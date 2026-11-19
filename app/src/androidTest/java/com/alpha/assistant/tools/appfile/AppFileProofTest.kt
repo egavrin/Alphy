@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.sandbox.GraphicsSession
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.sandbox.SandboxContract
 import com.alpha.assistant.tools.AgentScriptProvider
 import com.alpha.assistant.tools.GeneratedOutputDetail
 import com.alpha.assistant.tools.ToolGenerationService
@@ -35,6 +36,11 @@ internal suspend fun parsedAndSmoked(sandbox: SandboxClient,name: String,languag
     val spec=ToolSpec.parse(checkNotNull(result.definition)).withAppLanguage(result.language)
     smoked(sandbox,spec,name,spec.initialState,observeReplay)
     return spec
+}
+/** The event that the host sends for the control of an action id of a ui, as ToolGenerationSmoke.control picks it: a liveInput for a live input, else an action. */
+internal fun controlEvent(root: JSONObject,actionId: String,value: Any?): JSONObject {
+    val live=ToolUiCatalog.actionTarget(root,actionId)?.node?.let(ToolUiCatalog::isLiveInput) == true
+    return JSONObject().put("type",if(live) SandboxContract.LIVE_INPUT_EVENT else "action").put("actionId",actionId).put("value",value ?: JSONObject.NULL)
 }
 /** The smoke step as AppAgent.validate builds it, from a state. */
 internal suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,state: String,observeReplay: ((List<String>)->Unit)?) {
@@ -114,11 +120,13 @@ class AppFileProofTest {
         val sandbox=SandboxClient(instrumentation.targetContext)
         val spec=parsedAndSmoked(sandbox,"calc")
         // Five events in sequence, each on the state of the reply before it. Alphy's limit for one event is 500 ms.
+        // The tip is a live slider, so its events are liveInput events.
+        assertEquals(SandboxContract.LIVE_INPUT_EVENT,controlEvent(spec.ui,"tip_field",20).getString("type"))
         var state=JSONObject(spec.initialState)
         val times=listOf(Triple("bill_field",200,"57.50"),Triple("tip_field",20,"60.00"),Triple("people_field",5,"48.00"),
             Triple("bill_field",100,"24.00"),Triple("tip_field",10,"22.00")).map {(actionId,value,perPerson) ->
             val input=JSONObject().put("artifactId","appfile-calc").put("revision",1).put("state",state)
-                .put("event",JSONObject().put("type","action").put("actionId",actionId).put("value",value))
+                .put("event",controlEvent(spec.ui,actionId,value))
             val started=SystemClock.elapsedRealtime()
             val reply=sandbox.execute(spec.source,input.toString())
             val took=SystemClock.elapsedRealtime()-started
@@ -182,6 +190,11 @@ class AppFileProofTest {
             private set
         suspend fun act(actionId: String,value: Any?=null): JSONObject =
             send(JSONObject().put("type","action").put("actionId",actionId).put("value",value ?: JSONObject.NULL))
+        /** The value of a live input (a text field or a slider), as the host sends it while the person types or drags. */
+        suspend fun live(actionId: String,value: Any): JSONObject =
+            send(JSONObject().put("type",SandboxContract.LIVE_INPUT_EVENT).put("actionId",actionId).put("value",value))
+        /** The event that the host sends for this control on the screen of now (controlEvent). */
+        suspend fun control(actionId: String,value: Any?=null): JSONObject=send(controlEvent(JSONObject(ui),actionId,value))
         suspend fun send(event: JSONObject): JSONObject {
             val preview=generation.executeEvent(spec,id,1,state,event,ui) {source,input -> sandbox.execute(source,input.toString())}
             state=preview.state
@@ -194,8 +207,8 @@ class AppFileProofTest {
     @Test fun listPassesParseAndSmoke(): Unit=runBlocking {
         val sandbox=SandboxClient(instrumentation.targetContext)
         val app=Session(sandbox,parsedAndSmoked(sandbox,"list","it"),"appfile-list")
-        app.act("prodotti_new_nome","Burro")
-        app.act("prodotti_new_corsia","Latticini")
+        app.live("prodotti_new_nome","Burro")
+        app.live("prodotti_new_corsia","Latticini")
         val added=app.act("prodotti_add").getJSONArray("prodotti")
         assertEquals(listOf("r1","r2","r3","r4"),ids(added))
         assertEquals("Burro",added.getJSONObject(3).getString("nome"))
@@ -278,7 +291,7 @@ class AppFileProofTest {
         assertEquals("Añadir",opened.getJSONObject("resumen_s").getString("tab"))
         assertFalse(opened.getJSONObject("v").getBoolean("resumen_view_tab0"))
         assertTrue(opened.getJSONObject("v").getBoolean("resumen_view_tab1"))
-        app.act("gastos_new_concepto","Taxi")
+        app.live("gastos_new_concepto","Taxi")
         app.act("gastos_new_categoria","Transporte")
         val ready=app.act("gastos_new_importe",300)
         val added=app.act("gastos_add")
@@ -428,7 +441,7 @@ class AppFileProofTest {
         val checked=app.act("habits_mon",row("r1",true))
         assertTrue(checked.getJSONArray("habits").getJSONObject(0).getBoolean("mon"))
         assertEquals(listOf("Серія: 1","Серія: 0","Серія: 0"),streaks(checked))
-        app.act("habits_new_name","Біг")
+        app.live("habits_new_name","Біг")
         val added=app.act("habits_add")
         assertEquals(listOf("r1","r2","r3","r4"),ids(added.getJSONArray("habits")))
         assertEquals("Біг",added.getJSONArray("habits").getJSONObject(3).getString("name"))
@@ -531,15 +544,37 @@ class AppFileProofTest {
         val context=instrumentation.targetContext
         val sandbox=SandboxClient(context)
         val app=Host(context,sandbox,parsedAndSmoked(sandbox,"bytes"),"appfile-bytes")
-        fun field(actionId: String,value: Any)=JSONObject().put("type","action").put("actionId",actionId).put("value",value)
+        // The pad is a live text field: the host sends its text as a liveInput event, and the retained session answers it in 100 ms at most.
+        fun pad(text: String)=JSONObject().put("type",SandboxContract.LIVE_INPUT_EVENT).put("actionId","pad_field").put("value",text)
         fun bytes(preview: ToolPreview)=checkNotNull(preview.surfaces).toString().toByteArray(Charsets.UTF_8).size
         try {
             app.open()
-            app.send(field("n_field",350))
-            val exact=app.send(field("pad_field","x".repeat(773)))
+            app.send(action("n_field",350))
+            val exact=app.send(pad("x".repeat(773)))
             assertEquals(32768 to 351,bytes(exact) to commands(exact,"lines_view").size)
-            val cut=app.send(field("pad_field","x".repeat(774)))
+            val cut=app.send(pad("x".repeat(774)))
             assertEquals(31889 to 350,bytes(cut) to commands(cut,"lines_view").size)
+            // Five texts of the pad at the byte limit, logged with no time bar: a reply at the byte limit costs the host about 120 ms
+            // for each event, an action too, and the kit takes 2 to 5 ms of it (Task 11c). The 50 ms bar is for the plans that a person uses.
+            medianHostMs(app,"bytes liveInput",{pad("x".repeat(769+it))}) {assertEquals(351,commands(it,"lines_view").size)}
+        } finally {app.close()}
+    }
+    @Test fun aLiveInputBesideASurfaceTimerKeepsTheTimer(): Unit=runBlocking {
+        // A text field beside a timer with rounds on a surface: the kit test of the timer case has the same plan. The reply to a liveInput
+        // holds no timers (SandboxContract), so the host keeps the timer that runs, and the next timer event moves it.
+        val context=instrumentation.targetContext
+        val sandbox=SandboxClient(context)
+        val text="app(\"Note\", lang=\"en\")\nneed t = timer(\"Run\", 60, rounds=2, rest=10)\nneed note = input(\"text\", \"Note\", \"\")\n"
+        val app=Host(context,sandbox,parsedAndSmoked(sandbox,"note",text=text),"appfile-note")
+        fun note(value: String)=JSONObject().put("type",SandboxContract.LIVE_INPUT_EVENT).put("actionId","note_field").put("value",value)
+        try {
+            app.open()
+            assertEquals(mapOf("t_bar" to 1000),app.send(press("t_start")).timers)
+            val typed=JSONObject(app.send(note("Go")).state)
+            assertEquals("Go" to true,typed.getString("note") to typed.getJSONObject("t_s").getBoolean("on"))
+            assertEquals(mapOf("t_bar" to 1000),app.send(timer("t_bar")).timers)
+            val median=medianHostMs(app,"note liveInput",{note("Go $it")}) {assertTrue(checkNotNull(it.surfaces).length()>0)}
+            assertTrue("median $median ms",median<=50)
         } finally {app.close()}
     }
     private fun pointer(surfaceId: String,phase: String,x: Int)=JSONObject().put("type","pointer").put("surfaceId",surfaceId).put("x",x).put("y",60).put("phase",phase).put("pointer",0)
@@ -623,7 +658,8 @@ class AppFileProofTest {
     @Test fun eachPlanAnswersInTime(): Unit=runBlocking {
         // Each saved plan with its lists full: the open event, the add of a list that is one row short, and each action that the smoke step
         // sends from the full state, five times each in the bare sandbox. For a plan with a surface, also its timer or pointer event through
-        // the retained session. Alphy's limit for one event is 500 ms.
+        // the retained session. Alphy's limit for one event is 500 ms. The liveInput events of the live inputs are a set of their own with a limit
+        // of 100 ms: a plan with no surface answers them in a fresh sandbox, as it answers an action.
         val context=instrumentation.targetContext
         val sandbox=SandboxClient(context)
         // The draft steps and the add of each plan with an add. A list that starts empty gets its first row from the same steps:
@@ -644,12 +680,12 @@ class AppFileProofTest {
             assertEquals(name,name in hosted,spec.surfaces.isNotEmpty())
             val steps=adds[name].orEmpty()
             val start=Session(sandbox,spec,"appfile-$name")
-            if(lists(spec).any {(field,_) -> JSONObject(start.state).getJSONArray(field).length() == 0}) steps.forEach {(id,value) -> start.act(id,value)}
+            if(lists(spec).any {(field,_) -> JSONObject(start.state).getJSONArray(field).length() == 0}) steps.forEach {(id,value) -> start.control(id,value)}
             // Each event of a Session goes through Alphy's checks of the state, the event, and the reply.
             val app=Session(sandbox,spec,"appfile-$name",full(spec,JSONObject(start.state),if(steps.isEmpty()) 0 else 1).toString())
             app.send(open)
             val add=steps.lastOrNull()?.let {(id,value) ->
-                steps.dropLast(1).forEach {(step,draft) -> app.act(step,draft)}
+                steps.dropLast(1).forEach {(step,draft) -> app.control(step,draft)}
                 val before=JSONObject(app.state)
                 val (median,after)=timedEvent(sandbox,spec,"$name-add",before,action(id,value))
                 assertNotEquals("$name: the add keeps the state",before.toString(),after.toString())
@@ -659,20 +695,27 @@ class AppFileProofTest {
             val opened=app.send(open)
             for((field,count) in lists(spec)) assertEquals("$name $field",count,opened.getJSONArray(field).length())
             val openMs=timedEvent(sandbox,spec,"$name-open",opened,open).first
-            // Each action event that the smoke step sends from the full state: the list of a branch grows with each event.
+            // Each action and liveInput event that the smoke step sends from the full state: the list of a branch grows with each event.
             val sent=linkedSetOf<String>()
-            smoked(sandbox,spec,name,app.state) {events -> events.filter {JSONObject(it).getString("type") == "action"}.forEach {sent+=it}}
-            // Only the actions that the open screen takes: an action of a control that is not on it would time a refusal.
+            smoked(sandbox,spec,name,app.state) {events -> events.filter {JSONObject(it).getString("type") in setOf("action",SandboxContract.LIVE_INPUT_EVENT)}.forEach {sent+=it}}
+            // Only the events that the open screen takes: an event of a control that is not on it would time a refusal.
             val root=JSONObject(app.ui)
-            val (actions,notOnOpen)=sent.map {JSONObject(it)}.partition {event ->
-                runCatching {ToolUiCatalog.validateAction(root,event.getString("actionId"),event.get("value").takeUnless {it == JSONObject.NULL},opened)}.isSuccess
+            fun live(event: JSONObject)=event.getString("type") == SandboxContract.LIVE_INPUT_EVENT
+            val (taken,notOnOpen)=sent.map {JSONObject(it)}.partition {event ->
+                val id=event.getString("actionId")
+                val value=event.get("value").takeUnless {it == JSONObject.NULL}
+                runCatching {if(live(event)) ToolUiCatalog.validateLiveInput(root,id,value,opened) else ToolUiCatalog.validateAction(root,id,value,opened)}.isSuccess
             }
+            val (inputs,actions)=taken.partition(::live)
+            // A plan with a surface answers a liveInput in its retained session, which this loop does not time (aReplyAtTheByteLimitPassesTheHostPath does).
+            assertTrue("$name: a live input beside a surface",inputs.isEmpty() || spec.surfaces.isEmpty())
             // An action whose reply keeps the state does no work (a value that the state holds already, or a refusal):
             // the slowest action is the slowest one that changes the state.
             val timed=actions.mapIndexed {index,event ->
                 val (median,state)=timedEvent(sandbox,spec,"$name-a$index",opened,event)
                 Triple(event,median,state.toString() != opened.toString())
             }
+            val typed=inputs.mapIndexed {index,event -> event to timedEvent(sandbox,spec,"$name-live$index",opened,event).first}
             // Each later action on the state after its earlier event, then once more through Alphy's checks.
             val shown=later[name]?.let {(first,ids) -> ids.map {id ->
                 val step=Session(sandbox,spec,"appfile-$name",opened.toString())
@@ -700,9 +743,10 @@ class AppFileProofTest {
             }
             fun idsOf(events: List<JSONObject>)=events.map {it.getString("actionId")}
             // untimed: each action id of the open screen that no timed event has.
-            val untimed=actionIds(root)-idsOf(measured.map {it.first}).toSet()
+            val untimed=actionIds(root)-idsOf(measured.map {it.first}+typed.map {it.first}).toSet()
             // The counts: the actions that change the state, the actions that the open screen takes, and the actions of the smoke step.
             Log.i("AppFileProofTest","time $name open=$openMs action=$slowMs ${slow.getString("actionId")} add=${add?.second ?: "-"} host=${host ?: "-"} " +
+                "live=${typed.map {"${it.first.getString("actionId")}=${it.second}"}} " +
                 "later=${shown.map {"${it.first.getString("actionId")}=${it.second}"}} " +
                 "actions=${timed.count {it.third}}/${timed.size}/${sent.size} kept=${idsOf(timed.filterNot {it.third}.map {it.first})} " +
                 "notOnOpen=${idsOf(notOnOpen)} untimed=$untimed stateBytes=${opened.toString().toByteArray().size}")
@@ -711,6 +755,7 @@ class AppFileProofTest {
             if(openMs>=250) over+="$name open $openMs ms"
             // Each measured action, also an action whose reply keeps the state.
             for((event,median) in measured) if(median>=250) over+="$name action ${event.getString("actionId")} $median ms"
+            for((event,median) in typed) if(median>100) over+="$name liveInput ${event.getString("actionId")} $median ms"
             if(host != null && host>=50) over+="$name host $host ms"
         }
         assertEquals(emptyList<String>(),over)
