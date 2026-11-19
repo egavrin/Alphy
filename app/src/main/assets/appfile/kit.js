@@ -1620,8 +1620,26 @@ function smokeRun(file, limit, clock) {
     return out;
   };
   const start = save(), all = controls(false).map((control) => control.key);
-  /** Types "Test" into each empty text field of the screen. True when it typed into one. */
-  const typeInto = () => controls().filter((control) => control.node.type === "TextField" && control.node.props.value === "").map((control) => app.change(control.node, "Test")).length > 0;
+  /** The paths of the app that an expression reads, such as "name" for $/name, also through each formula that it reads. */
+  const reads = (tree, out = new Set()) => {
+    walk(tree, (node) => {
+      const path = node.k === "path" && node.abs ? node.segs.join("/") : null;
+      if (path === null || out.has(path)) return;
+      out.add(path);
+      const formula = file.get("$/" + node.segs[0]);
+      if (formula?.kind === "formula") reads(formula.tree, out);
+    });
+    return out;
+  };
+  /** Types "Test" into each empty text field of the screen whose value the action of button reads. True when it typed into one. */
+  const typeInto = (button) => {
+    const read = [...reads(button.props.action)].map((path) => path + "/");
+    const fields = controls().filter(({ node }) => {
+      const bind = node.props.bind, bound = bind?.k === "path" && bind.abs ? bind.segs.join("/") + "/" : null;
+      return node.type === "TextField" && node.props.value === "" && bound && read.some((path) => path.startsWith(bound) || bound.startsWith(path));
+    });
+    return fields.map((control) => app.change(control.node, "Test")).length > 0;
+  };
   /** A control that did nothing so far gets a new try in the state of now. Returns that state. */
   const retryIdle = (list) => {
     const later = save();
@@ -1649,7 +1667,8 @@ function smokeRun(file, limit, clock) {
         // The tab that is open does nothing when a person taps it. That is the rule of the host, not a fault of the app.
         if (found.node.tab && found.node.props.selected) continue;
         const { node, parent } = found, p = node.props, title = node.name ?? `the ${node.type} "${p.label ?? p.icon ?? ""}"`;
-        const seen = look(app.tree()), own = look({ ...node, children: [] }), known = new Set(app.faults.map((fault) => `${fault.where}: ${fault.message}`));
+        let seen = look(app.tree());
+        const own = look({ ...node, children: [] }), known = new Set(app.faults.map((fault) => `${fault.where}: ${fault.message}`));
         let error;
         if (p.bind) {
           const now = Number(p.value) || 0, by = p.step ?? 1;
@@ -1665,11 +1684,14 @@ function smokeRun(file, limit, clock) {
         } else error = app.fire(node);
         if (error) { faults.push("smoke run: " + error); continue; }
         // A button whose action needs a typed value, such as the add button of a form, gets a second press after the run types into each
-        // empty text field. It passes only when that press changes a value of the typed state, so a dead button beside a field stays a fault.
-        if (!p.bind && JSON.stringify(app.state) === base.text && typeInto()) {
+        // empty text field that its action reads. It passes only when that press changes a value of the typed state, so a dead button beside a field stays a fault.
+        // The typed text shows in its field, so the run looks at the screen again before that press.
+        if (!p.bind && JSON.stringify(app.state) === base.text && typeInto(node)) {
+          seen = look(app.tree());
           const filled = JSON.stringify(app.state);
-          app.fire(controls().find((control) => control.key === key)?.node ?? node);
-          if (JSON.stringify(app.state) === filled) reset();
+          error = app.fire(controls().find((control) => control.key === key)?.node ?? node);
+          if (error || JSON.stringify(app.state) === filled) reset();
+          if (error) { faults.push("smoke run: " + error); continue; }
         }
         // A timed change shows only when time passes. The run moves its clock to the end of each one before it looks at the screen.
         if (app.state._run) { wait(); app.tick(); }

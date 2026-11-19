@@ -60,6 +60,20 @@ test("entries: the smoke run types into the form before it presses the add butto
   expect(report(shop).faults).toEqual([]);
 });
 
+test("entries: the smoke run types only into the fields that the button reads, looks at the screen after the typing, and keeps the error of the typed press", () => {
+  const app = (action) => smoke(new AppFile().feedText(['app("T")', '$/name = ""', '$/note = ""', '$/hidden = 0', '$/n = 0', "root = Column([Text($/n), name, note, go])",
+    'name = TextField("Name", $/name)', 'note = TextField("Note", $/note)', `go = Button("Go", ${action})`].join("\n")));
+  // The typed text shows in its field, so only a look after the typing finds a change that no part of the screen shows.
+  expect(app("when(len($/name) > 0, inc($/hidden))").faults).toEqual(["smoke run: go changes a value, and no part of the screen shows it"]);
+  // The note is not typed: the run goes on from a state with only the name that the press read.
+  expect(app("when(len($/name) > 0, inc($/n))").trace.find((line) => line.startsWith("tap go"))).toBe('tap go: name "" -> "Test", n 0 -> 1');
+  // A name that a formula reads is a name that the press reads.
+  expect(smoke(new AppFile().feedText(['app("T")', '$/name = ""', '$/n = 0', "$/ready := len($/name) > 0", "root = Column([Text($/n), name, go])",
+    'name = TextField("Name", $/name)', 'go = Button("Go", when($/ready, inc($/n)))'].join("\n"))).faults).toEqual([]);
+  // The error of the typed press is a fault, not a dead button.
+  expect(app("when(len($/name) > 0, flip($/n, 1))").faults).toEqual(["smoke run: go: flip needs a list"]);
+});
+
 /** The template of the first list of a definition. */
 const rowOf = (definition) => every(definition.ui).find((node) => node.rowTemplate).rowTemplate;
 const muted = { tone: "muted" }, cell = { emphasis: "label" };
