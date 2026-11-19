@@ -2,14 +2,12 @@
 
 import { TONES, explode } from "./core.js";
 
-/** The surface of a timer's bar, in Alphy's pixels of a surface. */
-export const BAR_SURFACE = { width: 320, height: 64 };
+/** The surface of a timer's bar, in Alphy's pixels of a surface: the bar fills it, 16 to 1, as a thick bar of the card's width. Alphy takes 64 pixels high at least. */
+export const BAR_SURFACE = { width: 1024, height: 64 };
 /** A side of a surface: Alphy takes 64 to 2048 pixels each way. */
 export const sideOf = (value) => Math.min(2048, Math.max(64, Math.round(Number(value)) || 0));
 /** What Alphy draws in one reply, for all surfaces together (GraphicsContract.frame, ArtifactProtocol.validateSurfaces). */
 export const LIMITS = { commands: 512, pairs: 2048, chars: 2048, bytes: 32768 };
-/** A neutral track at 20 % opacity, so the bar reads on a light and on a dark theme. */
-const TRACK = "#33808080";
 /** The kit's color names as Alphy's colors: a tone of the theme for a role, else the hex of the kit. */
 const ROLES = { ink: "default", muted: "muted", accent: "accent", success: "success", warning: "warning" };
 export const PALETTE = Object.fromEntries(Object.keys(TONES).map((name) => [name, ROLES[name] ?? TONES[name]]));
@@ -65,10 +63,13 @@ function commandOf({ shape, x, y, r, w, h, x1, y1, x2, y2, text, points, radius,
  */
 export const commandsOf = (shapes, palette = PALETTE) => shapes.flatMap((shape) => { const command = commandOf(shape); return command ? [{ ...command, color: colorOf(shape.color, palette) }] : []; });
 
-/** The bar of a timer's phase: the track, and the share of the phase that passed (0 to 1) in the color of the phase. Two shapes. */
+/**
+ * The bar of a timer's phase: the track, and the share of the phase that passed (0 to 1) in the color of the phase. Two shapes.
+ * The track is the muted tone of the theme, which Alphy draws as a light tint of its muted ink (SurfaceDrawing.kt), so it reads in both themes.
+ */
 export const barOf = (share, color) => [
-  { shape: "rect", x: 0, y: 24, w: BAR_SURFACE.width, h: 16, color: TRACK, radius: 8 },
-  { shape: "rect", x: 0, y: 24, w: Math.round(BAR_SURFACE.width * share), h: 16, color, radius: 8 },
+  { shape: "rect", x: 0, y: 0, w: BAR_SURFACE.width, h: BAR_SURFACE.height, color: "muted", radius: BAR_SURFACE.height / 2 },
+  { shape: "rect", x: 0, y: 0, w: Math.round(BAR_SURFACE.width * share), h: BAR_SURFACE.height, color, radius: BAR_SURFACE.height / 2 },
 ];
 
 /** The surface of a model, and its stage: a light box under the faces, so the model reads on a light and on a dark theme (the prototype's canvas). */

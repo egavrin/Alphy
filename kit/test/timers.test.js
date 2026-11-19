@@ -65,7 +65,7 @@ test("emit: a foreground timer outside 1 second to 24 hours is a fault, and the 
 test("emit: timer-rounds.plan gives a surface, a canvas, and no foreground timer", async () => {
   const { definition, faults } = await compiled(plan("timer-rounds"));
   expect(faults).toEqual([]);
-  expect(definition.surfaces).toEqual([{ id: "timer_bar", width: 320, height: 64 }]);
+  expect(definition.surfaces).toEqual([{ id: "timer_bar", width: 1024, height: 64 }]);
   const all = every(definition.ui);
   expect(all.filter((node) => node.type === "canvas")).toEqual([{ type: "canvas", text: "Training", surfaces: ["timer_bar"] }]);
   expect(all.filter((node) => node.type === "timer" || node.type === "progress")).toEqual([]);
@@ -82,8 +82,11 @@ test("check: alert with rounds is a note, not a fault", async () => {
   expect(report(await planned('app("T", lang="en")\nneed t = timer("T", 40, rounds=8, rest=20)')).notes).toEqual([]);
 });
 
-/** The bar of a phase: the track, then the share of the phase that passed in its tone. */
-const bar = (width, color) => [{ type: "roundRect", x: 0, y: 24, width: 320, height: 16, radius: 8, color: "#33808080" }, { type: "roundRect", x: 0, y: 24, width, height: 16, radius: 8, color }];
+/**
+ * The bar of a phase: the track in the muted tone of the theme, then the share of the phase that passed in its tone. Each fills the
+ * surface of 1024 x 64 (Task 11b-2b: a 16-high bar in a 320 x 64 surface left empty bands above and under it).
+ */
+const bar = (width, color) => [{ type: "roundRect", x: 0, y: 0, width: 1024, height: 64, radius: 32, color: "muted" }, { type: "roundRect", x: 0, y: 0, width, height: 64, radius: 32, color }];
 
 test("run: start asks for a 1000 ms timer and stop returns timers: []", async () => {
   const { kit, send } = await rounds();
@@ -97,7 +100,7 @@ test("run: start asks for a 1000 ms timer and stop returns timers: []", async ()
   expect(paused.timers).toEqual([]);
   expect(paused.state.timer_s).toEqual({ on: false, round: 1, resting: false, over: false, spent: kit.state.timer_spent, end: 0 });
   expect(paused.state.timer_s.spent).toBe(10);
-  expect(paused.surfaces.timer_bar.commands).toEqual(bar(80, "accent"));
+  expect(paused.surfaces.timer_bar.commands).toEqual(bar(256, "accent"));
   // A start 100 s later ends the work phase 30 s after it.
   const again = send(110000, press("timer_start"));
   expect([again.state.timer_s.end, kit.state.timer_end]).toEqual([T0 + 140000, T0 + 140000]);
@@ -114,7 +117,7 @@ test("run: a timer event after the end of the work phase starts the rest phase",
   expect(Object.values(rest.state.d)).toEqual(expect.arrayContaining([kit.find("timer_phaseText").props.text, kit.find("timer_time").props.value]));
   expect(kit.find("timer_phaseText").props.text).toBe("Pause 1 / 8");
   expect(rest.timers).toEqual([{ id: "timer_bar", intervalMs: 1000 }]);
-  expect(rest.surfaces.timer_bar.commands).toEqual(bar(8, "success"));
+  expect(rest.surfaces.timer_bar.commands).toEqual(bar(26, "success"));
 });
 
 test("run: the count of finished rounds follows", async () => {
@@ -180,7 +183,7 @@ test("emit: a fifth timer on a surface is a fault of its need line", async () =>
 
 test("run: the short plan of the device test ends after its second rest", async () => {
   const { definition, app } = await compiled(SHORT);
-  expect(definition.surfaces).toEqual([{ id: "t_bar", width: 320, height: 64 }]);
+  expect(definition.surfaces).toEqual([{ id: "t_bar", width: 1024, height: 64 }]);
   let { state } = handle(request(definition.initialState, press("t_start")), app, T0);
   const seen = [];
   // The device waits until 300 ms after the end of each phase in the state of the reply before it.

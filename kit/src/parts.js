@@ -371,7 +371,8 @@ const PARTS = {
     const [title, seconds] = need.args, opt = need.named, text = caption, at = (part) => `$/${name}_${part}`;
     if (foreground(need)) {
       const unshown = ["start", "pause", "reset", "done"].filter((key) => opt[key]);
-      return { lines: [`${name}_timer = Timer(${show(title)}, ${show(seconds ?? { k: "lit", v: 60 })})`, `${name}_view = Card([${name}_timer])`], top: [`${name}_view`],
+      // A timer card is the hero of the screen, as in the baseline workout app (Task 11b-2b, A.1).
+      return { lines: [`${name}_timer = Timer(${show(title)}, ${show(seconds ?? { k: "lit", v: 60 })})`, `${name}_view = Card([${name}_timer], variant="hero")`], top: [`${name}_view`],
         note: unshown.length ? `need ${name}: the host's countdown shows its own buttons and alert, so ${unshown.map((key) => key + "=").join(", ")} do not show` : null };
     }
     // The phase and the round show when the timer has more than one phase.
@@ -382,15 +383,15 @@ const PARTS = {
       `${at("left")} := ceil(round(max(0, ${at("phase")} - ${at("spent")}), 3))`,
       `${at("clock")} := pad2(floor(${at("left")} / 60)) + ":" + pad2(${at("left")} % 60)`,
       `${name}_time = Metric(${show(title)}, ${at("clock")}, emphasis="display")`,
-      ...(many ? [`${name}_phaseText = Text((${at("resting")} ? ${text("restText", "Rest")} : ${text("workText", "Work")}) + " " + text(${at("round")}) + " / " + text(${opt.rounds ? show(opt.rounds) : 1}))`] : []),
+      ...(many ? [`${name}_phaseText = Text((${at("resting")} ? ${text("restText", "Rest")} : ${text("workText", "Work")}) + " " + text(${at("round")}) + " / " + text(${opt.rounds ? show(opt.rounds) : 1}), tone="muted")`] : []),
       `${name}_bar = Progress(${at("spent")}, ${at("phase")}, label=${show(title)})`,
-      `${name}_start = Button(${text("start", "Start")}, action=set(${at("on")}, true), visible=!${at("on")} && !${at("over")})`,
-      `${name}_pause = Button(${text("pause", "Pause")}, action=set(${at("on")}, false), visible=${at("on")})`,
-      `${name}_reset = Button(${text("reset", "Reset")}, action=[set(${at("on")}, false), set(${at("spent")}, 0), set(${at("round")}, 1), set(${at("resting")}, false), set(${at("over")}, false)], enabled=${at("on")} || ${at("spent")} > 0 || ${at("round")} > 1 || ${at("resting")} || ${at("over")})`,
+      `${name}_start = Button(${text("start", "Start")}, action=set(${at("on")}, true), visible=!${at("on")} && !${at("over")}, icon="Play", variant="filled")`,
+      `${name}_pause = Button(${text("pause", "Pause")}, action=set(${at("on")}, false), visible=${at("on")}, icon="Pause", variant="outlined")`,
+      `${name}_reset = Button(${text("reset", "Reset")}, action=[set(${at("on")}, false), set(${at("spent")}, 0), set(${at("round")}, 1), set(${at("resting")}, false), set(${at("over")}, false)], enabled=${at("on")} || ${at("spent")} > 0 || ${at("round")} > 1 || ${at("resting")} || ${at("over")}, icon="Refresh", variant="text")`,
       `${name}_doneNote = Notice(${text("done", "Time is up")}, visible=${at("over")})`];
     const parts = [`${name}_time`, ...(many ? [`${name}_phaseText`] : []), `${name}_bar`, `Row([${name}_start, ${name}_pause, ${name}_reset])`, `${name}_doneNote`];
     // The run-time draws the bar and moves the clock while the app is open. No sound or vibration comes at the end of a phase.
-    return { lines: [...lines, `${name}_view = Card([${parts.join(", ")}])`], top: [`${name}_view`],
+    return { lines: [...lines, `${name}_view = Card([${parts.join(", ")}], variant="hero")`], top: [`${name}_view`],
       note: opt.alert?.v === true ? `need ${name}: a timer with rounds shows the end of a round on the screen only` : null };
   },
 
