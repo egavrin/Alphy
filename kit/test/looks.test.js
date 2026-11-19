@@ -125,6 +125,39 @@ test("look: an icon that Alphy does not have, and an icon of a component that ta
   ]);
 });
 
+test("a look option that cannot apply becomes a note (A0-K4): each look-option fault of the model check compiles clean, with a note that names the need and the option", async () => {
+  const slider = "the part draws a Slider, which shows no icon", unknown = (name) => `${JSON.stringify(name)} is not the name of an icon of Alphy`;
+  const CASES = [
+    // icon= on an input whose component shows no icon.
+    [['need tip = input("percent", "Tip", 15, min=0, max=30, icon="Percent")'], [`need tip: ${slider}, so the kit left out icon="Percent"`]],
+    [['need price = input("range", "Price", [100, 500], min=0, max=1000, icon="Money")'], ['need price: the part draws a RangeSlider, which shows no icon, so the kit left out icon="Money"']],
+    [['need tops = input("choices", "Toppings", [], options=["a", "b"], icon="Pizza")'], ['need tops: the part draws a Choices, which shows no icon, so the kit left out icon="Pizza"']],
+    [['need on = input("toggle", "On", true, icon="Pin")'], ['need on: the part draws a Toggle, which shows no icon, so the kit left out icon="Pin"']],
+    [['need kind = input("choice", "Kind", "a", options=["a", "b"], icon="Pin")'], ['need kind: the part draws a choice of 2 options as a segmented control, which shows no icon, so the kit left out icon="Pin"']],
+    [['need kind = input("choice", "Kind", "a", options=["a", "b", "c", "d", "e"], icon="Pin")'], ['need kind: the part draws a choice of 5 options as a segmented control, which shows no icon, so the kit left out icon="Pin"']],
+    [['need n = input("number", "N", 1, icon="Rulerx")'], [`need n: ${unknown("Rulerx")}, so the kit left out icon="Rulerx"`]],
+    // icons= that names a field whose control in the add form shows no icon, also with add=false.
+    [['need items = entries("Items", fields={name: "text", done: "check"}, icons={done: "Check"})'],
+      ["need items: icons= names done, whose field of the add form shows no icon, so the kit left it out. A text, number, date, or time field shows one, and a choice of more than six options does too"]],
+    [['need doses = entries("Doses", fields={time: "time"}, rows=[{time: "08:00"}], add=false, icons={time: "Clock"})'], ["need doses: icons= names time, and with add=false the list has no add form, so the kit left it out"]],
+    // An emoji as the icon of a figure that is not the main one, an icon name that the kit does not have, and a list icon that is no emoji.
+    [['need a = figure("number", "A", 1, example=[{}, 1])', 'need b = figure("number", "B", 2, icon="🔥", example=[{}, 2])'], [`need b: ${unknown("🔥")}, so the kit left out icon="🔥"`]],
+    [['need a = figure("number", "A", 1, example=[{}, 1])', 'need b = figure("number", "B", 2, example=[{}, 2])', 'need c = figure("number", "C", 3, example=[{}, 3])', 'need d = figure("number", "D", 4, icon="Rulerx", example=[{}, 4])'],
+      [`need d: ${unknown("Rulerx")}, so the kit left out icon="Rulerx"`]],
+    [['need c = card("C", "Text", icon="Rulerx")'], [`need c: ${unknown("Rulerx")}, so the kit left out icon="Rulerx"`]],
+    [['need items = entries("Items", fields={name: "text"}, icon="Cart")'], ['need items: icon= of a list is an emoji, such as icon="🛒", and "Cart" is not one, so the kit left it out']],
+  ];
+  for (const [lines, notes] of CASES) {
+    const result = await compileAppFile(['app("Look", lang="en")', ...lines].join("\n"));
+    expect({ lines, faults: result.faults, notes: result.notes }).toEqual({ lines, faults: [], notes });
+  }
+});
+
+test("a look option that cannot apply becomes a note (A0-K4): a look option of a line that the author wrote stays a fault, and so does an option that is not a look option", async () => {
+  expect(await faultsOf("$/n = 0", "root = Column([s])", 's = Slider("S", $/n, icon="Percent")')).toEqual(["s: Slider has no property icon"]);
+  expect(await faultsOf('need name = input("text", "Name", "", min=1)')).toEqual(['line: need name: an input of kind text does not use min=. It uses icon=: need name = input("text", "Name", "", min=1)']);
+});
+
 test("look: options as a map of a value to its label: the state keeps the value, and the control shows the label, in the order of the plan", async () => {
   const text = ['app("Bikes", lang="en")', '$/order = "asc"', '$/kind = "road"', '$/tags = ["b"]', "root = Column([order, kind, tags, shown])",
     'order = Segmented("Order", $/order, {asc: "Low to high", desc: "High to low"})',
@@ -230,7 +263,6 @@ test("look: a value of the wrong type, and an option that the form of a part doe
     ['need tasks = entries("Tasks", fields={task: "text"}, sheet="yes")', 'need tasks: sheet= needs true or false, and "yes" is neither'],
     ['need total = figure("number", "Total", 2, decimals="x")', 'need total: decimals= needs a number, and "x" is not one'],
     ['need cups = counter("Cups", 0, step="x")', 'need cups: step= needs a number, and "x" is not one'],
-    ['need kind = input("choice", "Kind", "a", options=["a", "b"], icon="Pin")', "need kind: a choice of 2 options is a segmented control, which shows no icon. Remove icon="],
     ['need cups = counter("Cups", 0, icon="Cup")', "need cups: a counter with no addText= has a less and a more button, and it does not use icon=. Remove icon=, or give addText="],
     ['need ml = counter("Water", 0, addText="+1", lessText="x")', "need ml: a counter with addText= has one add button and a reset button, and it does not use lessText=. Remove lessText="],
     ['need today = figure("number", "Today", 1, goalText="Of the goal")', "need today: goalText= is the caption of the bar to goal=, and today has no goal=. Give goal=, or remove goalText="],
@@ -241,7 +273,7 @@ test("look: a value of the wrong type, and an option that the form of a part doe
     ['need n = input("number", "N", 1, step="x")', 'need n: step= needs a number, and "x" is not one'],
     // An input of each kind uses its own options.
     ['need name = input("text", "Name", "", min=1)', "need name: an input of kind text does not use min=. It uses icon="],
-    ['need on = input("toggle", "On", true, icon="Pin")', "need on: an input of kind toggle does not use icon=. It uses no option"],
+    ['need on = input("toggle", "On", true, step=1)', "need on: an input of kind toggle does not use step=. It uses no option"],
   ];
   const missing = [];
   for (const [line, ...messages] of CASES) {

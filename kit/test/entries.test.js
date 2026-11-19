@@ -3,6 +3,7 @@
 import { expect, test } from "bun:test";
 import { AppFile } from "../src/dsl.js";
 import { report, smoke } from "../src/check.js";
+import { compileAppFile } from "../src/compile.js";
 import { emit } from "../src/emit.js";
 import { built, every, live, planned, press, valueAt } from "./helpers.js";
 
@@ -128,11 +129,9 @@ test("entries: icon= gives each row a leading emoji named by the title of the li
   // A field that the row shows as its emoji is not a text of the row too.
   const field = await built('app("T", lang="en")', 'need items = entries("Items", fields={sign: "text", name: "text"}, icon=$sign)');
   expect(rowOf(field.definition).children.map((node) => node.bind)).toEqual(["sign", "name", undefined]);
-  for (const [option, fault] of [["icon=$nothing", "need items: icon=$nothing reads no field of the rows. Use a field of fields= or a name of show="],
-    ['icon="Cart"', 'need items: icon= of a list is an emoji, such as icon="🛒", and "Cart" is not one']]) {
-    const line = `need items = entries("Items", fields={name: "text"}, ${option})`;
-    expect(report(await planned(`app("T")\n${line}`)).faults).toEqual([`line: ${fault}: ${line}`]);
-  }
+  // An icon word in place of an emoji is a note (A0-K4, looks.test.js), and a formula that reads no field stays a fault.
+  const line = 'need items = entries("Items", fields={name: "text"}, icon=$nothing)';
+  expect(report(await planned(`app("T")\n${line}`)).faults).toEqual([`line: need items: icon=$nothing reads no field of the rows. Use a field of fields= or a name of show=: ${line}`]);
 });
 
 test("entries: more than two check marks are circles of one weight in a second row under the cells, each named by its label or its field", async () => {
@@ -176,11 +175,13 @@ test("entries: icons= gives a field of the add form its icon, tones= gives a val
   expect([count.style, valueAt(definition.initialState, count.bind)]).toEqual([{ emphasis: "display" }, "1 di 2"]);
 });
 
-test("entries: icons= of a field with no icon in the add form, tones= of no value of show=, and total= with no hero count are faults of the need", async () => {
-  const faults = async (options, more = []) => report(await planned(['app("T")', ...more, `need items = entries("Items", fields={name: "text", kind: ["a", "b"], done: "check"}${options})`].join("\n"))).faults;
-  expect(await faults(', icons={done: "Check"}')).toContainEqual(expect.stringContaining("need items: icons= names done, whose field of the add form shows no icon. A text, number, date, or time field shows one, and a choice of more than six options"));
-  expect(await faults(', icons={kind: "Tag"}')).toContainEqual(expect.stringContaining("need items: icons= names kind, whose field of the add form shows no icon"));
-  expect(await faults(', icons={size: "Ruler"}')).toContainEqual(expect.stringContaining("need items: icons= names size, whose field of the add form shows no icon"));
+test("entries: icons= of a field with no icon in the add form is a note (A0-K4), and tones= of no value of show= and total= with no hero count are faults of the need", async () => {
+  const lines = (options, more = []) => ['app("T")', ...more, `need items = entries("Items", fields={name: "text", kind: ["a", "b"], done: "check"}${options})`].join("\n");
+  const faults = async (options, more) => report(await planned(lines(options, more))).faults;
+  for (const key of ["done", "kind", "size"]) {
+    const result = await compileAppFile(lines(`, icons={${key}: "Tag"}`));
+    expect([key, result.faults, result.notes]).toEqual([key, [], [`need items: icons= names ${key}, whose field of the add form shows no icon, so the kit left it out. A text, number, date, or time field shows one, and a choice of more than six options does too`]]);
+  }
   expect(await faults(', show={n: 1}, tones={m: "accent"}')).toContainEqual(expect.stringContaining("need items: tones= names m, and show= has no value of that name"));
   expect(await faults(', total="of"', ['need f = figure("number", "F", 1)'])).toContainEqual(expect.stringContaining("need items: total= joins the shown rows and all rows of the hero count, and this list has no hero count"));
 });

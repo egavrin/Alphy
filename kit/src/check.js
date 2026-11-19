@@ -1,10 +1,9 @@
 // The checks of the host: the report of the faults of an app file, its check lines, and the smoke run that uses each control.
 // The agent loop reads the faults and the check results. An app that runs does not need this file.
 
-import { HOST_ICONS } from "./icons.js";
 import { show } from "./dsl.js";
-import { App, CATALOG, ICON_NAMES, STEPS, given, settings } from "./core.js";
-import { faultName, needsOf } from "./parts.js";
+import { App, CATALOG, STEPS, given, settings } from "./core.js";
+import { ICONED, ICONS, choices, faultName, needsOf } from "./parts.js";
 
 /** Calls visit for each node of an expression tree. */
 function walk(node, visit) {
@@ -341,14 +340,12 @@ function gaps(file, reached, named) {
 }
 
 const SIZES = ["small", "medium", "large"], ALIGNS = ["start", "center", "end"], GAPS = ["none", "small", "medium", "large"], TONES = ["muted", "accent", "success", "warning", "error"];
-/** The names of IconButton and icon=: each icon of Alphy, and the kit's names that the run-time gives Alphy's name (ICON_NAMES). */
-const ICONS = [...HOST_ICONS, ...Object.keys(ICON_NAMES)];
 /**
  * The look options of the components, and the values of each one that the kit gives: values of Alphy's catalog (ToolUiCatalog).
  * The run-time puts each value into its node as it is, so only the compile step reads this table.
  */
 const LOOKS = {
-  icon: Object.fromEntries(["Button", "IconButton", "Metric", "Badge", "Notice", "Card", "TextField", "NumberField", "Select", "DateField", "TimeField"].map((type) => [type, ICONS])),
+  icon: Object.fromEntries(ICONED.map((type) => [type, ICONS])),
   variant: { Button: ["filled", "outlined", "text", "tonal"], Text: ["muted", "eyebrow"], Card: ["hero"], CheckBox: ["circle"], Progress: ["bar", "dots"] },
   size: { Emoji: SIZES },
   emphasis: { Text: ["body", "title", "headline", "label", "number", "display"], Metric: ["display", "number"] },
@@ -356,13 +353,6 @@ const LOOKS = {
   tone: { Text: TONES, Metric: TONES, Badge: TONES, Notice: TONES },
   gap: { Row: GAPS, Column: GAPS },
   columns: { Grid: [1, 2, 3, 4] },
-};
-/** The values that an option can take: a value in the line, or each value of a choice (test ? a : b, or if(test, a, b)). Null for each other expression. */
-const choices = (tree) => {
-  const pair = tree.k === "if" ? [tree.yes, tree.no] : tree.k === "call" && tree.name === "if" && tree.args.length === 3 ? tree.args.slice(1) : null;
-  if (!pair) return tree.k === "lit" ? [tree.v] : null;
-  const [yes, no] = pair.map(choices);
-  return yes && no && [...yes, ...no];
 };
 
 /**

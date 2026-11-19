@@ -2,11 +2,48 @@
 // After that the lines are plain lines. The loop can patch each one by its name.
 // A part is a kind of need, never a named app.
 
+import { HOST_ICONS } from "./icons.js";
 import { DslError, parseLine, show } from "./dsl.js";
-import { MAX_DOTS, foreground, own, phased } from "./core.js";
+import { ICON_NAMES, MAX_DOTS, foreground, own, phased } from "./core.js";
 import { hasWords, wordOf } from "./words.js";
 
 const q = JSON.stringify;
+/** The names of IconButton and icon=: each icon of Alphy, and the kit's names that the run-time gives Alphy's name (ICON_NAMES). */
+export const ICONS = [...HOST_ICONS, ...Object.keys(ICON_NAMES)];
+/** The components that show icon=. A Select of six options or fewer is Alphy's segmented control, which shows none (run.js). */
+export const ICONED = ["Button", "IconButton", "Metric", "Badge", "Notice", "Card", "TextField", "NumberField", "Select", "DateField", "TimeField"];
+/** The values that an option can take: a value in the line, or each value of a choice (test ? a : b, or if(test, a, b)). Null for each other expression. */
+export const choices = (tree) => {
+  const pair = tree.k === "if" ? [tree.yes, tree.no] : tree.k === "call" && tree.name === "if" && tree.args.length === 3 ? tree.args.slice(1) : null;
+  if (!pair) return tree.k === "lit" ? [tree.v] : null;
+  const [yes, no] = pair.map(choices);
+  return yes && no && [...yes, ...no];
+};
+/** Why a component of a part line cannot show its icon, or null when it can. A formula that is no choice of values stays for the report (check.js looks). */
+function iconless(node, icon) {
+  const options = ["Segmented", "Select"].includes(node.name) ? (node.args[2]?.items ?? node.args[2]?.entries) : null;
+  if (options && options.length <= 6) return `the part draws a choice of ${options.length} options as a segmented control, which shows no icon`;
+  if (!ICONED.includes(node.name)) return `the part draws a ${node.name}, which shows no icon`;
+  const wrong = (choices(icon) ?? []).find((value) => !ICONS.includes(value));
+  return wrong === undefined ? null : `${q(wrong)} is not the name of an icon of Alphy`;
+}
+/**
+ * A look option that cannot apply changes only the look, so it is a note and never a fault of a need (A0-K4). The icon of each component of a
+ * line that a part wrote goes when the component cannot show it, and a glyph (an IconButton with no action) with such an icon goes from its list.
+ * Returns the notes. The lines of an author keep their look options, and the report checks them (check.js looks).
+ */
+function dropIcons(tree, need) {
+  const notes = [], drop = (node, icon) => { const why = iconless(node, icon); if (why) notes.push(`need ${need}: ${why}, so the kit left out icon=${show(icon)}`); return why; };
+  const visit = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(visit);
+    if (node.k === "list") node.items = node.items.filter((item) => !(item.k === "call" && item.name === "IconButton" && !item.named.action && item.args[0] && drop(item, item.args[0])));
+    if (node.k === "call" && node.named.icon && drop(node, node.named.icon)) delete node.named.icon;
+    Object.values(node).forEach(visit);
+  };
+  visit(tree);
+  return notes;
+}
 // A member of a tabs or steps group is the name of a need. A plan that knows $/NAME as the value of a need also writes $/NAME or $NAME
 // there (route run of the unified prompt: 2 of 45 plans), and the host reads it as the name.
 const memberName = (member) => member.name ?? (member.k === "path" && member.segs?.length === 1 ? member.segs[0] : undefined);
@@ -79,18 +116,18 @@ const PARTS = {
     const k = kind?.v;
     // Each kind of input uses its own options, and any other one is a fault (G.4).
     if (!Object.hasOwn(INPUT_USES, k)) throw new DslError(`an input of kind ${k ?? (kind ? show(kind) : "nothing")} is not built. Use one of the kinds ${Object.keys(INPUT_USES).join(", ")}`);
-    const uses = INPUT_USES[k], unused = Object.keys(extras).filter((key) => !uses.includes(key));
+    // icon= is a look option: each kind takes it, and a component that cannot show it drops it with a note (dropIcons).
+    const uses = INPUT_USES[k], unused = Object.keys(extras).filter((key) => key !== "icon" && !uses.includes(key));
     if (unused.length) throw new DslError(`an input of kind ${k} does not use ${unused.map((key) => key + "=").join(", ")}. ${uses.length ? `It uses ${uses.map((key) => key + "=").join(", ")}` : "It uses no option"}`);
     const named = Object.entries(extras).filter(([key]) => key !== "options").map(([key, tree]) => `, ${key}=${show(tree)}`).join("");
     // The options are a list of values or a map of a value to its label. The host draws a choice of six options or fewer as a segmented control, which shows no icon (run.js).
     const count = (extras.options?.items ?? extras.options?.entries)?.length;
-    if (k === "choice" && extras.icon && count <= 6) throw new DslError(`a choice of ${count} options is a segmented control, which shows no icon. Remove icon=`);
     const icon = extras.icon ? `, icon=${show(extras.icon)}` : "", options = show(extras.options ?? { k: "list", items: [] }), few = (count ?? 9) <= 4;
     let widget;
-    if (k === "choice") widget = `${few ? "Segmented" : "Select"}(${show(title)}, $/${name}, ${options}${few ? "" : icon})`;
-    else if (k === "toggle") widget = `Toggle(${show(title)}, $/${name})`;
+    if (k === "choice") widget = `${few ? "Segmented" : "Select"}(${show(title)}, $/${name}, ${options}${icon})`;
+    else if (k === "toggle") widget = `Toggle(${show(title)}, $/${name}${icon})`;
     else if (k === "text") widget = `TextField(${show(title)}, $/${name}${icon})`;
-    else if (k === "choices") widget = `Choices(${show(title)}, $/${name}, ${options}${extras.max ? `, max=${show(extras.max)}` : ""})`;
+    else if (k === "choices") widget = `Choices(${show(title)}, $/${name}, ${options}${extras.max ? `, max=${show(extras.max)}` : ""}${icon})`;
     else if (k === "date" || k === "time") widget = `${k === "date" ? "DateField" : "TimeField"}(${show(title)}, $/${name}${icon})`;
     else if (k === "range") widget = `RangeSlider(${show(title)}, $/${name}${named})`;
     else {
@@ -155,13 +192,15 @@ const PARTS = {
     // The rows are data for a deck, a chart, or a figure, and the list is not on the screen.
     if (opt.hidden?.v === true) return { lines, top: [] };
     const cells = [], marks = [], texts = [], tail = [], add = [], blank = [], reset = [], canAdd = opt.add?.v !== false, edit = opt.edit?.v === true;
+    // A look option that cannot apply goes, with a note (A0-K4).
+    const notes = [], iconWord = opt.icon?.k === "lit" && /^[A-Za-z]+$/.test(opt.icon.v);
+    if (iconWord) notes.push(`need ${name}: icon= of a list is an emoji, such as icon="🛒", and ${q(opt.icon.v)} is not one, so the kit left it out`);
     // icon=: one sign for each row, or a value of the row (C.2). A field that is the sign of the row is not a text of the row too.
-    const icon = opt.icon, sign = icon?.k === "path" && !icon.abs ? icon.segs[0] : null, shown = opt.show?.entries ?? [];
+    const icon = iconWord ? undefined : opt.icon, sign = icon?.k === "path" && !icon.abs ? icon.segs[0] : null, shown = opt.show?.entries ?? [];
     // icons= gives a field of the add form its icon, and tones= gives a value of show= its tone (C.8). Maps, as labels= is.
     const icons = new Map(opt.icons?.entries ?? []), tones = new Map(opt.tones?.entries ?? []);
     for (const key of tones.keys()) if (!shown.some(([value]) => value === key && value !== sign)) throw new DslError(`tones= names ${key}, and show= has no value of that name`);
     if (icon?.k === "path" && ![...fields, ...shown].some(([key]) => key === sign)) throw new DslError(`icon=${show(icon)} reads no field of the rows. Use a field of fields= or a name of show=`);
-    if (icon?.k === "lit" && /^[A-Za-z]+$/.test(icon.v)) throw new DslError(`icon= of a list is an emoji, such as icon="🛒", and ${q(icon.v)} is not one`);
     // More than 2 check marks are circles of one weight in a second row (C.3).
     const many = fields.filter(([, kindTree]) => kindTree.v === "check").length > 2;
     const kindOf = (kindTree) => (kindTree.k === "list" ? "choice" : own(FIELD_KINDS, kindTree.v) ?? "text");
@@ -210,7 +249,8 @@ const PARTS = {
       if (["text", "number", "count"].includes(kind)) reset.push(`set($/${name}_new_${field}, ${empty})`);
     }
     // Each name of icons= that is left has no field of the add form that shows an icon.
-    for (const key of icons.keys()) throw new DslError(`icons= names ${key}, whose field of the add form shows no icon. A text, number, date, or time field shows one, and a choice of more than six options does too`);
+    for (const key of icons.keys()) notes.push(canAdd ? `need ${name}: icons= names ${key}, whose field of the add form shows no icon, so the kit left it out. A text, number, date, or time field shows one, and a choice of more than six options does too`
+      : `need ${name}: icons= names ${key}, and with add=false the list has no add form, so the kit left it out`);
     // A value for each row, from the fields of that row.
     for (const [key, formula] of shown) if (key !== sign) { lines.push(`${name}_${key} = Badge(${show(formula)}${tones.has(key) ? `, tone=${show(tones.get(key))}` : ""})`); cells.push(`${name}_${key}`); }
     // The arrows become the reorder of the list, which Alphy draws with its own words (NativeRecordReorder.kt), so they need no caption.
@@ -253,12 +293,12 @@ const PARTS = {
     }
     lines.push(`${name}_view = Section(${show(title)}, [${parts.join(", ")}])`);
     if (opt.total && !count) throw new DslError(`total= joins the shown rows and all rows of the hero count, and this list has no hero count. A list has one when it is the only main element of the app. Remove total=`);
-    if (!count) return { lines, top: [`${name}_view`] };
+    if (!count) return { lines, top: [`${name}_view`], note: notes };
     // The only main element of the app is this list (C.6): a hero card with the count of its shown rows comes first. A sign of each row gives no emoji there.
     // total="of" shows all rows too: "12 of 12".
     const counted = opt.countText ? show(opt.countText) : show(title), value = opt.total ? `text(len(${source})) + " " + ${show(opt.total)} + " " + text(len($/${name}))` : `len(${source})`;
     lines.push(`${name}_hero = Card([${icon?.k === "lit" ? `Emoji(${show(icon)}, size="large", label=${counted}), ` : ""}Metric(${counted}, ${value}, emphasis="display")], variant="hero")`);
-    return { lines, top: [`${name}_view`], lead: [`${name}_hero`] };
+    return { lines, top: [`${name}_view`], lead: [`${name}_hero`], note: notes };
   },
 
   // need line = chart("Steps", $/days, $day, $steps, kind="line"): one bar or point for each row of a list.
@@ -625,8 +665,13 @@ export function expand(file) {
       continue;
     }
     file.tops.set(entry.key, built.top);
-    // What the part builds in a different way than the need line asks. The report shows it as a note.
-    if (built.note) file.partNotes.push(built.note);
+    // What the part builds in a different way than the need line asks: one note or a list of them. The report shows each one.
+    file.partNotes.push(...[].concat(built.note ?? []));
+    // Each icon that a component of the part cannot show goes, with a note (A0-K4).
+    parsed.forEach((line, index) => {
+      const notes = line.kind === "component" ? dropIcons(line.tree, entry.key) : [];
+      if (notes.length) { built.lines[index] = `${line.key} = ${show(line.tree)}`; file.partNotes.push(...notes); }
+    });
     // The controls that the part made, by name, so that the report can say when a later step took one off the screen.
     const control = (made) => made.kind === "component" && made.tree.k === "call" && (made.tree.named.action || ["Button", "IconButton", "TextField", "NumberField", "Slider", "RangeSlider", "Toggle", "CheckBox", "Segmented", "Select", "DateField", "TimeField"].includes(made.tree.name));
     (file.made ??= new Map()).set(entry.key, parsed.filter(control).map((made) => made.key));
