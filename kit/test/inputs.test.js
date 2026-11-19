@@ -118,49 +118,14 @@ test("inputs: a choice takes options as a map of a value to its label, and the s
   expect(many.definition.ui.children[0].children.map((node) => [node.type, node.options.map((option) => option.text).join(" ")])).toEqual([["segmented", "XS S M L XL"], ["multiChoice", "Bell Lamp"]]);
 });
 
-// L1 item 4 (e-packing-de: "Dokumen te"; d-rainbow: "Преломление" lost its last letter): a segmented control gives each option an equal
-// share of the width, and a long label broke or shrank in it.
-const choiceForms = (definition) => every(definition.ui).filter((node) => ["segmented", "singleChoice", "select"].includes(node.type)).map((node) => [node.text, node.type, node.variant, node.options.map((option) => option.text)]);
-
-test("inputs (L1 item 4): a single choice whose labels do not fit a segmented row on the phone is a group of cells that wraps, with its title over it", async () => {
+// L1 item 4, fix round 1: the kit made a choice with long labels a group of cells by an estimate of the phone width, also on a wide screen where the
+// segmented row fits. Only Alphy knows the width and the font, so a single choice of six options or fewer is a segmented node, and Alphy draws cells when a label does not fit.
+test("inputs (L1 item 4): a single choice of six options or fewer is a segmented node, also with long labels", async () => {
   const { readFileSync } = await import("node:fs");
-  const model = (name) => readFileSync(new URL(`./fixtures/model/${name}.plan`, import.meta.url), "utf8");
-  const forms = async (text) => choiceForms((await built(...text.split("\n").filter(Boolean))).definition);
-  expect(await forms(model("d-rainbow"))).toEqual([["Этап", "singleChoice", "scene", ["Преломление", "Отражение", "Разложение"]]]);
-  expect(await forms(model("e-packing-de"))).toEqual([["Kategorie", "singleChoice", "scene", ["Kleidung", "Hygiene", "Dokumente", "Technik", "Sonstiges"]]]);
-  // Labels that fit stay a segmented row: Hangul is wide, and three short words still fit.
-  expect((await forms(model("e-cafe-ko"))).map(([text, type]) => [text, type])).toEqual([["음료 종류", "segmented"], ["사이즈", "segmented"]]);
-  expect((await forms(model("d-heart"))).map(([text, type]) => [text, type])).toEqual([["Проследить путь", "segmented"]]);
-  // The host draws no title over the group of cells, so the group stands under a label text of its own, and its action takes the value of an option.
-  const { definition, app } = await built('app("T", lang="ru")', 'need stage = input("choice", "Этап", "Преломление", options=["Преломление", "Отражение", "Разложение"])');
-  const [label, cells] = definition.ui.children[0].children[0].children;
-  expect([definition.ui.children[0].children[0].type, label]).toEqual(["column", { type: "text", text: "Этап", style: { emphasis: "label" } }]);
-  expect(press(definition.initialState, app, cells.action, "Отражение").state.stage).toBe("Отражение");
-});
-
-test("inputs (L1 item 4): in each saved plan and model plan, a choice is a group of cells where a segmented row cut a label on the phone", async () => {
-  const { allPlans } = await import("./helpers.js");
-  const { plansIn } = await import("../build.js");
-  const { readFileSync } = await import("node:fs");
-  const { fileURLToPath } = await import("node:url");
-  const { compileAppFile } = await import("../src/compile.js");
-  const models = plansIn(fileURLToPath(new URL("./fixtures/model", import.meta.url))).map((path) => [path, readFileSync(path, "utf8")]);
-  const cells = [];
-  for (const [path, text] of [...allPlans(), ...models]) {
-    const { definition } = await compileAppFile(text);
-    for (const node of definition ? every(definition.ui) : []) if (node.type === "singleChoice") cells.push(`${path.split("/").pop()}: ${node.text}`);
-  }
-  // The list comes from the widths of the labels in the Roboto and Noto CJK fonts of the phone. In each of these choices, a selected label had less than
-  // 5 dp of the segment beside its check, or a word broke. Each other segmented row keeps 6 dp or more, such as "Szklanki" of units-pl (7 dp)
-  // and "Da comprare" of look-shopping-it (7 dp), and stays a segmented row.
-  expect(cells.sort()).toEqual(["Categoría", "Dimensione", "Estado", "Kategorie", "Size", "Bike type", "Type", "Этап"].map((text, index) =>
-    `${["tabs-chart", "showcase-ui-pizza", "holdout-reading-es", "e-packing-de", "rich", "mock-price-filter", "price-filter", "d-rainbow"][index]}.plan: ${text}`).sort());
-  // In a row of a list, the group of cells has no label text over it: two more nodes in each row would leave room for fewer rows.
-  const { definition } = await compileAppFile(readFileSync(new URL("./rich.plan", import.meta.url), "utf8"));
-  const rows = every(definition.ui).filter((node) => node.rowTemplate).map((node) => every(node.rowTemplate));
-  const labeled = (node) => node.children?.[0]?.type === "text" && node.children[1]?.type === "singleChoice";
-  expect(rows.map((nodes) => [nodes.filter((node) => node.type === "singleChoice").length, nodes.some(labeled)])).toEqual([[1, false], [0, false]]);
-  expect(definition.stateSchema.shirts.maxItems).toBe(91);
+  const forms = async (name) => every((await built(...readFileSync(new URL(`./fixtures/model/${name}.plan`, import.meta.url), "utf8").split("\n").filter(Boolean))).definition.ui)
+    .filter((node) => ["segmented", "singleChoice", "select"].includes(node.type)).map((node) => [node.text, node.type, node.variant]);
+  expect(await forms("d-rainbow")).toEqual([["Этап", "segmented", undefined]]);
+  expect(await forms("e-packing-de")).toEqual([["Kategorie", "segmented", undefined]]);
 });
 
 test("inputs: icon= is the icon of the field of each input that takes one", async () => {

@@ -2006,14 +2006,25 @@ internal fun rootThemeColors(ui: String, shellDark: Boolean): ColorScheme? =
         when(type) {
             // The options share the width. A scrolling row looked cut off at the screen edge.
             // All options take the height of the tallest one, so a two-line label does not stand out.
-            "segmented" -> SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-                values.forEachIndexed {index,option -> SegmentedButton(selected(option.get("value")),{choose(option.get("value"))},
-                    SegmentedButtonDefaults.itemShape(index,values.size),modifier=Modifier.weight(1f).fillMaxHeight().sizeIn(minHeight=48.dp),
-                    enabled=enabled) {
-                        // A narrow option shrinks its label, so a word such as "Quarterly" does not break.
-                        Text(option.getString("text"),maxLines=2,overflow=TextOverflow.Ellipsis,textAlign=TextAlign.Center,
-                            autoSize=WholeWordAutoSize(10.sp,LocalTextStyle.current.fontSize))
-                    } }
+            "segmented" -> {
+                val widest = widestLabel(values, MaterialTheme.typography.labelLarge)
+                val cellColors = SegmentedButtonDefaults.colors()
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    // A selected segment shows its label on one line beside the check (its size and a gap of 8 dp). The segments share the row, and
+                    // their borders of 1 dp overlap. When a label does not fit its share, the options are cells that wrap, each label whole (L1 item 4: "Dokumen te").
+                    val (check, border) = with(LocalDensity.current) { (SegmentedButtonDefaults.IconSize + 8.dp).roundToPx() to 1.dp.roundToPx() }
+                    if (constraints.hasBoundedWidth && values.size * (widest + check) > constraints.maxWidth + (values.size - 1) * border)
+                        NativeSceneChoices(null, values, enabled, Modifier, ::selected, ::choose, cellColors.activeContainerColor, cellColors.activeContentColor)
+                    else SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                        values.forEachIndexed {index,option -> SegmentedButton(selected(option.get("value")),{choose(option.get("value"))},
+                            SegmentedButtonDefaults.itemShape(index,values.size),modifier=Modifier.weight(1f).fillMaxHeight().sizeIn(minHeight=48.dp),
+                            enabled=enabled) {
+                                // A narrow option shrinks its label, so a word such as "Quarterly" does not break.
+                                Text(option.getString("text"),maxLines=2,overflow=TextOverflow.Ellipsis,textAlign=TextAlign.Center,
+                                    autoSize=WholeWordAutoSize(10.sp,LocalTextStyle.current.fontSize))
+                            } }
+                    }
+                }
             }
             "navigationBar" -> NavigationBar(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 values.forEach {option -> NavigationBarItem(selected(option.get("value")),{choose(option.get("value"))},icon={AlphaIcon(Glyph.Grid, color = LocalContentColor.current)},label={Text(option.getString("text"))},enabled=enabled)}
@@ -2062,14 +2073,27 @@ internal fun rootThemeColors(ui: String, shellDark: Boolean): ColorScheme? =
     }
 }
 
+/** The width in px of the widest option label on one line in [style]. */
+@Composable
+private fun widestLabel(options: List<JSONObject>, style: androidx.compose.ui.text.TextStyle): Int {
+    val measurer = rememberTextMeasurer(cacheSize = options.size)
+    return remember(options, style, measurer) { options.maxOf { measurer.measure(it.getString("text"), style = style, softWrap = false).size.width } }
+}
+
+/**
+ * Cells of a single choice that wrap. A scene choice of a course keeps its fixed blue. A segmented control whose labels do not fit
+ * passes the colors of its selected segment and no label, because its title stands over it.
+ */
 @Composable
 private fun NativeSceneChoices(
-    label: String,
+    label: String?,
     options: List<JSONObject>,
     enabled: Boolean,
     modifier: Modifier,
     selected: (Any) -> Boolean,
     choose: (Any) -> Unit,
+    selectedContainer: Color = Color(0xFFC7DFFF),
+    selectedContent: Color = Color(0xFF17283E),
 ) {
     val style = MaterialTheme.typography.labelLarge
     val colors = MaterialTheme.colorScheme
@@ -2078,13 +2102,10 @@ private fun NativeSceneChoices(
     val horizontalPadding = 8.dp
     val checkSize = 16.dp
     val labelGap = 4.dp
-    val measurer = rememberTextMeasurer(cacheSize = options.size)
-    val textWidth = remember(options, style, measurer) {
-        options.maxOf { measurer.measure(it.getString("text"), style = style, softWrap = false).size.width }
-    }
+    val textWidth = widestLabel(options, style)
     val density = LocalDensity.current
     BoxWithConstraints(modifier.selectableGroup().semantics {
-        contentDescription = label
+        if (label != null) contentDescription = label
         isTraversalGroup = true
     }) {
         val columns = with(density) {
@@ -2100,9 +2121,9 @@ private fun NativeSceneChoices(
                     for (option in row) {
                         val value = option.get("value")
                         val active = selected(value)
-                        val foreground = if (active) Color(0xFF17283E) else colors.onSurface
+                        val foreground = if (active) selectedContent else colors.onSurface
                         val textColor = if (enabled) foreground else foreground.copy(alpha = 0.38f)
-                        val decoration = if (active) Modifier.background(Color(0xFFC7DFFF))
+                        val decoration = if (active) Modifier.background(selectedContainer)
                             else Modifier.border(1.dp, colors.outline, shape)
                         Row(
                             Modifier.weight(1f).heightIn(min = 48.dp).clip(shape).then(decoration)
