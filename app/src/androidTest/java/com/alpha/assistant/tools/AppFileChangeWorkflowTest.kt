@@ -56,6 +56,7 @@ class AppFileChangeWorkflowTest {
     private val shopping get() = plan("shopping")
     private val prompt get() = AppFilePrompt.load(context)
     private val refused get() = context.getString(R.string.tool_generation_state)
+    private val retry get() = context.getString(R.string.tool_generation_connection)
 
     @After fun remove() {
         runBlocking { engine.closeArtifacts() }
@@ -101,11 +102,11 @@ class AppFileChangeWorkflowTest {
         return Changed(calls.toList(), events, result)
     }
 
-    /** The person sees why nothing changed, and the store holds [before] with no new revision. No loop step ran. */
-    private fun assertRefused(changed: Changed, before: ToolRecord) {
+    /** The person sees [text], which says why nothing changed, and the store holds [before] with no new revision. No loop step ran. */
+    private fun assertRefused(changed: Changed, before: ToolRecord, code: String = "widget_state", text: String = refused) {
         val failure = changed.failure
-        assertEquals(failure.toString(), "widget_state", (failure as? CloudFailure)?.code)
-        assertEquals(refused, failure.message)
+        assertEquals(failure.toString(), code, (failure as? CloudFailure)?.code)
+        assertEquals(text, failure.message)
         assertEquals(before, store.tool(before.id))
         assertEquals(1, store.revisions(before.id).size)
         assertTrue(changed.stages.toString(), AGENT !in changed.stages)
@@ -195,13 +196,20 @@ class AppFileChangeWorkflowTest {
             "fallback:faults" to listOf(Scripted.Text(BROKEN), Scripted.Text(BROKEN)),
             "fallback:outside" to listOf(Scripted.Text("outside(\"game\")")),
             "fallback:outside" to listOf(Scripted.Text(BROKEN), Scripted.Text("outside(\"game\")")),
-            "fallback:call_failed" to listOf(Scripted.Fails("pre_headers_io")),
         )
         for ((outcome, replies) in ways) {
             val changed = change(before, replies + LOOP)
             assertEquals("$replies", outcome, changed.outcome)
             assertRefused(changed, before)
         }
+    }
+
+    // Failure case: after a failed change call, the person read that the change does not fit the saved data, so the person did not retry.
+    @Test fun aFailedChangeCallSaysToRetry() {
+        val before = shoppingWithData()
+        val changed = change(before, listOf(Scripted.Fails("pre_headers_io")) + LOOP)
+        assertEquals("fallback:call_failed", changed.outcome)
+        assertRefused(changed, before, "widget_generation", retry)
     }
 
     // Failure case: the long-decimal check ran only in finish of the loop, so a changed app could show 3.3333333333333335.
@@ -223,7 +231,7 @@ class AppFileChangeWorkflowTest {
         // The change call has the limits of a plan call: 20 s to the first text.
         val ms = changed.msBetween("change_call_start", "plan_outcome")
         assertTrue("$ms ms", ms in 20_000..21_500)
-        assertRefused(changed, before)
+        assertRefused(changed, before, "widget_generation", retry)
     }
 
     @Test fun aStopDuringTheChangeCallEndsTheRequest() {
@@ -321,6 +329,8 @@ class AppFileChangeWorkflowTest {
         val result = testFix(before, listOf(Scripted.Text(BOUGHT)) + LOOP)
         assertEquals(result.detail, TestFixStatus.VERIFIED, result.status)
         assertEquals("Shopping list", result.detail)
+        // No run reproduced the report, so the chat does not say that the version was checked.
+        assertFalse(result.checkedByRun)
         // The report of the person is the request of one change call.
         assertEquals(listOf(APP_FILE_CHANGE), calls.map { it.generationStage })
         assertEquals(listOf(prompt.changeText(FIX, shopping)), calls.single().turns.map { it.text })
@@ -331,10 +341,9 @@ class AppFileChangeWorkflowTest {
         assertEquals(2, store.revisions(saved.id).size)
     }
 
-    /** Test and fix of the shopping list with data and the change [reply] ends with [status] and [detail] after one call. The store keeps the app. */
-    private fun assertTestFixKeepsTheApp(reply: String, status: TestFixStatus, detail: String) {
-        val before = shoppingWithData()
-        val result = testFix(before, listOf(Scripted.Text(reply)) + LOOP)
+    /** Test and fix of [before] with the change [reply] ends with [status] and [detail] after one call and no loop step. The store keeps the app. */
+    private fun assertTestFixKeepsTheApp(reply: Scripted, status: TestFixStatus, detail: String, before: ToolRecord = shoppingWithData()) {
+        val result = testFix(before, listOf(reply) + LOOP)
         assertEquals(result.detail, status, result.status)
         assertEquals(detail, result.detail)
         assertNull(result.candidate)
@@ -343,22 +352,18 @@ class AppFileChangeWorkflowTest {
         assertEquals(1, store.revisions(before.id).size)
     }
 
-    @Test fun aTestFixWithNoLineIsPassed() = assertTestFixKeepsTheApp(shopping.lines()[1], TestFixStatus.PASSED, "No change was needed.")
+    // Failure case: a test and fix that changed no line said that the checks passed, but no check ran.
+    @Test fun aTestFixWithNoLineIsUnverified() = assertTestFixKeepsTheApp(Scripted.Text(shopping.lines()[1]), TestFixStatus.UNVERIFIED,
+        context.getString(R.string.tool_test_fix_no_line))
 
-    @Test fun aRefusedTestFixWithStoredDataIsUnrepaired() = assertTestFixKeepsTheApp(AISLE_NUMBER, TestFixStatus.UNREPAIRED, refused)
+    @Test fun aRefusedTestFixWithStoredDataIsUnrepaired() = assertTestFixKeepsTheApp(Scripted.Text(AISLE_NUMBER), TestFixStatus.UNREPAIRED, refused)
 
-    // The literal rule of the task: with no data of the person, the test-and-fix loop of a new app gets the report. That loop has no app to run,
-    // and it refuses each write before a reproduced problem, so it ends unverified after its steps. This test pins that behavior.
-    @Test fun aRefusedTestFixWithNoStoredDataGoesToTheLoopOfANewApp() {
-        val before = created()
-        val result = testFix(before, listOf(Scripted.Text("outside(\"game\")")) + LOOP)
-        assertEquals(result.detail, TestFixStatus.UNVERIFIED, result.status)
-        assertEquals(APP_FILE_CHANGE, calls.first().generationStage)
-        assertTrue(calls.drop(1).all { it.generationStage == AGENT })
-        val task = calls[1].turns.first().text
-        assertTrue(task, "Build a new app." in task && "Current app definition" !in task && shopping.lines()[2] !in task)
-        assertEquals(before, store.tool(before.id))
-    }
+    // Failure case: with no data of the person, a refused test and fix went to a loop with no app to run, which made 20 calls for nothing.
+    @Test fun aRefusedTestFixWithNoStoredDataIsUnrepaired() =
+        assertTestFixKeepsTheApp(Scripted.Text("outside(\"game\")"), TestFixStatus.UNREPAIRED, refused, created())
+
+    @Test fun aTestFixWithAFailedCallSaysToRetry() =
+        assertTestFixKeepsTheApp(Scripted.Fails("pre_headers_io"), TestFixStatus.UNREPAIRED, retry, created())
 
     // Failure case: a press during the change call of test and fix was lost, because the save wrote the state from before the press.
     @Test fun aPressDuringATestFixByLinesKeepsTheNewerState() {
@@ -376,17 +381,20 @@ class AppFileChangeWorkflowTest {
         const val FIX = "The bought items are not counted. Test and fix this app."
         const val NEW ="User request: Make a shopping list by aisle\nWidget brief: A shopping list sorted by aisle"
         const val CHANGE = "User request: Count the bought items too\nWidget brief: Add a count of the bought items"
-        const val BOUGHT = "need bought = figure(\"count\", \"Bought\", count(\$/items, \$done), example=[{items: [{done: true}]}, 1])"
         /** A fault: count reads a value that no line sets. */
         const val BROKEN = "need bought = figure(\"count\", \"Bought\", count(\$/nothing, \$done))"
         const val URGENT = "need items = entries(\"Items\", fields={name: \"text\", aisle: \"text\", done: \"check\", urgent: \"check\"}, " +
             "sort=\$aisle, labels={name: \"Product\", aisle: \"Aisle\"}, rows=[{name: \"Milk\", aisle: \"Dairy\", done: false, urgent: false}, " +
             "{name: \"Bread\", aisle: \"Bakery\", done: false, urgent: false}, {name: \"Apples\", aisle: \"Produce\", done: false, urgent: false}])"
-        /** The saved rows hold a text in the column aisle, so a number there is blocked. The order of the rows keeps the check of the plan. */
-        const val AISLE_NUMBER = "need items = entries(\"Items\", fields={name: \"text\", aisle: \"number\", done: \"check\"}, " +
-            "sort=\$aisle, labels={name: \"Product\", aisle: \"Aisle\"}, rows=[{name: \"Milk\", aisle: 2, done: false}, " +
-            "{name: \"Bread\", aisle: 1, done: false}, {name: \"Apples\", aisle: 3, done: false}])"
         /** The replies of the loop: one write of the fixture app and a finish. */
         val LOOP = listOf(Scripted.Text(agentWrite(FIXTURE_APP)), Scripted.Text(agentFixtureFinish))
     }
 }
+
+/** A change line of the shopping list plan: a count of the bought items. */
+internal const val BOUGHT = "need bought = figure(\"count\", \"Bought\", count(\$/items, \$done), example=[{items: [{done: true}]}, 1])"
+
+/** A change line of the shopping list plan. The saved rows hold a text in the column aisle, so a number there is blocked. The order of the rows keeps the check of the plan. */
+internal const val AISLE_NUMBER = "need items = entries(\"Items\", fields={name: \"text\", aisle: \"number\", done: \"check\"}, " +
+    "sort=\$aisle, labels={name: \"Product\", aisle: \"Aisle\"}, rows=[{name: \"Milk\", aisle: 2, done: false}, " +
+    "{name: \"Bread\", aisle: 1, done: false}, {name: \"Apples\", aisle: 3, done: false}])"

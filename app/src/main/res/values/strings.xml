@@ -376,6 +376,7 @@
     <string name="tool_generation_invalid">Не удалось собрать мини-приложение из ответа сервиса ИИ. Повторите запрос.</string>
     <string name="tool_generation_state">Новая версия не подходит к сохранённым данным. Уточните запрос. Данные не изменились.</string>
     <string name="tool_generation_unchanged">Запрос не изменил ни одной строки приложения. Уточните запрос. Приложение и данные не изменились.</string>
+    <string name="tool_test_fix_no_line">Alphy не нашёл строки приложения, которую нужно изменить. Приложение и данные не изменились.</string>
     <string name="tool_generation_preview_failed">Не удалось проверить предпросмотр. Уточните запрос и повторите попытку.</string>
     <string name="tool_generation_preview_state">Предпросмотр попытался изменить данные. Сохранённые данные не изменились.</string>
     <string name="tool_generation_preview_effects">Предпросмотр запросил действие на устройстве. Сохранённые данные не изменились.</string>
@@ -455,6 +456,7 @@
     <string name="chat_memory_ready">Проверьте запись и нажмите «Сохранить».</string>
     <string name="chat_memory_unavailable">Не удалось открыть запись для проверки. Повторите запрос в этом чате, когда редактор памяти будет свободен.</string>
     <string name="chat_app_test_saved">Версия %1$d проверена. Исправление сохранено как версия %2$d.</string>
+    <string name="chat_app_test_saved_unchecked">Исправление по вашему описанию сохранено как версия %1$d. Проверьте, что ошибки больше нет.</string>
     <string name="chat_app_test_passed">Проверки версии %1$d прошли.</string>
     <string name="chat_app_test_unverified">Проверка версии %1$d не подтвердила ошибку.</string>
     <string name="chat_app_test_unrepaired">Исправление для версии %1$d не прошло проверку.</string>

@@ -141,13 +141,13 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             agent.run(AppAgentRequest(request, base, emptyList(), base.id, privateState,
                 extraInstructions = AppAgentGuide.testFix, testFix = true), session)
         } catch (failure: CloudFailure) {
-            // A change by lines that the saved data of the person blocks: the app and its data stay as they were.
-            if (failure.code == "widget_state") return TestFixResult(TestFixStatus.UNREPAIRED, failure.message)
+            // A change by lines that the kit could not make: the app and its data stay as they were, and the detail says why.
+            if (agent.byLines && failure.code in setOf("widget_state", "widget_generation")) return TestFixResult(TestFixStatus.UNREPAIRED, failure.message)
             if (failure.code != "widget_agent_incomplete") throw failure
             val status = if (agent.edited || agent.reproduced) TestFixStatus.UNREPAIRED else TestFixStatus.UNVERIFIED
             return TestFixResult(status, failure.message)
         }
-        return if (result.changed) TestFixResult(TestFixStatus.VERIFIED, result.summary, candidate = result.preview)
+        return if (result.changed) TestFixResult(TestFixStatus.VERIFIED, result.summary, candidate = result.preview, checkedByRun = !agent.byLines)
         else TestFixResult(TestFixStatus.PASSED, result.summary)
     }
 

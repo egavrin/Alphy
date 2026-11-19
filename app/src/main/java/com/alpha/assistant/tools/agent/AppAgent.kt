@@ -120,6 +120,10 @@ internal class AppAgent(
     var reproduced = false
         private set
 
+    /** True after the change step of an app with an app file started. No run reproduces a report on this path. */
+    var byLines = false
+        private set
+
     suspend fun run(request: AppAgentRequest, session: CloudSession): AppAgentResult = run(request, session, rebuild = false)
 
     /**
@@ -427,6 +431,7 @@ internal class AppAgent(
         val base = request.base
         if (previous?.appFile != null && base != null) {
             val call = checkNotNull(appFileCall) { "An app with an app file changes only through the kit." }
+            byLines = true
             val outcome = appFileSteps(call).change(request.prompt, AppFilePrevious(previous.appFile, previous.schema.toString(), base.state),
                 AppFileLimits())
             checkActive()
@@ -436,14 +441,17 @@ internal class AppAgent(
                 is AppFileOutcome.Fallback -> outcome.reason
             }
             request.phase("plan_outcome", "fallback:$reason")
-            if (reason == "empty") {
-                // Test and fix that changes no line found nothing to repair. A change request that changes no line is not finished.
-                if (request.testFix) return AppAgentResult(ToolPreview(previous, base.state, base.ui), NO_CHANGE_NEEDED, 1, changed = false)
-                throw CloudFailure("widget_agent_incomplete", sandbox.context.getString(R.string.tool_generation_unchanged))
-            }
+            val context = sandbox.context
+            // A change that changes no line is not finished. Test and fix then found no line to repair.
+            if (reason == "empty") throw CloudFailure("widget_agent_incomplete",
+                context.getString(if (request.testFix) R.string.tool_test_fix_no_line else R.string.tool_generation_unchanged))
+            // A failed call or compile made no change, so a retry can work. Each other reason is a change that the kit cannot apply.
+            val failure = if (reason in CALL_FAILURES || reason.startsWith("compile_"))
+                CloudFailure("widget_generation", context.getString(R.string.tool_generation_connection))
+            else CloudFailure("widget_state", context.getString(R.string.tool_generation_state))
+            // Test and fix by lines never goes to the loop, which has no app to run here.
             // A value that differs from the start state is data of the person: the app, its data, and its revision stay.
-            if (!sameToolJson(JSONObject(base.state), JSONObject(previous.initialState)))
-                throw CloudFailure("widget_state", sandbox.context.getString(R.string.tool_generation_state))
+            if (request.testFix || !sameToolJson(JSONObject(base.state), JSONObject(previous.initialState))) throw failure
             return run(request, session, rebuild = true)
         }
 
@@ -891,7 +899,8 @@ internal class AppAgent(
 
     private companion object {
         const val REPRODUCE_FIRST = "Reproduce the reported problem with run on the current app before you change it."
-        const val NO_CHANGE_NEEDED = "No change was needed."
+        /** The fallback reasons of a change call that ended before a reply. */
+        val CALL_FAILURES = setOf("call_failed", "first_text_timeout", "total_timeout")
         const val PRIVATE_EDIT = "This app keeps private device data. The host keeps its ui and initialState private and unchanged. " +
             "Use edit_app without ui or initialState."
         const val REVIEW_SCREEN = "Review this screen as the user: a calculator shows real results for sample inputs, not 0 or dashes, and no label or value repeats."

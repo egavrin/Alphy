@@ -12,6 +12,7 @@ import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
+import com.alpha.assistant.data.MessageProvenance
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.agent.GenerationSettings
 import com.alpha.assistant.tools.appfile.checked
@@ -50,18 +51,42 @@ class AppFileChatWorkflowTest {
         fixture.remove()
     }
 
-    /** Sends [request] in a new chat that routes it to a new app. The generation calls answer from [script]. The saved app goes to [test]. */
-    private fun create(request: String, script: AgentScriptProvider, test: (ToolRecord) -> Unit) {
+    /** Opens the shell with a chat model that gives [decisions] in order. The generation calls answer from [script]. */
+    private fun launch(script: AgentScriptProvider, decisions: List<CloudEvent.RoundComplete>, test: (ShellViewModel) -> Unit) {
+        val next = ArrayDeque(decisions)
         fixture.install(chat = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
-                if (request.generationStage != null) script.respond(key, request, session, emit)
-                else emit(CloudEvent.RoundComplete(chatDecision("create", "Готово.", "A new app for the request"), false))
+                if (request.generationStage != null) script.respond(key, request, session, emit) else emit(next.removeFirst())
         })
         fixture.launch().use {
             val model = checkNotNull(fixture.model)
             robot.waitUntil { !model.loading }
+            test(model)
+        }
+    }
+
+    /** Sends [request] in a new chat that routes it to a new app. The generation calls answer from [script]. The saved app goes to [test]. */
+    private fun create(request: String, script: AgentScriptProvider, test: (ToolRecord) -> Unit) =
+        launch(script, listOf(CloudEvent.RoundComplete(chatDecision("create", "Готово.", "A new app for the request"), false))) { model ->
             test(saved(model, send(model, request)))
         }
+
+    /**
+     * The shopping list from one plan call in a new chat. The next chat decision is [next], and its generation call answers [change].
+     * [test] gets the chat model, the saved app, and the script of the generation calls.
+     */
+    private fun shopping(change: Scripted, next: CloudEvent.RoundComplete, test: (ShellViewModel, ToolRecord, AgentScriptProvider) -> Unit) {
+        val script = AgentScriptProvider(listOf(Scripted.Text(plan("shopping")), change))
+        launch(script, listOf(CloudEvent.RoundComplete(chatDecision("create", "Готово.", "A shopping list by aisle"), false), next)) { model ->
+            test(model, saved(model, send(model, "Список покупок по рядам магазина")), script)
+        }
+    }
+
+    /** The saved record of [id] as the chat holds it. */
+    private fun record(model: ShellViewModel, id: String): ToolRecord {
+        var record: ToolRecord? = null
+        robot.instrumentation.runOnMainSync { record = model.tools.tools.single { it.id == id } }
+        return checkNotNull(record)
     }
 
     /** Sends [request] in the open chat and gives the last message after the request ends. */
@@ -78,43 +103,48 @@ class AppFileChatWorkflowTest {
         assertEquals(card.error, "complete", card.status)
         // The chat card of the app shows its open button.
         robot.waitFor(robot.text(R.string.tool_open))
-        var saved: ToolRecord? = null
-        robot.instrumentation.runOnMainSync { saved = model.tools.tools.single { it.id == card.toolId } }
-        return checkNotNull(saved)
+        return record(model, checkNotNull(card.toolId))
     }
 
     // Failure case: a change that the saved data of the person blocks showed no reason in the chat, or it changed the app.
-    @Test fun aChangeThatTheSavedDataBlocksSaysWhyInTheChat() {
-        val shopping = plan("shopping")
-        // The saved rows hold a text in the column aisle, so the kit blocks a number there.
-        val aisleNumber = "need items = entries(\"Items\", fields={name: \"text\", aisle: \"number\", done: \"check\"}, sort=\$aisle, " +
-            "labels={name: \"Product\", aisle: \"Aisle\"}, rows=[{name: \"Milk\", aisle: 2, done: false}, {name: \"Bread\", aisle: 1, done: false}, " +
-            "{name: \"Apples\", aisle: 3, done: false}])"
-        val script = AgentScriptProvider(listOf(Scripted.Text(shopping), Scripted.Text(aisleNumber)))
-        val decisions = ArrayDeque(listOf(chatDecision("create", "Готово.", "A shopping list by aisle"),
-            chatDecision("refine", "Меняю.", "Make the aisle a number")))
-        fixture.install(chat = object : ChatProvider {
-            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
-                if (request.generationStage != null) script.respond(key, request, session, emit)
-                else emit(CloudEvent.RoundComplete(decisions.removeFirst(), false))
-        })
-        fixture.launch().use {
-            val model = checkNotNull(fixture.model)
-            robot.waitUntil { !model.loading }
-            val created = saved(model, send(model, "Список покупок по рядам магазина"))
+    @Test fun aChangeThatTheSavedDataBlocksSaysWhyInTheChat() =
+        shopping(Scripted.Text(AISLE_NUMBER), CloudEvent.RoundComplete(chatDecision("refine", "Меняю.", "Make the aisle a number"), false)) { model, created, script ->
             // The person marks Milk as bought.
             robot.instrumentation.runOnMainSync { model.tools.interact(created, "items_done", row("r1", true)) }
-            robot.waitUntil { model.tools.tools.single { it.id == created.id }.stateVersion > created.stateVersion }
-            var pressed: ToolRecord? = null
-            robot.instrumentation.runOnMainSync { pressed = model.tools.tools.single { it.id == created.id } }
+            robot.waitUntil { record(model, created.id).stateVersion > created.stateVersion }
+            val pressed = record(model, created.id)
             val card = send(model, "Пусть ряд будет числом")
             assertEquals(listOf(APP_FILE, APP_FILE_CHANGE), script.calls.map { it.generationStage })
             assertEquals("error", card.status)
             val why = fixture.context.getString(R.string.tool_generation_state)
             assertEquals(why, card.error)
             robot.waitFor(robot.text(R.string.tool_generation_state))
-            robot.instrumentation.runOnMainSync { assertEquals(pressed, model.tools.tools.single { it.id == created.id }) }
+            assertEquals(pressed, record(model, created.id))
         }
+
+    /** Sends the test and fix FIX of the shopping list: it makes one change call, and the chat shows [text]. Gives the chat card. */
+    private fun assertTestFixShows(model: ShellViewModel, script: AgentScriptProvider, text: String): Message {
+        val card = send(model, FIX)
+        assertEquals(listOf(APP_FILE, APP_FILE_CHANGE), script.calls.map { it.generationStage })
+        assertEquals(card.error, "complete", card.status)
+        assertEquals(text, card.text)
+        val headline = text.lines().first()
+        robot.waitUntil { robot.texts().any { headline in it } }
+        return card
+    }
+
+    // Failure case: the chat said that a fix by lines was checked, but no run checked it.
+    @Test fun aTestFixByLinesAsksThePersonToCheckTheFix() = shopping(Scripted.Text(BOUGHT), TEST_FIX) { model, created, script ->
+        val card = assertTestFixShows(model, script, robot.text(R.string.chat_app_test_saved_unchecked, 2) + "\nShopping list")
+        assertEquals(2, card.toolRevision)
+        assertEquals(2, record(model, created.id).revision)
+    }
+
+    // Failure case: a test and fix that changed no line said that the checks of the version passed, but no check ran.
+    @Test fun aTestFixWithNoLineSaysThatAlphyFoundNoLine() = shopping(Scripted.Text(plan("shopping").lines()[1]), TEST_FIX) { model, created, script ->
+        val before = record(model, created.id)
+        assertTestFixShows(model, script, robot.text(R.string.chat_app_test_unverified, 1) + "\n" + robot.text(R.string.tool_test_fix_no_line))
+        assertEquals(before, record(model, created.id))
     }
 
     /** The steps of the behavior checker on the saved app, from its start state: each step runs, and each expectation passes. */
@@ -164,5 +194,11 @@ class AppFileChatWorkflowTest {
             assertEquals(listOf(AGENT, AGENT), script.calls.map { it.generationStage })
             assertNull(ToolSpec.parsePersisted(saved.spec).appFile)
         }
+    }
+
+    private companion object {
+        const val FIX = "Купленные не считаются. Проверь и исправь приложение."
+        /** The chat decision of a test and fix of the one app of the chat. */
+        val TEST_FIX = CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, testFix = CloudEvent.TestFixRequest(null))
     }
 }

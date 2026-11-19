@@ -1902,13 +1902,17 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                             prepared = { prepareToolOperation(R.string.chat_app_test_progress) },
                             canCommit = canCommit,
                             completed = { result, saved ->
-                                val headline = if (saved != null) app.getString(R.string.chat_app_test_saved, testTarget.revision, saved.revision)
-                                else app.getString(when (result.status) {
-                                    TestFixStatus.PASSED -> R.string.chat_app_test_passed
-                                    TestFixStatus.UNVERIFIED -> R.string.chat_app_test_unverified
-                                    TestFixStatus.UNREPAIRED -> R.string.chat_app_test_unrepaired
-                                    TestFixStatus.VERIFIED -> R.string.chat_app_test_unsaved
-                                }, testTarget.revision)
+                                val headline = when {
+                                    saved == null -> app.getString(when (result.status) {
+                                        TestFixStatus.PASSED -> R.string.chat_app_test_passed
+                                        TestFixStatus.UNVERIFIED -> R.string.chat_app_test_unverified
+                                        TestFixStatus.UNREPAIRED -> R.string.chat_app_test_unrepaired
+                                        TestFixStatus.VERIFIED -> R.string.chat_app_test_unsaved
+                                    }, testTarget.revision)
+                                    result.checkedByRun -> app.getString(R.string.chat_app_test_saved, testTarget.revision, saved.revision)
+                                    // A fix by lines: no run checked it, so the person checks it.
+                                    else -> app.getString(R.string.chat_app_test_saved_unchecked, saved.revision)
+                                }
                                 updateMessage(request, assistant.id) {
                                     it.copy(text = "$headline\n${result.detail}", status = "complete",
                                         toolId = saved?.id, toolRevision = saved?.revision, provenance = replyProvenance)
