@@ -52,6 +52,9 @@ internal const val MAX_TOOL_PROMPT_LENGTH = 64_000
 
 internal fun isValidToolPrompt(prompt: String) = prompt.isNotBlank() && prompt.length <= MAX_TOOL_PROMPT_LENGTH
 
+/** The code of a refused manual edit of a part-built app: its message names the field or the line of the plan to change. */
+internal const val APP_FILE_EDIT = "app_file_edit"
+
 data class ToolPreview(val spec: ToolSpec, val state: String, val ui: String, val effects: List<CapabilityRequest> = emptyList(), val records: JSONArray = JSONArray(), val surfaces: JSONObject? = null, val frames: Set<String>? = null, val timers: Map<String,Int>? = null, val playback: String? = null)
 /** The model-facing reason for a rejected generated result. User-facing messages stay short. */
 internal interface GeneratedOutputDetail { val detail: String }
@@ -600,8 +603,21 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
                 "Мини-приложение изменилось. Откройте текущую версию."
             }
             val previous = ToolSpec.parsePersisted(old.spec)
-            val spec = ToolSpec.parsePersisted(definition).withAppLanguage(previous.appLanguage).withIcon(previous.iconId)
-            val state = ToolSpec.stateForRevision(previous, spec, old.state)
+            val edited = JSONObject(definition)
+            val appFile = edited.remove("appFile")
+            val (spec, state) = when {
+                previous.appFile == null && appFile == null ->
+                    ToolSpec.parsePersisted(definition).withAppLanguage(previous.appLanguage).withIcon(previous.iconId)
+                        .let { it to ToolSpec.stateForRevision(previous, it, old.state) }
+                // The kit builds each other field of a part-built app from its plan, and only the kit writes a plan.
+                previous.appFile == null || appFile !is String || !sameToolJson(edited, JSONObject(old.spec).apply { remove("appFile") }) ->
+                    throw CloudFailure(APP_FILE_EDIT, store.context.getString(com.alpha.assistant.R.string.tool_manual_edit_app_file))
+                else -> kitCompile(old, previous, appFile).let { compiled ->
+                    // The fault of the kit names the line, so the person can fix the plan.
+                    if (compiled.status == "faults") throw CloudFailure(APP_FILE_EDIT, compiled.faults.joinToString("\n"))
+                    kitRevision(compiled, old, previous, appFile)
+                }
+            }
             val revision = Math.incrementExact(old.revision)
             val preview = generation.evaluate(spec, old.id, revision, state,
                 JSONObject().put("type", "render"), spec.ui.toString())

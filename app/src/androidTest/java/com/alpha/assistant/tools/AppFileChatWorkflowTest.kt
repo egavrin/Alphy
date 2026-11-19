@@ -15,6 +15,8 @@ import com.alpha.assistant.data.Message
 import com.alpha.assistant.data.MessageProvenance
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.agent.GenerationSettings
+import com.alpha.assistant.tools.appfile.AppFileCompiler
+import com.alpha.assistant.tools.appfile.AppFilePrevious
 import com.alpha.assistant.tools.appfile.checked
 import com.alpha.assistant.tools.appfile.plan
 import com.alpha.assistant.tools.appfile.row
@@ -188,6 +190,30 @@ class AppFileChatWorkflowTest {
             works(saved, """[{"expect":"value","target":"d.perperson_text","equals":"550,00"},
                 {"set":"bill_field","value":1200},{"set":"tip_field","value":20},{"set":"people_field","value":3},
                 {"expect":"value","target":"d.perperson_text","equals":"480,00"},{"expect":"text","contains":"480,00"}]""")
+        }
+    }
+
+    // Failure case: a refused manual edit of a part-built app said only that the save failed, so the person did not know what to change.
+    @Test fun aRefusedManualEditSaysWhatToChange() {
+        val shopping = plan("shopping")
+        create("Список покупок по рядам магазина", AgentScriptProvider(listOf(Scripted.Text(shopping)))) { saved ->
+            val model = checkNotNull(fixture.model)
+            robot.instrumentation.runOnMainSync { model.openSurface(saved.id) }
+            robot.click(robot.text(R.string.tool_options))
+            robot.click(robot.text(R.string.tool_manual_edit))
+            val broken = shopping + BROKEN + "\n"
+            val previous = AppFilePrevious(shopping, ToolSpec.parsePersisted(saved.spec).schema.toString(), saved.state)
+            val faults = runBlocking { AppFileCompiler(fixture.context, SandboxClient(fixture.context)).compile(broken, previous) }.faults
+            // A plan with a fault shows the fault of the kit, which names the line. A changed compiled field shows the sentence on the plan.
+            val shown = listOf(JSONObject(saved.spec).put("appFile", broken) to faults.joinToString("\n"),
+                JSONObject(saved.spec).put("title", "Groceries") to robot.text(R.string.tool_manual_edit_app_file))
+            val input = robot.text(R.string.tool_manual_edit_definition)
+            for ((definition, text) in shown) {
+                robot.edit(input, definition.toString())
+                robot.click(robot.text(R.string.tool_manual_edit_save))
+                robot.reveal(text)
+            }
+            assertEquals(saved, record(model, saved.id))
         }
     }
 

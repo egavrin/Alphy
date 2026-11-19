@@ -30,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
+import com.alpha.assistant.cloud.CloudFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -47,6 +48,7 @@ internal fun ToolPortabilityDialog(controller: ToolController, tool: ToolRecord,
     var oversized by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
+    var refusal by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = { if (!busy) dismiss() },
         title = { Text(title) },
@@ -74,7 +76,7 @@ internal fun ToolPortabilityDialog(controller: ToolController, tool: ToolRecord,
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (stale) Text(stringResource(R.string.tool_refinement_current_version), color = MaterialTheme.colorScheme.error)
-                else if (failed) Text(failure, color = MaterialTheme.colorScheme.error)
+                else if (failed) Text(refusal ?: failure, color = MaterialTheme.colorScheme.error)
             }
         },
         confirmButton = {
@@ -96,7 +98,9 @@ internal fun ToolPortabilityDialog(controller: ToolController, tool: ToolRecord,
                         dismiss()
                     } catch (cancel: CancellationException) {
                         throw cancel
-                    } catch (_: Exception) {
+                    } catch (problem: Exception) {
+                        // A refused plan edit says which field or line to change. Each other failure keeps the generic text.
+                        refusal = (problem as? CloudFailure)?.takeIf { it.code == APP_FILE_EDIT || it.code == "widget_state" }?.message
                         failed = true
                     } finally {
                         busy = false

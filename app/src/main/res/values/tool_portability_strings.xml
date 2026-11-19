@@ -13,4 +13,5 @@
     <string name="tool_manual_edit_save">Проверить и сохранить</string>
     <string name="tool_manual_edit_size">Описание превышает допустимый размер (%1$d КиБ).</string>
     <string name="tool_manual_edit_failed">Не удалось сохранить изменения. Проверьте JSON и текущую версию мини-приложения.</string>
+    <string name="tool_manual_edit_app_file">Остальные поля Alphy собирает из поля appFile, поэтому изменяйте только appFile.</string>
 </resources>

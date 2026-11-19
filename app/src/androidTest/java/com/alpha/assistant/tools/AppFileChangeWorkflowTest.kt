@@ -13,6 +13,8 @@ import com.alpha.assistant.cloud.CloudGenerationStage.APP_FILE_CHANGE
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.appfile.AppFileCompiler
+import com.alpha.assistant.tools.appfile.AppFilePrevious
 import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.plan
 import com.alpha.assistant.tools.appfile.row
@@ -462,14 +464,72 @@ class AppFileChangeWorkflowTest {
         assertEquals(5, store.revisions(used.id).size)
     }
 
+    /** The manual edit of [record] with the text [definition], as the dialog saves it. */
+    private fun edited(record: ToolRecord, definition: String) =
+        runCatching { runBlocking { engine.saveManualDefinition(record, definition) } }
+
+    /** The manual edit of [before] with [definition] gives [text] with [code], and the store keeps [before]. */
+    private fun assertEditRefused(before: ToolRecord, definition: String, text: String, code: String = APP_FILE_EDIT) {
+        val revisions = store.revisions(before.id).size
+        val failure = edited(before, definition).exceptionOrNull()
+        assertEquals(failure.toString(), code, (failure as? CloudFailure)?.code)
+        assertEquals(text, failure?.message)
+        assertEquals(before, store.tool(before.id))
+        assertEquals(revisions, store.revisions(before.id).size)
+    }
+
+    // Failure case: a manual edit of the plan of a part-built app failed on each save, because the kit did not compute the next state.
+    @Test fun aManualEditOfTheAppFileThatAddsANeedKeepsTheStoredValues() {
+        val before = added(shoppingWithData(), "Butter")
+        val saved = edited(before, JSONObject(before.spec).put("appFile", shopping + BOUGHT + "\n").toString()).getOrThrow()
+        assertEquals(2, saved.revision)
+        assertEquals(shopping + BOUGHT + "\n", appFile(saved))
+        assertSameRows(items(before), items(saved))
+        assertEquals("1", JSONObject(saved.state).getJSONObject("d").getString("bought_text"))
+        assertEquals(saved, store.tool(before.id))
+        assertEquals("Ручное изменение", store.revisions(before.id).first().label)
+        // The same values in another layout: the kit builds the same definition and the same state as the change step did.
+        val same = edited(saved, JSONObject(saved.spec).toString(2)).getOrThrow()
+        assertEquals(3, same.revision)
+        assertTrue(same.spec, sameToolJson(JSONObject(saved.spec), JSONObject(same.spec)))
+        assertTrue(same.state, sameToolJson(JSONObject(saved.state), JSONObject(same.state)))
+    }
+
+    // Failure case: a manual edit of a compiled field saved code that the plan does not make, so the next change by lines lost the edit or was refused.
+    @Test fun aManualEditOfACompiledFieldIsRefused() {
+        val before = shoppingWithData()
+        val sentence = context.getString(R.string.tool_manual_edit_app_file)
+        val other = listOf(JSONObject(before.spec).put("title", "Groceries"), JSONObject(before.spec).apply { remove("appFile") },
+            JSONObject(before.spec).put("title", "Groceries").put("appFile", shopping + BOUGHT + "\n"))
+        for (definition in other) assertEditRefused(before, definition.toString(), sentence)
+        // Only the kit writes an app file, so an app of today's form takes none by hand.
+        val today = change(created(), listOf(Scripted.Text("outside(\"game\")")) + LOOP).saved
+        assertEditRefused(today, JSONObject(today.spec).put("appFile", shopping).toString(), sentence)
+    }
+
+    // Failure case: a manual edit that breaks the plan gave a text that names no line, so the person could not fix the plan.
+    @Test fun aManualEditThatBreaksThePlanShowsTheFaultOfTheKit() {
+        val before = shoppingWithData()
+        val broken = shopping + BROKEN + "\n"
+        val previous = AppFilePrevious(shopping, ToolSpec.parsePersisted(before.spec).schema.toString(), before.state)
+        val faults = runBlocking { AppFileCompiler(context, SandboxClient(context)).compile(broken, previous) }.faults
+        assertTrue(faults.toString(), faults.isNotEmpty() && faults.all { it.startsWith("need bought") })
+        assertEditRefused(before, JSONObject(before.spec).put("appFile", broken).toString(), faults.joinToString("\n"))
+        // A plan that the saved rows block gives the message of widget_state.
+        val aisle = shopping.replace(shopping.lines()[2], AISLE_NUMBER)
+        assertEditRefused(before, JSONObject(before.spec).put("appFile", aisle).toString(), refused, "widget_state")
+        // A hole is a part that the kit does not have, so a plan with one saves nothing.
+        assertTrue(edited(before, JSONObject(before.spec).put("appFile", shopping + "need chart = hole(\"A chart\")\n").toString()).isFailure)
+        assertEquals(before, store.tool(before.id))
+        assertEquals(1, store.revisions(before.id).size)
+    }
+
     private companion object {
         const val FIX = "The bought items are not counted. Test and fix this app."
         const val NEW ="User request: Make a shopping list by aisle\nWidget brief: A shopping list sorted by aisle"
         const val CHANGE = "User request: Count the bought items too\nWidget brief: Add a count of the bought items"
         /** A change of the label of the count of the shopping list. */
         const val STILL_TO_BUY = "need left = figure(\"count\", \"Still to buy\", count(\$/items, !\$done))"
-        /** A fault: count reads a value that no line sets. */
-        const val BROKEN = "need bought = figure(\"count\", \"Bought\", count(\$/nothing, \$done))"
         const val URGENT = "need items = entries(\"Items\", fields={name: \"text\", aisle: \"text\", done: \"check\", urgent: \"check\"}, " +
             "sort=\$aisle, labels={name: \"Product\", aisle: \"Aisle\"}, rows=[{name: \"Milk\", aisle: \"Dairy\", done: false, urgent: false}, " +
             "{name: \"Bread\", aisle: \"Bakery\", done: false, urgent: false}, {name: \"Apples\", aisle: \"Produce\", done: false, urgent: false}])"
@@ -477,6 +537,9 @@ class AppFileChangeWorkflowTest {
         val LOOP = listOf(Scripted.Text(agentWrite(FIXTURE_APP)), Scripted.Text(agentFixtureFinish))
     }
 }
+
+/** A change line of the shopping list plan with a fault: count reads a value that no line sets. */
+internal const val BROKEN = "need bought = figure(\"count\", \"Bought\", count(\$/nothing, \$done))"
 
 /** A change line of the shopping list plan: a count of the bought items. */
 internal const val BOUGHT = "need bought = figure(\"count\", \"Bought\", count(\$/items, \$done), example=[{items: [{done: true}]}, 1])"
