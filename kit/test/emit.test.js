@@ -90,10 +90,11 @@ test("emit: names that Alphy refuses get safe names", async () => {
   // The compiled data keeps only the names of the screen that differ from the name that the kit wishes, each one f<index>.
   expect(Object.values(app.names).filter((name) => actions.includes(name)).length).toBeGreaterThan(0);
   for (const [key, name] of Object.entries(app.names)) { expect(name).toMatch(/^f\d+$/); expect(key).not.toMatch(/^(\$\/|need:)/); }
-  // The label of a control that has no text of its own is the kit's name of its line, never a safe name such as f3.
+  // The label of a control of a part is a word of the kit or the readable name of its field, never a safe name such as f3.
   const labels = nodes(definition.ui).flatMap((node) => [node, ...nodes(node.rowTemplate ?? { type: "" })]).filter((node) => node.action).map((node) => node.text);
-  expect(labels).toContain("покупки remove");
-  expect(labels).toContain("покупки куплено");
+  expect(labels).toContain("Remove");
+  expect(labels).toContain("Куплено");
+  expect(labels).toContain("Constructor");
   for (const text of labels) expect(text).not.toMatch(/^f\d+$/);
 });
 
@@ -188,16 +189,16 @@ test("emit: list.plan gives a list with a row template and an add form", async (
     d: { daComprare_text: "3" }, v: { prodotti_add_enabled: false },
   });
   expect(definition.ui.children[0].children[1]).toEqual({ type: "section", text: "Prodotti", children: [
-    { type: "list", text: "Prodotti", bind: "prodotti_list", emptyText: "Nothing here yet", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
+    { type: "list", text: "Prodotti", bind: "prodotti_list", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
       { type: "text", text: "", bind: "nome", layout: { weight: 1 } },
       { type: "text", text: "", bind: "corsia" },
-      { type: "icon", name: "Trash", text: "prodotti remove", action: "prodotti_remove" },
-      { type: "checkbox", text: "prodotti preso", bind: "preso", action: "prodotti_preso" },
+      { type: "icon", name: "Trash", text: "Rimuovi", action: "prodotti_remove" },
+      { type: "checkbox", text: "Preso", bind: "preso", action: "prodotti_preso" },
     ] } },
     { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
       { type: "input", text: "Prodotto", bind: "prodotti_s.new_nome", action: "prodotti_new_nome", inputMode: "apply", layout: { weight: 1 } },
       { type: "input", text: "Corsia", bind: "prodotti_s.new_corsia", action: "prodotti_new_corsia", inputMode: "apply", layout: { weight: 1 } },
-      { type: "button", text: "Add", action: "prodotti_add", enabledBind: "v.prodotti_add_enabled" },
+      { type: "button", text: "Aggiungi", action: "prodotti_add", enabledBind: "v.prodotti_add_enabled" },
     ] },
   ] });
 });
@@ -225,8 +226,7 @@ test("emit: an add form with more than two typed fields is a bottom sheet", asyn
   expect(sheet.faults).toEqual([]);
   expect(sheet.definition.ui.children[0].children[0].children.slice(1)).toEqual([
     { type: "button", text: "Add", action: "tasks_open" },
-    { type: "bottomSheet", text: "Add", visibleBind: "tasks_s.adding", dismissAction: "tasks_addRow_dismiss", children: [...fields,
-      { type: "flowRow", children: [{ type: "icon", name: "Close", text: "tasks close", action: "tasks_close" }, add] }] },
+    { type: "bottomSheet", text: "Add", visibleBind: "tasks_s.adding", dismissAction: "tasks_addRow_dismiss", children: [...fields, add] },
   ]);
   // sheet=true with no typed field: a dialog that holds a field of the form is a bottom sheet too.
   const picks = emit(await planned(['app("Picks", lang="en")', 'need picks = entries("Picks", fields={day: ["Sat", "Sun"]}, sheet=true, rows=[])'].join("\n")));
@@ -263,12 +263,12 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   // A time that a row only shows is a text that the run-time computes, so the list of acts is a view with that text.
   expect(definition.stateSchema.acts.fields).toEqual({ id: "string", what: "string", day: "string", at: "number" });
   expect(definition.initialState.acts.map((row) => row.at)).toEqual([540, 1140, 600]);
-  // A list and a row control announce the captions of their need: its title and its labels=. An icon keeps the name of its line.
-  expect(acts.children[0]).toEqual({ type: "groupedList", text: "Plan", bind: "acts_list", groupBy: "day", emptyText: "Nothing here yet", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
+  // A list and a row control announce the captions of their need: its title and its labels=. An icon button announces a word of the kit.
+  expect(acts.children[0]).toEqual({ type: "groupedList", text: "Plan", bind: "acts_list", groupBy: "day", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
     { type: "text", text: "", bind: "what", layout: { weight: 1 } },
     { type: "segmented", text: "Day", bind: "day", action: "acts_day", options: [{ text: "Sat", value: "Sat" }, { text: "Sun", value: "Sun" }] },
     { type: "badge", text: "", bind: "acts_at_value" },
-    { type: "icon", name: "Trash", text: "acts remove", action: "acts_remove" },
+    { type: "icon", name: "Trash", text: "Remove", action: "acts_remove" },
   ] } });
   // The rows of a group come together, in the order of the first row of each group.
   expect(definition.initialState.acts_list.map((row) => [row.what, row.acts_at_value])).toEqual([["Hike", "09:00"], ["Dinner", "19:00"], ["Museum", "10:00"]]);
@@ -277,8 +277,8 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   const [list, confirm, form] = doses.children;
   expect(list).toMatchObject({ type: "list", text: "Doses", bind: "doses" });
   expect(list.rowTemplate.children.map((node) => [node.type, node.text, node.bind ?? node.name])).toEqual([
-    ["input", "Dose", "name"], ["toggle", "On", "on"], ["icon", "doses taken minus", "Minus"], ["numberInput", "Taken", "taken"],
-    ["icon", "doses taken plus", "Plus"], ["dateInput", "Day", "day"], ["timeInput", "Time", "at"], ["segmented", "Kind", "kind"], ["icon", "doses remove", "Trash"],
+    ["input", "Dose", "name"], ["toggle", "On", "on"], ["icon", "Less", "Minus"], ["numberInput", "Taken", "taken"],
+    ["icon", "More", "Plus"], ["dateInput", "Day", "day"], ["timeInput", "Time", "at"], ["segmented", "Kind", "kind"], ["icon", "Remove", "Trash"],
   ]);
   expect(definition.initialState.doses.map((row) => row.at)).toEqual([480, 1200]);
   expect(confirm).toEqual({ type: "dialog", text: "Delete this dose?", visibleBind: "v.doses_confirm_visible", dismissAction: "doses_confirm_dismiss", children: [{ type: "flowRow", children: [
@@ -287,7 +287,7 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   expect(form.children[1].children.map((node) => node.type)).toEqual(["input", "numberInput", "dateInput", "timeInput", "segmented", "button"]);
   // The arrows of a row become the reorder of the list. Its label is a text that the run-time computes and that is never blank.
   expect(steps.children[0]).toMatchObject({ type: "list", text: "Steps", bind: "steps_list", reorder: { action: "steps_list_move", labelField: "label" } });
-  expect(steps.children[0].rowTemplate.children.map((node) => [node.type, node.text])).toEqual([["text", ""], ["icon", "steps remove"], ["checkbox", "Done"]]);
+  expect(steps.children[0].rowTemplate.children.map((node) => [node.type, node.text])).toEqual([["text", ""], ["icon", "Remove"], ["checkbox", "Done"]]);
   expect(definition.initialState.steps_list.map((row) => row.label)).toEqual(["Pack", "Drive", "Hike"]);
 });
 
@@ -710,16 +710,17 @@ test("emit: the progress, ring, chart, and tabs of a part show a caption of the 
 });
 
 test("emit: the texts that are the name of a line, in each saved plan and fixture that compiles", async () => {
-  // The list of now, so that a later task sees when it grows. The row controls with no label of their own are in it by a ruling.
+  // The list of now, so that a later task sees when it grows. A part names each control by a word of the kit or by its field (Task 11b-2a, A.3 and A.4),
+  // so only the icon buttons that an author wrote with no label= are in it.
   const PINNED = {
-    "plans/calc.plan": [], "plans/list.plan": ["prodotti remove", "prodotti preso"], "plans/quiz.plan": [], "plans/section.plan": ["habits remove"],
-    "plans/tabs-chart.plan": ["gastos remove"], "plans/tea.plan": [], "plans/timer-rounds.plan": [], "plans/lesson.plan": [], "plans/model3d.plan": [], "test/shapes.plan": [], "test/bytes.plan": [], "test/model.plan": [],
-    "test/cards.plan": ["tasks remove"], "test/free.plan": [], "test/fixtures/habits.plan": ["habits remove", "habits done"], "test/fixtures/price-filter.plan": [],
-    "test/fixtures/shopping.plan": ["items remove", "items done"], "test/fixtures/units-pl.plan": [], "test/fixtures/water-ko.plan": ["ml minus", "ml plus"],
+    "plans/calc.plan": [], "plans/list.plan": [], "plans/quiz.plan": [], "plans/section.plan": [],
+    "plans/tabs-chart.plan": [], "plans/tea.plan": [], "plans/timer-rounds.plan": [], "plans/lesson.plan": [], "plans/model3d.plan": [], "test/shapes.plan": [], "test/bytes.plan": [], "test/model.plan": [],
+    "test/cards.plan": [], "test/free.plan": [], "test/fixtures/habits.plan": [], "test/fixtures/price-filter.plan": [],
+    "test/fixtures/shopping.plan": [], "test/fixtures/units-pl.plan": [], "test/fixtures/water-ko.plan": [],
     "test/fixtures/look-water-ko.plan": [], "test/fixtures/look-shopping-it.plan": [], "test/looks.plan": [],
-    "test/lists.plan": ["acts remove", "acts close", "doses taken minus", "doses taken plus", "doses remove", "steps remove"],
+    "test/lists.plan": [],
     "test/nodes.plan": ["up", "down", "left", "right", "edit"],
-    "test/rich.plan": ["shirts size", "shirts remove", "shirts done", "shoes size", "shoes remove", "shoes done"],
+    "test/rich.plan": [],
   };
   const found = {};
   for (const [path, text] of allPlans()) {

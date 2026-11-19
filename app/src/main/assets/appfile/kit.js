@@ -826,11 +826,102 @@ const settings = { gate: "smoke", now: () => Date.now() };
 
 return { CATALOG, ICON_NAMES, ACTIONS, TONES, explode, dayNumber, FUNCTIONS, phased, foreground, shownFormulas, given, App, settings };
 })();
+// words.js
+const { WORDS, hasWords, wordOf } = (() => {
+// The words of the kit: the captions that a part writes by itself, in each language of Alphy, by their English word.
+// Only the compile step reads this table (parts.js), so no word goes into the run-time text of an app.
+// A word that Alphy's resources hold with the same meaning and form is a copy of it (values*/mini_app_strings.xml,
+// values/mini_app_editor_english.xml, and the Russian default in values/), so that the app and the host use one word.
+
+/** The words by language, each by its English word. English is the key itself. */
+const WORDS = {
+  ru: {
+    Add: "Добавить", Yes: "Да", No: "Нет", Back: "Назад", Next: "Далее", Done: "Готово", Start: "Начать", Pause: "Пауза", Reset: "Сбросить", Show: "Показать",
+    Again: "Ещё раз", Check: "Проверить", Right: "Верно", Wrong: "Неверно", "Not yet": "Пока нет", Points: "Очки", "Your answer": "Ваш ответ", Rest: "Отдых",
+    Work: "Работа", "Time is up": "Время вышло", Step: "Шаг", "Put together": "Собрать", "Take apart": "Разобрать",
+    Remove: "Убрать", Less: "Меньше", More: "Больше",
+  },
+  de: {
+    Add: "Hinzufügen", Yes: "Ja", No: "Nein", Back: "Zurück", Next: "Weiter", Done: "Fertig", Start: "Starten", Pause: "Pause", Reset: "Zurücksetzen", Show: "Zeigen",
+    Again: "Noch einmal", Check: "Prüfen", Right: "Richtig", Wrong: "Falsch", "Not yet": "Noch nicht", Points: "Punkte", "Your answer": "Deine Antwort", Rest: "Erholung",
+    Work: "Belastung", "Time is up": "Zeit abgelaufen", Step: "Schritt", "Put together": "Zusammensetzen", "Take apart": "Zerlegen",
+    Remove: "Entfernen", Less: "Weniger", More: "Mehr",
+  },
+  es: {
+    Add: "Añadir", Yes: "Sí", No: "No", Back: "Atrás", Next: "Siguiente", Done: "Listo", Start: "Empezar", Pause: "Pausa", Reset: "Restablecer", Show: "Mostrar",
+    Again: "Otra vez", Check: "Comprobar", Right: "Correcto", Wrong: "Incorrecto", "Not yet": "Todavía no", Points: "Puntos", "Your answer": "Tu respuesta", Rest: "Descanso",
+    Work: "Trabajo", "Time is up": "Se acabó el tiempo", Step: "Paso", "Put together": "Montar", "Take apart": "Desmontar",
+    Remove: "Quitar", Less: "Menos", More: "Más",
+  },
+  fr: {
+    Add: "Ajouter", Yes: "Oui", No: "Non", Back: "Précédent", Next: "Suivant", Done: "Terminé", Start: "Démarrer", Pause: "Pause", Reset: "Réinitialiser", Show: "Afficher",
+    Again: "Recommencer", Check: "Vérifier", Right: "Juste", Wrong: "Faux", "Not yet": "Pas encore", Points: "Points", "Your answer": "Ta réponse", Rest: "Repos",
+    Work: "Effort", "Time is up": "Temps écoulé", Step: "Étape", "Put together": "Assembler", "Take apart": "Démonter",
+    Remove: "Supprimer", Less: "Moins", More: "Plus",
+  },
+  it: {
+    Add: "Aggiungi", Yes: "Sì", No: "No", Back: "Indietro", Next: "Avanti", Done: "Fatto", Start: "Avvia", Pause: "Pausa", Reset: "Azzera", Show: "Mostra",
+    Again: "Di nuovo", Check: "Verifica", Right: "Giusto", Wrong: "Sbagliato", "Not yet": "Non ancora", Points: "Punti", "Your answer": "La tua risposta", Rest: "Riposo",
+    Work: "Lavoro", "Time is up": "Tempo scaduto", Step: "Passo", "Put together": "Assembla", "Take apart": "Smonta",
+    Remove: "Rimuovi", Less: "Meno", More: "Più",
+  },
+  ja: {
+    Add: "追加", Yes: "はい", No: "いいえ", Back: "戻る", Next: "次へ", Done: "完了", Start: "開始", Pause: "一時停止", Reset: "リセット", Show: "表示",
+    Again: "もう一度", Check: "確認", Right: "正解", Wrong: "不正解", "Not yet": "まだ", Points: "ポイント", "Your answer": "あなたの答え", Rest: "休憩",
+    Work: "運動", "Time is up": "時間になりました", Step: "ステップ", "Put together": "組み立てる", "Take apart": "分解する",
+    Remove: "削除", Less: "減らす", More: "増やす",
+  },
+  ko: {
+    Add: "추가", Yes: "예", No: "아니요", Back: "뒤로", Next: "다음", Done: "완료", Start: "시작", Pause: "일시정지", Reset: "초기화", Show: "보기",
+    Again: "다시", Check: "확인", Right: "정답", Wrong: "오답", "Not yet": "아직", Points: "점수", "Your answer": "내 답", Rest: "휴식",
+    Work: "운동", "Time is up": "시간이 종료되었습니다", Step: "단계", "Put together": "조립하기", "Take apart": "분해하기",
+    Remove: "제거", Less: "줄이기", More: "늘리기",
+  },
+  pl: {
+    Add: "Dodaj", Yes: "Tak", No: "Nie", Back: "Wstecz", Next: "Dalej", Done: "Gotowe", Start: "Start", Pause: "Pauza", Reset: "Resetuj", Show: "Pokaż",
+    Again: "Jeszcze raz", Check: "Sprawdź", Right: "Dobrze", Wrong: "Źle", "Not yet": "Jeszcze nie", Points: "Punkty", "Your answer": "Twoja odpowiedź", Rest: "Odpoczynek",
+    Work: "Praca", "Time is up": "Czas minął", Step: "Krok", "Put together": "Złóż", "Take apart": "Rozłóż",
+    Remove: "Usuń", Less: "Mniej", More: "Więcej",
+  },
+  pt: {
+    Add: "Adicionar", Yes: "Sim", No: "Não", Back: "Voltar", Next: "Próximo", Done: "Concluído", Start: "Iniciar", Pause: "Pausar", Reset: "Redefinir", Show: "Mostrar",
+    Again: "De novo", Check: "Verificar", Right: "Certo", Wrong: "Errado", "Not yet": "Ainda não", Points: "Pontos", "Your answer": "Sua resposta", Rest: "Descanso",
+    Work: "Trabalho", "Time is up": "O tempo acabou", Step: "Passo", "Put together": "Montar", "Take apart": "Desmontar",
+    Remove: "Remover", Less: "Menos", More: "Mais",
+  },
+  tr: {
+    Add: "Ekle", Yes: "Evet", No: "Hayır", Back: "Geri", Next: "İleri", Done: "Tamam", Start: "Başlat", Pause: "Duraklat", Reset: "Sıfırla", Show: "Göster",
+    Again: "Tekrar", Check: "Kontrol et", Right: "Doğru", Wrong: "Yanlış", "Not yet": "Henüz değil", Points: "Puan", "Your answer": "Cevabın", Rest: "Dinlenme",
+    Work: "Çalışma", "Time is up": "Süre doldu", Step: "Adım", "Put together": "Birleştir", "Take apart": "Parçalara ayır",
+    Remove: "Kaldır", Less: "Azalt", More: "Artır",
+  },
+  uk: {
+    Add: "Додати", Yes: "Так", No: "Ні", Back: "Назад", Next: "Далі", Done: "Готово", Start: "Почати", Pause: "Пауза", Reset: "Скинути", Show: "Показати",
+    Again: "Ще раз", Check: "Перевірити", Right: "Правильно", Wrong: "Неправильно", "Not yet": "Ще ні", Points: "Бали", "Your answer": "Ваша відповідь", Rest: "Відпочинок",
+    Work: "Робота", "Time is up": "Час вийшов", Step: "Крок", "Put together": "Зібрати", "Take apart": "Розібрати",
+    Remove: "Прибрати", Less: "Менше", More: "Більше",
+  },
+  zh: {
+    Add: "添加", Yes: "是", No: "否", Back: "返回", Next: "下一步", Done: "完成", Start: "开始", Pause: "暂停", Reset: "重置", Show: "显示",
+    Again: "再来一次", Check: "检查", Right: "正确", Wrong: "错误", "Not yet": "还没有", Points: "得分", "Your answer": "你的答案", Rest: "休息",
+    Work: "训练", "Time is up": "时间到", Step: "步骤", "Put together": "组装", "Take apart": "拆开",
+    Remove: "移除", Less: "减少", More: "增加",
+  },
+};
+
+/** True when the kit has its words in the language of an app: English, a language of the table, or no language. */
+const hasWords = (lang) => lang === undefined || lang === "en" || Object.hasOwn(WORDS, lang);
+/** The word of the kit for an English caption in a language. A language that the table does not have gets the English word. */
+const wordOf = (lang, english) => (Object.hasOwn(WORDS, lang ?? "") && Object.hasOwn(WORDS[lang], english) ? WORDS[lang][english] : english);
+
+return { WORDS, hasWords, wordOf };
+})();
 // parts.js
 const { rules, PART_KINDS, needsOf, faultName, expand } = (() => {
 // Generic parts. A part turns one need line into ordinary app lines: state, formulas, components, and checks.
 // After that the lines are plain lines. The loop can patch each one by its name.
 // A part is a kind of need, never a named app.
+
 
 
 
@@ -940,9 +1031,10 @@ const PARTS = {
 
   // need tasks = entries("Tasks", fields={task: "text", level: ["high", "low"], done: "check"}, rows=[], edit=true, reorder=true, filter=$done, sort=$task, order=$/order, show={double: $n * 2})
   // More: field kinds "date", "time", "switch", "count". confirm="Delete?", sheet=true, group=$field, sort=[$day, $time], hidden=true.
-  async entries(name, need) {
+  async entries(name, need, { caption, word }) {
     const title = need.args[0], opt = need.named, fields = opt.fields?.entries ?? [["name", { k: "lit", v: "text" }]];
-    const labels = Object.fromEntries((opt.labels?.entries ?? []).map(([key, tree]) => [key, tree.v])), text = (key, fallback) => (opt[key] ? show(opt[key]) : q(fallback));
+    // A Map, so that a field named "constructor" does not read a property of Object.
+    const labels = new Map((opt.labels?.entries ?? []).map(([key, tree]) => [key, tree.v])), text = caption;
     const lines = [`$/${name} = ${show(opt.rows ?? { k: "list", items: [] })}`];
     // The rows are data for a deck, a chart, or a figure, and the list is not on the screen.
     if (opt.hidden?.v === true) return { lines, top: [] };
@@ -953,20 +1045,21 @@ const PARTS = {
       const kind = choice ? "choice" : ["number", "money", "percent"].includes(kindTree.v) ? "number" : ["check", "switch", "count", "date", "time", "picture"].includes(kindTree.v) ? kindTree.v : "text";
       // The field for a value that the person types or picks.
       const widget = { number: "NumberField", date: "DateField", time: "TimeField" }[kind] ?? "TextField";
-      // The add form names each field. A control of a row takes the caption of labels= only: without one, the emitter names it by its line.
-      const caption = q(labels[field] ?? label(field)), cell = q(labels[field] ?? "");
+      // The add form and each control of a row name the field by labels=, else by the readable form of the field name.
+      const named = q(labels.get(field) ?? label(field));
       const pick = (text, bind) => `${choice && kindTree.items.length <= 4 ? "Segmented" : "Select"}(${text}, ${bind}, ${choice})`;
       // The cell of the row: a check mark, a choice, a field that the person can change, or a plain value.
-      if (kind === "check") lines.push(`${name}_${field} = CheckBox(${cell}, $${field})`);
-      else if (kind === "switch") lines.push(`${name}_${field} = Toggle(${cell}, $${field})`);
+      if (kind === "check") lines.push(`${name}_${field} = CheckBox(${named}, $${field})`);
+      else if (kind === "switch") lines.push(`${name}_${field} = Toggle(${named}, $${field})`);
       else if (kind === "count") {
         // A count in the row: a minus and a plus button around the number, and the person can also type it
         // (route steps-chart: seven day rows with a count of steps, and no way to give 8000 but by taps). Not below 0.
-        lines.push(`${name}_${field}_minus = IconButton("Minus", action=set($${field}, max(0, $${field} - 1)))`, `${name}_${field} = NumberField(${cell}, $${field}, min=0, step=1)`, `${name}_${field}_plus = IconButton("Plus", action=inc($${field}))`);
+        lines.push(`${name}_${field}_minus = IconButton("Minus", action=set($${field}, max(0, $${field} - 1)), label=${q(word("Less"))})`, `${name}_${field} = NumberField(${named}, $${field}, min=0, step=1)`,
+          `${name}_${field}_plus = IconButton("Plus", action=inc($${field}), label=${q(word("More"))})`);
         cells.push(`${name}_${field}_minus`);
       } else if (kind === "picture") lines.push(`${name}_${field} = Picture($${field})`);
-      else if (kind === "choice") lines.push(`${name}_${field} = ${pick(cell, "$" + field)}`);
-      else if (edit) lines.push(`${name}_${field} = ${widget}(${cell}, $${field}${kind === "text" ? ", weight=1" : ""})`);
+      else if (kind === "choice") lines.push(`${name}_${field} = ${pick(named, "$" + field)}`);
+      else if (edit) lines.push(`${name}_${field} = ${widget}(${named}, $${field}${kind === "text" ? ", weight=1" : ""})`);
       else if (kind !== "text") lines.push(`${name}_${field} = Badge($${field})`);
       else lines.push(`${name}_${field} = Text($${field}${firstText ? "" : ", weight=1"})`);
       if (kind === "text") firstText ??= field;
@@ -977,21 +1070,22 @@ const PARTS = {
       if (["check", "switch", "picture"].includes(kind)) { blank.push(`${field}: ${{ check: "false", switch: "true", picture: '""' }[kind]}`); continue; }
       // A count has a number field in the add form and its stepper in the row. final2: with the stepper only, three apps needed 30 taps for a count of 30.
       const empty = { number: "0", count: "0", date: "today()", time: '"08:00"' }[kind] ?? (kind === "choice" ? show(kindTree.items[0]) : '""');
-      const typed = kind === "count" ? `NumberField(${caption}, $/${name}_new_${field}, min=0, step=1)` : `${widget}(${caption}, $/${name}_new_${field}${kind === "text" ? ", weight=1" : ""})`;
-      lines.push(`$/${name}_new_${field} = ${empty}`, `${name}_new_${field} = ${kind === "choice" ? pick(caption, `$/${name}_new_${field}`) : typed}`);
+      const typed = kind === "count" ? `NumberField(${named}, $/${name}_new_${field}, min=0, step=1)` : `${widget}(${named}, $/${name}_new_${field}${kind === "text" ? ", weight=1" : ""})`;
+      lines.push(`$/${name}_new_${field} = ${empty}`, `${name}_new_${field} = ${kind === "choice" ? pick(named, `$/${name}_new_${field}`) : typed}`);
       add.push(`${name}_new_${field}`);
       blank.push(`${field}: $/${name}_new_${field}`);
       if (["text", "number", "count"].includes(kind)) reset.push(`set($/${name}_new_${field}, ${empty})`);
     }
     // A value for each row, from the fields of that row.
     for (const [key, formula] of opt.show?.entries ?? []) { lines.push(`${name}_${key} = Badge(${show(formula)})`); cells.push(`${name}_${key}`); }
+    // The arrows become the reorder of the list, which Alphy draws with its own words (NativeRecordReorder.kt), so they need no caption.
     if (opt.reorder?.v === true) { lines.push(`${name}_up = IconButton("ArrowUp", action=move(-1))`, `${name}_down = IconButton("ArrowDown", action=move(1))`); cells.push(`${name}_up`, `${name}_down`); }
     if (opt.remove?.v !== false) {
       // With confirm= the delete button asks first. The row that waits for the answer is known by its id.
-      if (opt.confirm) lines.push(`$/${name}_drop = ""`, `${name}_remove = IconButton("Trash", action=set($/${name}_drop, $id))`,
+      if (opt.confirm) lines.push(`$/${name}_drop = ""`, `${name}_remove = IconButton("Trash", action=set($/${name}_drop, $id), label=${q(word("Remove"))})`,
         `${name}_yes = Button(${text("yes", "Yes")}, action=[remove($/${name}, $id == $/${name}_drop), set($/${name}_drop, "")])`, `${name}_no = Button(${text("no", "No")}, action=set($/${name}_drop, ""))`,
         `${name}_confirm = Dialog(${show(opt.confirm)}, [Row([${name}_yes, ${name}_no])], visible=$/${name}_drop != "")`);
-      else lines.push(`${name}_remove = IconButton("Trash", action=remove())`);
+      else lines.push(`${name}_remove = IconButton("Trash", action=remove(), label=${q(word("Remove"))})`);
       cells.push(`${name}_remove`);
     }
     // Many check marks get a line of their own under the other cells.
@@ -999,15 +1093,17 @@ const PARTS = {
     let source = `$/${name}`;
     if (opt.filter) source = `filter(${source}, ${show(opt.filter)})`;
     if (opt.sort) source = `sort(${source}, ${show(opt.sort)}${opt.order ? ", " + show(opt.order) : ""})`;
-    lines.push(`${name}_list = List(${source}, ${name}_row${opt.group ? `, group=${show(opt.group)}` : ""}, empty=${text("emptyText", "Nothing here yet")})`);
+    // With no emptyText= the list has no text of its own, and Alphy shows its own word for an empty list in the language of the app.
+    lines.push(`${name}_list = List(${source}, ${name}_row${opt.group ? `, group=${show(opt.group)}` : ""}${opt.emptyText ? `, empty=${show(opt.emptyText)}` : ""})`);
     const parts = [`${name}_list`];
     if (opt.remove?.v !== false && opt.confirm) parts.push(`${name}_confirm`);
     if (canAdd) {
       const ready = firstText ? `, enabled=len(trim($/${name}_new_${firstText})) > 0` : "", sheet = opt.sheet?.v === true;
       lines.push(`${name}_add = Button(${text("addText", "Add")}, action=[${[`append($/${name}, {${blank.join(", ")}})`, ...reset, ...(sheet ? [`set($/${name}_adding, false)`] : [])].join(", ")}]${ready})`);
-      // With sheet=true the add form is a dialog that a button opens. The add button and the close button close it.
-      if (sheet) lines.push(`$/${name}_adding = false`, `${name}_open = Button(${text("addText", "Add")}, action=set($/${name}_adding, true))`, `${name}_close = IconButton("Close", action=set($/${name}_adding, false))`,
-        `${name}_addRow = Dialog(${text("addText", "Add")}, [${[...add, `Row([${name}_close, ${name}_add])`].join(", ")}], visible=$/${name}_adding)`);
+      // With sheet=true the add form is a dialog that a button opens. The add button closes it, and so does the close button that Alphy
+      // draws in each sheet with its own word (NativeToolUi.kt, bottomSheet), so the part writes no close button of its own.
+      if (sheet) lines.push(`$/${name}_adding = false`, `${name}_open = Button(${text("addText", "Add")}, action=set($/${name}_adding, true))`,
+        `${name}_addRow = Dialog(${text("addText", "Add")}, [${[...add, `${name}_add`].join(", ")}], visible=$/${name}_adding)`);
       else lines.push(`${name}_addRow = Row([${[...add, `${name}_add`].join(", ")}])`);
       parts.push(...(sheet ? [`${name}_open`] : []), `${name}_addRow`);
     }
@@ -1022,8 +1118,8 @@ const PARTS = {
   },
 
   // need quiz = deck("Quiz", $/words, front=$word, back=$meaning, mark=$known): one row at a time. A tap shows the back, then yes or no goes to the next row.
-  async deck(name, need) {
-    const [title, list] = need.args, opt = need.named, text = (key, fallback) => (opt[key] ? show(opt[key]) : q(fallback));
+  async deck(name, need, { caption }) {
+    const [title, list] = need.args, opt = need.named, text = caption;
     // A field of the row in front, such as $word, is a field of the row that the deck shows now.
     const now = (tree) => show(rebase(tree, `${name}_now`));
     // picture=$field: a picture on each card, from the description in that field of the row.
@@ -1075,8 +1171,8 @@ const PARTS = {
   },
 
   // need setup = steps(["Genres", "Pages"], [[genres], [pages, week]], finish="Start"): other needs in groups, one group at a time.
-  async steps(name, need, { tops }) {
-    const [titles, groups] = need.args, opt = need.named, text = (key, fallback) => (opt[key] ? show(opt[key]) : q(fallback)), last = groups.items.length - 1;
+  async steps(name, need, { tops, caption }) {
+    const [titles, groups] = need.args, opt = need.named, text = caption, last = groups.items.length - 1;
     const lines = [`$/${name}_step = 0`, `$/${name}_done = false`, `${name}_title = Heading(at(${show(titles)}, $/${name}_step))`];
     groups.items.forEach((group, index) => lines.push(`${name}_step${index} = Column([${group.items.flatMap((member) => tops(memberName(member))).join(", ")}], visible=$/${name}_step == ${index})`));
     lines.push(`${name}_back = Button(${text("back", "Back")}, action=dec($/${name}_step), enabled=$/${name}_step > 0, variant="outlined")`,
@@ -1107,13 +1203,13 @@ const PARTS = {
   },
 
   // need cups = counter("Cups", 0, step=1, min=0)
-  async counter(name, need) {
+  async counter(name, need, { word }) {
     const [title, value] = need.args, step = need.named.step ? show(need.named.step) : "1";
     const down = need.named.min ? `set($/${name}, max(${show(need.named.min)}, $/${name} - ${step}))` : `dec($/${name}, ${step})`;
     const up = need.named.max ? `set($/${name}, min(${show(need.named.max)}, $/${name} + ${step}))` : `inc($/${name}, ${step})`;
     return {
-      lines: [`$/${name} = ${show(value ?? { k: "lit", v: 0 })}`, `${name}_minus = IconButton("Minus", action=${down})`,
-        `${name}_value = Metric(${show(title)}, $/${name})`, `${name}_plus = IconButton("Plus", action=${up})`,
+      lines: [`$/${name} = ${show(value ?? { k: "lit", v: 0 })}`, `${name}_minus = IconButton("Minus", action=${down}, label=${q(word("Less"))})`,
+        `${name}_value = Metric(${show(title)}, $/${name})`, `${name}_plus = IconButton("Plus", action=${up}, label=${q(word("More"))})`,
         `${name}_view = Row([${name}_minus, ${name}_value, ${name}_plus])`],
       top: [`${name}_view`],
     };
@@ -1123,8 +1219,8 @@ const PARTS = {
   // need set = timer("Workout", 40, rounds=8, rest=20): each round is a work phase and then a rest phase. $/NAME counts the work phases that ended.
   // A timer with more than one phase, or with no alert, is plain lines with start, pause, and reset. The host moves it with its clock (App.tick).
   // Evidence: 4 of Alphy's 45 corpus cases are timers (workout-de, tea-tr, pomodoro-zh, eggs-it). Only the passing of time is the host's.
-  async timer(name, need) {
-    const [title, seconds] = need.args, opt = need.named, text = (key, fallback) => (opt[key] ? show(opt[key]) : q(fallback)), at = (part) => `$/${name}_${part}`;
+  async timer(name, need, { caption }) {
+    const [title, seconds] = need.args, opt = need.named, text = caption, at = (part) => `$/${name}_${part}`;
     if (foreground(need)) {
       const unshown = ["start", "pause", "reset", "done"].filter((key) => opt[key]);
       return { lines: [`${name}_timer = Timer(${show(title)}, ${show(seconds ?? { k: "lit", v: 60 })})`, `${name}_view = Card([${name}_timer])`], top: [`${name}_view`],
@@ -1181,8 +1277,8 @@ const PARTS = {
   // need rover = model3d("Rover", [box("", 0, 0, 0, 4, 1, 2, "sand"), cylinder("wheels", -1.4, -0.8, 1.2, 0.6, 0.4, "z", "ink")], parts={wheels: "Wheels"})
   // A 3D model from boxes and cylinders. $/NAME/selected is the id of the part that a chip selected, or "". $/NAME/exploded is true when the model is taken apart.
   // Evidence: screen 4 of the dialogue mocks. A second tap on a chip clears the selection.
-  async model3d(name, need) {
-    const [title, bodies] = need.args, opt = need.named, text = (key, fallback) => (opt[key] ? show(opt[key]) : q(fallback)), at = (field) => `$/${name}/${field}`;
+  async model3d(name, need, { caption }) {
+    const [title, bodies] = need.args, opt = need.named, text = caption, at = (field) => `$/${name}/${field}`;
     const turn = opt.turn?.v !== false, chips = (opt.parts?.entries ?? []).map(([id, caption]) => [`${name}_part_${id}`, q(id), show(caption)]), tools = [];
     const lines = [`$/${name} = {selected: "", exploded: false, turn: 30}`,
       `${name}_model = Model3d(${show(title)}, ${show(bodies)}${turn ? `, ${at("turn")}` : ""}, exploded=${at("exploded")}, selected=${at("selected")})`,
@@ -1210,8 +1306,8 @@ const PARTS = {
 
   // need steps = lesson([{title: "Look", text: "..."}, {title: "Test", text: "..."}], next="Next", back="Back", stepText="Step")
   // One step at a time, with "Step · 1 / 2" and a progress bar. $/NAME is the number of the step, from 1.
-  async lesson(name, need) {
-    const steps = need.args[0], opt = need.named, text = (key, fallback) => (opt[key] ? show(opt[key]) : q(fallback)), count = `len($/${name}_steps)`;
+  async lesson(name, need, { caption }) {
+    const steps = need.args[0], opt = need.named, text = caption, count = `len($/${name}_steps)`;
     const lines = [`$/${name} = 1`, `$/${name}_steps := ${show(steps)}`, `$/${name}_now := at($/${name}_steps, $/${name} - 1)`,
       `${name}_count = Text(${text("stepText", "Step")} + " · " + text($/${name}) + " / " + text(${count}), variant="eyebrow")`,
       // A lesson of at most 12 steps shows one dot for each step (Alphy draws at most 12 dots), and a longer one a bar.
@@ -1228,8 +1324,8 @@ const PARTS = {
 
   // need ask = question("Is the Moon a star?", options=["Yes", "No"], right="No", rightText="Right", wrongText="Not yet")
   // One button for each answer, and a text that says right or wrong. $/NAME is true while the right answer is the chosen one.
-  async question(name, need) {
-    const opt = need.named, options = opt.options?.k === "list" ? opt.options.items : [], text = (key, fallback) => (opt[key] ? show(opt[key]) : q(fallback));
+  async question(name, need, { caption }) {
+    const opt = need.named, options = opt.options?.k === "list" ? opt.options.items : [], text = caption;
     if (options.length < 2 || !opt.right) throw new DslError('question needs options and the right one: question("Text", options=["Yes", "No"], right="No")');
     if (!options.some((option) => show(option) === show(opt.right))) throw new DslError(`right=${show(opt.right)} is not one of the options`);
     const at = `$/${name}_answer`, keys = options.map((_, index) => `${name}_opt${index}`);
@@ -1290,6 +1386,9 @@ async function expand(file, choose = rules) {
   // A part that holds other needs, such as steps, is built after them. Its place on the screen stays the place of its line.
   const holder = (entry) => ["steps", "tabs"].includes(entry.tree.name);
   const place = new Map();
+  // The captions that a part writes by itself are in the language of the app (words.js). A language outside the table gets the English
+  // words and one note that names each option of a need that took an English caption, so that the author can give it.
+  const said = file.get("app")?.tree?.named?.lang, lang = said?.k === "lit" ? said.v : undefined, english = new Map();
   for (const entry of [...needs.filter((entry) => !holder(entry)), ...needs.filter(holder)]) {
     const part = entry.tree.k === "call" && Object.hasOwn(PARTS, entry.tree.name) ? PARTS[entry.tree.name] : null;
     if (!part) { file.partFaults.push({ line: null, text: entry.raw, message: `no part for need kind ${entry.tree.name ?? "?"}` }); continue; }
@@ -1299,7 +1398,12 @@ async function expand(file, choose = rules) {
     }
     let built, parsed;
     try {
-      built = await part(entry.key, entry.tree, { choose, hero, tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
+      const word = (text, option) => {
+        if (option && !hasWords(lang)) english.set(entry.key, new Set(english.get(entry.key)).add(option));
+        return wordOf(lang, text);
+      };
+      const caption = (option, text) => (entry.tree.named[option] ? show(entry.tree.named[option]) : q(word(text, option)));
+      built = await part(entry.key, entry.tree, { choose, hero, word, caption, tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
       // A part line that the host cannot read is a fault of this need, never an exception. The other needs still expand.
       parsed = built.lines.map((line) => parseLine(line));
       if (parsed.includes(null)) throw new DslError("the part made an empty line");
@@ -1320,11 +1424,17 @@ async function expand(file, choose = rules) {
     file.partLines.set(entry.key, keys);
     (built.holds ?? []).forEach((other) => held.add(other));
     place.set(entry.key, built.top);
-    if (file.expanded.get(entry.key) === entry.raw + (entry.key === hero)) continue;
+    // A change of the language of the app writes the part again, in the words of the new language.
+    const made = `${entry.raw}${entry.key === hero}${lang}`;
+    if (file.expanded.get(entry.key) === made) continue;
     if (!file.expanded.has(entry.key)) fresh.push(entry.key);
-    file.expanded.set(entry.key, entry.raw + (entry.key === hero));
+    file.expanded.set(entry.key, made);
     // A line that an author wrote or deleted belongs to the author. The part leaves it as it is.
     out.push(...built.lines.filter((line, index) => file.open(parsed[index].key)));
+  }
+  if (english.size) {
+    const options = [...english].map(([key, said]) => `need ${key} ${[...said].map((option) => `${option}=`).join(", ")}`).join("; ");
+    file.partNotes.push(`the kit has no words of the language "${lang}", so the parts wrote these captions in English: ${options}. Give each one in the language of the app`);
   }
   // The screen: the main element first, then each need in the order of its line. A need that a step holds is not there twice.
   for (const entry of needs) if (place.has(entry.key) && !held.has(entry.key)) (entry.key === hero ? top.unshift.bind(top) : top.push.bind(top))(...place.get(entry.key));

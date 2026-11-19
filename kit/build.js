@@ -10,7 +10,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The modules of the bundle in dependency order: each one imports only modules before it. */
-const MODULES = ["icons", "dsl", "core", "parts", "check", "rows", "draw", "drag", "run", "emit", "compile"];
+const MODULES = ["icons", "dsl", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "compile"];
 const at = (path) => fileURLToPath(new URL(path, import.meta.url));
 /** The host's sources of its icon names (ToolUiCatalog.icons): the shell glyphs and the domain icons. */
 const HOST_SOURCES = ["ToolUiCatalog", "ToolIcons"].map((name) => at(`../app/src/main/java/com/alpha/assistant/tools/${name}.kt`));

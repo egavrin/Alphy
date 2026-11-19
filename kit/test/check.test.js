@@ -202,5 +202,5 @@ test("the smoke gate is clean on the catalog example and on an app with each new
   same([report(demo).faults, report(demo).checks.length, report(demo).checks.every((check) => check.pass)], [[], 2, true], "the catalog example of the demo page is clean under the smoke gate");
   same(report(full), { faults: [], checks: [{ name: "slept example", pass: true, detail: "" }], notes: [] }, "the smoke gate is clean on an app with each new item");
   const fullRun = smoke(full).trace.join(" | ");
-  for (const part of ["doses_yes", "doses_no", "acts_add", "acts_close", "book_again", "doses_qty_plus", "doses_time", "start_field"]) assert(fullRun.includes(part), `the smoke run did not use ${part}: ${fullRun}`);
+  for (const part of ["doses_yes", "doses_no", "acts_add", "acts_open", "book_again", "doses_qty_plus", "doses_time", "start_field"]) assert(fullRun.includes(part), `the smoke run did not use ${part}: ${fullRun}`);
 });
