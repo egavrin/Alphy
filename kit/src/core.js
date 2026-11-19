@@ -593,10 +593,11 @@ export class App {
       if (!s[n + "_end"]) s[n + "_end"] = now + Math.max(0, phase() - s[n + "_spent"]) * 1000;
       // 1000 phases at most in one look, so a phase of no length cannot hold the host.
       for (let guard = 0; s[n + "_on"] && now >= s[n + "_end"] && guard < 1000; guard++) {
-        const ended = s[n + "_end"], last = s[n + "_round"] >= number(entry.tree.named.rounds, 1);
+        const named = entry.tree.named, ended = s[n + "_end"], rounds = number(named.rounds, 1), last = s[n + "_round"] >= rounds;
         if (!s[n + "_resting"]) s[n] += 1;
         // A rest is between two rounds: after the work phase of the last round the timer is over (K1 item 6: 5 x 45 + 4 x 15 = 285 s).
-        if (!s[n + "_resting"] && !last && number(entry.tree.named.rest, 0) > 0) { s[n + "_resting"] = true; s[n + "_spent"] = 0; }
+        // A timer of one round, and a timer with cycle=true, also rest after the last work phase (K2: inhale 4 s and exhale 6 s end at 10 s).
+        if (!s[n + "_resting"] && (!last || rounds <= 1 || named.cycle?.v === true) && number(named.rest, 0) > 0) { s[n + "_resting"] = true; s[n + "_spent"] = 0; }
         else if (last) { s[n + "_over"] = true; s[n + "_on"] = false; s[n + "_spent"] = phase(); s[n + "_end"] = 0; }
         else { s[n + "_round"] += 1; s[n + "_resting"] = false; s[n + "_spent"] = 0; }
         this.recompute();

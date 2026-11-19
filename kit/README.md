@@ -178,6 +178,8 @@ A text that a format function printed is for a person: do not read it back as a 
 - `timer`: the card of a timer is a hero card, also the host's own countdown. A timer with rounds has a filled Start with a play icon, a filled Pause with a pause icon while it runs, a Reset text button, and a muted phase text.
   Its bar is a surface of 1024 x 64 that the bar fills: a track in the muted tone of the theme, a stop dot near its end, and the share of the phase that passed.
   A rest phase is between two rounds: after the work phase of the last round the timer is over. 5 rounds of 45 s with 15 s of rest take 5 x 45 + 4 x 15 = 285 s (`core.js` `tick`).
+  A timer of one round (`rounds=1` or no `rounds=`) and a timer with `cycle=true` also run the rest phase after the work phase of the last round, for a cycle of two phases such as breathing in and out:
+  `timer(4, rest=6)` ends at 10 s, and `timer(4, rounds=5, rest=6, cycle=true)` ends at 5 x (4 + 6) = 50 s (K2).
 - `deck`: the front of a card is a centered text with the display emphasis, and the back is a centered text with the headline emphasis. Yes is filled with a check, No is outlined, and the two counts are a grid of two.
   The hero card holds the card and its Show button. The row of Yes and No stands under the card.
   With `answer=`, the field, the check button, the notice, and the next button stand under the card.
@@ -201,7 +203,7 @@ A text that a format function printed is for a person: do not read it back as a 
   - On a muted shape, the text is in the default ink. The host draws a muted shape as the muted ink at the alpha `MUTED_SHAPE_ALPHA` (56), and only the default ink keeps 4.5 on that tint on each canvas.
   - On a shape in `surface`, or on no shape, the text keeps its color, and a text in `surface` takes the default ink.
   - A polygon, a line, and an outline cover no text, so a text on a filled polygon keeps its color.
-- The value of an option has its type. `sheet=`, `edit=`, `add=`, `remove=`, `hidden=`, and `reorder=` are `true` or `false` in the line, because a part reads them once when it builds the screen. `step=` and `decimals=` are numbers or formulas. A value of another type is a fault of the need.
+- The value of an option has its type. `sheet=`, `edit=`, `add=`, `remove=`, `hidden=`, `reorder=`, and `cycle=` are `true` or `false` in the line, because a part reads them once when it builds the screen. `step=` and `decimals=` are numbers or formulas. A value of another type is a fault of the need.
 
 ## Look rules
 

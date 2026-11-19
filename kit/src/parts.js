@@ -446,7 +446,8 @@ const PARTS = {
   },
 
   // need tea = timer("Tea", $/kind == "green" ? 120 : 180, alert=true): one phase with an alert is the host's own countdown, a Timer line.
-  // need set = timer("Workout", 40, rounds=8, rest=20): each round is a work phase and then a rest phase. $/NAME counts the work phases that ended.
+  // need set = timer("Workout", 40, rounds=8, rest=20): each round is a work phase, and a rest phase is between two rounds. $/NAME counts the work phases that ended.
+  // need breath = timer("Breath", 4, rest=6) and timer(..., rounds=5, rest=6, cycle=true): each round is the work phase and then the rest phase, also the last one (App.tick).
   // A timer with more than one phase, or with no alert, is plain lines with start, pause, and reset. The host moves it with its clock (App.tick).
   // Evidence: 4 of Alphy's 45 corpus cases are timers (workout-de, tea-tr, pomodoro-zh, eggs-it). Only the passing of time is the host's.
   timer(name, need, { caption }) {
@@ -594,7 +595,7 @@ const OPTIONS = {
   entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText", "icons", "tones", "total"],
   chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max", "lessText", "moreText", "addText", "icon", "resetText"],
-  timer: ["alert", "rounds", "rest", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],
+  timer: ["alert", "rounds", "rest", "cycle", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],
   model3d: ["turn", "parts", "explode", "joinText", "explodeText"], card: ["eyebrow", "icon"], link: ["note"], lesson: ["next", "back", "stepText"],
   question: ["options", "right", "rightText", "wrongText"], content: [], hole: [],
 };
@@ -605,7 +606,7 @@ const INPUT_USES = { number: NUMBER_USES, money: NUMBER_USES, percent: NUMBER_US
  * The type of the value of an option (G.4). A part reads a flag once when it builds the screen, so a flag is true or false in the line.
  * A number can be a formula, which the kit cannot check here.
  */
-const FLAGS = new Set(["sheet", "edit", "add", "remove", "hidden", "reorder"]), NUMBERS = new Set(["step", "decimals"]);
+const FLAGS = new Set(["sheet", "edit", "add", "remove", "hidden", "reorder", "cycle"]), NUMBERS = new Set(["step", "decimals"]);
 const literal = (tree) => tree.k === "lit" || tree.k === "list" || tree.k === "map";
 function typeFault(key, tree) {
   if (FLAGS.has(key) && !(tree.k === "lit" && typeof tree.v === "boolean")) return `${key}= needs true or false, and ${show(tree)} ${literal(tree) ? "is neither" : "is a formula. The part reads it once when it builds the screen"}`;

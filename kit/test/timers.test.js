@@ -5,7 +5,7 @@ import { App, settings } from "../src/core.js";
 import { report } from "../src/check.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
-import { T0, clocked, fixture, gateEach, plan, planned } from "./helpers.js";
+import { T0, clocked, faultsOf, fixture, gateEach, plan, planned } from "./helpers.js";
 
 gateEach("smoke");
 
@@ -209,6 +209,58 @@ test("run: a timer with rounds does not rest after its last round (K1 item 6): 5
   expect([over.state.planche, over.state.planche_s.over, over.state.planche_s.on, over.timers]).toEqual([5, true, false, []]);
   // The end shows the full bar of the last work phase and the done text.
   expect([kit.state.planche_left, kit.find("planche_doneNote").props.visible]).toEqual([0, true]);
+});
+
+/**
+ * Each change of the phase of the timer need `name`, at the times of `changes` in s after its start, as
+ * "time: phase round count > phase round count": the state 0.5 s before the change, and 0.5 s after it. The run-time and the kit's App agree at each time.
+ */
+const changesOf = async (text, name, changes) => {
+  const { kit, send } = await clocked(text), at = (seconds) => {
+    const state = send(seconds * 1000, timer(`${name}_bar`)).state, phase = state[`${name}_s`];
+    expect([state[name], phase.round, phase.resting, phase.over]).toEqual(["", "_round", "_resting", "_over"].map((part) => kit.state[name + part]));
+    return `${phase.over ? "over" : phase.resting ? "rest" : "work"} ${phase.round} ${state[name]}`;
+  };
+  send(0, press(`${name}_start`));
+  return changes.map((seconds) => `${seconds}: ${at(seconds - 0.5)} > ${at(seconds + 0.5)}`);
+};
+
+test("run (K2): a timer of one round with a rest runs the work phase and then the rest phase: 4 s and 6 s end at 10 s", async () => {
+  for (const line of ['timer("Breath", 4, rounds=1, rest=6)', 'timer("Breath", 4, rest=6)']) {
+    expect([line, await changesOf(`app("T", lang="en")\nneed t = ${line}`, "t", [4, 10])]).toEqual([line, ["4: work 1 0 > rest 1 1", "10: rest 1 1 > over 1 1"]]);
+  }
+});
+
+test("run (K2): a timer of more rounds rests only between two rounds: 5 rounds of 45 s with 15 s of rest end at 285 s", async () => {
+  expect(await changesOf('app("T", lang="en")\nneed t = timer("Plank", 45, rounds=5, rest=15)', "t", [45, 60, 105, 120, 165, 180, 225, 240, 285])).toEqual([
+    "45: work 1 0 > rest 1 1", "60: rest 1 1 > work 2 1", "105: work 2 1 > rest 2 2", "120: rest 2 2 > work 3 2", "165: work 3 2 > rest 3 3",
+    "180: rest 3 3 > work 4 3", "225: work 4 3 > rest 4 4", "240: rest 4 4 > work 5 4", "285: work 5 4 > over 5 5"]);
+});
+
+test("run (K2): with cycle=true each round is the work phase and then the rest phase, also the last one: 5 rounds of 4 s and 6 s end at 50 s", async () => {
+  expect(await changesOf('app("T", lang="en")\nneed t = timer("Breath", 4, rounds=5, rest=6, cycle=true)', "t", [4, 10, 14, 20, 24, 30, 34, 40, 44, 50])).toEqual([
+    "4: work 1 0 > rest 1 1", "10: rest 1 1 > work 2 1", "14: work 2 1 > rest 2 2", "20: rest 2 2 > work 3 2", "24: work 3 2 > rest 3 3",
+    "30: rest 3 3 > work 4 3", "34: work 4 3 > rest 4 4", "40: rest 4 4 > work 5 4", "44: work 5 4 > rest 5 5", "50: rest 5 5 > over 5 5"]);
+  // cycle=false is the timer with a rest between two rounds.
+  expect((await changesOf('app("T", lang="en")\nneed t = timer("T", 4, rounds=2, rest=6, cycle=false)', "t", [14])).at(-1)).toBe("14: work 2 1 > over 2 2");
+});
+
+test("run (K2): the saved model plan d-breathing runs its exhale of 6 s after its inhale of 4 s, and ends at 10 s", async () => {
+  expect(await changesOf(fixture("model/d-breathing"), "breath", [4, 10])).toEqual(["4: work 1 0 > rest 1 1", "10: rest 1 1 > over 1 1"]);
+  const { kit, send } = await clocked(fixture("model/d-breathing"));
+  send(0, press("breath_start"));
+  send(4500, timer("breath_bar"));
+  expect([kit.find("breath_phaseText").props.text, kit.state.breath_left]).toEqual(["Выдох 1 / 1", 6]);
+  // At the end the bar of the exhale is full, and the done text shows.
+  send(10000, timer("breath_bar"));
+  expect([kit.find("breath_phaseText").props.text, kit.state.breath_left, kit.find("breath_doneNote").props.visible]).toEqual(["Выдох 1 / 1", 0, true]);
+});
+
+test("check (K2): cycle= is true or false in the line, as each other flag of a part", async () => {
+  const line = (value) => `need t = timer("T", 4, rounds=5, rest=6, cycle=${value})`;
+  expect(await faultsOf(line('"yes"'))).toEqual([`line: need t: cycle= needs true or false, and "yes" is neither: ${line('"yes"')}`]);
+  expect(await faultsOf("$/on = true", line("$/on"))).toEqual([`line: need t: cycle= needs true or false, and $/on is a formula. The part reads it once when it builds the screen: ${line("$/on")}`]);
+  expect(await faultsOf(line("true"))).toEqual([]);
 });
 
 test("emit: a Timer in a row of a list is a fault of its line", async () => {

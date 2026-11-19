@@ -38,6 +38,14 @@ test("prompt (K1 fix 4): outside has a sixth word, other, for a main thing that 
   expect(SECTIONS.Repair).not.toContain("component");
 });
 
+test("prompt (K2): the timer paragraph keeps the rest between two rounds and names cycle=true for a cycle of two phases", () => {
+  const timer = KINDS.find(([kind]) => kind === "timer")[1];
+  expect(timer).toContain("a rest phase of rest seconds is between two rounds");
+  expect(timer).toContain("With cycle=true each round is the work phase and then the rest phase, also the last round,");
+  expect(timer).toContain("a timer of one round with a rest runs both phases");
+  expect(optionsIn(timer)).toContain("cycle");
+});
+
 test("prompt: each kind that the prompt names is a part of the kit", async () => {
   for (const [kind] of KINDS) expect((await faultsOf(`need x = ${kind}()`)).filter((fault) => fault.includes("no part for need kind"))).toEqual([]);
 });
