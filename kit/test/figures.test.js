@@ -50,6 +50,12 @@ test("figures: two figures after the main one are a grid of two metrics with the
   expect(definition.initialState.d[nodes[4].children[1].bind.slice(2)]).toBe("16,67");
 });
 
+test("figures (L1 item 8): a row of a figure is at most 360 dp wide, so on a wide screen its value stays near its title", async () => {
+  // H5 (mock-units-pl, section): on a wide screen the value of a row stood in the middle of the screen, far from its title. A phone row is narrower than 360 dp.
+  const { definition } = await built('app("T", lang="en")', ...["H", "A", "B", "C"].map((title, index) => `need f${index} = figure("number", "${title}", ${index}, example=[{}, ${index}])`));
+  expect(tops(definition).map((node) => [node.type, node.layout])).toEqual([["card", undefined], ...Array(3).fill(["row", { maxWidth: 360 }])]);
+});
+
 test("figures: the figures of one group of steps or tabs are a set of their own, and a figure never leaves its group", async () => {
   const head = ['app("T", lang="en")', 'need h = figure("number", "H", 1, example=[{}, 1])', 'need a = figure("number", "A", 2, example=[{}, 2])', 'need b = figure("number", "B", 3, example=[{}, 3])'];
   // Two figures in one step: a grid in that step.

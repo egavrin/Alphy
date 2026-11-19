@@ -158,10 +158,11 @@ const PARTS = {
     const named = icon?.k === "lit" && /^[A-Za-z]+$/.test(icon.v), sign = main && icon && !named, metric = (look) => `Metric(${show(title)}, $/${name}_text${look}${icon && !sign ? `, icon=${show(icon)}` : ""})`;
     // A row shows its icon as a small sign at the left of its title. A host icon there is an IconButton with no action, which Alphy draws as a glyph.
     const small = icon ? (named ? `IconButton(${show(icon)}, label=${show(title)}), ` : `Emoji(${show(icon)}, size="small", label=${show(title)}), `) : "";
+    // A row of a figure is at most 360 dp wide, as a counter is, so on a wide screen its value stays near its title, and a phone row does not change (L1 item 8, H5).
     if (main) {
       const parts = [sign && `Emoji(${show(icon)}, size="large", label=${show(title)})`, metric(', emphasis="display"'), goal && `Progress($/${name}, ${show(goal)}, label=${show(goalText ?? title)})`, note && `Text(${show(note)}, tone="muted")`];
       lines.push(`${name}_view = Card([${parts.filter(Boolean).join(", ")}], variant="hero")`);
-    } else lines.push(`${name}_view = ${role === "row" ? `Row([${small}Text(${show(title)}, weight=1), Text($/${name}_text, emphasis="number")])` : metric("")}`);
+    } else lines.push(`${name}_view = ${role === "row" ? `Row([${small}Text(${show(title)}, weight=1), Text($/${name}_text, emphasis="number")], max=360)` : metric("")}`);
     // The first of two figures in a grid holds the second one, whose own place stays empty.
     const pair = role?.startsWith("grid ") && role.slice(5);
     if (pair) lines.push(`${name}_grid = Grid([${name}_view, ${pair}_view], columns=2)`);
