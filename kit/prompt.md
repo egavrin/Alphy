@@ -3,7 +3,8 @@
 The prompt that lets a model write an app file for this kit.
 The host sends the section "System" as the instructions of each plan call and of each repair call.
 A repair call gets the request, the plan, the faults of the kit, and the section "Repair".
-For a screen of a voice dialogue, the host adds the section "Dialogue" as one line under the request.
+For a screen of a voice dialogue, the section "Dialogue" is one line under the request.
+Today only `modelcheck.js` adds it. The app will add it with the voice path.
 A change call of an app gets the request, the app file, and the section "Change" (`prompt.js` `changeText`).
 `test/prompt.test.js` checks each kind, each option, and each example of the section "System" against the kit.
 `modelcheck.js` measures the prompt with a model.

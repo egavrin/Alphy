@@ -18,7 +18,7 @@ const HOST_SOURCES = ["ToolUiCatalog", "ToolIcons"].map((name) => at(`../app/src
 
 /**
  * The text of src/icons.js: each icon name that the host's validator takes, in the host's order: shellIcons of ToolUiCatalog.kt,
- * then the keys of paths of ToolIcons.kt. The build writes it, so the kit and the host cannot differ, and only check.js imports it.
+ * then the keys of paths of ToolIcons.kt. The build writes it, so the kit and the host cannot differ, and only parts.js imports it.
  */
 export function iconModule(catalog = readFileSync(HOST_SOURCES[0], "utf8"), icons = readFileSync(HOST_SOURCES[1], "utf8")) {
   const shell = /\bshellIcons\s*=\s*setOf\(([^)]*)\)/.exec(catalog)?.[1], domain = [...icons.matchAll(/^\s*"(\w+)" to "/gm)].map((match) => match[1]);

@@ -27,7 +27,7 @@ export const CATALOG = {
 };
 /**
  * The kit's icon names that Alphy has under a different name (ToolUiCatalog.icons). ArrowDown has no glyph of its own there.
- * IconButton and icon= take these names and each name of Alphy (check.js).
+ * IconButton and icon= take these names and each name of Alphy (parts.js ICONS).
  */
 export const ICON_NAMES = { ArrowUp: "Arrow", ArrowDown: "Sort", ArrowLeft: "Back", ArrowRight: "Chevron", Edit: "Pencil" };
 const NAMED = new Set(["visible", "enabled", "variant", "tone", "emphasis", "weight", "min", "max", "step", "empty", "placeholder", "gap", "selected", "kind", "size", "align", "columns", "icon", "fit"]);
