@@ -1,6 +1,5 @@
 package com.alpha.assistant.tools.agent
 
-import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.CapabilityCatalog
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudGenerationStage
@@ -30,11 +29,7 @@ import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.ToolUiDiagnostic
 import com.alpha.assistant.tools.ToolUiValidationStage
 import com.alpha.assistant.tools.ToolValidationFailure
-import com.alpha.assistant.tools.appfile.AppFileCompiler
-import com.alpha.assistant.tools.appfile.AppFilePrevious
-import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.imageSlots
-import com.alpha.assistant.tools.sameToolJson
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneFailure
 import com.alpha.assistant.tools.three.ThreeSceneProblem
@@ -386,11 +381,6 @@ internal class AppAgent(
             }
         }
 
-        fun appFileSteps(call: suspend (CloudGenerationStage, String, String, AppFileLimits) -> AppFileReply) =
-            AppFileSteps(AppFileCompiler(sandbox.context, sandbox), AppFilePrompt.load(sandbox.context), call, request::phase) {
-                request.progress?.invoke(it)
-            }
-
         // The app of a clean plan of the kit when it passes the host checks. Null: a host check failed, or the check itself failed.
         suspend fun kitApp(outcome: AppFileOutcome.Clean): AppAgentResult? = try {
             val candidate = validate(outcome.definition, appFile = outcome.appFile, migrated = outcome.state)
@@ -400,7 +390,7 @@ internal class AppAgent(
                     System.currentTimeMillis(), candidate.spec.surfaces)) != null) null
             else {
                 edited = true
-                request.phase("plan_outcome", "accepted")
+                request.phase(AppFileNames.PLAN_OUTCOME, "accepted")
                 // A kit definition has an empty description, so the summary is its title.
                 AppAgentResult(preview, candidate.spec.description.ifBlank { candidate.spec.title }, outcome.calls, changed = true)
             }
@@ -411,49 +401,8 @@ internal class AppAgent(
             null
         }
 
-        // The plan step of a new app. A clean plan that passes the host checks is the app.
-        // Each other outcome goes on with the loop of today, and the loop gets nothing of the plan.
-        val planStep = request.planStep
-        if (planStep != null && appFileCall != null && request.base == null && lesson == null && request.images.isEmpty() &&
-            request.sceneAssets.isEmpty() && !request.testFix) {
-            val outcome = appFileSteps(appFileCall).plan(request.prompt, planStep)
-            checkActive()
-            val detail = when (outcome) {
-                is AppFileOutcome.Outside -> "outside:${outcome.word}"
-                is AppFileOutcome.Fallback -> "fallback:${outcome.reason}"
-                is AppFileOutcome.Clean -> kitApp(outcome)?.let { return it } ?: "fallback:host_check"
-            }
-            request.phase("plan_outcome", detail)
-        }
-
-        // The change step of a saved app with an app file, for a change and for test and fix. The report of test and fix is the request.
-        // The loop never gets such an app, so no write or edit can drop a saved value.
-        val base = request.base
-        if (previous?.appFile != null && base != null) {
-            val call = checkNotNull(appFileCall) { "An app with an app file changes only through the kit." }
-            byLines = true
-            val outcome = appFileSteps(call).change(request.prompt, AppFilePrevious(previous.appFile, previous.schema.toString(), base.state),
-                AppFileLimits())
-            checkActive()
-            val reason = when (outcome) {
-                is AppFileOutcome.Clean -> kitApp(outcome)?.let { return it } ?: "host_check"
-                is AppFileOutcome.Outside -> "outside"
-                is AppFileOutcome.Fallback -> outcome.reason
-            }
-            request.phase("plan_outcome", "fallback:$reason")
-            val context = sandbox.context
-            // A change that changes no line is not finished. Test and fix then found no line to repair.
-            if (reason == "empty") throw CloudFailure("widget_agent_incomplete",
-                context.getString(if (request.testFix) R.string.tool_test_fix_no_line else R.string.tool_generation_unchanged))
-            // A failed call or compile made no change, so a retry can work. Each other reason is a change that the kit cannot apply.
-            val failure = if (reason in CALL_FAILURES || reason.startsWith("compile_"))
-                CloudFailure("widget_generation", context.getString(R.string.tool_generation_connection))
-            else CloudFailure("widget_state", context.getString(R.string.tool_generation_state))
-            // Test and fix by lines never goes to the loop, which has no app to run here.
-            // A value that differs from the start state is data of the person: the app, its data, and its revision stay.
-            if (request.testFix || !sameToolJson(JSONObject(base.state), JSONObject(previous.initialState))) throw failure
-            return run(request, session, rebuild = true)
-        }
+        routeAppFile(request, previous, sandbox, appFileCall, checkActive = { checkActive() }, kitApp = { kitApp(it) },
+            byLines = { byLines = true }, rebuild = { run(request, session, rebuild = true) })?.let { return it }
 
         val guidance = if (lesson != null) "" else {
             request.phase("capability_guidance_start")
@@ -899,8 +848,6 @@ internal class AppAgent(
 
     private companion object {
         const val REPRODUCE_FIRST = "Reproduce the reported problem with run on the current app before you change it."
-        /** The fallback reasons of a change call that ended before a reply. */
-        val CALL_FAILURES = setOf("call_failed", "first_text_timeout", "total_timeout")
         const val PRIVATE_EDIT = "This app keeps private device data. The host keeps its ui and initialState private and unchanged. " +
             "Use edit_app without ui or initialState."
         const val REVIEW_SCREEN = "Review this screen as the user: a calculator shows real results for sample inputs, not 0 or dashes, and no label or value repeats."

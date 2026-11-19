@@ -5,6 +5,7 @@ import com.alpha.assistant.tools.three.ThreeSceneProblem
 import android.os.SystemClock
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.GenerationTransportFailure
+import com.alpha.assistant.tools.agent.AppFileNames
 import kotlinx.coroutines.CancellationException
 import java.util.UUID
 
@@ -116,11 +117,7 @@ internal class ToolGenerationTrace(
 }
 
 private val phaseNames = setOf("draft_start", "draft_end", "capability_guidance_start", "capability_guidance_end",
-    "agent_call_start", "plan_call_start", "plan_first_text", "plan_reply_end", "compile", "repair_call_start",
-    "change_call_start", "plan_outcome")
-
-private val planFallbacks = setOf("call_failed", "first_text_timeout", "total_timeout", "hole", "faults", "host_check",
-    "data_blocks", "outside", "empty")
+    "agent_call_start") + AppFileNames.PHASES
 
 /** "ok", "faults", or a sandbox status such as TIMEOUT or BUSY (AppFileCompiler). */
 private val compileStatus = Regex("ok|faults|[A-Z_]{1,32}")
@@ -134,12 +131,13 @@ private val outsideWord = Regex("[a-z0-9]{1,16}")
  */
 internal fun safePhaseDetail(name: String, detail: String?): String? = when {
     detail == null -> null
-    name == "compile" -> detail.takeIf { it.matches(compileStatus) } ?: "other"
-    name != "plan_outcome" -> null
+    name == AppFileNames.COMPILE -> detail.takeIf { it.matches(compileStatus) } ?: "other"
+    name != AppFileNames.PLAN_OUTCOME -> null
     detail == "accepted" -> detail
     detail.startsWith("outside:") -> "outside:" + (detail.removePrefix("outside:").takeIf { it.matches(outsideWord) } ?: "other")
     detail.startsWith("fallback:") -> detail.removePrefix("fallback:").let { reason ->
-        "fallback:" + (reason.takeIf { it in planFallbacks || it.startsWith("compile_") && it.removePrefix("compile_").matches(compileStatus) } ?: "other")
+        "fallback:" + (reason.takeIf { it in AppFileNames.FALLBACKS || it.startsWith(AppFileNames.COMPILE_STATUS) &&
+            it.removePrefix(AppFileNames.COMPILE_STATUS).matches(compileStatus) } ?: "other")
     }
     else -> "other"
 }

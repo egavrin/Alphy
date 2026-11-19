@@ -10,6 +10,7 @@ import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.agent.AppAgentGuide
+import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.tools.agent.GenerationSettings
 import com.alpha.assistant.tools.agent.ReplyJson
 import kotlinx.coroutines.runBlocking
@@ -114,6 +115,18 @@ class AgentGenerationWorkflowTest {
             events.map { (it as ToolGenerationTraceEvent.Phase).name })
         assertEquals(listOf(17L, 3000L, 1L), events.mapNotNull { (it as ToolGenerationTraceEvent.Phase).ms })
         assertEquals(List(events.size - 1) { 1 } + 0, events.map { it.attempt })
+    }
+
+    // Failure case: a reason or a phase name that the plan step emits, but the trace does not list, leaves as "other" or not at all.
+    @Test fun eachReasonAndPhaseOfThePlanStepLeavesUnchanged() {
+        val events = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+        val run = ToolGenerationTrace(UUID.randomUUID(), { events += it }).Run()
+        val outcomes = (AppFileNames.FALLBACKS.toList() + "${AppFileNames.COMPILE_STATUS}TIMEOUT").map { "fallback:$it" }
+        outcomes.forEach { run.phase(AppFileNames.PLAN_OUTCOME, it) }
+        AppFileNames.PHASES.forEach { run.phase(it) }
+        val phases = events.map { it as ToolGenerationTraceEvent.Phase }
+        assertEquals(List(outcomes.size) { AppFileNames.PLAN_OUTCOME } + AppFileNames.PHASES, phases.map { it.name })
+        assertEquals(outcomes + List(AppFileNames.PHASES.size) { null }, phases.map { it.detail })
     }
 
     /** Generates with [replies] and asserts that the app with [title] is accepted after the last reply. */

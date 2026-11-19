@@ -21,6 +21,7 @@ import com.alpha.assistant.tools.agent.AppAgent
 import com.alpha.assistant.tools.agent.AppAgentGuide
 import com.alpha.assistant.tools.agent.AppAgentRequest
 import com.alpha.assistant.tools.agent.AppAgentResult
+import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.tools.agent.AppImageMaker
 import com.alpha.assistant.tools.agent.AppLessonTarget
 import com.alpha.assistant.tools.agent.AppSnapshot
@@ -151,7 +152,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                 extraInstructions = AppAgentGuide.testFix, testFix = true), session)
         } catch (failure: CloudFailure) {
             // A change by lines that the kit could not make: the app and its data stay as they were, and the detail says why.
-            if (agent.byLines && failure.code in setOf("widget_state", "widget_generation")) return TestFixResult(TestFixStatus.UNREPAIRED, failure.message)
+            if (agent.byLines && failure.code in AppFileNames.BY_LINES_FAILURES) return TestFixResult(TestFixStatus.UNREPAIRED, failure.message)
             if (failure.code != "widget_agent_incomplete") throw failure
             val status = if (agent.edited || agent.reproduced) TestFixStatus.UNREPAIRED else TestFixStatus.UNVERIFIED
             return TestFixResult(status, failure.message)
@@ -165,8 +166,8 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         onPhase: ((String, String?, Long?) -> Unit)? = null) =
         AppAgent(this, sandbox, appFileCall = { stage, instructions, input, limits ->
             appFileCall(key, session, stage, instructions, input, limits) { timing ->
-                timing.firstTextNanos?.let { onPhase?.invoke("plan_first_text", null, it / 1_000_000) }
-                onPhase?.invoke("plan_reply_end", null, timing.endNanos / 1_000_000)
+                timing.firstTextNanos?.let { onPhase?.invoke(AppFileNames.PLAN_FIRST_TEXT, null, it / 1_000_000) }
+                onPhase?.invoke(AppFileNames.PLAN_REPLY_END, null, timing.endNanos / 1_000_000)
             }
         }) { turns, instructions ->
             response(key, turns, session, CloudGenerationStage.AGENT, instructions, expandedWriterOutput = true, onCompletion)
@@ -355,7 +356,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         }
 }
 
-/** The outcome of one app-file call. [Failed.reason] is `call_failed`, `first_text_timeout`, or `total_timeout`. */
+/** The outcome of one app-file call. [Failed.reason] is one of AppFileNames.CALL_FAILURES. */
 internal sealed interface AppFileReply {
     data class Text(val text: String) : AppFileReply
     data class Failed(val reason: String) : AppFileReply
@@ -381,8 +382,8 @@ internal suspend fun ToolGenerationService.appFileCall(key: String, session: Clo
             // A blocked HTTP read holds the thread of the call, so the watcher runs on a different thread.
             val watcher = launch(Dispatchers.Default) {
                 reason.set(withTimeoutOrNull(limits.totalMs) {
-                    if (withTimeoutOrNull(limits.firstTextMs) { textStarted.await() } == null) "first_text_timeout" else awaitCancellation()
-                } ?: "total_timeout")
+                    if (withTimeoutOrNull(limits.firstTextMs) { textStarted.await() } == null) AppFileNames.FIRST_TEXT_TIMEOUT else awaitCancellation()
+                } ?: AppFileNames.TOTAL_TIMEOUT)
                 // The cancel comes first: a call that attaches its connection after the abort then stops at its next check.
                 call.cancel()
                 session.abortCall()
@@ -393,7 +394,7 @@ internal suspend fun ToolGenerationService.appFileCall(key: String, session: Clo
         if (failure is CloudFailure && failure.code == "cancelled" || !currentCoroutineContext().isActive) throw failure
         session.check()
         reason.get()?.let { return AppFileReply.Failed(it) }
-        if (failure is java.io.IOException) AppFileReply.Failed("call_failed") else throw failure
+        if (failure is java.io.IOException) AppFileReply.Failed(AppFileNames.CALL_FAILED) else throw failure
     }
 }
 
