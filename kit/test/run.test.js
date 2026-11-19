@@ -389,7 +389,8 @@ test("run: the timer of a timer with rounds and the timer of animate are one lis
   const rest = send(2100, timer("laps_bar"));
   expect([rest.state.size, rest.state.laps_s.resting, rest.timers]).toEqual([100, true, [{ id: "laps_bar", intervalMs: 1000 }]]);
   expect(rest.surfaces.art_view.commands).toEqual(commandsOf(kit.find("art_view").props.shapes));
-  expect(rest.surfaces.art_view.commands.map((command) => [command.type, command.color])).toEqual([["rect", "#ffffff"], ["roundRect", "#a16207"], ["polyline", "default"],
+  // The surface color is the surface role of the theme (L1 item 6), and the accent text on that surface keeps its color.
+  expect(rest.surfaces.art_view.commands.map((command) => [command.type, command.color])).toEqual([["rect", "surface"], ["roundRect", "#a16207"], ["polyline", "default"],
     ["circle", "#336699"], ["arc", "#80ff0000"], ["line", "muted"], ["polygon", "success"], ["polyline", "warning"], ["text", "accent"], ["rect", "#facc15"], ["rect", "#facc15"], ["circle", "default"]]);
 });
 

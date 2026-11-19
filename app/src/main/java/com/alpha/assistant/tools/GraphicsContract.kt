@@ -88,9 +88,12 @@ object GraphicsContract {
     }
     private val hexColor=Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")
     private val bitmapHandle=Regex("[0-9a-f]{64}")
-    /** [orGradient] is true for a command color, which can also be a gradient object, and false for a gradient stop. */
+    /**
+     * [orGradient] is true for a command color, which can also be a gradient object, and false for a gradient stop. The role surface of a
+     * drawing (NativeToolUi.drawingRoles) passes too. The text of a fault leaves it out, so a prompt does not change (L1 item 6).
+     */
     private fun color(value: Any,path: String,orGradient: Boolean) {
-        if(value is String && (value in ToolUiCatalog.tones || value.matches(hexColor))) return
+        if(value is String && (value in ToolUiCatalog.tones || value == "surface" || value.matches(hexColor))) return
         val expected=ToolUiCatalog.tones.joinToString(", ")+", #RRGGBB, "+if(orGradient) "#AARRGGBB, or a gradient object" else "or #AARRGGBB"
         throw ToolValidationFailure(ToolValidationCategory.DRAWING,ToolValidationDetails("drawing.color",path,expected,"\"${value.toString().take(40)}\""))
     }

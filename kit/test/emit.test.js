@@ -857,7 +857,8 @@ test("emit: lesson.plan gives a surface, a canvas, and commands in the open repl
   expect(open(definition.initialState, app)).toEqual({ state: definition.initialState, timers: [], surfaces: { orbit_view: { commands: [
     { type: "arc", x: 50, y: 50, width: 220, height: 220, start: 0, sweep: 360, stroke: 2, color: "default" },
     { type: "circle", x: 160, y: 160, radius: 34, color: "#38bdf8" },
-    { type: "text", x: 160, y: 160, size: 12, text: "Земля", align: "center", baseline: "middle", color: "#ffffff" },
+    // The name in the surface color stands on the light blue Earth, so it is black (L1 item 6).
+    { type: "text", x: 160, y: 160, size: 12, text: "Земля", align: "center", baseline: "middle", color: "#000000" },
     { type: "circle", x: 244.26, y: 89.29, radius: 18, color: "#e7d3a8" },
     { type: "circle", x: 230.48, y: 100.86, radius: 5, color: "accent" }] } } });
 });

@@ -8,6 +8,8 @@ import com.alpha.assistant.R
 import kotlin.math.abs
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.ColorUtils
+import com.alpha.assistant.ui.AlphaDarkColors
+import com.alpha.assistant.ui.AlphaLightColors
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import org.json.JSONObject
@@ -156,5 +158,32 @@ class NativePaletteWorkflowTest {
                 assertTrue("$name dark=$dark $role", contrast(pair.first, pair.second) >= 4.5)
             assertEquals("$name dark=$dark background", dark, ColorUtils.calculateLuminance(s.background.toArgb()) < 0.5)
         }
+    }
+
+    /**
+     * Failure case (L1 item 6): a box in the surface color stayed white in a dark theme, and a text in surface on a light ink was white on pink.
+     * On each canvas of each palette and theme, the surface role of a drawing follows the theme, and each ink reads on it. The kit draws a text
+     * on a muted shape in the default ink, which reads on that shape too: SurfaceDrawing draws it as the muted ink at MUTED_SHAPE_ALPHA.
+     */
+    @Test fun eachDrawingInkReadsOnTheSurfaceRoleAndTheDefaultInkOnAMutedShape() {
+        val low = mutableListOf<String>()
+        for (name in ToolPalettes.names) for (dark in listOf(false, true)) {
+            val s = if (name == ToolPalettes.GRAPHITE) if (dark) AlphaDarkColors else AlphaLightColors else checkNotNull(ToolPalettes.scheme(name, dark))
+            // The canvas takes the background of the app, a card, a hero, or a role surface (NativeToolUi.ToolRoleSurface).
+            val canvases = mapOf("background" to s.background, "surface" to s.surface, "surfaceContainer" to s.surfaceContainer,
+                "surfaceContainerHigh" to s.surfaceContainerHigh, "secondaryContainer" to s.secondaryContainer, "primaryContainer" to s.primaryContainer,
+                "surfaceVariant" to s.surfaceVariant, "errorContainer" to s.errorContainer,
+                "successContainer" to checkNotNull(ToolPalettes.status("success", dark)).second, "warningContainer" to checkNotNull(ToolPalettes.status("warning", dark)).second)
+            for ((canvas, background) in canvases) {
+                val roles = s.drawingRoles(background)
+                val surface = roles.getValue("surface")
+                if ((ColorUtils.calculateLuminance(surface) < 0.5) != dark) low += "$name dark=$dark $canvas: surface ${Integer.toHexString(surface)}"
+                val muted = ColorUtils.compositeColors(ColorUtils.setAlphaComponent(roles.getValue("muted"), MUTED_SHAPE_ALPHA), background.toArgb())
+                if (ColorUtils.calculateContrast(roles.getValue("default"), muted) < 4.5) low += "$name dark=$dark $canvas: default on muted"
+                for (tone in ToolUiCatalog.tones)
+                    if (ColorUtils.calculateContrast(roles.getValue(tone), surface) < 4.5) low += "$name dark=$dark $canvas: $tone on surface"
+            }
+        }
+        assertEquals(emptyList<String>(), low)
     }
 }

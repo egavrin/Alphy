@@ -8,8 +8,11 @@ export const BAR_SURFACE = { width: 1024, height: 64 };
 export const sideOf = (value) => Math.min(2048, Math.max(64, Math.round(Number(value)) || 0));
 /** What Alphy draws in one reply, for all surfaces together (GraphicsContract.frame, ArtifactProtocol.validateSurfaces). */
 export const LIMITS = { commands: 512, pairs: 2048, chars: 2048, bytes: 32768 };
-/** The kit's color names as Alphy's colors: a tone of the theme for a role, else the hex of the kit. */
-const ROLES = { ink: "default", muted: "muted", accent: "accent", success: "success", warning: "warning" };
+/**
+ * The kit's color names as Alphy's colors: a tone of the theme for a role, else the hex of the kit. The role surface is the lowest container of the
+ * theme (NativeToolUi.drawingRoles): white on a light theme and near black on a dark one (L1 item 6).
+ */
+const ROLES = { ink: "default", muted: "muted", accent: "accent", success: "success", warning: "warning", surface: "surface" };
 export const PALETTE = Object.fromEntries(Object.keys(TONES).map((name) => [name, ROLES[name] ?? TONES[name]]));
 /** A color name of the palette, a hex that passes as it is, or the default ink for each other text. */
 const colorOf = (color, palette) => (Object.hasOwn(palette, color) ? palette[color] : HEX.test(color) ? color : "default");
@@ -57,10 +60,31 @@ function commandOf({ shape, x, y, r, w, h, x1, y1, x2, y2, text, points, radius,
 }
 
 /**
- * The shapes of the kit as Alphy's commands, each with its color by the palette: a color name as an Alphy color. A shape that
- * Alphy cannot draw is left out, and a size past Alphy's bounds is clamped.
+ * The shapes of the kit as Alphy's commands, each with its color by the palette: a color name as an Alphy color. A shape that Alphy cannot
+ * draw is left out, and a size past Alphy's bounds is clamped. A text takes a color that reads on the last filled disk or box under its anchor (L1 item 6):
+ * - on a shape in a hex color, black or white by the luminance of the shape. With a gamma of 2.2 and a limit of 0.18, the contrast is 4.5 or more.
+ * - on a shape in an ink role, the surface role. The host keeps each ink and the surface role at 4.5 or more (NativeToolUi.drawingRoles).
+ * - on a shape in muted, the default ink. A muted shape is a light tint of the muted ink, and only the default ink keeps 4.5 on that tint.
+ * - on a shape in surface, or on no shape, its own color, and the default ink for the surface role.
+ * shortcut: a polygon, a line, and an outline cover no text, so a text on a filled polygon keeps its color. No plan puts a text there, and the
+ * test of a point in a polygon costs 150 bytes of the run-time text. Add it when the run-time has room.
  */
-export const commandsOf = (shapes, palette = PALETTE) => shapes.flatMap((shape) => { const command = commandOf(shape); return command ? [{ ...command, color: colorOf(shape.color, palette) }] : []; });
+export const commandsOf = (shapes, palette = PALETTE) => shapes.reduce((drawn, shape) => {
+  const command = commandOf(shape);
+  let color = colorOf(shape.color, palette), under;
+  if (command?.type === "text") {
+    const { x: X, y: Y } = command;
+    // A box is a rect or a roundRect, the only types that start with r. An arc is the outline of a disk.
+    for (const { type, x, y, radius, width, height, color: fill } of drawn) {
+      if (type === "circle" ? (X - x) ** 2 + (Y - y) ** 2 <= radius ** 2 : /^r/.test(type) && X >= x && X <= x + width && Y >= y && Y <= y + height) under = fill;
+    }
+    // The relative luminance of the shape, with weights times 10000.
+    color = HEX.test(under) ? (argbOf(under).reduce((sum, channel, index) => sum + [0, 2126, 7152, 722][index] * (channel / 255) ** 2.2, 0) > 1800 ? "#000000" : "#ffffff")
+      : under === "muted" ? "default" : under && under !== "surface" ? "surface" : color === "surface" ? "default" : color;
+  }
+  if (command) drawn.push({ ...command, color });
+  return drawn;
+}, []);
 
 /**
  * The bar of a timer's phase: the track, and the share of the phase that passed (0 to 1) in the color of the phase. Three shapes.
@@ -74,7 +98,7 @@ export const barOf = (share, color) => [
 ];
 
 /**
- * The surface of a model, and its stage: a box under the faces in the muted tone of the theme, a tint that Alphy draws at alpha 64 (SurfaceDrawing.kt).
+ * The surface of a model, and its stage: a box under the faces in the muted tone of the theme, a tint that Alphy draws at a low alpha (SurfaceDrawing.kt MUTED_SHAPE_ALPHA).
  * It is a mid tone on a light and on a dark card, so the dark and the white faces both read (Task 11b-2b: a light stage was a bright panel in a dark card).
  */
 export const MODEL = { width: 320, height: 240 };

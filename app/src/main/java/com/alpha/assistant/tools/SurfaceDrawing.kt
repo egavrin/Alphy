@@ -132,7 +132,7 @@ internal fun observeSurfaceGeometry(surface: ToolSurface, commands: JSONArray, s
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val scheme = AlphaLightColors
     val background = scheme.surface.toArgb()
-    val colors = ToolUiCatalog.tones.associateWith { scheme.toolInk(it, scheme.surface).toArgb() }
+    val colors = scheme.drawingRoles(scheme.surface)
     try {
         val canvas = Canvas(bitmap)
         fun render(array: JSONArray, pixels: IntArray) {
@@ -242,7 +242,8 @@ private fun gradient(g: JSONObject,roleColors: Map<String,Int>): Shader {
     else RadialGradient(f("x"),f("y"),f("radius"),colors,positions,Shader.TileMode.CLAMP)
 }
 
-private const val MUTED_SHAPE_ALPHA = 64
+/** At 64, the default ink on a muted shape fell to 4.36 on some dark cards. At 56 it keeps 4.5 on each canvas (L1 item 6). */
+internal const val MUTED_SHAPE_ALPHA = 56
 
 private fun drawingColor(value: String,roleColors: Map<String,Int>) = roleColors[value] ?: android.graphics.Color.parseColor(value)
 

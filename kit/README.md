@@ -193,7 +193,7 @@ Kit tests check the look rules over the nine saved plans and the look fixtures (
 6. `look: the group of the main action has exactly one filled button and each other group at most one, on the first screen and after the press of the main action` (`test/lookrules.test.js`): by the rule of the host (`NativeToolUi.kt` `secondaryButtons`).
    While a timer runs, its filled Pause is the one filled button of the group of Start. After Show of a deck, its hero card shows no button, and the filled Yes is in the row under the card.
    A timer whose time is up shows only its Reset text button, so its group has no filled button. One event does not reach that state.
-7. `look: no line of a saved plan has the muted role, because Alphy draws a muted shape at the alpha 64` (`test/lookrules.test.js`): a line or a stroked shape uses the role `ink` (`SurfaceDrawing.kt` `MUTED_SHAPE_ALPHA`). A filled shape, such as a stage or a track, can be muted.
+7. `look: no line of a saved plan has the muted role, because Alphy draws a muted shape as a light tint (MUTED_SHAPE_ALPHA)` (`test/lookrules.test.js`): a line or a stroked shape uses the role `ink` (`SurfaceDrawing.kt` `MUTED_SHAPE_ALPHA`). A filled shape, such as a stage or a track, can be muted.
 8. `look: a hero card holds no outlined or tonal button` (`test/lookrules.test.js`): on the first screen and after the press of the main action. A field, a segmented control, a select, a multi-choice, and an outlined, tonal, or elevated button stand under the card.
 
 ## Commands

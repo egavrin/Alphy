@@ -66,6 +66,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInWindow
@@ -359,6 +360,14 @@ internal fun ColorScheme.toolInk(name: String, background: Color): Color {
         else -> inverseOnSurface
     }
 }
+
+/**
+ * The colors of the roles of a drawing on a canvas of this background: each tone as its readable ink, and surface as the lowest
+ * container of the theme. That is white in a light theme and near black in a dark one, so a shape in surface follows the theme, and a
+ * text in surface reads on a shape in an ink (L1 item 6).
+ */
+internal fun ColorScheme.drawingRoles(background: Color): Map<String, Int> =
+    ToolUiCatalog.tones.associateWith { toolInk(it, background).toArgb() } + ("surface" to surfaceContainerLowest.toArgb())
 
 @Composable private fun toolInk(name: String?): Color = when (name) {
     null, "", "default" -> LocalContentColor.current

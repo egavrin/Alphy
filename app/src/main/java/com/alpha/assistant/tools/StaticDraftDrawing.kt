@@ -15,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.takeOrElse
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -51,7 +50,7 @@ import org.json.JSONObject
     val scheme = MaterialTheme.colorScheme
     // As in the accepted app, the canvas takes the color of the card or page around it.
     val canvasBackground = LocalToolBackground.current.takeOrElse { scheme.surface }
-    val roleColors = remember(scheme) { ToolUiCatalog.tones.associateWith { scheme.toolInk(it, canvasBackground).toArgb() } }
+    val roleColors = remember(scheme) { scheme.drawingRoles(canvasBackground) }
 
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Canvas(Modifier.width(minOf(maxWidth, maxHeight * ratio)).aspectRatio(ratio).clip(MaterialTheme.shapes.medium)

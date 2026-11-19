@@ -15,7 +15,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.nativeCanvas
@@ -276,9 +275,7 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
         // A full-screen surface takes the app theme background. An inline canvas takes the color of the card or page around it.
         val colors = if (immersive) appColors ?: scheme else MaterialTheme.colorScheme
         val canvasBackground = if (immersive) colors.background else LocalToolBackground.current.takeOrElse { colors.surface }
-        val roleColors = remember(colors, canvasBackground) {
-            ToolUiCatalog.tones.associateWith { colors.toolInk(it, canvasBackground).toArgb() }
-        }
+        val roleColors = remember(colors, canvasBackground) { colors.drawingRoles(canvasBackground) }
         val selected = effectiveSurfaces.filter { it.id in ids }
         val placements = remember(selected) { surfacePlacements(selected) }
         if(placements.isNotEmpty()) {

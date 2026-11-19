@@ -55,7 +55,7 @@ test("look: no saved plan has more than two typed fields on the first screen", (
   expect(over).toEqual([]);
 });
 
-test("look: no line of a saved plan has the muted role, because Alphy draws a muted shape at the alpha 64", () => {
+test("look: no line of a saved plan has the muted role, because Alphy draws a muted shape as a light tint (MUTED_SHAPE_ALPHA)", () => {
   // SurfaceDrawing.kt 185 (MUTED_SHAPE_ALPHA): a thin muted stroke, such as the orbit of lesson, was faint (1.6 to 1 in the dark theme).
   const faint = APPS.flatMap(({ name, definition, app }) => Object.values(handle({ artifactId: "kit-test", revision: 1, state: definition.initialState, event: { type: "open" } }, app).surfaces ?? {})
     .flatMap(({ commands }) => commands).filter((command) => command.stroke && command.color === "muted").map((command) => [name, command.type]));

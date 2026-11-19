@@ -32,8 +32,9 @@ test("draw: a line is a line with the stroke of its width, 2 by default", () => 
 });
 
 test("draw: a text is centered at its x and y, with a size of 14 by default", () => {
+  // A text in the surface color on no shape is in the default ink (L1 item 6).
   expect(one({ shape: "text", x: 160, y: 160, text: "Земля", color: "surface", size: 12 }))
-    .toEqual([{ type: "text", x: 160, y: 160, size: 12, text: "Земля", align: "center", baseline: "middle", color: "#ffffff" }]);
+    .toEqual([{ type: "text", x: 160, y: 160, size: 12, text: "Земля", align: "center", baseline: "middle", color: "default" }]);
   expect(one({ shape: "text", x: 1, y: 2, text: "N", color: "muted" })).toEqual([{ type: "text", x: 1, y: 2, size: 14, text: "N", align: "center", baseline: "middle", color: "muted" }]);
 });
 
@@ -47,9 +48,64 @@ test("draw: an outline polygon is a closed polyline", () => {
 });
 
 test("draw: a color name of the kit maps to a tone or a hex", () => {
+  // surface is the surface role of the theme (L1 item 6).
   const colors = ["ink", "muted", "accent", "success", "warning", "surface", "water", "land", "sun", "sand", "wood", "#336699", "#80FF0000", "purple", "#fff", "error", "toString"];
   expect(commandsOf(colors.map((color) => ({ shape: "circle", x: 1, y: 1, r: 1, color }))).map((command) => command.color)).toEqual([
-    "default", "muted", "accent", "success", "warning", "#ffffff", "#38bdf8", "#65a30d", "#facc15", "#e7d3a8", "#a16207", "#336699", "#80FF0000", "default", "default", "default", "default"]);
+    "default", "muted", "accent", "success", "warning", "surface", "#38bdf8", "#65a30d", "#facc15", "#e7d3a8", "#a16207", "#336699", "#80FF0000", "default", "default", "default", "default"]);
+});
+
+/** The WCAG contrast of two hex colors. */
+const contrast = (...hexes) => {
+  const [high, low] = hexes.map((hex) => [1, 3, 5].reduce((sum, at, index) => {
+    const c = parseInt(hex.slice(at, at + 2), 16) / 255;
+    return sum + [0.2126, 0.7152, 0.0722][index] * (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  }, 0)).sort((a, b) => b - a);
+  return (high + 0.05) / (low + 0.05);
+};
+const textOn = (...shapes) => commandsOf([...shapes, { shape: "text", x: 50, y: 50, text: "A", color: "ink" }]).at(-1).color;
+
+test("draw (L1 item 6): a text on a shape in an ink role is in the surface role, on muted in the default ink, and on surface or on no shape it keeps its role", () => {
+  const disk = (color, more = {}) => ({ shape: "circle", x: 50, y: 50, r: 20, color, ...more }), box = (color, x = 40) => ({ shape: "rect", x, y: 40, w: 20, h: 20, color, radius: 4 });
+  expect(["ink", "accent", "success", "warning"].flatMap((color) => [textOn(disk(color)), textOn(box(color))])).toEqual(Array(8).fill("surface"));
+  expect([textOn(disk("muted")), textOn(box("surface")), textOn(), textOn(disk("accent", { stroke: true })), textOn(box("accent", 60))]).toEqual(Array(5).fill("default"));
+  // A muted shape is a light tint, so each ink but the default one can fall under 4.5 on it (NativePaletteWorkflowTest).
+  expect(["muted", "accent", "success", "warning", "error"].map((color) => commandsOf([disk("muted"), { shape: "text", x: 50, y: 50, text: "A", color }]).at(-1).color))
+    .toEqual(Array(5).fill("default"));
+  expect(commandsOf([box("muted"), { shape: "text", x: 50, y: 50, text: "A", color: "accent" }]).at(-1).color).toBe("default");
+  // The last shape under the text counts. A text in the surface role on a surface is in the default ink, and a text in the accent role stays.
+  expect(textOn(box("accent"), disk("surface"))).toBe("default");
+  expect(commandsOf([box("surface"), { shape: "text", x: 50, y: 50, text: "A", color: "surface" }, { shape: "text", x: 50, y: 50, text: "B", color: "accent" }])
+    .slice(1).map((command) => command.color)).toEqual(["default", "accent"]);
+  // shortcut: a filled polygon covers no text.
+  expect(textOn({ shape: "polygon", points: [0, 0, 100, 0, 50, 100], color: "accent" })).toBe("default");
+});
+
+test("draw (L1 item 6): a text on a shape in a hex color is black or white, with a contrast of 4.5 or more against the shape", () => {
+  expect([textOn({ shape: "circle", x: 50, y: 50, r: 30, color: "sun" }), textOn({ shape: "circle", x: 50, y: 50, r: 30, color: "#0056d0" }), textOn({ shape: "rect", x: 0, y: 0, w: 99, h: 99, color: "water" })])
+    .toEqual(["#000000", "#ffffff", "#000000"]);
+  const low = [];
+  for (let red = 0; red < 256; red += 15) for (let green = 0; green < 256; green += 5) for (let blue = 0; blue < 256; blue += 15) {
+    const fill = `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`, text = textOn({ shape: "circle", x: 50, y: 50, r: 30, color: fill });
+    if (contrast(fill, text) < 4.5) low.push(`${text} on ${fill}`);
+  }
+  expect(low).toEqual([]);
+});
+
+test("draw (L1 item 6): in d-heart, e-atom-ru, and e-seasons-ru, each text on a shape reads in both themes", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { emit } = await import("../src/emit.js");
+  const { handle } = await import("../src/run.js");
+  const { planned } = await import("./helpers.js");
+  const texts = {};
+  for (const name of ["d-heart", "e-atom-ru", "e-seasons-ru"]) {
+    const { definition, app } = emit(await planned(readFileSync(new URL(`./fixtures/model/${name}.plan`, import.meta.url), "utf8")));
+    const { surfaces } = handle({ artifactId: "t", revision: 1, state: definition.initialState, event: { type: "open" } }, app);
+    texts[name] = Object.values(surfaces).flatMap(({ commands }) => commands.filter((command) => command.type === "text").map((command) => `${command.text}: ${command.color}`));
+  }
+  // "Сердце" stands on the accent box, "Лёгкие" on the light blue box, and "Тело" on the surface box. The particles of the nucleus are accent disks,
+  // and the Sun is a yellow disk. The letter С of the Earth stands beside it.
+  expect(texts).toEqual({ "d-heart": ["Сердце: surface", "Лёгкие: #000000", "Тело: default"], "e-atom-ru": ["+: surface", "+: surface", "н: surface", "н: surface"],
+    "e-seasons-ru": ["Солнце: #000000", "С: default"] });
 });
 
 test("draw: budgetOf counts commands, pairs, and characters", () => {
