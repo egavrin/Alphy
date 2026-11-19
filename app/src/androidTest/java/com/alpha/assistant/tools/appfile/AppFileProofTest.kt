@@ -553,7 +553,8 @@ class AppFileProofTest {
         assertEquals(setOf("anim","laps_bar"),sent)
         val app=Host(context,sandbox,spec,"appfile-shapes")
         try {
-            assertEquals(listOf("rect" to "#ffffff","roundRect" to "#a16207","polyline" to "default","circle" to "#336699","arc" to "#80ff0000","line" to "muted",
+            // The kit color surface is the host role surface, which follows the theme (L1 item 6).
+            assertEquals(listOf("rect" to "surface","roundRect" to "#a16207","polyline" to "default","circle" to "#336699","arc" to "#80ff0000","line" to "muted",
                 "polygon" to "success","polyline" to "warning","text" to "accent","rect" to "#facc15","rect" to "#facc15","circle" to "default"),
                 commands(app.open(),"art_view").map {it.getString("type") to it.getString("color")})
             app.send(press("laps_start"))
