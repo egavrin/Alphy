@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { AppFile } from "../src/dsl.js";
 import { report, smoke } from "../src/check.js";
 import { emit } from "../src/emit.js";
-import { built, every, live, planned, press } from "./helpers.js";
+import { built, every, live, planned, press, valueAt } from "./helpers.js";
 
 
 test("entries: the fields of the add form stand one below the other, and the add button is on its own line, enabled, with a plus", async () => {
@@ -163,6 +163,26 @@ test("entries: a plan whose only main element is a list starts with a hero card 
     const other = emit(await planned(['app("T", lang="en")', ...lines, `need items = entries("Items", fields={name: "text"}${hidden})`].join("\n")));
     expect([lines, every(other.definition.ui).filter((node) => node.variant === "hero" && node.children?.some((child) => child.text === "Items")).length]).toEqual([lines, 0]);
   }
+});
+
+test("entries: icons= gives a field of the add form its icon, tones= gives a value of show= its tone, and total= shows the hero count of all rows", async () => {
+  const aisles = '["Frutta", "Forno", "Latte", "Carne", "Pesce", "Casa", "Bevande"]';
+  const { definition } = await built('app("Spesa", lang="it")', `need items = entries("Prodotti", fields={nome: "text", corsia: ${aisles}, peso: "number", preso: "check"}, icons={nome: "Cart", corsia: "Tag", peso: "Weight"}, show={giorni: "🔥 " + text($peso)}, tones={giorni: "accent"}, filter=!$preso, total="di", rows=[{nome: "Latte", corsia: "Latte", peso: 1, preso: false}, {nome: "Pane", corsia: "Forno", peso: 1, preso: true}])`);
+  const nodes = every(definition.ui);
+  expect(["items_new_nome", "items_new_corsia", "items_new_peso"].map((action) => [nodes.find((node) => node.action === action).type, nodes.find((node) => node.action === action).icon]))
+    .toEqual([["input", "Cart"], ["select", "Tag"], ["numberInput", "Weight"]]);
+  expect(nodes.find((node) => node.type === "badge")).toMatchObject({ bind: "items_giorni_value", style: { tone: "accent" } });
+  const count = nodes.find((node) => node.type === "metric");
+  expect([count.style, valueAt(definition.initialState, count.bind)]).toEqual([{ emphasis: "display" }, "1 di 2"]);
+});
+
+test("entries: icons= of a field with no icon in the add form, tones= of no value of show=, and total= with no hero count are faults of the need", async () => {
+  const faults = async (options, more = []) => report(await planned(['app("T")', ...more, `need items = entries("Items", fields={name: "text", kind: ["a", "b"], done: "check"}${options})`].join("\n"))).faults;
+  expect(await faults(', icons={done: "Check"}')).toContainEqual(expect.stringContaining("need items: icons= names done, whose field of the add form shows no icon. A text, number, date, or time field shows one, and a choice of more than six options"));
+  expect(await faults(', icons={kind: "Tag"}')).toContainEqual(expect.stringContaining("need items: icons= names kind, whose field of the add form shows no icon"));
+  expect(await faults(', icons={size: "Ruler"}')).toContainEqual(expect.stringContaining("need items: icons= names size, whose field of the add form shows no icon"));
+  expect(await faults(', show={n: 1}, tones={m: "accent"}')).toContainEqual(expect.stringContaining("need items: tones= names m, and show= has no value of that name"));
+  expect(await faults(', total="of"', ['need f = figure("number", "F", 1)'])).toContainEqual(expect.stringContaining("need items: total= joins the shown rows and all rows of the hero count, and this list has no hero count"));
 });
 
 test("entries: a list that a steps or tabs need groups gets no hero count at the root, and the first list that no holder groups gets it", async () => {

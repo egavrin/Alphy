@@ -108,7 +108,8 @@ const NODES = {
     const variant = n.props.variant ?? (n.props.selected === undefined ? undefined : n.props.selected ? "filled" : "tonal");
     return { type: "button", text: at.caption(n.props.label), action: at.action(), ...(variant && { variant }), ...iconOf(n) };
   },
-  IconButton: (n, at) => ({ type: "icon", name: iconOf(n).icon, text: at.caption(n.props.label), action: at.action() }),
+  // An IconButton with no action is a sign: Alphy draws its glyph with no button.
+  IconButton: (n, at) => ({ type: "icon", name: iconOf(n).icon, text: at.caption(n.props.label), ...(n.props.action && { action: at.action() }) }),
   NumberField: ranged("numberInput", 0, 1000000),
   // Alphy gives a slider without bounds 0 to 100.
   Slider: ranged("slider", 0, 100),

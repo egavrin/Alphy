@@ -104,18 +104,21 @@ const PARTS = {
     const [format, title, formula] = need.args, f = format?.v, { icon, note, goal, goalText, unit } = need.named, main = hero === name;
     if ((note || goal || goalText) && !main) throw new DslError(`note=, goal=, and goalText= show only on the main figure, and ${name} is not it`);
     if (goalText && !goal) throw new DslError(`goalText= is the caption of the bar to goal=, and ${name} has no goal=. Give goal=, or remove goalText=`);
-    if (icon && role === "row") throw new DslError(`${name} is a row, because three figures or more in one place are rows of one size, and a row shows no icon. Remove icon=`);
-    // An own key, so that a format such as "constructor" is a number and never a property of Object.
-    const formats = { money: `money($/${name})`, percent: `percent($/${name})`, text: `text($/${name})` };
-    const text = Object.hasOwn(formats, f) ? formats[f] : `amount($/${name}, ${need.named.decimals ? show(need.named.decimals) : f === "count" ? 0 : 2})`;
+    const decimals = need.named.decimals && show(need.named.decimals);
+    if (decimals && f === "text") throw new DslError(`a figure of the format text shows its value as it is, so it takes no decimals=. Remove decimals=, or give the format number`);
+    // An own key, so that a format such as "constructor" is a number and never a property of Object. money() always prints 2 decimals, so decimals= of money is fixed().
+    const formats = { money: decimals ? `fixed($/${name}, ${decimals})` : `money($/${name})`, percent: `percent($/${name}${decimals ? `, ${decimals}` : ""})`, text: `text($/${name})` };
+    const text = Object.hasOwn(formats, f) ? formats[f] : `amount($/${name}, ${decimals || (f === "count" ? 0 : 2)})`;
     // unit="ml" follows the shown number ("2,000 ml"), and the value stays a number for a bar, a check, or an example.
     const lines = [`$/${name} := ${show(formula)}`, `$/${name}_text := ${text}${unit ? ` + " " + ${show(unit)}` : ""}`];
     // An emoji, or a formula that gives one, is the sign of the main figure. A word of letters is the name of a host icon.
-    const sign = main && icon && !(icon.k === "lit" && /^[A-Za-z]+$/.test(icon.v)), metric = (look) => `Metric(${show(title)}, $/${name}_text${look}${icon && !sign ? `, icon=${show(icon)}` : ""})`;
+    const named = icon?.k === "lit" && /^[A-Za-z]+$/.test(icon.v), sign = main && icon && !named, metric = (look) => `Metric(${show(title)}, $/${name}_text${look}${icon && !sign ? `, icon=${show(icon)}` : ""})`;
+    // A row shows its icon as a small sign at the left of its title. A host icon there is an IconButton with no action, which Alphy draws as a glyph.
+    const small = icon ? (named ? `IconButton(${show(icon)}, label=${show(title)}), ` : `Emoji(${show(icon)}, size="small", label=${show(title)}), `) : "";
     if (main) {
       const parts = [sign && `Emoji(${show(icon)}, size="large", label=${show(title)})`, metric(', emphasis="display"'), goal && `Progress($/${name}, ${show(goal)}, label=${show(goalText ?? title)})`, note && `Text(${show(note)}, tone="muted")`];
       lines.push(`${name}_view = Card([${parts.filter(Boolean).join(", ")}], variant="hero")`);
-    } else lines.push(`${name}_view = ${role === "row" ? `Row([Text(${show(title)}, weight=1), Text($/${name}_text, emphasis="number")])` : metric("")}`);
+    } else lines.push(`${name}_view = ${role === "row" ? `Row([${small}Text(${show(title)}, weight=1), Text($/${name}_text, emphasis="number")])` : metric("")}`);
     // The first of two figures in a grid holds the second one, whose own place stays empty.
     const pair = role?.startsWith("grid ") && role.slice(5);
     if (pair) lines.push(`${name}_grid = Grid([${name}_view, ${pair}_view], columns=2)`);
@@ -144,6 +147,9 @@ const PARTS = {
     const cells = [], marks = [], texts = [], tail = [], add = [], blank = [], reset = [], canAdd = opt.add?.v !== false, edit = opt.edit?.v === true;
     // icon=: one sign for each row, or a value of the row (C.2). A field that is the sign of the row is not a text of the row too.
     const icon = opt.icon, sign = icon?.k === "path" && !icon.abs ? icon.segs[0] : null, shown = opt.show?.entries ?? [];
+    // icons= gives a field of the add form its icon, and tones= gives a value of show= its tone (C.8). Maps, as labels= is.
+    const icons = new Map(opt.icons?.entries ?? []), tones = new Map(opt.tones?.entries ?? []);
+    for (const key of tones.keys()) if (!shown.some(([value]) => value === key && value !== sign)) throw new DslError(`tones= names ${key}, and show= has no value of that name`);
     if (icon?.k === "path" && ![...fields, ...shown].some(([key]) => key === sign)) throw new DslError(`icon=${show(icon)} reads no field of the rows. Use a field of fields= or a name of show=`);
     if (icon?.k === "lit" && /^[A-Za-z]+$/.test(icon.v)) throw new DslError(`icon= of a list is an emoji, such as icon="🛒", and ${q(icon.v)} is not one`);
     // More than 2 check marks are circles of one weight in a second row (C.3).
@@ -159,7 +165,7 @@ const PARTS = {
       const widget = { number: "NumberField", date: "DateField", time: "TimeField" }[kind] ?? "TextField";
       // The add form and each control of a row name the field by labels=, else by the readable form of the field name.
       const named = q(labels.get(field) ?? label(field));
-      const pick = (text, bind) => `${choice && kindTree.items.length <= 4 ? "Segmented" : "Select"}(${text}, ${bind}, ${choice})`;
+      const pick = (text, bind, more = "") => `${choice && kindTree.items.length <= 4 ? "Segmented" : "Select"}(${text}, ${bind}, ${choice}${more})`;
       // The cell of the row: a check mark, a choice, a field that the person can change, a text of the title column, or a small label of a value.
       if (field === sign || field === under) /* the emoji of the row, or the line under its title */;
       else if (kind === "check") lines.push(`${name}_${field} = CheckBox(${named}, $${field}${many ? ', variant="circle", weight=1' : ""})`);
@@ -184,14 +190,19 @@ const PARTS = {
       if (["check", "switch", "picture"].includes(kind)) { blank.push(`${field}: ${{ check: "false", switch: "true", picture: '""' }[kind]}`); continue; }
       // A count has a number field in the add form and its stepper in the row. final2: with the stepper only, three apps needed 30 taps for a count of 30.
       const empty = { number: "0", count: "0", date: "today()", time: '"08:00"' }[kind] ?? (kind === "choice" ? show(kindTree.items[0]) : '""');
-      const typed = kind === "count" ? `NumberField(${named}, $/${name}_new_${field}, min=0, step=1)` : `${widget}(${named}, $/${name}_new_${field})`;
-      lines.push(`$/${name}_new_${field} = ${empty}`, `${name}_new_${field} = ${kind === "choice" ? pick(named, `$/${name}_new_${field}`) : typed}`);
+      // A choice of more than six options is a Select, which shows an icon. A shorter one is a segmented control, which shows none (run.js choice).
+      const iconed = icons.has(field) && (kind !== "choice" || kindTree.items.length > 6) ? `, icon=${show(icons.get(field))}` : "";
+      const typed = kind === "count" ? `NumberField(${named}, $/${name}_new_${field}, min=0, step=1${iconed})` : `${widget}(${named}, $/${name}_new_${field}${iconed})`;
+      lines.push(`$/${name}_new_${field} = ${empty}`, `${name}_new_${field} = ${kind === "choice" ? pick(named, `$/${name}_new_${field}`, iconed) : typed}`);
+      if (iconed) icons.delete(field);
       add.push(`${name}_new_${field}`);
       blank.push(`${field}: $/${name}_new_${field}`);
       if (["text", "number", "count"].includes(kind)) reset.push(`set($/${name}_new_${field}, ${empty})`);
     }
+    // Each name of icons= that is left has no field of the add form that shows an icon.
+    for (const key of icons.keys()) throw new DslError(`icons= names ${key}, whose field of the add form shows no icon. A text, number, date, or time field shows one, and a choice of more than six options does too`);
     // A value for each row, from the fields of that row.
-    for (const [key, formula] of shown) if (key !== sign) { lines.push(`${name}_${key} = Badge(${show(formula)})`); cells.push(`${name}_${key}`); }
+    for (const [key, formula] of shown) if (key !== sign) { lines.push(`${name}_${key} = Badge(${show(formula)}${tones.has(key) ? `, tone=${show(tones.get(key))}` : ""})`); cells.push(`${name}_${key}`); }
     // The arrows become the reorder of the list, which Alphy draws with its own words (NativeRecordReorder.kt), so they need no caption.
     if (opt.reorder?.v === true) { lines.push(`${name}_up = IconButton("ArrowUp", action=move(-1))`, `${name}_down = IconButton("ArrowDown", action=move(1))`); tail.push(`${name}_up`, `${name}_down`); }
     if (opt.remove?.v !== false) {
@@ -231,10 +242,12 @@ const PARTS = {
       parts.push(...(sheet ? [`${name}_open`] : []), `${name}_addRow`);
     }
     lines.push(`${name}_view = Section(${show(title)}, [${parts.join(", ")}])`);
+    if (opt.total && !count) throw new DslError(`total= joins the shown rows and all rows of the hero count, and this list has no hero count. A list has one when it is the only main element of the app. Remove total=`);
     if (!count) return { lines, top: [`${name}_view`] };
     // The only main element of the app is this list (C.6): a hero card with the count of its shown rows comes first. A sign of each row gives no emoji there.
-    const counted = opt.countText ? show(opt.countText) : show(title);
-    lines.push(`${name}_hero = Card([${icon?.k === "lit" ? `Emoji(${show(icon)}, size="large", label=${counted}), ` : ""}Metric(${counted}, len(${source}), emphasis="display")], variant="hero")`);
+    // total="of" shows all rows too: "12 of 12".
+    const counted = opt.countText ? show(opt.countText) : show(title), value = opt.total ? `text(len(${source})) + " " + ${show(opt.total)} + " " + text(len($/${name}))` : `len(${source})`;
+    lines.push(`${name}_hero = Card([${icon?.k === "lit" ? `Emoji(${show(icon)}, size="large", label=${counted}), ` : ""}Metric(${counted}, ${value}, emphasis="display")], variant="hero")`);
     return { lines, top: [`${name}_view`], lead: [`${name}_hero`] };
   },
 
@@ -487,7 +500,7 @@ export const PART_KINDS = Object.keys(PARTS);
  */
 const OPTIONS = {
   input: ["options", "min", "max", "step", "icon"], figure: ["decimals", "example", "icon", "note", "goal", "goalText", "unit"],
-  entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText"],
+  entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText", "icons", "tones", "total"],
   chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max", "lessText", "moreText", "addText", "icon", "resetText"],
   timer: ["alert", "rounds", "rest", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],

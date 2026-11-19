@@ -98,13 +98,32 @@ test("figures: a new figure writes the figures before it again in their new plac
     expect(report(await planned(`app("T")\nneed a = figure("number", "A", 1)\n${line}`)).faults)
       .toContain(`line: need b: note=, goal=, and goalText= show only on the main figure, and b is not it: ${line}`);
   }
-  // A row shows no icon (fix round 1, G.4): the part said no word when it dropped icon= of a row.
-  const line = 'need c = figure("number", "C", 3, icon="Drop")';
-  expect(report(await planned(['app("T")', 'need h = figure("number", "H", 0)', 'need a = figure("number", "A", 1)', 'need b = figure("number", "B", 2)', line].join("\n"))).faults)
-    .toContain(`line: need c: c is a row, because three figures or more in one place are rows of one size, and a row shows no icon. Remove icon=: ${line}`);
 });
 
 test("figures: a format that is a name of an Object property, such as constructor, is a plain number", async () => {
   const { definition } = await built('app("T", lang="en")', 'need x = figure("constructor", "X", 5)', 'need y = figure("toString", "Y", 2.5)');
   expect([definition.initialState.d.x_text, definition.initialState.d.y_text]).toEqual(["5", "2.5"]);
+});
+
+test("figures: a figure that is a row shows its icon= as a small sign at the left of its title: an emoji, or an icon of Alphy", async () => {
+  // Task 11b-2a: icon= on a row was a fault, so a model that added a third figure needed one more step to take the icons away.
+  const { definition } = await built('app("T", lang="en")', 'need h = figure("number", "H", 0)', 'need a = figure("number", "A", 1, icon="💧")', 'need b = figure("number", "B", 2, icon="Drop")',
+    'need c = figure("number", "C", 3, icon=$/h > 0 ? "🔥" : "❄️")', 'need d = figure("number", "D", 4)');
+  const rows = tops(definition).slice(1);
+  expect(rows.map((row) => row.children.map((node) => [node.type, node.text, node.value ?? node.name ?? node.style?.emphasis, node.size]))).toEqual([
+    [["emoji", "A", "💧", "small"], ["text", "A", undefined, undefined], ["text", "", "number", undefined]],
+    [["icon", "B", "Drop", undefined], ["text", "B", undefined, undefined], ["text", "", "number", undefined]],
+    [["emoji", "C", undefined, "small"], ["text", "C", undefined, undefined], ["text", "", "number", undefined]],
+    [["text", "D", undefined, undefined], ["text", "", "number", undefined]],
+  ]);
+  // The icon of Alphy is a sign, not a button: it has no action.
+  expect(rows[1].children[0].action).toBeUndefined();
+});
+
+test("figures: decimals= is the number of decimals of a money and a percent figure, and a fault for a text figure", async () => {
+  const { definition } = await built('app("T", lang="en")', 'need a = figure("money", "A", 1234.567, decimals=0)', 'need b = figure("percent", "B", 12.345, decimals=1)',
+    'need c = figure("money", "C", 5)', 'need d = figure("percent", "D", 12.345)');
+  expect(["a", "b", "c", "d"].map((key) => definition.initialState.d[`${key}_text`])).toEqual(["1,235", "12.3%", "5.00", "12%"]);
+  const line = 'need t = figure("text", "T", "Mon", decimals=1)';
+  expect(report(await planned(`app("T")\n${line}`)).faults).toContain(`line: need t: a figure of the format text shows its value as it is, so it takes no decimals=. Remove decimals=, or give the format number: ${line}`);
 });

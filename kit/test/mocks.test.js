@@ -58,9 +58,16 @@ test("mocks: a day mark counts in the week ring, the days of the habit, and its 
 test("mocks: the price range, the type, and the order change the hero count and the order of the list", async () => {
   const { app, state } = await mock("mock-price-filter");
   const names = (at) => at.bikes_list.map((row) => row.name);
-  expect([state.d.bikes_hero_1_value, names(state).at(0), names(state).at(-1)]).toEqual([12, "Retrospec Beaumont", "Cube Kathmandu"]);
+  // total="of" (C.8): the hero shows the matching bikes of all 12, as the baseline does.
+  expect([state.d.bikes_hero_1_value, names(state).at(0), names(state).at(-1)]).toEqual(["12 of 12", "Retrospec Beaumont", "Cube Kathmandu"]);
   const ranged = press(state, app, "price_field", [500, 1000]).state;
-  expect([ranged.d.bikes_hero_1_value, names(ranged)]).toEqual([5, ["Trek Marlin 6", "Specialized Sirrus X 2", "Marin Bobcat Trail", "Fuji Sportif 2.3", "Cannondale CAAD Optimo"]]);
+  expect([ranged.d.bikes_hero_1_value, names(ranged)]).toEqual(["5 of 12", ["Trek Marlin 6", "Specialized Sirrus X 2", "Marin Bobcat Trail", "Fuji Sportif 2.3", "Cannondale CAAD Optimo"]]);
   const road = press(press(ranged, app, "type_field", "road").state, app, "order_field", "desc").state;
-  expect([road.d.bikes_hero_1_value, names(road)]).toEqual([2, ["Cannondale CAAD Optimo", "Fuji Sportif 2.3"]]);
+  expect([road.d.bikes_hero_1_value, names(road)]).toEqual(["2 of 12", ["Cannondale CAAD Optimo", "Fuji Sportif 2.3"]]);
+});
+
+test("mocks: the shopping list gives its add fields their icons, and the streak of a habit is an accent badge", async () => {
+  const shopping = await planned(fixture("mock-shopping-it")), habits = await planned(fixture("mock-habits-uk"));
+  expect([shopping.get("prodotti_new_nome").raw, shopping.get("prodotti_new_corsia").raw.endsWith(', icon="Tag")'), habits.get("habits_streak").raw.endsWith(', tone="accent")')])
+    .toEqual(['prodotti_new_nome = TextField("Prodotto", $/prodotti_new_nome, icon="Cart")', true, true]);
 });
