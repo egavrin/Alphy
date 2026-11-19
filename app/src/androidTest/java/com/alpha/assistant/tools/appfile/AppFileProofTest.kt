@@ -48,7 +48,7 @@ internal suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,s
     }
 }
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -129,6 +129,19 @@ class AppFileProofTest {
         val median=times.sorted()[2]
         Log.i("AppFileProofTest","event times ms=$times median=$median")
         assertTrue("median $median ms of $times",median<250)
+    }
+    @Test fun aFigurePrintsTheNumbersOfItsLanguageAtCompileAndInTheSandbox(): Unit=runBlocking {
+        // The texts of kit/test/numbers.test.js: the table of the kit prints them, not the language data of the device.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        for ((language,start,after) in listOf(Triple("pl",listOf("2469","1234,50"),listOf("40\u00a0000","20\u00a0000,00")),
+            Triple("de",listOf("2.469","1.234,50"),listOf("40.000","20.000,00")))) {
+            val text="app(\"T\", lang=\"$language\")\nneed x = input(\"number\", \"X\", 1234.5)\n" +
+                "need y = figure(\"number\", \"Y\", \$/x * 2, example=[{x: 10}, 20])\nneed m = figure(\"money\", \"M\", \$/x, example=[{x: 10}, 10])"
+            val spec=parsedAndSmoked(sandbox,"numbers-$language",language,text)
+            fun shown(state: JSONObject)=state.getJSONObject("d").let {listOf(it.getString("y_text"),it.getString("m_text"))}
+            assertEquals(language,start,shown(JSONObject(spec.initialState)))
+            assertEquals(language,after,shown(Session(sandbox,spec,"appfile-numbers-$language").act("x_field",20000)))
+        }
     }
     /** Events in sequence through ToolGenerationService.executeEvent: Alphy checks each event against the screen before it, and each reply. */
     private class Session(private val sandbox: SandboxClient,private val spec: ToolSpec,private val id: String,seed: String=spec.initialState) {

@@ -1,19 +1,18 @@
 # Request: 하루 물 마시기 기록 앱을 만들어 줘. 컵 버튼을 누르면 250ml씩 추가되고 목표 2리터 대비 진행률을 보여 줘.
-# Components only, in the tree of the baseline showcase-lang-water-ko. The last two metrics show how a Metric prints 1234.5: from a state value and from a computed value.
+# Components only, in the tree of the baseline showcase-lang-water-ko. Each amount prints with amount(), so the digit groups follow the language of the app.
 app("하루 물 마시기", lang="ko", preset="clean", palette="blue")
 $/ml = 0
-$/n = 1234.5
+$/goal = 2000
 $/editing = false
-root = Column([hero, cup, hint, figures, done, manage, numbers, sheet])
-hero = Card([Emoji("💧", size="large"), Metric("오늘 마신 양", $/ml + " ml", emphasis="display"), Progress($/ml, 2000, label="달성률")], variant="hero")
+root = Column([hero, cup, hint, figures, done, manage, sheet])
+hero = Card([Emoji("💧", size="large"), Metric("오늘 마신 양", amount($/ml) + " ml", emphasis="display"), Progress($/ml, $/goal, label="달성률")], variant="hero")
 cup = Button("컵 추가 (250 ml)", inc($/ml, 250), variant="filled", icon="Cup")
 hint = Text("컵 한 번에 250 ml가 더해져요.", tone="muted")
-figures = Grid([Metric("남은 양", max(0, 2000 - $/ml) + " ml", icon="Drop"), Metric("하루 목표", "2,000 ml", icon="Target")], columns=2)
-done = Notice("오늘 목표 2 L를 달성했어요 🎉", tone="success", icon="Trophy", visible=$/ml >= 2000)
+figures = Grid([Metric("남은 양", amount(max(0, $/goal - $/ml)) + " ml", icon="Drop"), Metric("하루 목표", amount($/goal) + " ml", icon="Target")], columns=2)
+done = Notice("오늘 목표 2 L를 달성했어요 🎉", tone="success", icon="Trophy", visible=$/ml >= $/goal)
 manage = Section("기록 관리", [Row([edit, reset], gap="small")])
 edit = Button("직접 입력", set($/editing, true), variant="outlined", icon="Pencil")
 reset = Button("하루 리셋", set($/ml, 0), variant="text", icon="Refresh")
 sheet = Dialog("섭취량 직접 입력", [Text("오늘 마신 총량을 직접 고칠 수 있어요.", tone="muted"), total], visible=$/editing)
 total = NumberField("총 섭취량 (ml)", $/ml, min=0, max=20000, step=250, icon="Drop")
-numbers = Grid([Metric("Plain", $/n), Metric("Computed", $/n * 1)], columns=2)
 check("컵 세 번, 리셋, 직접 입력", tap(cup), tap(cup), tap(cup), expect($/ml == 750), tap(reset), expect($/ml == 0), tap(edit), expect($/editing), set(total, 1500), expect($/ml == 1500))

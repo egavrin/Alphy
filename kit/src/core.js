@@ -50,6 +50,21 @@ export function explode(bodies) {
   const center = ["x", "y", "z"].map((axis) => bodies.reduce((sum, body) => sum + body[axis], 0) / (bodies.length || 1));
   return bodies.map((body) => (body.part ? { ...body, ...Object.fromEntries(["x", "y", "z"].map((axis, index) => [axis, round(body[axis] + (body[axis] - center[index]) / 2, 2)])) } : body));
 }
+/** The group sign and the decimal sign of a language of the app. Each other language prints as en. A table, not Intl: the kit and the sandbox of the device print one text. */
+const SIGNS = { de: ".,", es: ".,", it: ".,", pt: ".,", tr: ".,", ru: "\u00a0,", fr: "\u00a0,", pl: "\u00a0,", uk: "\u00a0," };
+/** A number for a person with n decimals, in the language of the app. trim takes the zeros at the end of the decimals away. In es, pl, and pt a whole part of four digits has no group. */
+function print(lang, x, n, trim) {
+  const [group, point] = Object.hasOwn(SIGNS, lang) ? SIGNS[lang] : ",.", fixed = Number(x).toFixed(n), parts = /^-?(\d+)\.?(\d*)$/.exec(fixed);
+  if (!parts) return fixed;
+  const [, whole, decimals] = parts, shown = trim ? decimals.replace(/0+$/, "") : decimals;
+  return (Number(fixed) < 0 ? "-" : "") + (whole.length < 5 && /^(es|pl|pt)$/.test(lang) ? whole : whole.replace(/\B(?=(\d{3})+$)/g, group)) + (shown ? point + shown : "");
+}
+/** The format functions that print a number for a person. Each one takes the language of the app first. */
+const PRINT = {
+  fixed: (lang, x, n = 2) => print(lang, x, n), money: (lang, x, sign = "") => sign + print(lang, x, 2), percent: (lang, x, n = 0) => print(lang, x, n) + "%",
+  // The number of a figure: rounded to at most n decimals, with no zeros at the end.
+  amount: (lang, x, n = 0) => print(lang, round(Number(x), n), n, true),
+};
 const PLAIN = {
   round, floor: Math.floor, ceil: Math.ceil, abs: Math.abs,
   // Angles in degrees, for a place on a circle. round takes the float noise away: sin(180) is 0, and never -0.
@@ -61,8 +76,7 @@ const PLAIN = {
   min: (...values) => (values.flat(3).length ? Math.min(...values.flat(3)) : 0), max: (...values) => (values.flat(3).length ? Math.max(...values.flat(3)) : 0),
   clamp: (x, low, high) => Math.min(high, Math.max(low, x)),
   len: (x) => (x == null ? 0 : x.length), text: (x) => String(x ?? ""), number: (x) => Number(x) || 0,
-  fixed: (x, n = 2) => Number(x).toFixed(n), pad2: (x) => String(Math.floor(x)).padStart(2, "0"),
-  money: (x, sign = "") => sign + Number(x).toFixed(2), percent: (x, n = 0) => Number(x).toFixed(n) + "%",
+  pad2: (x) => String(Math.floor(x)).padStart(2, "0"),
   join: (list, sep = ", ") => (list || []).join(sep), upper: (s) => String(s).toUpperCase(), lower: (s) => String(s).toLowerCase(),
   at: (list, index) => (Array.isArray(list) ? list[index] ?? null : null),
   // The longest run of true values in a list, such as the days in a row that a habit was done.
@@ -113,7 +127,7 @@ const ROWWISE = {
   },
 };
 
-export const FUNCTIONS = new Set([...Object.keys(PLAIN), ...Object.keys(ROWWISE), "if"]);
+export const FUNCTIONS = new Set([...Object.keys(PLAIN), ...Object.keys(PRINT), ...Object.keys(ROWWISE), "if"]);
 
 /** Equal values. Two lists or two rows are equal when each value in them is equal, with no look at the row id of the host. */
 function same(a, b) {
@@ -243,6 +257,7 @@ export class App {
           return ROWWISE[node.name](rows, perRow(node.args[1]), node.name === "groups" ? perRow(node.args[2]) : node.args[2] && this.value(node.args[2], ctx));
         }
         if (PLAIN[node.name]) return PLAIN[node.name](...node.args.map((arg) => this.value(arg, ctx)));
+        if (PRINT[node.name]) return PRINT[node.name](this.file.get("app")?.tree.named.lang?.v, ...node.args.map((arg) => this.value(arg, ctx)));
         if (CATALOG[node.name]) throw new DslError(MESSAGES ? `${node.name} is a component. A component line has a plain name with no $/ before it` : "");
         throw new DslError(MESSAGES ? `unknown function ${node.name}` : "");
       }
