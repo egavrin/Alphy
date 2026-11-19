@@ -77,6 +77,13 @@ test("entries: the row is a title with a muted second line, then the value cells
   // One text field is the title alone, with the weight of the row.
   expect(rowOf((await built('app("T", lang="en")', 'need items = entries("Items", fields={name: "text"})')).definition).children[0])
     .toEqual({ type: "text", text: "", bind: "name", layout: { weight: 1 } });
+  // In a row with one text, a choice that the row does not change is the muted line under the title.
+  // Task 11b-2a pictures: "Frutta e verdura" as a label broke into two lines beside the title.
+  const one = await built('app("Spesa", lang="it")', 'need items = entries("Prodotti", fields={aisle: ["Frutta e verdura", "Forno"], name: "text"})');
+  expect(rowOf(one.definition).children[0].children).toEqual([{ type: "text", text: "", bind: "name" }, { type: "text", text: "", bind: "aisle", style: muted }]);
+  // A choice that the row changes stays a control.
+  const edit = await built('app("Spesa", lang="it")', 'need items = entries("Prodotti", fields={name: "text", aisle: ["Frutta", "Forno"]}, edit=true)');
+  expect(rowOf(edit.definition).children.map((node) => node.type)).toEqual(["input", "segmented", "icon"]);
 });
 
 test("entries: icon= gives each row a leading emoji named by the title of the list, from a sign or from a value of the row", async () => {
@@ -85,8 +92,9 @@ test("entries: icon= gives each row a leading emoji named by the title of the li
   // A value of the row: a field of the form, or a value that show= computes for each row.
   const shown = await built('app("Spesa", lang="it")',
     'need items = entries("Prodotti", fields={name: "text", aisle: ["Frutta", "Forno"]}, show={sign: $aisle == "Forno" ? "🥖" : "🍎"}, icon=$sign, rows=[{name: "Pane", aisle: "Forno"}])');
-  const [emoji, title] = rowOf(shown.definition).children;
-  expect([emoji.type, emoji.text, emoji.size, typeof emoji.bind, title.bind]).toEqual(["emoji", "Prodotti", "small", "string", "name"]);
+  // The aisle is the line under the title.
+  const [emoji, main] = rowOf(shown.definition).children;
+  expect([emoji.type, emoji.text, emoji.size, typeof emoji.bind, main.children.map((node) => node.bind)]).toEqual(["emoji", "Prodotti", "small", "string", ["name", "aisle"]]);
   expect(shown.definition.initialState.items_list[0][emoji.bind]).toBe("🥖");
   // The sign of a row that the add form makes: show= computes it from the new row.
   const typed = press(shown.definition.initialState, shown.app, "items_new_name", "Mela");
@@ -101,11 +109,12 @@ test("entries: icon= gives each row a leading emoji named by the title of the li
   }
 });
 
-test("entries: more than two check marks are circles of one weight in a second row of a card, each named by its label or its field", async () => {
+test("entries: more than two check marks are circles of one weight in a second row under the cells, each named by its label or its field", async () => {
   const { definition } = await built('app("Звички", lang="uk")',
     'need habits = entries("Звички", fields={name: "text", mon: "check", tue: "check", wed: "check"}, labels={mon: "Пн", tue: "Вт"}, show={streak: count([$mon, $tue, $wed], $it)})');
   const [top, marks] = rowOf(definition).children;
-  expect(rowOf(definition).type).toBe("card");
+  // The host draws each row of a list on a card of its own, so a card in the template is a card in a card (Task 11b-2a pictures).
+  expect(rowOf(definition).type).toBe("column");
   expect(top.children.map((node) => node.type)).toEqual(["text", "badge", "icon"]);
   expect(marks).toEqual({ type: "row", wrap: false, style: { gap: "none", crossAlign: "center" }, children: [["Пн", "mon"], ["Вт", "tue"], ["Wed", "wed"]].map(([text, bind]) => (
     { type: "checkbox", text, bind, action: `habits_${bind}`, variant: "circle", layout: { weight: 1 } })) });

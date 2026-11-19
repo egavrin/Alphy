@@ -138,17 +138,20 @@ const PARTS = {
     if (icon?.k === "lit" && /^[A-Za-z]+$/.test(icon.v)) throw new DslError(`icon= of a list is an emoji, such as icon="🛒", and ${q(icon.v)} is not one`);
     // More than 2 check marks are circles of one weight in a second row (C.3).
     const many = fields.filter(([, kindTree]) => kindTree.v === "check").length > 2;
+    const kindOf = (kindTree) => kindTree.k === "list" ? "choice" : ["number", "money", "percent"].includes(kindTree.v) ? "number" : ["check", "switch", "count", "date", "time", "picture"].includes(kindTree.v) ? kindTree.v : "text";
+    const others = fields.filter(([field]) => field !== sign);
+    // In a row with one text, a choice that the row does not change is the muted line under the title: as a label beside it, "Frutta e verdura" broke into two lines.
+    const under = !edit && others.filter(([, kindTree]) => kindOf(kindTree) === "text").length === 1 ? others.find(([, kindTree]) => kindOf(kindTree) === "choice")?.[0] : undefined;
     let firstText = null;
     for (const [field, kindTree] of fields) {
-      const choice = kindTree.k === "list" ? show(kindTree) : null;
-      const kind = choice ? "choice" : ["number", "money", "percent"].includes(kindTree.v) ? "number" : ["check", "switch", "count", "date", "time", "picture"].includes(kindTree.v) ? kindTree.v : "text";
+      const choice = kindTree.k === "list" ? show(kindTree) : null, kind = kindOf(kindTree);
       // The field for a value that the person types or picks.
       const widget = { number: "NumberField", date: "DateField", time: "TimeField" }[kind] ?? "TextField";
       // The add form and each control of a row name the field by labels=, else by the readable form of the field name.
       const named = q(labels.get(field) ?? label(field));
       const pick = (text, bind) => `${choice && kindTree.items.length <= 4 ? "Segmented" : "Select"}(${text}, ${bind}, ${choice})`;
       // The cell of the row: a check mark, a choice, a field that the person can change, a text of the title column, or a small label of a value.
-      if (field === sign) /* the emoji of the row */;
+      if (field === sign || field === under) /* the emoji of the row, or the line under its title */;
       else if (kind === "check") lines.push(`${name}_${field} = CheckBox(${named}, $${field}${many ? ', variant="circle", weight=1' : ""})`);
       else if (kind === "switch") lines.push(`${name}_${field} = Toggle(${named}, $${field})`);
       else if (kind === "count") {
@@ -164,7 +167,7 @@ const PARTS = {
       else if (kind !== "text") lines.push(`${name}_${field} = Text($${field}, emphasis="label")`);
       else texts.push(field);
       if (kind === "text" && field !== sign) firstText ??= field;
-      if (field !== sign && !(kind === "text" && !edit)) (kind === "check" ? marks : cells).push(`${name}_${field}`);
+      if (field !== sign && field !== under && !(kind === "text" && !edit)) (kind === "check" ? marks : cells).push(`${name}_${field}`);
       if (kind === "count") cells.push(`${name}_${field}_plus`);
       if (!canAdd) continue;
       // A new row starts with no check mark, with its switch on, and with no picture.
@@ -192,11 +195,12 @@ const PARTS = {
     // The row (C.1): the emoji, the title with a muted line under it for each further text, the value cells, the check marks, and the remove button.
     // The emoji is named by the title of the list for a person who does not see it.
     if (icon) lines.push(`${name}_emoji = Emoji(${show(icon)}, size="small", label=${show(title)})`);
+    if (under) texts.push(under);
     lines.push(...texts.map((field, index) => `${name}_${field} = Text($${field}${texts.length === 1 ? ", weight=1" : index ? ', tone="muted"' : ""})`));
     if (texts.length > 1) lines.push(`${name}_main = Column([${texts.map((field) => `${name}_${field}`).join(", ")}], weight=1, gap="none")`);
     const head = [...(icon ? [`${name}_emoji`] : []), ...(texts.length > 1 ? [`${name}_main`] : texts.map((field) => `${name}_${field}`)), ...cells];
-    // Many check marks get a row of their own under the other cells, and the row of a list is a card.
-    lines.push(many ? `${name}_row = Card([Row([${[...head, ...tail].join(", ")}]), Row([${marks.join(", ")}], gap="none")])` : `${name}_row = Row([${[...head, ...marks, ...tail].join(", ")}])`);
+    // Many check marks get a row of their own under the other cells. The host draws each row of a list on its own card, so the template has no card.
+    lines.push(many ? `${name}_row = Column([Row([${[...head, ...tail].join(", ")}]), Row([${marks.join(", ")}], gap="none")])` : `${name}_row = Row([${[...head, ...marks, ...tail].join(", ")}])`);
     let source = `$/${name}`;
     if (opt.filter) source = `filter(${source}, ${show(opt.filter)})`;
     if (opt.sort) source = `sort(${source}, ${show(opt.sort)}${opt.order ? ", " + show(opt.order) : ""})`;
