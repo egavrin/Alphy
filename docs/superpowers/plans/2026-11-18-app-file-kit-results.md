@@ -1,10 +1,307 @@
 # App file kit (phase 1): results
 
 This file records the device results of `docs/superpowers/plans/2026-11-18-app-file-kit.md`.
-Each section belongs to one task of the plan.
+The section "Phase 1 proof" records Task 12: the whole proof on one revision, and the verdict of the stop rule of phase 1.
+Each later section belongs to one task of the plan and keeps the numbers of that task. Where a number of a task differs from "Phase 1 proof", the number of "Phase 1 proof" is the state at `9bcd313`.
 
-All runs used the emulator `emulator-5592` (AVD `AlphyAppFile`, API 36) and the class `com.alpha.assistant.tools.appfile.AppFileProofTest`.
+All runs used the emulator `emulator-5592` (AVD `AlphyAppFile`, API 36). The table or the command of each run names its test classes.
 The `run.json` of each label is in `evidence/alphy-ui/<label>/`, which Git does not keep.
+
+## Phase 1 proof
+
+Task 12 ran the whole proof one time on `9bcd313`, with a clean tree.
+`9bcd313` merges `origin/main` `80ca3d5` (the live voice mode) into this branch. No file changed on both sides.
+
+### The run
+
+| Command | Result |
+| --- | --- |
+| `bun test kit` | 320 pass, 0 fail, 1882 `expect()` calls in 21 files, 4.3 s |
+| `bun kit/build.js --check` | exit 0 |
+| `run.py suite`, label `appfile-phase1` | passed: 108 tests, 0 failures, 0 skipped. The runner took 198.4 s for the build, the install, and the tests. The tests took 189.3 s |
+
+| Class | Tests | Result | Seconds |
+| --- | --- | --- | --- |
+| `com.alpha.assistant.tools.appfile.AppFileProofTest` | 29 | passed | 83.4 |
+| `com.alpha.assistant.tools.appfile.AppFileLookTest` | 8 | passed | 99.0 |
+| `com.alpha.assistant.sandbox.SandboxIsolationTest` | 10 | passed | 1.9 |
+| `com.alpha.assistant.tools.AgentGenerationWorkflowTest` | 48 | passed | 4.9 |
+| `com.alpha.assistant.voice.VoiceModeProtocolTest` | 13 | passed | 0.04 |
+
+The seconds of a class come from the `started` and `finished` lines of the log tag `TestRunner`. The log buffer lost the first lines of `AppFileProofTest`, so its seconds are the rest of the 189.3 s.
+The `run.json` names the revision `9bcd313beb826473dfa3cd0b61c4bef6d91cad75`, `dirty: false`, and the serial `emulator-5592`.
+The test APK `lastUpdateTime` was `2026-11-19 09:03:45` before the run (the "after" time of `appfile-look-all-5`) and `2026-11-19 09:26:24` after it.
+The run started at 09:26:17, installed the test APK at 09:26:24, and ended at 09:29:35. No other session installed the test APK.
+
+The last three classes show that the paths of the app from before this plan still work on the merged tree: the sandbox, the agent loop with a scripted model, and the voice protocol of main.
+`VoiceModeProtocolTest` tests the GPT-Live wire protocol with no network, no microphone, and no model.
+The file `AgentGenerationWorkflowTest.kt` also holds the class `AgentGuideExampleTest` (3 tests). This run did not name that class.
+
+Commands:
+
+```text
+bun test kit
+bun kit/build.js --check
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-phase1 com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest com.alpha.assistant.sandbox.SandboxIsolationTest com.alpha.assistant.tools.AgentGenerationWorkflowTest com.alpha.assistant.voice.VoiceModeProtocolTest
+```
+
+During the run, `adb -s emulator-5592 logcat -T 1 -v time -s AppFileProofTest:I AppFileLookTest:I` wrote the time lines to `evidence/alphy-ui/appfile-phase1/logcat.txt`.
+The runner does not copy the pictures. After the run, `adb pull` copied the folders `appfile-look`, `appfile-step-zero`, and `appfile-steps-kit` of the app's external files into `evidence/alphy-ui/appfile-phase1/`.
+
+### The nine saved plans
+
+Each saved plan compiled with the status `ok` and no fault, and passed `ToolSpec.parse` and the host smoke step on the device.
+`parsedAndSmoked` asserts the three steps in the test of each plan (`calcPassesParseAndSmoke` and the others) and in `eachPlanAnswersInTime`.
+
+| Plan | Language | Needs | Source (bytes) | Smoke events from the full state | Slowest action that changes the state (ms) | Live input (ms) | Hero, typed fields on the first screen, typed fields in rows |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `calc` | en | 5 | 47495 | 4 / 6 / 9 | 10 (`bill_field`) | `tip_field` 9, 9, 10 | 1, 2, 0 |
+| `list` | it | 2 | 48306 | 4 / 7 / 11 | 18 (`prodotti_preso`) | `prodotti_new_nome` 18, 18. `prodotti_new_corsia` 17, 18 | 1, 2, 0 |
+| `quiz` | ja | 0 | 47875 | 3 / 3 / 3 | 15 (`revealButton`) | none | 1, 0, 0 |
+| `tabs-chart` | es | 4 | 48814 | 6 / 10 / 12 | 18 (`resumen_view`) | `gastos_new_concepto` 17, 17 | 1, 0, 0 |
+| `timer-rounds` | de | 3 | 48887 | 1 / 1 / 3 | 10 (`timer_start`) | none | 1, 0, 0 |
+| `tea` | tr | 2 | 47194 | 1 / 2 / 2 | 12 (`cay_field`) | none | 1, 0, 0 |
+| `section` | uk | 2 | 49048 | 16 / 31 / 33 | 33 (`habits_remove`) | `habits_new_name` 33, 32 | 1, 1, 0 |
+| `lesson` | ru | 6 | 50316 | 7 / 9 / 10 | 15 (`lesson_next`) | none | 1, 1, 0 |
+| `model3d` | ru | 2 | 49951 | 6 / 6 / 6 | 19 (`rover_part_panel`) | none | 1, 0, 0 |
+
+- Smoke events from the full state: the actions that change the state / the actions that the open screen takes / the action and live input events that the smoke step sent from the state with full lists. They come from the `time` line of `eachPlanAnswersInTime` in the log.
+- `quiz.plan` writes its own component lines and has no need line.
+- The look numbers come from `bun kit/look.js`. A scratch script compared each of the 62 pictures of this run with the same picture of `appfile-look-all-5`, below the status bar. It counts a pixel as changed when a channel differs by more than 8.
+  In 61 pictures, 0.000 % of the pixels changed. `dark/look-guide-es-answered.png` has 33.3 % changed pixels: the screen scrolls by a different distance after the reveal of the notice (section "Look of each plan").
+  So the column "Seen in the pictures" of "Look of each plan" holds at this head.
+
+### Sizes at this head
+
+The method is the method of "Sizes and times". The kit test `budget: each saved plan is inside each limit` printed this table at `9bcd313` (`bun test kit/test/budget.test.js`).
+It measures the 9 saved plans, the 9 test plans, and the 14 fixtures that compile. The fixtures `catalog`, `dialogue-game`, `dialogue-materials`, and `dialogue-rover` do not compile, and the test skips them.
+
+| Plan | Source | Definition | UI | Nodes | State | Fields | Commands | Pairs | Chars | Bytes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Limit | 65536 (bar 60000) | 262144 | 65536 | 512 | 49152 | 40 | 512 | 2048 | 2048 | 32768 |
+| `plans/tea.plan` | 47194 | 50011 | 577 | 5 | 20 | 1 | 0 | 0 | 0 | 2 |
+| `plans/lesson.plan` | 50316 | 55898 | 1940 | 22 | 637 | 7 | 5 | 5 | 5 | 452 |
+| `plans/calc.plan` | 47495 | 50551 | 661 | 8 | 83 | 4 | 0 | 0 | 0 | 2 |
+| `plans/timer-rounds.plan` | 48887 | 53235 | 1255 | 16 | 282 | 4 | 3 | 3 | 0 | 260 |
+| `plans/list.plan` | 48306 | 52560 | 1159 | 16 | 459 | 4 | 0 | 0 | 0 | 2 |
+| `plans/section.plan` | 49048 | 55157 | 2210 | 26 | 1015 | 4 | 0 | 0 | 0 | 2 |
+| `plans/quiz.plan` | 47875 | 51718 | 857 | 14 | 370 | 7 | 0 | 0 | 0 | 2 |
+| `plans/model3d.plan` | 49951 | 54311 | 1206 | 17 | 301 | 3 | 52 | 253 | 0 | 6445 |
+| `plans/tabs-chart.plan` | 48814 | 53979 | 2015 | 22 | 257 | 7 | 0 | 0 | 0 | 2 |
+| `test/rich.plan` | 49116 | 64767 | 2541 | 26 | 10253 | 5 | 0 | 0 | 0 | 2 |
+| `test/nodes.plan` | 49123 | 55709 | 3121 | 45 | 450 | 12 | 0 | 0 | 0 | 2 |
+| `test/lists.plan` | 51732 | 61229 | 4477 | 55 | 1195 | 13 | 0 | 0 | 0 | 2 |
+| `test/shapes.plan` | 49264 | 53901 | 1193 | 16 | 375 | 7 | 15 | 25 | 7 | 1285 |
+| `test/bytes.plan` | 47202 | 49859 | 413 | 6 | 17 | 2 | 2 | 3 | 1 | 224 |
+| `test/free.plan` | 47685 | 51815 | 1092 | 19 | 426 | 5 | 0 | 0 | 0 | 2 |
+| `test/looks.plan` | 49557 | 57110 | 4075 | 53 | 378 | 11 | 0 | 0 | 0 | 2 |
+| `test/cards.plan` | 53650 | 68779 | 5343 | 71 | 5017 | 18 | 0 | 0 | 0 | 2 |
+| `test/model.plan` | 47961 | 51364 | 758 | 12 | 96 | 3 | 12 | 51 | 0 | 1392 |
+| `test/fixtures/price-filter.plan` | 48200 | 53793 | 1354 | 15 | 1606 | 7 | 0 | 0 | 0 | 2 |
+| `test/fixtures/mock-units-pl.plan` | 48518 | 52998 | 1762 | 21 | 162 | 4 | 0 | 0 | 0 | 2 |
+| `test/fixtures/water-ko.plan` | 47490 | 50679 | 825 | 10 | 62 | 2 | 0 | 0 | 0 | 2 |
+| `test/fixtures/habits.plan` | 47902 | 51588 | 994 | 14 | 228 | 3 | 0 | 0 | 0 | 2 |
+| `test/fixtures/mock-water-ko.plan` | 47858 | 51346 | 979 | 13 | 103 | 2 | 0 | 0 | 0 | 2 |
+| `test/fixtures/mock-price-filter.plan` | 48362 | 55298 | 1363 | 16 | 2814 | 6 | 0 | 0 | 0 | 2 |
+| `test/fixtures/look-water-ko.plan` | 48138 | 52516 | 1669 | 20 | 166 | 5 | 0 | 0 | 0 | 2 |
+| `test/fixtures/units-pl.plan` | 48294 | 52602 | 1651 | 19 | 155 | 4 | 0 | 0 | 0 | 2 |
+| `test/fixtures/mock-shopping-it.plan` | 48901 | 53535 | 1727 | 19 | 117 | 4 | 0 | 0 | 0 | 2 |
+| `test/fixtures/shopping.plan` | 48103 | 52254 | 1108 | 16 | 431 | 4 | 0 | 0 | 0 | 2 |
+| `test/fixtures/look-shopping-it.plan` | 49352 | 55715 | 2589 | 25 | 736 | 8 | 0 | 0 | 0 | 2 |
+| `test/fixtures/look-guide-es.plan` | 49705 | 55661 | 2653 | 35 | 393 | 5 | 0 | 0 | 0 | 2 |
+| `test/fixtures/look-deck-es.plan` | 48616 | 53198 | 1334 | 16 | 533 | 4 | 0 | 0 | 0 | 2 |
+| `test/fixtures/mock-habits-uk.plan` | 48683 | 54447 | 1766 | 21 | 1107 | 3 | 0 | 0 | 0 | 2 |
+
+The largest source is `test/cards.plan` with 53650 bytes: 6350 bytes under the bar 60000 and 11886 bytes under the limit 65536. The largest saved plan is `plans/lesson.plan` with 50316 bytes.
+The drawing columns are of the open reply. The rover of `model3d.plan` takes 6589 bytes at its largest whole turn: the kit test of `model3d.plan` in `kit/test/emit.test.js` prints it ("most at any whole turn").
+
+The run-time text by module, with the method of "Run-time text" (the scratch script now also reads `icons.js` and `words.js`, which the run-time does not import):
+
+| Module | Bytes at `f1865a5` (Task 10) | Bytes at `9bcd313` |
+| --- | --- | --- |
+| `dsl.js` | 5283 | 5283 |
+| `core.js` | 17557 | 18413 |
+| `draw.js` | 5422 | 5509 |
+| `rows.js` | 3440 | 3450 |
+| `run.js` and `drag.js` | 12924 | 14007 |
+| Run-time text | 44626 | 46662 |
+
+The kit test `source: the run-time text is at most 48500 bytes` holds the bar, so 1838 bytes are left under it.
+The rest of a source is the compiled data of the plan and a call line of 24 bytes. It is 532 bytes (`tea`) to 3654 bytes (`lesson`) for the saved plans, and 6988 bytes for `test/cards.plan`.
+For example, the kit test of `calc.plan` prints the source 47495 bytes with the compiled data 809 bytes: 47495 = 46662 + 809 + 24.
+
+### Times at this head
+
+The device test `eachPlanAnswersInTime` takes the steps of "Time of each saved plan". The medians of the run `appfile-phase1`:
+
+| Plan | Open (ms) | Slowest action timed (ms) | Action | Add to `maxItems` (ms) | After one earlier event (ms) | Surface event (ms) | State bytes, full | Actions: change state / on the open screen / smoke | Not timed |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `calc` | 9 | 10 | `bill_field` | none | none | none | 83 | 4 / 6 / 9 | none |
+| `list` | 18 | 18 | `prodotti_preso` | 18 | none | none | 12495 | 4 / 7 / 11 | none |
+| `quiz` | 15 | 15 | `revealButton` | none | none | none | 7322 | 3 / 3 / 3 | none |
+| `tabs-chart` | 17 | 18 | `resumen_view` | 17 | none | none | 7472 | 6 / 10 / 12 | none |
+| `timer-rounds` | 10 | 10 | `timer_start` | none | `timer_pause` 10, `timer_reset` 10 | 2 (`timer_bar`) | 282 | 1 / 1 / 3 | none |
+| `tea` | 12 | 12 | `cay_field` | none | none | none | 20 | 1 / 2 / 2 | `demleme_timer` |
+| `section` | 32 | 33 | `habits_remove` | 33 | none | none | 31650 | 16 / 31 / 33 | none |
+| `lesson` | 14 | 15 | `lesson_next` | none | `lesson_back` 14 | 3 (`anim`) | 637 | 7 / 9 / 10 | none |
+| `model3d` | 18 | 19 | `rover_part_panel` | none | none | 10 (pointer move) | 301 | 6 / 6 / 6 | none |
+
+The column "Slowest action timed" holds the slowest action whose reply changes the state. An action whose reply keeps the state took at most 19 ms (`list`).
+Each time is under its bar of the kit: 250 ms for an open and an action, 100 ms for a live input, and 50 ms for a surface event.
+The medians of the 31 timed actions of `section.plan` were 31 to 33 ms in this run.
+The full lists are 100 rows each: `prodotti` and `prodotti_list`, `cards`, `gastos`, and `habits` and `streak_list`. The largest full state is 31650 bytes (`section.plan`).
+
+| Plan | Path | Live control: median of each timed value (ms) |
+| --- | --- | --- |
+| `calc` | fresh | `tip_field` 9, 9, 10 |
+| `list` | fresh | `prodotti_new_nome` 18, 18. `prodotti_new_corsia` 17, 18 |
+| `tabs-chart` | fresh | `gastos_new_concepto` 17, 17 |
+| `section` | fresh | `habits_new_name` 33, 32 |
+| a text field beside a surface timer | retained | `note_field` 2 |
+| `test/bytes.plan` (logged, no bar) | retained | `pad_field` 120 |
+
+The other medians of the run, each of five events (ms):
+
+| Measure | Test | Median (ms) |
+| --- | --- | --- |
+| Compile of `quiz.plan` | `compileTakesUnderOneSecond` | 32 |
+| Event of `calc.plan` | `calcPassesParseAndSmoke` | 9 |
+| Add of `tabs-chart.plan` | `tabsChartPassesParseAndSmoke` | 11 |
+| Event of `rich.plan` | `twoRichListsFullToTheirCountPassParseAndSmoke` | 21 |
+| Event of `cards.plan` | `eachCardChartAndTabPassesParseAndSmoke` | 18 |
+| Event on 100 rows | `anActionOnAListOf100RowsTakesUnder250Ms` | 15 |
+| Event of `section.plan` | `sectionPassesParseAndSmoke` | 14 |
+| Timer event of the 40 s work phase of `timer-rounds.plan`, host path | `timerRoundsPassesParseAndSmoke` | 3 |
+| Action and timer event of `lesson.plan`, retained session | `lessonPassesParseAndSmoke` | 2 and 2 |
+| Pointer move of `model3d.plan`, host path | `model3dPassesParseAndSmoke` | 9 |
+| Live input of `test/bytes.plan` at the byte limit, retained session | `aReplyAtTheByteLimitPassesTheHostPath` | 120 |
+
+### The timer points of the design, section 8
+
+1. A duration that a choice gives: yes. The `source` may return a `ui` with a new duration after the choice changes, and Alphy's validator takes the new duration.
+   In this run, `teaPassesParseAndSmoke` read 300000 ms before a choice, 180000 ms after "Yeşil çay", and 420000 ms after "Bitki çayı".
+   So a timer whose time comes from a choice needs no `outside("timer")` rule.
+2. No effect from a timer event: the canvas form works. A timer with rounds draws its bar on a surface and asks for timer events.
+   In this run, `timerRoundsPassesParseAndSmoke` passed: the smoke step sent `timer_bar`, and a short plan of 2 rounds went through the host's path on the real clock.
+   Five timer events of the 40 s work phase took 4, 3, 3, 3, and 3 ms (median 3 ms). The end of a round shows on the screen only, and the kit's report has a note, not a fault.
+   So the timer part needs no `outside("timer")` rule for rounds.
+
+The section "Timers" holds the record of Task 6.
+
+### The mapping rules of the design, section 2
+
+| Rule | Result | Evidence |
+| --- | --- | --- |
+| Each part keeps its inner values in its own state object, next to its value. A plan of 9 needs then has about 20 of the 40 fields. | Changed (Tasks 4 and 9). The inner values of a part are the object `NAME_s` beside its value (Task 3). A list of a part is a top-level list field (Task 4), and the record of a model is a top-level object (`rover`, Task 9). The saved plans have 0 to 6 needs and 1 to 7 of the 40 fields. The most fields of a plan is 18 (`test/cards.plan`). | The column "Fields" of the budget table. Each plan passed `ToolSpec.parse` in this run. |
+| State field names come from need names. For a need that changes, the kit gets the earlier file and the stored state and computes the next state by the rule of section 5. | Proved for the names. The next state of a changed need is not built: section 5 (storage and later changes) belongs to phase 2, and no task of this plan built it. | Each field of a need has the name of the need (`prodotti`, `habits`, `gastos`, `rover`). The kit tests of the names are in `kit/test/emit.test.js`. |
+| A `visible=` test needs a boolean state field, or the `source` returns `ui` for each event. Phase 1 picks one by measurement. | The boolean field. A computed `visible=` is a boolean field of the state object `v` with `visibleBind` (Task 3). A reply holds `ui` only when the screen changed (`kit/src/run.js` 463). The brief of Task 3 made this choice. No run measured the other form. | `eachNodeOfTheTablePassesParseAndSmoke` (a computed `visible=`). `aTypedTextShowsASecondLiveFieldThatTakesItsText` (`visible=len($/first) > 0`). With this form, the slowest action of a saved plan took 33 ms. |
+| A sorted or filtered view of a list is a second list field. A row control writes back to the stored list by the row key. | Proved. | `list.plan` has the list `prodotti` and its sorted view `prodotti_list`, and `section.plan` has `habits` and `streak_list`. A row event carries `{key, value}`. `aTapOnARowControlChangesTheRow` taps the first checkbox of the sorted view, and only the row `r2` of the stored list changes. `eachPlanAnswersInTime` sends the row actions on lists of 100 rows. |
+| `dateInput` cannot bind an empty text. A date field starts at today. | Proved. | The kit test `emit: an empty date start value becomes today, the day of the clock of the kit`. The `dateInput` of `test/lists.plan` passed parse and the smoke step in `eachListAndModalPassesParseAndSmoke`. |
+| `timeInput` holds minutes. The kit converts to and from "HH:MM". | Proved. | The kit test `run: a time field reads "07:30" as 450 minutes and writes it back`. The `timeInput` of `test/lists.plan` holds 480 and 1200 ("08:00" and "20:00") and passed parse and the smoke step in `eachListAndModalPassesParseAndSmoke`. |
+| `numberInput` shows an Apply button, as in today's apps. | Proved for a number field. Changed for a text field and a slider (Task 11c). | A `NumberField` is a `numberInput` with no `inputMode` (`kit/src/run.js` 113), so the host keeps its apply step. A `TextField` and a `Slider` are live inputs with no apply button, as the inputs of the baseline apps: `theKitListTakesTheStepsOfTheBaselineList`, `theTipSliderOfCalcChangesTheTotalWithNoStepByHand`. No device test typed into a number field, so no picture shows its apply button. |
+| `chart` wants a categories array and a number array in the state. | Proved. | `Chart` writes the fields `<key>_labels` and `<key>_values` (Task 5). `tabsChartPassesParseAndSmoke`, `eachCardChartAndTabPassesParseAndSmoke`. |
+| At most 4 images. A picture in each row or card becomes an `emoji`: the row field then holds one emoji sign. | Proved for the emoji. Images are not built in phase 1. | A row field holds one emoji sign, and `icon=$sign` shows it (`mock-habits-uk`, pictures of this run). A `Picture` line is the fault "picture is not built yet" (`kit/src/run.js` 220), so the kit makes no image and has no check of 4 images. |
+| A `picture` need gets its image from the picture maker of the agent (phase 5). In phases 2 to 4, a plan with a `picture` need is not taken. | As planned for phase 1: a `picture` need is a fault. | The kit test `emit: a picture need is a fault "picture is not built yet"`. `model3d.plan` lost its picture line (ruling of Task 9). `kit/test/fixtures/dialogue-rover.plan` keeps the line and gives only that fault. No device test. |
+| `list.reorder` gives a real drag. The prototype used two buttons. | Proved for the reorder event. No finger drag on a device. | The arrows of a row, `move(-1)` and `move(1)`, become the `reorder` of the list (`kit/src/rows.js` 116 to 121, Task 4). The host draws a drag handle for it (`NativeRecordReorder.kt`, `detectDragGestures`). `eachListAndModalPassesParseAndSmoke` sends the event of a drag (`steps_list_move` from `r6` to `r8`), and the order becomes `r7`, `r8`, `r6`. |
+| A `drawing` part becomes one surface that a `canvas` node shows. The kit writes the code that draws it. A shape with `stroke=true` becomes an `arc`, a `polyline`, or a `path`. The limits are for all surfaces of one app together, and a plan over a limit is a fault of its need line. | Proved (Task 8). | `lessonPassesParseAndSmoke`, `eachShapeAndColorPassesParseAndSmoke`, `aReplyAtTheByteLimitPassesTheHostPath`, `aSmallModelBesideADrawingPassesParseAndSmoke`. The orbit of `lesson.plan` has `stroke=true` and becomes an `arc` of 360 degrees (`kit/src/draw.js` 38). A plan over a limit and a fifth surface are faults of the need line (kit tests `emit: a plan over a limit is a fault of its need line` and `emit: a fifth timer on a surface is a fault of its need line`). |
+| `animate` needs frame or timer events, which Alphy gives to an app with a declared surface while its playback is `playing`. The kit asks for these events only while a timed change runs. | Proved (Tasks 8 and 11a). | The reply asks for `{id: "anim", intervalMs: 50}` only while a change runs. In `theLapButtonMovesTheHandInTheDrawnApp`, Alphy's own timer loop of the drawn app moves `angle` to 360. |
+| A `model3d` part is drawn by the kit as polygons on such a surface, with no 3D run-time. A turn by a drag is a pointer event with the 100 ms limit. The prototype also gives two arrow buttons. | Proved (Task 9). | `model3dPassesParseAndSmoke`: 52 faces, a drag of 50 pixels turns the rover from 30 to 60 degrees, and a pointer move takes 9 ms (median). The plan has the two turn buttons. |
+| The three rules of the drawing, of `animate`, and of `model3d` are read from the contract text. Phase 1 proves them with two more saved plans. | Proved. | `lesson.plan` and `model3d.plan` passed parse, the smoke step, and their events in this run. |
+
+### The stop rule
+
+The stop rule of phase 1 (design, section "Phases and stop rules", item 1): if a plan cannot pass inside Alphy's limits, the design comes back to the user before anything else is built.
+If only the drawing or the 3D model cannot pass, that kind leaves the prompt, its requests get `outside`, and the user hears it.
+
+Verdict: the stop rule does not stop. Each of the nine saved plans passes inside each limit of Alphy at `9bcd313`, also the drawing (`lesson`) and the 3D model (`model3d`).
+So the design does not come back to the user for a limit, and the drawing and the 3D model stay in the prompt.
+
+Each plan against each limit, the smallest margin first. The size limits are the limits of the budget test. A limit of time is the host limit: 500 ms for an event in the sandbox (`SandboxContract.EVALUATION_MS`), 100 ms for a surface event (`GraphicsContract.EVALUATION_MS`).
+"none" marks a limit that does not apply to the plan: no surface, or no live input.
+
+| Limit | `calc` | `list` | `quiz` | `tabs-chart` | `timer-rounds` | `tea` | `section` | `lesson` | `model3d` | Smallest margin |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Source, 65536 bytes | 47495 | 48306 | 47875 | 48814 | 48887 | 47194 | 49048 | 50316 | 49951 | `lesson`: 76.8 % used, 15220 bytes left |
+| State with full lists, 49152 bytes | 83 | 12495 | 7322 | 7472 | 282 | 20 | 31650 | 637 | 301 | `section`: 64.4 % used, 17502 bytes left |
+| Definition, 262144 bytes | 50551 | 52560 | 51718 | 53979 | 53235 | 50011 | 55157 | 55898 | 54311 | `lesson`: 21.3 % used |
+| Drawing bytes, 32768 | none | none | none | none | 260 | none | none | 452 | 6589 | `model3d`: 20.1 % used |
+| Fields, 40 | 4 | 4 | 7 | 7 | 4 | 1 | 4 | 7 | 3 | `quiz`, `tabs-chart`, `lesson`: 17.5 % used |
+| Drawing pairs, 2048 | none | none | none | none | 3 | none | none | 5 | 253 | `model3d`: 12.4 % used |
+| Drawing commands, 512 | none | none | none | none | 3 | none | none | 5 | 52 | `model3d`: 10.2 % used |
+| Surface event, 100 ms | none | none | none | none | 2 | none | none | 3 | 10 | `model3d`: 10.0 % used |
+| Slowest timed action, 500 ms | 10 | 19 | 15 | 18 | 10 | 12 | 33 | 15 | 19 | `section`: 6.6 % used |
+| Slowest live input, 500 ms | 10 | 18 | none | 17 | none | none | 33 | none | none | `section`: 6.6 % used |
+| Open, 500 ms | 9 | 18 | 15 | 17 | 10 | 12 | 32 | 14 | 18 | `section`: 6.4 % used |
+| Nodes, 512 | 8 | 16 | 14 | 22 | 16 | 5 | 26 | 22 | 17 | `section`: 5.1 % used |
+| UI, 65536 bytes | 661 | 1159 | 857 | 2015 | 1255 | 577 | 2210 | 1940 | 1206 | `section`: 3.4 % used |
+| Start state, 49152 bytes | 83 | 459 | 370 | 257 | 282 | 20 | 1015 | 637 | 301 | `section`: 2.1 % used |
+| Drawing characters, 2048 | none | none | none | none | 0 | none | none | 5 | 0 | `lesson`: 0.2 % used |
+
+- The smallest margin is the source of `lesson.plan`: 50316 of 65536 bytes, 15220 bytes left, and 9684 bytes under the kit bar 60000. The run-time text is 46662 bytes of each source.
+- The next margin is the full state of `section.plan`: 31650 of 49152 bytes with 100 habits. Each other limit is at most 21.3 % used.
+- The drawing cells are the open reply, except `model3d`, which is the rover at its largest whole turn (6589 bytes).
+- The row count of each list keeps the full screen inside the render work limit of 2048 (ruling of Task 4). The open of each plan with full lists went through `executeEvent`, which checks the state and the reply.
+- The sources of these numbers: the budget table and the kit test of `model3d.plan` (`bun test kit`), and the `time` lines and the `event times` lines of `evidence/alphy-ui/appfile-phase1/logcat.txt`. The scratch script that sorts them is not in the tree.
+
+Limits of this verdict:
+
+- `model3d.plan` passes without the picture line of the prototype plan (ruling of Task 9). `kit/test/fixtures/dialogue-rover.plan` keeps the line and gives the fault "picture is not built yet". Pictures belong to phase 5.
+- The times come from the emulator, not from a phone.
+- The saved plans are fixed plans of this plan, not plans that the model of the app wrote. Phase 2 measures the plans that a model writes.
+
+### Host items
+
+This plan changed no host code. These facts about the host came from the device runs of this plan.
+
+1. The empty text of a chart does not follow the language of the app. `R.string.tool_chart_empty` (`app/src/main/res/values/strings.xml` 399) has no `_en` string and no translation, and `NativeToolUi.kt` 1846 reads it with `stringResource`, not with `miniAppString`.
+   A person sees the Russian "Нет данных для графика" in the Spanish app `tabs-chart`.
+2. The refine action of the shell bar does not follow the language of the app. `R.string.tool_refine` "Изменить" (`strings.xml` 284) shows in each app (`ToolUi.kt` 686). It is a text of the shell, not of the app.
+3. The inactive dots of a `progress` with `variant="dots"` have low contrast in the dark theme (`NativeToolUi.kt` 1337, the track color of `progressTrack` at 369 to 370).
+   A person sees the steps of the lesson of `lesson.plan` with faint inactive dots.
+4. The border of an outlined button on a hero card has no contrast in the dark theme. The host draws the Material 3 `OutlinedButton` border (`NativeToolUi.kt` 1176) on the hero container (`NativeToolUi.kt` 1062): 1.0 to 1 in the dark theme, 1.3 to 1 in the light theme. A tonal button has the color of the hero card.
+   The text of the button reads well. Look rule 8 of `kit/README.md` keeps each outlined and tonal control off a hero card, so no plan of the kit shows it now.
+5. A fast press after the finish of a live text value sends the earlier state version and gets the generic error.
+   The finish button goes when the host commits the final live value as version V (`NativeToolUi.kt` 307, `NativeLiveDraft.complete`). The screen takes the version of an action from the record that the shell model publishes later (`ToolUi.kt` 965, `MiniAppContent`, after `ToolController.kt` 215 `watchStore` and 1382 `loadSnapshots`).
+   A press in that interval sends V-1, and `ArtifactCoordinator.kt` 74 (`current`) throws "The mini-app data changed. Reopen it.".
+   A person sees "Не удалось выполнить действие инструмента. Сохранённые данные доступны." and no new row. The typed text stays, and a second press adds the row.
+   It happened in 3 of 80 presses with a store of 28 apps (2 of 40 in `mock-shopping-it`, 1 of 40 in the baseline app), and in 0 of 80 presses with a store of one app (section "The add that failed one time").
+6. The host writes no log of an action exception. `ToolController.kt` 1355 to 1375 (`run`) keeps only the error text. A person sees only the generic text, and a developer finds no cause in the log.
+7. No way exists to add a row with one press after the typing of a text. `NativeToolUi.kt` 209 to 213 (`allowAction`) refuses a press of a different control before the finish of a live edit and shows the notice `tool_live_input_finish_first` and the finish button. A `form` node is only a container.
+   A person types, finishes the edit with the action key or the finish button, and then presses the add button. The baseline app has the same steps (section "Live inputs").
+8. A reply at the byte limit of a drawing costs about 120 ms of host time for each event, an action or a live input. In this run, the live input of `test/bytes.plan` (32768 bytes, about 350 commands) took 120 ms (median), and the kit's dispatch takes 2 to 5 ms of it (Task 11c).
+   About 90 ms follows the count of commands, and about 30 ms follows the length of the text. Assumption: the cost is in the checks of the host path outside the dispatch (`ArtifactCoordinator.kt` 457, `evaluate`). A probe that times the checks one by one can test it.
+   A person would see a timed change with 50 ms steps fall behind on such a drawing. The saved plans are far under it (`model3d` 6589 bytes, pointer move 10 ms).
+9. A shape of the muted role has the alpha 64 (`SurfaceDrawing.kt` 185 and 245, `MUTED_SHAPE_ALPHA`). A muted line had the contrast 1.5 to 1 (light) and 1.6 to 1 (dark). A look rule of the kit keeps lines out of the muted role.
+10. A disabled button is almost invisible in the dark theme. A person sees the disabled "Atrás" of the steps of `look-guide-es` as a faint outline (`NativeToolUi.kt` 1176, `OutlinedButton` with `enabled=false`).
+11. The host has no pair of left and right arrow icons (`ToolUiCatalog.kt` 42, `shellIcons`). The two turn buttons of `model3d.plan` show a back arrow and a chevron.
+12. The host does not shorten a text in a row. A text with no weight shares the free width with the title (`NativeToolUi.kt` 945 to 947), so a long text breaks into more lines.
+    A person sees "Frutta e verdura" in three lines in `look-shopping-it`, "Пити воду" in two lines in `mock-habits-uk`, and "2017 · One size · Fair" in two lines in the plan and in the baseline app of the bikes.
+13. The faces of a model keep their hex colors, because the shading of a face needs a hex color (`SurfaceDrawing.kt` 247 takes a role name or a hex). The colors of a model do not change with the theme.
+14. A loss of focus does not finish a live edit (`NativeToolUi.kt` 240, `NativeLiveDraft`). Task 11c read it in the code. No device test showed it.
+
+### Open decisions for the user
+
+This section makes no choice. Each item gives the facts for a decision of the user.
+
+1. Where the run-time lives.
+   - Now, the run-time lives inside each app. Each `source` holds the run-time text of 46662 bytes: `dsl.js` 5283, `core.js` 18413, `draw.js` 5509, `rows.js` 3450, and `run.js` with `drag.js` 14007 (section "Sizes at this head").
+   - The kit bar of the run-time text is 48500 bytes, so 1838 bytes are left. The largest source is 53650 bytes (`test/cards.plan`): 11886 bytes under the host limit 65536 and 6350 under the kit bar 60000. The largest saved plan is 50316 bytes (`lesson.plan`): 15220 bytes under the host limit.
+   - The run-time text was 50138 bytes after Task 9, 44626 bytes after the cut of Task 10, and 46662 bytes now. The tasks after Task 10 (the look and the live inputs) added 2036 bytes.
+   - The later phases add pictures and capabilities (phase 5), the canvas code section (phase 6), and more parts. In this form, each of them adds run-time code to each `source`.
+   - The other form: the run-time lives in the host. Then an app holds only its plan and its compiled data, and it needs a host that has the run-time.
+     The saved plans are 387 bytes (`timer-rounds.plan`) to 2314 bytes (`lesson.plan`). Their compiled data with the call line is 532 to 3654 bytes.
+2. The host items that change what a person sees: items 1, 2, 3, 5, 7, 10, 11, and 12 of "Host items". Item 4 shows only if the kit permits an outlined or tonal control on a hero card. Item 8 shows only with a drawing near the byte limit.
+3. The open points for the prompt of phase 2 that the ledger of this plan names:
+   - A year belongs in `text()`, not in a figure: a figure prints a year with a digit group (2,019).
+   - The display sizes of a text (`emphasis` `number` and `display`) are too large for a list row.
+   - `edit=true` of `entries` puts typed fields into rows. An edit of a row in a dialog has no part form yet.
+   - For an alert timer of one round, the host shows its own buttons and alert. So the prompt must not ask for `start=`, `pause=`, `reset=`, or `done=` there. A done text could go into a notification, which needs the permission `POST_NOTIFICATIONS`.
+
+### Pictures
+
+The pictures of this run are in `evidence/alphy-ui/appfile-phase1/light/` and `dark/`, 31 in each theme. Git does not keep these files.
+The contact sheets are `evidence/alphy-ui/appfile-phase1/contact-light.png` and `contact-dark.png`. The pair sheet `pairs-light.png` in the same folder shows each of the five baseline apps at the left and its plan with parts at the right.
+Scratch scripts of Task 12 made the sheets. They are not in the tree.
 
 ## Timers
 
@@ -50,7 +347,7 @@ So the timer part needs no `outside("timer")` rule for a time from a choice.
 ### Open point 2: no effect from a timer event
 
 A timer with rounds or a rest keeps the end of its phase in the state (`NAME_s.end`, in ms of the host's clock).
-Its bar is one surface of 320 by 64 in a `canvas` node.
+Its bar is one surface in a `canvas` node: 320 by 64 in Task 6, and 1024 by 64 since Task 11b-2b (`kit/src/draw.js` `BAR_SURFACE`).
 While it runs, each reply asks for `timers: [{id: "NAME_bar", intervalMs: 1000}]`, and a stop gives `timers: []`.
 A timer event cannot ask for an effect, so this form gives no sound and no vibration.
 The kit's report has the note "need timer: a timer with rounds shows the end of a round on the screen only", and no fault.
@@ -88,7 +385,8 @@ Answer: the canvas form works on the device, so the timer part needs no `outside
 - No test saw a notification. The kit asks for no notification.
 - No test pressed the host's own Start, Pause, or Reset button of a foreground timer.
   So no test saw the host's countdown run with the new duration. The proof stops at Alphy's validator and parser of the reply.
-- No test took a screenshot of the canvas. The drawing commands passed `GraphicsContract`, and nobody looked at the bar.
+- In Task 6, no test took a screenshot of the canvas. The drawing commands passed `GraphicsContract`, and nobody looked at the bar.
+  Since Task 11a, `picturesOfEachPlan` takes a picture of the bar of `timer-rounds` in both themes (section "Look").
 - No test sent a timer event with a playback state other than `playing`.
 - No test closed the app while a timer ran. Only a kit test shows that an open moves a timer to the clock of now.
 
@@ -105,7 +403,7 @@ Each module of the run-time puts a text that only the compile step reads behind 
 `kit/build.js` builds the run-time text from the modules without that line and with `define: {MESSAGES: "false"}`, so the minifier drops each such text.
 Bun 1.3.9 does not put the value of a module-level constant into the lines of a module that has an import, so a constant with the value false was not sufficient.
 
-| Module | Bytes at `850c5e3` | Bytes now | Change |
+| Module | Bytes at `850c5e3` | Bytes at `f1865a5` | Change |
 | --- | --- | --- | --- |
 | `dsl.js` | 5596 | 5283 | -313 |
 | `core.js` | 19744 | 17557 | -2187 |
@@ -117,12 +415,13 @@ Bun 1.3.9 does not put the value of a module-level constant into the lines of a 
 Method of the split: a scratch script builds the names that `run.js` and `drag.js` import, as `runtimeText` builds them, with one more module each time in the order `dsl`, `core`, `draw`, `rows`.
 The bytes of a module are the increase of the minified text. The rest of the run-time text is `run.js` and `drag.js`.
 The kit test `source: the run-time text is at most 46500 bytes` held the bar. Task 11b-1 changed the bar to 48500 bytes (see "Look vocabulary").
-Each source is 5512 bytes smaller than at `850c5e3`. The rule of an open after a drag added 48 bytes. The budget table below is from `0b18408`, before these 48 bytes.
+At `f1865a5`, each source was 5512 bytes smaller than at `850c5e3`. The rule of an open after a drag added 48 bytes after `0b18408`.
+The split at `9bcd313` is in "Phase 1 proof", section "Sizes at this head".
 
 ### Budget of each compiled plan
 
-The kit test `budget: each saved plan is inside each limit` (`kit/test/budget.test.js`) prints this table.
-It measures the 9 saved plans, the 8 test plans, and the 5 fixtures that compile.
+The kit test `budget: each saved plan is inside each limit` (`kit/test/budget.test.js`) prints a table of each plan that compiles, with the columns below.
+The table at `9bcd313` is in "Phase 1 proof" (section "Sizes at this head"). In Task 10, it measured the 9 saved plans, the 8 test plans, and the 5 fixtures that compiled.
 The fixtures `catalog`, `dialogue-game`, `dialogue-materials`, and `dialogue-rover` do not compile, and the test skips them.
 
 - source: the UTF-8 bytes of the source (`SandboxContract.MAX_SOURCE_BYTES`). The test fails at 60000 bytes or more.
@@ -131,34 +430,8 @@ The fixtures `catalog`, `dialogue-game`, `dialogue-materials`, and `dialogue-rov
 - fields: the top-level fields of the state schema (`ToolValueSchema`).
 - commands, pairs, chars, and bytes: the drawing of the open reply over all its surfaces (`GraphicsContract.frame`). A plan with no surface shows 2 bytes: the text `{}`.
 
-| Plan | Source | Definition | UI | Nodes | State | Fields | Commands | Pairs | Chars | Bytes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Limit | 65536 (bar 60000) | 262144 | 65536 | 512 | 49152 | 40 | 512 | 2048 | 2048 | 32768 |
-| `plans/tea.plan` | 45092 | 47759 | 541 | 5 | 20 | 1 | 0 | 0 | 0 | 2 |
-| `plans/lesson.plan` | 48247 | 53822 | 1965 | 22 | 688 | 7 | 5 | 5 | 5 | 450 |
-| `plans/calc.plan` | 45411 | 48319 | 623 | 8 | 83 | 4 | 0 | 0 | 0 | 2 |
-| `plans/timer-rounds.plan` | 46698 | 50842 | 1190 | 17 | 282 | 4 | 2 | 2 | 0 | 201 |
-| `plans/list.plan` | 46159 | 50404 | 1172 | 15 | 494 | 5 | 0 | 0 | 0 | 2 |
-| `plans/section.plan` | 46543 | 51970 | 1691 | 24 | 1019 | 4 | 0 | 0 | 0 | 2 |
-| `plans/quiz.plan` | 45791 | 49562 | 895 | 14 | 370 | 7 | 0 | 0 | 0 | 2 |
-| `plans/model3d.plan` | 47563 | 51694 | 1143 | 17 | 301 | 3 | 52 | 253 | 0 | 6447 |
-| `plans/tabs-chart.plan` | 46777 | 52135 | 2252 | 22 | 284 | 7 | 0 | 0 | 0 | 2 |
-| `test/rich.plan` | 46854 | 62351 | 2473 | 24 | 10281 | 5 | 0 | 0 | 0 | 2 |
-| `test/nodes.plan` | 47039 | 53414 | 3020 | 45 | 450 | 12 | 0 | 0 | 0 | 2 |
-| `test/lists.plan` | 49527 | 59137 | 4657 | 54 | 1247 | 12 | 0 | 0 | 0 | 2 |
-| `test/shapes.plan` | 46992 | 51349 | 1061 | 15 | 375 | 7 | 14 | 24 | 7 | 1226 |
-| `test/bytes.plan` | 45067 | 47545 | 349 | 5 | 17 | 2 | 2 | 3 | 1 | 224 |
-| `test/free.plan` | 45601 | 49703 | 1174 | 19 | 426 | 5 | 0 | 0 | 0 | 2 |
-| `test/cards.plan` | 51476 | 66766 | 5571 | 73 | 5050 | 18 | 0 | 0 | 0 | 2 |
-| `test/model.plan` | 45731 | 48962 | 720 | 12 | 96 | 3 | 12 | 51 | 0 | 1394 |
-| `test/fixtures/price-filter.plan` | 46037 | 51349 | 1196 | 14 | 1606 | 7 | 0 | 0 | 0 | 2 |
-| `test/fixtures/water-ko.plan` | 45310 | 48198 | 654 | 10 | 62 | 2 | 0 | 0 | 0 | 2 |
-| `test/fixtures/habits.plan` | 45843 | 49619 | 1097 | 15 | 261 | 4 | 0 | 0 | 0 | 2 |
-| `test/fixtures/units-pl.plan` | 46067 | 49634 | 1036 | 11 | 155 | 4 | 0 | 0 | 0 | 2 |
-| `test/fixtures/shopping.plan` | 45969 | 50102 | 1118 | 15 | 463 | 5 | 0 | 0 | 0 | 2 |
-
-The largest source is `test/cards.plan` with 51476 bytes, 8524 bytes under the bar. The largest saved plan is `plans/lesson.plan` with 48247 bytes.
-The state column is the start state. The state of a list that is full to its row count is in the next table.
+At `0b18408` (Task 10), the largest source was `test/cards.plan` with 51476 bytes, and the largest saved plan was `plans/lesson.plan` with 48247 bytes.
+The state column is the start state. The state with each list full to its row count is in the time table of "Times at this head".
 
 ### Time of each saved plan
 
@@ -172,37 +445,26 @@ The device test `eachPlanAnswersInTime` does these steps for each saved plan:
 4. For a plan with an add, send the draft steps through `executeEvent`. Time the add five times through `SandboxClient.execute`, and assert that its reply changes the state.
    Then send the add through `executeEvent`. Each list then has `maxItems` rows.
 5. Send `open` again, and assert that each list has `maxItems` rows. Time `open` five times through `SandboxClient.execute`.
-6. Run the smoke step again from the full state, and keep each action event that it sends.
+6. Run the smoke step again from the full state, and keep each action event that it sends. Since Task 11c, it also keeps each live input event.
 7. Keep each of these actions that `ToolUiCatalog.validateAction` takes on the open screen. Time each one five times on the full state.
+   Since Task 11c, the test also times each live input event that `ToolUiCatalog.validateLiveInput` takes (section "Time of a live input").
 8. For an action that shows after one earlier event, send that event through `executeEvent`, time the action five times, and assert that its reply changes the state.
    Then send the action through `executeEvent`. These are `timer_pause` and `timer_reset` after `timer_start`, and `lesson_back` after `lesson_next`.
 9. Take the slowest action whose reply changes the state, the add and the actions of step 8 included. Send it once more through `executeEvent`.
 10. For a plan with a surface, send the start event and five surface events through one retained `GraphicsSession`.
 11. Assert the set of action ids of the open screen that no timed event has: `demleme_timer` for `tea`, and no action id for each other plan.
 
-The limits are 250 ms for `open` and for each timed action, also an action whose reply keeps the state, and 50 ms for a surface event.
+The limits are 250 ms for `open` and for each timed action, also an action whose reply keeps the state, and 50 ms for a surface event. Since Task 11c, the limit of a live input is 100 ms.
 Alphy stops an evaluation at 500 ms (`SandboxContract.EVALUATION_MS`), and a frame, pointer, or timer event at 100 ms (`GraphicsContract.EVALUATION_MS`).
-The medians of the run `appfile-sizes-times-round`:
+The table of the run `appfile-phase1` at `9bcd313` is in "Phase 1 proof" (section "Times at this head").
 
-| Plan | Open (ms) | Slowest action timed (ms) | Action | Add to `maxItems` (ms) | After one earlier event (ms) | Surface event (ms) | State bytes, full | Actions: change state / on the open screen / smoke | Not timed |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `calc` | 9 | 10 | `bill_field` | none | none | none | 83 | 6 / 9 / 9 | none |
-| `list` | 18 | 18 | `prodotti_add` | 18 | none | none | 12530 | 6 / 10 / 11 | none |
-| `quiz` | 16 | 16 | `revealButton` | none | none | none | 7322 | 3 / 3 / 3 | none |
-| `tabs-chart` | 17 | 19 | `gastos_new_importe` | 18 | none | none | 7498 | 11 / 17 / 18 | none |
-| `timer-rounds` | 10 | 12 | `timer_reset` | none | `timer_pause` 11, `timer_reset` 12 | 3 (`timer_bar`) | 282 | 1 / 1 / 3 | none |
-| `tea` | 13 | 12 | `cay_field` | none | none | none | 20 | 1 / 2 / 2 | `demleme_timer` |
-| `section` | 32 | 36 | `habits_remove` | 32 | none | none | 31652 | 17 / 32 / 33 | none |
-| `lesson` | 15 | 16 | `lesson_next` | none | `lesson_back` 15 | 3 (`anim`) | 688 | 7 / 9 / 10 | none |
-| `model3d` | 19 | 20 | `rover_part_camera` | none | none | 11 (pointer move) | 301 | 6 / 6 / 6 | none |
-
-The slowest time is 36 ms for an action and 11 ms for a surface event, so no event needed a change for speed.
+In the run `appfile-sizes-times-round` of Task 10, the slowest time was 36 ms for an action (`section`) and 11 ms for a surface event, so no event needed a change for speed.
 The actions of one plan differ by a few ms, so the name of the slowest action changes from run to run.
 In the run `appfile-sizes-times-7`, the slowest action took 42 ms (`section`). Its actions took 37 to 42 ms at first and 32 to 35 ms later, for the same kind of row event.
 In the run `appfile-sizes-times-6` on the same test, the times of `section.plan` rose from 32 to 41 to 57 ms in the middle of the plan, and its slowest action took 52 ms.
 Assumption: other work on the host computer caused these changes. A run with nothing else on the host computer can test this assumption.
 The full lists are 100 rows each: `prodotti` and `prodotti_list`, `cards`, `gastos`, and `habits` and `streak_list`.
-The largest full state is 31652 bytes (`section.plan`), under the limit of 49152 bytes.
+In the run `appfile-sizes-times-round`, the largest full state was 31652 bytes (`section.plan`), under the limit of 49152 bytes.
 
 ### Runs of Task 10
 
@@ -275,7 +537,7 @@ The split comes from a probe of the run `appfile-live-times` that timed `Graphic
 The device class `AppFileLookTest` shows each compiled plan as a saved app in the real shell (`ShellFixture`, `ShellRobot`, `ToolStore.saveTool`).
 It compiles each plan with `parsedAndSmoked` of `AppFileProofTest`, which gives the spec the language of the compile result (`ToolSpec.withAppLanguage`). The shell makes no model call.
 
-- `picturesOfEachPlan` opens each of the nine saved plans and each look fixture of `kit/build.js` (`LOOK_FIXTURES`: five in Task 11a, seven since Task 11b-1, twelve since Task 11b-2a). Since Task 11b-2a, it also opens the spec of each of the five baseline apps (section "Look with parts").
+- `picturesOfEachPlan` opens each of the nine saved plans and each look fixture of `kit/build.js` (`LOOK_FIXTURES`: five in Task 11a, seven since Task 11b-1, twelve since Task 11b-2a, fourteen since Task 11b-2b). Since Task 11b-2a, it also opens the spec of each of the five baseline apps (section "Look with parts").
   For each app, it waits for the title, the refine action, and the reply to the open event. Then it takes a screenshot of the first screen.
   For a plan with a surface (`timer-rounds`, `lesson`, `model3d`), it waits until the inside of each canvas holds more than one color.
   It takes the pictures in the light theme and in the dark theme, and it sets the night mode of the emulator back in a `finally` block.
@@ -292,6 +554,7 @@ bun kit/look.js
 ```
 
 The last column is what the pictures of the run `appfile-look-before-3` show. "Dark" marks a defect of the dark theme only.
+The table is the state of Task 11a. The section "Look of each plan" gives the numbers and the pictures since Task 11b-2b.
 
 | Plan | Hero | Typed fields, first screen | Typed fields in rows | Seen in the picture |
 | --- | --- | --- | --- | --- |
@@ -319,6 +582,8 @@ With the language of each app set, these host texts are still not in the languag
 The pictures of `appfile-look-before-3` and `appfile-look-before-2` are the same below the status bar, except the timer card of `tea` in both themes.
 
 ### Known look points
+
+This table is the state of Task 11a (run `appfile-look-before-3`). The section "Look of each plan" gives the state since Task 11b-2b.
 
 | Point | Plan | Result |
 | --- | --- | --- |
