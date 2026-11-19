@@ -441,13 +441,14 @@ const PARTS = {
     return { lines: [...lines, `${name}_view = Card([${[`${name}_model`, ...rows].join(", ")}])`], top: [`${name}_view`] };
   },
 
-  // need focus = card("Title", $/rover/selected == "camera" ? "The camera" : "The rover", eyebrow="In focus"): a card of text. The title and the text can be formulas.
+  // need focus = card("Title", $/rover/selected == "camera" ? "The camera" : "The rover", eyebrow="In focus", icon="Layers"): a card of text with a muted body.
+  // The title and the text can be formulas.
   async card(name, need) {
-    const [title, text] = need.args, made = [];
+    const [title, text] = need.args, made = [], icon = need.named.icon;
     if (need.named.eyebrow) made.push(["eyebrow", `Text(${show(need.named.eyebrow)}, variant="eyebrow")`]);
     made.push(["title", `Heading(${show(title)})`]);
-    if (text) made.push(["text", `Text(${show(text)})`]);
-    return { lines: [...made.map(([key, line]) => `${name}_${key} = ${line}`), `${name}_view = Card([${made.map(([key]) => `${name}_${key}`).join(", ")}])`], top: [`${name}_view`] };
+    if (text) made.push(["text", `Text(${show(text)}, tone="muted")`]);
+    return { lines: [...made.map(([key, line]) => `${name}_${key} = ${line}`), `${name}_view = Card([${made.map(([key]) => `${name}_${key}`).join(", ")}]${icon ? `, icon=${show(icon)}` : ""})`], top: [`${name}_view`] };
   },
 
   // need source = link("Apollo 17 photo", "https://science.nasa.gov/...", note="Open the source"): a link to a web page. The prototype only draws it.
@@ -509,7 +510,7 @@ const OPTIONS = {
   chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max", "lessText", "moreText", "addText", "icon", "resetText"],
   timer: ["alert", "rounds", "rest", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],
-  model3d: ["turn", "parts", "explode", "joinText", "explodeText"], card: ["eyebrow"], link: ["note"], lesson: ["next", "back", "stepText"],
+  model3d: ["turn", "parts", "explode", "joinText", "explodeText"], card: ["eyebrow", "icon"], link: ["note"], lesson: ["next", "back", "stepText"],
   question: ["options", "right", "rightText", "wrongText"], content: [], hole: [],
 };
 /** The options that each kind of input uses. A kind that is not here is a number field or a slider. */

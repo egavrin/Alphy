@@ -55,6 +55,12 @@ test("template: a lesson of at most 12 steps shows its count once, in the dots, 
   expect([long.definition.initialState.d[count.bind.slice(2)], every(long.definition.ui).find((node) => node.type === "progress").variant]).toEqual(["Step · 1 / 13", "bar"]);
 });
 
+test("template: icon= gives a card its icon, and the body text of a card is muted", async () => {
+  const { definition } = await built('app("T", lang="en")', 'need legend = card("Legend", "Teal is the Moon", icon="Layers")');
+  const card = every(definition.ui).find((node) => node.type === "card");
+  expect([card.icon, card.children.map((node) => [node.text, node.style])]).toEqual(["Layers", [["Legend", { emphasis: "title" }], ["Teal is the Moon", { tone: "muted" }]]]);
+});
+
 test("template: the title of a chart shows once, as the label of the chart, with no section around it", async () => {
   const { definition } = await built('app("T", lang="en")', '$/days = [{day: "Mo", steps: 6}, {day: "Tu", steps: 10}]', 'need line = chart("Steps", $/days, $day, $steps)');
   const all = every(definition.ui);
