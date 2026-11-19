@@ -911,8 +911,8 @@ test("run: a choice stays inside its options, and a choice with no option leaves
 test("run: an entries field named id is a fault of the need, and start rows need ids of their own (final review 8)", async () => {
   // ToolValueSchema: the id of a row is not blank, has at most 128 characters, and no other row has it.
   const typed = await compileAppFile('app("T", lang="en")\nneed things = entries("Things", fields={id: "text", name: "text"})');
-  // The need made no line, so the plan has no root line either.
-  expect(typed.faults).toEqual(["line: need things: a field named id is the key of each row, which the host gives. Give the field a different name: need things = entries(\"Things\", fields={id: \"text\", name: \"text\"})", "no root line"]);
+  // The need made no line, so the plan has no root line either. The fault of the need says why (A0-K2).
+  expect(typed.faults).toEqual(["line: need things: a field named id is the key of each row, which the host gives. Give the field a different name: need things = entries(\"Things\", fields={id: \"text\", name: \"text\"})"]);
   for (const id of ['"a"', '""', `"${"x".repeat(129)}"`]) {
     const rows = await compileAppFile(`app("T", lang="en")\nneed things = entries("Things", fields={name: "text"}, rows=[{id: "a", name: "x"}, {id: ${id}, name: "y"}])`);
     expect(rows.faults).toEqual([`need things: a row of $/things has the id ${id.length > 40 ? `"${"x".repeat(129)}"` : id}, and Alphy keys each row by an id of 1 to 128 characters that no other row has. Give each row an id of its own, or no id`]);

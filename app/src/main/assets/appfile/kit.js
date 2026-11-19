@@ -2168,13 +2168,16 @@ function report(file) {
     const line = named("$/" + name);
     return `${line === "$/" + name ? "" : line + ": "}$/${name} is not a finite number at the start`;
   });
+  // The fault of a need, of a need line, or of the root line already says why the screen has no root. A second fault "no root line"
+  // made a model write root by hand (A0-K2), so the report gives it only with no such cause.
+  const rootless = !file.get("root") && !file.partFaults.length && !file.faults.some((fault) => /^(need\s|root\s*=)/.test(fault.text));
   const faults = [
     // A line of many thousand characters, such as one with too many levels, gives its start only.
     ...[...file.faults, ...file.partFaults].map((f) => `${f.line == null ? "line" : "line " + f.line}: ${f.message}: ${f.text.length > 200 ? f.text.slice(0, 200) + "..." : f.text}`),
     ...app.faults.map((f) => `${named(f.where)}: ${f.message}`),
     ...circles(file, named),
     ...broken,
-    ...(file.get("root") ? [] : ["no root line"]),
+    ...(rootless ? ["no root line"] : []),
     ...gaps(file, app.reached, named),
     ...looks(file, named),
   ];

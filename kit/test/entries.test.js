@@ -131,7 +131,7 @@ test("entries: icon= gives each row a leading emoji named by the title of the li
   for (const [option, fault] of [["icon=$nothing", "need items: icon=$nothing reads no field of the rows. Use a field of fields= or a name of show="],
     ['icon="Cart"', 'need items: icon= of a list is an emoji, such as icon="🛒", and "Cart" is not one']]) {
     const line = `need items = entries("Items", fields={name: "text"}, ${option})`;
-    expect(report(await planned(`app("T")\n${line}`)).faults).toEqual([`line: ${fault}: ${line}`, "no root line"]);
+    expect(report(await planned(`app("T")\n${line}`)).faults).toEqual([`line: ${fault}: ${line}`]);
   }
 });
 

@@ -56,6 +56,20 @@ test("compileAppFile: a fault of a line that a part wrote names its need, and no
   expect((await compileAppFile('app("T", lang="en") + 1\nroot = Column([Text("a")])')).faults).toEqual(['line 1: an app line is one call of app, such as app("Title", lang="en"): app("T", lang="en") + 1']);
 });
 
+test('"no root line" as a second fault (A0-K2): the fault of a need, of a need line, or of the root line explains a screen with no root, and a plan with no need still gets the fault', async () => {
+  // A need whose part fails writes no line. Its fault is the cause, so the model does not write root by hand (A0-K2, alarm of r0-sol-medium).
+  const id = 'need things = entries("Things", fields={id: "text"})';
+  expect(await faultsOf(id)).toEqual([`line: need things: a field named id is the key of each row, which the host gives. Give the field a different name: ${id}`]);
+  // A need line or a root line that the kit cannot read is the cause too.
+  expect(await faultsOf("need x = figure(")).toEqual(["line 2: value expected at the end of the line: need x = figure("]);
+  expect(await faultsOf("root = Column([")).toEqual(["line 2: value expected at the end of the line: root = Column(["]);
+  // A plan with no need has no screen, also beside the fault of a line that is not a need or root.
+  expect(await faultsOf("$/n = 1")).toEqual(["no root line"]);
+  expect(await faultsOf("$/n = (")).toEqual(["line 2: value expected at the end of the line: $/n = (", "no root line"]);
+  // A need that shows nothing, such as a hidden list, explains nothing.
+  expect(await faultsOf('need items = entries("Items", hidden=true)')).toEqual(["no root line"]);
+});
+
 test("compileAppFile: a field of a list with the name of a line of the list part is a fault of the need (final review 13)", async () => {
   // fields= and show= of an entries need name the lines NAME_FIELD of its part, so a field must not have the name of another line of the part.
   for (const field of ["row", "list", "view", "main", "add", "remove", "hero", "emoji", "up", "down", "open", "addRow", "confirm", "yes", "no"]) {
