@@ -1,4 +1,5 @@
-// The sandbox entry of the kit: an app file in, the report of the host and the app definition out. kit/build.js makes it the one global of the bundle.
+// The sandbox entry of the kit: an app file in, the report of the host and the app definition out. kit/build.js makes compileAppFile,
+// patchAppFile, and readPlanReply the globals of the bundle.
 
 import { AppFile } from "./dsl.js";
 import { expand } from "./parts.js";
@@ -9,18 +10,35 @@ import { emit } from "./emit.js";
  * The faults hold the line faults and the report faults, or, when the report is clean, what the emitter cannot build yet.
  * A definition comes only with no fault. A throw inside the kit is the one fault "kit: <message>".
  * The host reads the result as a promise (AppFileCompiler.kt: compileAppFile(...).then(JSON.stringify)), so the entry stays async.
+ * hole is true when the file has a need of kind hole, also with faults: the plan step of the app gives such a plan to its loop.
  */
 export async function compileAppFile(text) {
+  let hole = false;
   try {
     const file = new AppFile().feedText(text);
+    hole = file.of("need").some((entry) => entry.tree.name === "hole");
     expand(file);
     const { faults, notes } = report(file);
-    if (faults.length) return { faults, notes, definition: null, language: null };
+    if (faults.length) return { faults, notes, definition: null, language: null, hole };
     const emitted = emit(file);
-    return { faults: emitted.faults, notes, definition: emitted.definition, language: emitted.language };
+    return { faults: emitted.faults, notes, definition: emitted.definition, language: emitted.language, hole };
   } catch (failure) {
-    return { faults: [`kit: ${failure?.message ?? failure}`], notes: [], definition: null, language: null };
+    return { faults: [`kit: ${failure?.message ?? failure}`], notes: [], definition: null, language: null, hole };
   }
+}
+
+/** The lines of a reply: an empty line and a markdown fence line go. Each other text stays, and the kit reports it. */
+export const linesOf = (text) => text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("```"));
+const OUTSIDE = /^\s*outside\(\s*"([a-z0-9]{1,16})"\s*\)\s*$/;
+
+/**
+ * A reply of a plan call: {kind: "outside", word} for the one line outside("word"), else {kind: "plan", text} with the lines of the reply
+ * and a final newline. The word is 1 to 16 small Latin letters or digits, such as 3d, and the reader holds no list of words.
+ * A reply of prose is a plan too: the compile reports its faults.
+ */
+export function readPlanReply(text) {
+  const lines = linesOf(text), word = lines.length === 1 ? OUTSIDE.exec(lines[0])?.[1] : undefined;
+  return word ? { kind: "outside", word } : { kind: "plan", text: lines.join("\n") + "\n" };
 }
 
 /** A line of an app file: a need, a state or formula, the header, a check, a delete, or a component. A repair reply keeps only these, so its prose and fences go. */

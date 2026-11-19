@@ -2,7 +2,8 @@
 // the merge of a repair, and the record of a request. No test calls the API.
 
 import { expect, test } from "bun:test";
-import { BARS, PROMPT, SET_E, barFaults, bodyOf, checkOne, faultTable, kindOf, merge, numbers, repairText, repairsOf, taskText, worstCase } from "../modelcheck.js";
+import { BARS, SET_E, barFaults, bodyOf, checkOne, faultTable, kindOf, merge, numbers, repairsOf, worstCase } from "../modelcheck.js";
+import { PROMPT, repairText, taskText } from "../prompt.js";
 import "./helpers.js";
 
 const PLAN = 'app("Tip", lang="en")\nneed bill = input("money", "Bill", 80, min=0, max=500)\nneed tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])\n';

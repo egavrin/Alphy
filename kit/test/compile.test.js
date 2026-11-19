@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext, runInContext } from "node:vm";
-import { compileAppFile, patchAppFile } from "../src/compile.js";
+import { compileAppFile, patchAppFile, readPlanReply } from "../src/compile.js";
 import { AppFile } from "../src/dsl.js";
 import { expand } from "../src/parts.js";
 import { bundle, iconModule, outputs, planCopies, plansIn, script, withoutMessages } from "../build.js";
@@ -21,6 +21,32 @@ test("compileAppFile: calc.plan gives a definition and no fault", async () => {
   expect(result.faults).toEqual([]);
   expect(result.definition.title).toBe("Tip split");
   expect(result.language).toBe("en");
+});
+
+test("readPlanReply (task 1): one outside line gives its word as it is, also in a fence with blank lines", () => {
+  expect(readPlanReply('outside("game")\n')).toEqual({ kind: "outside", word: "game" });
+  expect(readPlanReply('\n```\noutside("3d")\n```\n')).toEqual({ kind: "outside", word: "3d" });
+  // The reader holds no list of words: each word of 1 to 16 small Latin letters or digits is an outside reply.
+  expect(readPlanReply('  outside( "fridge" )  ')).toEqual({ kind: "outside", word: "fridge" });
+  // Each other reply is a plan, also prose: the kit reports its faults.
+  for (const reply of ['outside("Game")', 'outside("a_b")', `outside("${"a".repeat(17)}")`, 'outside("")', 'outside("game")\nneed x = content("x")', "I cannot do that."]) {
+    expect([reply, readPlanReply(reply).kind]).toEqual([reply, "plan"]);
+  }
+});
+
+test("readPlanReply (task 1): a plan in a fence with blank lines gives its lines with no blank line and a final newline, and the plan compiles with no fault", async () => {
+  const text = plan("calc"), read = readPlanReply("```plan\n\n" + text.trimEnd().split("\n").join("\n\n") + "\n```\n\n");
+  expect(read).toEqual({ kind: "plan", text });
+  expect((await compileAppFile(read.text)).faults).toEqual([]);
+  // Prose stays in the text, so that the compile names it.
+  expect(readPlanReply("Here it is:\n```\n" + text + "```")).toEqual({ kind: "plan", text: "Here it is:\n" + text });
+});
+
+test("compileAppFile (task 1): hole is true when the plan has a need of kind hole, whether or not the compile is clean", async () => {
+  const lines = 'app("T", lang="en")\nneed chart = hole("A chart of spending")\n';
+  const open = await compileAppFile(lines), built = await compileAppFile(lines + 'chart_view = Text("Spending")\n');
+  expect([open.hole, open.faults.length > 0, built.hole, built.faults]).toEqual([true, true, true, []]);
+  expect([(await compileAppFile(plan("calc"))).hole, (await compileAppFile(null)).hole]).toEqual([false, false]);
 });
 
 test("compileAppFile: a need with no part gives one fault that names its line", async () => {
@@ -146,13 +172,16 @@ test("patchAppFile (A0-K1): each of the 41 saved repairs that writes a need of i
   expect(hits).toBe(41);
 });
 
-test("bundle: it defines only compileAppFile and patchAppFile, and the sandbox expression compiles calc.plan and patches a plan through them", async () => {
+test("bundle: it defines only compileAppFile, patchAppFile, and readPlanReply, and the sandbox expression compiles calc.plan, patches a plan, and reads a reply through them", async () => {
   // The sandbox has no structuredClone and no host API: a fresh context of the language is closer to it than Bun's own.
   const context = createContext();
   const names = () => [...runInContext("Object.getOwnPropertyNames(globalThis)", context)];
   const before = names();
   const text = await runInContext(`${await bundle()}\ncompileAppFile(${JSON.stringify(plan("calc"))}).then(JSON.stringify)`, context);
-  expect(names().filter((name) => !before.includes(name))).toEqual(["compileAppFile", "patchAppFile"]);
+  expect(names().filter((name) => !before.includes(name))).toEqual(["compileAppFile", "patchAppFile", "readPlanReply"]);
+  for (const reply of ["```\noutside(\"game\")\n```", "```\n" + plan("calc") + "```"]) {
+    expect(JSON.parse(runInContext(`JSON.stringify(readPlanReply(${JSON.stringify(reply)}))`, context))).toEqual(readPlanReply(reply));
+  }
   expect(JSON.parse(text)).toEqual(JSON.parse(JSON.stringify(await compileAppFile(plan("calc")))));
   const reply = 'need tip = input("percent", "Tip", 20)\ndelete people';
   expect(runInContext(`patchAppFile(${JSON.stringify(plan("calc"))}, ${JSON.stringify(reply)})`, context)).toBe(patchAppFile(plan("calc"), reply));

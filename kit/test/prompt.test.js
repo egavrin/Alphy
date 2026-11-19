@@ -4,7 +4,8 @@
 import { expect, test } from "bun:test";
 import { ICON_NAMES } from "../src/core.js";
 import { HOST_ICONS } from "../src/icons.js";
-import { PROMPT as SECTIONS } from "../modelcheck.js";
+import { PROMPT as SECTIONS, changeText, repairText } from "../prompt.js";
+import { promptAsset } from "../build.js";
 import { faultsOf } from "./helpers.js";
 
 const SYSTEM = SECTIONS.System;
@@ -15,8 +16,8 @@ const KINDS = SYSTEM.slice(SYSTEM.indexOf("Kinds."), SYSTEM.indexOf("\nFormulas:
 const EXAMPLES = [...SYSTEM.matchAll(/^Request: (.*)\n((?:.+\n?)+)/gm)].map(([, request, plan]) => [request, plan]);
 const optionsIn = (text) => [...new Set([...text.matchAll(/\b([A-Za-z]+)=/g)].map(([, key]) => key))];
 
-test("prompt: the file has the sections System, Repair, and Dialogue", () => {
-  expect(Object.keys(SECTIONS)).toEqual(["System", "Repair", "Dialogue"]);
+test("prompt: the file has the sections System, Repair, Dialogue, and Change", () => {
+  expect(Object.keys(SECTIONS)).toEqual(["System", "Repair", "Dialogue", "Change"]);
   for (const text of Object.values(SECTIONS)) expect(text.length).toBeGreaterThan(100);
   expect(KINDS.length).toBe(17);
   expect(EXAMPLES.length).toBe(4);
@@ -36,6 +37,27 @@ test("prompt (K1 fix 4): outside has a sixth word, other, for a main thing that 
   expect([...SYSTEM.matchAll(/outside\("(\w+)"\)/g)].map(([, word]) => word)).toEqual(["game", "drawing", "3d", "picture", "device", "other"]);
   expect(SECTIONS.Repair).toContain("delete NAME removes a need line, and delete $/NAME removes a state line");
   expect(SECTIONS.Repair).not.toContain("component");
+});
+
+test("prompt (task 1): the section Change is one paragraph that names the changed lines, delete NAME, and outside", () => {
+  const change = SECTIONS.Change;
+  expect(change.split("\n")).toHaveLength(1);
+  for (const part of ["delete NAME", 'outside("', 'outside("other")', "Do not rename a need or a field", "Reply with lines only."]) expect([part, change.includes(part)]).toEqual([part, true]);
+  expect(changeText({ request: "Add a note", plan: "P\n\n" })).toBe(`Add a note\n\nYour app file:\nP\n\n${change}`);
+});
+
+test("prompt.json (task 1): it holds each section of prompt.md and the two templates, and a filled template is the text that the model check sends", () => {
+  const asset = promptAsset();
+  expect(Object.keys(asset)).toEqual(["system", "repair", "dialogue", "change", "repairTask", "changeTask"]);
+  expect([asset.system, asset.repair, asset.dialogue, asset.change]).toEqual([SECTIONS.System, SECTIONS.Repair, SECTIONS.Dialogue, SECTIONS.Change]);
+  expect(Object.values(asset).filter((text) => typeof text !== "string" || text.length < 100 || text.includes("undefined"))).toEqual([]);
+  for (const part of ["{{task}}", "{{plan}}", "- {{faults}}"]) expect([part, asset.repairTask.includes(part)]).toEqual([part, true]);
+  expect([asset.repairTask.endsWith(SECTIONS.Repair), asset.changeTask.endsWith(SECTIONS.Change)]).toEqual([true, true]);
+  // The host fills each placeholder one time: the plan with trimEnd, and the faults joined by "\n- ".
+  const fill = (template, values) => template.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key]);
+  const plan = 'app("T", lang="en")\nneed a = content("a")\n', faults = ["f1", "f2"];
+  expect(fill(asset.repairTask, { task: "TASK", plan: plan.trimEnd(), faults: faults.join("\n- ") })).toBe(repairText({ task: "TASK", plan, faults }));
+  expect(fill(asset.changeTask, { request: "Add a note", plan: plan.trimEnd() })).toBe(changeText({ request: "Add a note", plan }));
 });
 
 test("prompt (K2): the timer paragraph keeps the rest between two rounds and names cycle=true for a cycle of two phases", () => {

@@ -9,9 +9,10 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { LINE, compileAppFile, patchAppFile } from "./src/compile.js";
+import { LINE, compileAppFile, linesOf, patchAppFile, readPlanReply } from "./src/compile.js";
 import { runtime } from "./src/emit.js";
 import { runtimeText } from "./build.js";
+import { PROMPT, PROMPT_HASH, repairText, taskText } from "./prompt.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const EVIDENCE = ROOT + "evidence/modelcheck/";
@@ -23,12 +24,6 @@ const REPORTS = ["/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-17
 const MAX_OUTPUT = 128000;
 /** The device bars of a clean plan: Bun is about 1.3 times faster than the device, whose compile cap is 3000 ms, and the host refuses a larger start state. */
 export const BARS = { compileMs: 2300, stateBytes: 49152 };
-
-/** The text under each level-2 heading of kit/prompt.md, by the heading. */
-export const PROMPT = Object.fromEntries(readFileSync(new URL("./prompt.md", import.meta.url), "utf8").split(/^## /m).slice(1)
-  .map((part) => [part.slice(0, part.indexOf("\n")), part.slice(part.indexOf("\n") + 1).trim()]));
-/** The first 12 hex digits of the SHA-256 of the sections of the prompt, so that each record names the prompt that made it. */
-const PROMPT_HASH = new Bun.CryptoHasher("sha256").update(JSON.stringify(PROMPT)).digest("hex").slice(0, 12);
 
 /** The cases that the kit cannot serve (the code map, section 8): 5 need a picture, 15 are games, a drawing canvas, or 3D. Their expected reply is outside(...). */
 export const OUTSIDE_CASES = new Set(["showcase-image-recipe", "showcase-image-flashcards", "showcase-image-plant", "showcase-image-story", "showcase-image-menu",
@@ -61,30 +56,17 @@ export function corpus() {
   });
 }
 
-/**
- * The task text as ChatToolReply.generationPrompt builds it: the request, the widget brief, the fixed line, and the reply excerpt.
- * The saved reports keep no brief, so the brief is empty. A screen of a dialogue gets the host line under the request.
- */
-export const taskText = ({ request, brief = "", reply = "", host = "" }) => `User request: ${request}${host ? "\n" + host : ""}\nWidget brief: ${brief}`
-  + "\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above." + (reply ? `\nReply excerpt: ${reply.slice(0, 4000)}` : "");
-
-/** The text of a repair call: the task, the plan, the faults of the kit, and the repair rule of the prompt. */
-export const repairText = ({ task, plan, faults }) => `${task}\n\nYour plan:\n${plan.trimEnd()}\n\nFaults of the kit:\n${faults.map((fault) => "- " + fault).join("\n")}\n\n${PROMPT.Repair}`;
-
 /** The body of a call as OpenAiResponsesWire.wireBody builds it with no JSON mode: the profile's reasoning effort, the model, the instructions, and one user message. */
 export const bodyOf = ({ model, effort, system, input, maxTokens = MAX_OUTPUT }) => ({
   reasoning: { effort }, model, stream: true, store: false, include: ["reasoning.encrypted_content"], max_output_tokens: maxTokens,
   instructions: system, input: [{ type: "message", role: "user", content: [{ type: "input_text", text: input }] }],
 });
 
-/** The lines of a reply: the one cleaning is that an empty line and a markdown fence line go. Each other text stays, and the kit reports it. */
-const linesOf = (text) => text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("```"));
-const OUTSIDE = /^\s*outside\(\s*"(\w+)"\s*\)\s*$/;
-/** The kind of a reply: "outside" with its word for the one line outside("word"), "plan" for a reply with a header or a need line, else "other". */
+/** The kind of a reply for the numbers: readPlanReply of the kit, and "other" for a plan with no header and no need line. */
 export function kindOf(text) {
-  const lines = linesOf(text), word = lines.length === 1 ? OUTSIDE.exec(lines[0])?.[1] : undefined;
-  if (word) return { kind: "outside", word };
-  return { kind: lines.some((line) => /^\s*(app\s*\(|need\s)/.test(line)) ? "plan" : "other" };
+  const reply = readPlanReply(text);
+  if (reply.kind === "outside") return reply;
+  return { kind: /^\s*(app\s*\(|need\s)/m.test(reply.text) ? "plan" : "other" };
 }
 /** The plan after a repair: patchAppFile of the kit, as the loop of the app calls it. dropped counts the prose lines of the reply. */
 export function merge(plan, reply) {
@@ -124,7 +106,7 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
   const first = await send(0, effort, task), kind = first.status === "completed" ? kindOf(first.text) : { kind: first.status };
   const record = { id: item.id, set: item.set, dialogue: Boolean(item.host), expect: item.expect, model, effort, repairs, prompt: PROMPT_HASH, task, calls, steps, first: kind, clean: null, plan: null };
   if (kind.kind !== "plan" && kind.kind !== "other") return finish(record);
-  let plan = linesOf(first.text).join("\n") + "\n";
+  let plan = readPlanReply(first.text).text;
   for (let step = 0; ; step++) {
     const result = await compile(plan);
     steps.push({ faults: result.faults, notes: result.notes, compileMs: result.compileMs, stateBytes: result.stateBytes, dropped: step ? calls.at(-1).dropped : 0 });

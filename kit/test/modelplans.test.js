@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compileAppFile } from "../src/compile.js";
+import { compileAppFile, readPlanReply } from "../src/compile.js";
 import { plansIn } from "../build.js";
 // helpers.js gives the emitter the text of the run-time.
 import "./helpers.js";
@@ -25,8 +25,11 @@ test("model plans: the index holds each fixture of the sets C, D, and E with its
   }
 });
 
-for (const path of plans) test(`model plans: ${basename(path)} compiles with no fault`, async () => {
-  const result = await compileAppFile(readFileSync(path, "utf8"));
+// The plan step of the app reads a reply with readPlanReply and compiles its text (task 1).
+for (const path of plans) test(`model plans: ${basename(path)} is a plan for readPlanReply and compiles with no fault`, async () => {
+  const reply = readPlanReply(readFileSync(path, "utf8"));
+  expect(reply.kind).toBe("plan");
+  const result = await compileAppFile(reply.text);
   expect(result.faults).toEqual([]);
   expect(result.definition).not.toBeNull();
 });

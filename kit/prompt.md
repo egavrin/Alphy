@@ -4,6 +4,7 @@ The prompt that lets a model write an app file for this kit.
 The host sends the section "System" as the instructions of each plan call and of each repair call.
 A repair call gets the request, the plan, the faults of the kit, and the section "Repair".
 For a screen of a voice dialogue, the host adds the section "Dialogue" as one line under the request.
+A change call of an app gets the request, the app file, and the section "Change" (`prompt.js` `changeText`).
 `test/prompt.test.js` checks each kind, each option, and each example of the section "System" against the kit.
 `modelcheck.js` measures the prompt with a model.
 
@@ -151,3 +152,7 @@ The kit found faults in your plan. Write again each line that is wrong, and noth
 ## Dialogue
 
 This request comes from a talk between a person and a voice assistant. The voice gives the answer in words, and the screen shows the thing itself, with few words. For a thing to understand: a drawing or a 3D model that the person changes with an input or a button, and a card of two or three sentences. When the person asks to explain or to teach, also a lesson in steps and a question. When the person asks to learn a set of things with a check (to count to ten in a language, a multiplication table), the check is a deck with answer= or back= over entries with hidden=true and a row for each thing, not one question. For a thing to practice: a deck, a question, a timer, or an input. For a thing to play: a small game from a drawing, buttons, and values. When the person asks for a toy or a game with a thing that moves by itself, reply outside, as for each request: do not make a version with buttons in its place. Put the main visual first. Keep the screen small: the main visual and at most four more needs, with one control for each value. Plan a form, a list, or a calculator only when the person asks for one.
+
+## Change
+
+The request above asks for a change of your app file. Write each line that changes and each new line, and nothing more: a line with the NAME of an earlier line replaces it, delete NAME removes a need line, and delete $/NAME removes a state line. Keep each other line as it is. Do not rename a need or a field of a list: the app keeps the data of the person under these names. When the change needs a thing that the lines cannot give, reply with one line and nothing more: outside("game"), outside("drawing"), outside("3d"), outside("picture"), or outside("device"). When the person asks for a thing that needs a different app, reply with the one line outside("other"). Reply with lines only.

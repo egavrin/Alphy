@@ -1,5 +1,5 @@
-// Builds the sandbox bundle of the kit and copies the saved plans for the device tests.
-//   bun kit/build.js           writes kit/src/icons.js, app/src/main/assets/appfile/kit.js, and app/src/androidTest/assets/appfile/*.plan
+// Builds the sandbox bundle of the kit and the prompt asset of the app, and copies the saved plans for the device tests.
+//   bun kit/build.js           writes kit/src/icons.js, app/src/main/assets/appfile/kit.js and prompt.json, and app/src/androidTest/assets/appfile/*.plan
 //   bun kit/build.js --check   writes nothing, and exits 1 when a file that the build writes differs or a copied plan has no source
 // The sandbox evaluates plain script text, not modules, so the bundle is one script with no import and no export.
 // The bundle also holds the run-time as text: the emitter puts it into the source of each app. Bun's minifier makes that
@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PROMPT, changeText, repairText } from "./prompt.js";
 
 /** The modules of the bundle in dependency order: each one imports only modules before it. */
 const MODULES = ["icons", "dsl", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "compile"];
@@ -84,10 +85,21 @@ export async function runtimeText() {
   return `let handle;const __handle=(f)=>{handle=f};\n${(await built.outputs[0].text()).trim()}`;
 }
 
-/** The bundle defines globalThis.compileAppFile and globalThis.patchAppFile (the plan after a repair reply), and no other global. */
+/**
+ * The bundle defines globalThis.compileAppFile, globalThis.patchAppFile (the plan after a repair reply), and globalThis.readPlanReply
+ * (a plan or an outside word from the reply of a plan call), and no other global.
+ */
 export async function bundle() {
-  return `// Built by kit/build.js from kit/src with Bun ${Bun.version}. Do not edit: run bun kit/build.js.\n(() => {\n"use strict";\n${script(MODULES.map(source))}runtime.text = ${JSON.stringify(await runtimeText())};\nglobalThis.compileAppFile = compileAppFile;\nglobalThis.patchAppFile = patchAppFile;\n})();\n`;
+  return `// Built by kit/build.js from kit/src with Bun ${Bun.version}. Do not edit: run bun kit/build.js.\n(() => {\n"use strict";\n${script(MODULES.map(source))}runtime.text = ${JSON.stringify(await runtimeText())};\nglobalThis.compileAppFile = compileAppFile;\nglobalThis.patchAppFile = patchAppFile;\nglobalThis.readPlanReply = readPlanReply;\n})();\n`;
 }
+
+/**
+ * The prompt asset of the app (prompt.json): the four sections of kit/prompt.md, and the task texts of a repair call and a change call
+ * with the placeholders {{task}}, {{plan}}, {{faults}}, and {{request}}. The host puts the plan with no newline at its end, and the faults
+ * joined by "\n- ", so a filled template is the text of repairText and changeText (prompt.js). No prompt text is typed in Kotlin.
+ */
+export const promptAsset = () => ({ system: PROMPT.System, repair: PROMPT.Repair, dialogue: PROMPT.Dialogue, change: PROMPT.Change,
+  repairTask: repairText({ task: "{{task}}", plan: "{{plan}}", faults: ["{{faults}}"] }), changeTask: changeText({ request: "{{request}}", plan: "{{plan}}" }) });
 
 /** The plan files of a directory. */
 export const plansIn = (directory) => readdirSync(directory).filter((name) => name.endsWith(".plan")).map((name) => join(directory, name));
@@ -107,6 +119,7 @@ export const LOOK_FIXTURES = ["water-ko", "units-pl", "shopping", "habits", "pri
  * The plans that a model wrote (test/fixtures/model) go to a directory of their own, appfile/model, with their index: the device test reads the request of each plan.
  */
 export const outputs = async () => [[at("src/icons.js"), iconModule()], [at("../app/src/main/assets/appfile/kit.js"), await bundle()],
+  [at("../app/src/main/assets/appfile/prompt.json"), JSON.stringify(promptAsset(), null, 2) + "\n"],
   ...planCopies([...plansIn(at("plans")), ...["nodes", "looks", "lists", "rich", "cards", "free", "shapes", "bytes", "model"].map((name) => at(`test/${name}.plan`)), ...LOOK_FIXTURES],
     at("../app/src/androidTest/assets/appfile")),
   ...planCopies(plansIn(at("test/fixtures/model")), at("../app/src/androidTest/assets/appfile/model")),
