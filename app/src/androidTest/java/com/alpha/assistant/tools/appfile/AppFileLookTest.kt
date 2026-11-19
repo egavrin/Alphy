@@ -387,4 +387,15 @@ class AppFileLookTest {
             robot.waitUntil(10_000) {angle() == 360.0 && ends().all {it == 0L}}
         }
     }
+
+    @Test fun aLongTextOfAPlanShowsInFull() {
+        // Item 11 of the final review: the host takes at most 300 characters in a literal text, and a bound text has no such limit.
+        // The kit binds a text of 427 characters, and the screen holds all of it.
+        val long="Read each line with care. ".repeat(16)+"Then begin."
+        val spec=runBlocking {parsedAndSmoked(SandboxClient(instrumentation.targetContext),"long",text="app(\"Long\", lang=\"en\")\nneed intro = content(\"$long\")\n")}
+        inShell("appfile-long",mapOf("appfile-long" to spec)) {robot,model,_,_ ->
+            open(robot,model,"appfile-long",spec)
+            robot.reveal(long,forward=null)
+        }
+    }
 }

@@ -4,7 +4,7 @@
 
 import { AppFile, parseExpression, show } from "./dsl.js";
 import { App, ICON_NAMES, foreground, given, settings } from "./core.js";
-import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, wished } from "./rows.js";
+import { MAX_ROWS, MAX_TEXT, cast, castRow, clockOf, namer, own, relative, rows, wished } from "./rows.js";
 import { BAR_SURFACE, MODEL, STAGE, accentOf, barOf, commandsOf, fit, hostBytes, polygonsOf, sideOf } from "./draw.js";
 import { IDLE, dragged } from "./drag.js";
 
@@ -115,7 +115,12 @@ const NODES = {
     : { type: "flowRow", ...rowStyle(n), children: at.children() }),
   Grid: (n, at) => ({ type: "grid", columns: n.props.columns ?? 2, children: at.children() }),
   Card: (n, at) => ({ type: "card", ...(n.props.variant === "hero" && { variant: "hero" }), ...iconOf(n), children: at.children() }),
-  Section: (n, at) => ({ type: "section", text: at.plain(n.props.title), children: at.children() }),
+  // A Section of no title is a fault of its line, and Alphy takes a section with no text (ToolUiCatalog).
+  Section: (n, at) => {
+    const title = at.plain(n.props.title);
+    if (MESSAGES && !title) at.fault("a Section needs a title of 1 to 300 characters");
+    return { type: "section", ...(title && { text: title }), children: at.children() };
+  },
   // A tone or an emphasis of the plan wins over the one of its variant.
   Text: (n, at) => ({ type: "text", ...at.text("text"), ...styled(n, ["emphasis", "align", "tone"], own(STYLES, n.props.variant)) }),
   Heading: (n, at) => ({ type: "text", ...at.text("text"), style: { emphasis: "title" } }),
@@ -259,7 +264,7 @@ export function screen(kit, app, first = false) {
     }
     // A list in a Section announces the title of the Section: an entries need puts its list into a Section with the title of the need.
     const within = { ...ctx, off, ...(node.type === "Section" && { title: node.props.title }) };
-    const bound = (prop) => (expr[prop] && expr[prop].k !== "lit" ? slot("d", `${key}.${prop}`, expr[prop], node.props[prop], at) : null);
+    const bound = (prop, long = false) => (expr[prop] && (long || expr[prop].k !== "lit") ? slot("d", `${key}.${prop}`, expr[prop], node.props[prop], at) : null);
     const at = {
       scope, fault, off,
       // Options that read the row are a fault of their own (above), so their rules give no fault more.
@@ -268,14 +273,27 @@ export function screen(kit, app, first = false) {
       children: (weighted = false, inner = within) => node.children.map((child, index) => walk(child, child.name ?? `${key}:${index}`, line, { ...inner, weighted })).filter(Boolean),
       // The text of a control: its label, else the kit's name of its line, which a person can read. Never a safe name such as f3.
       caption: (label) => at.plain(label) || (node.name ? node.name : `${line} ${node.props.icon ?? node.type}`).replace(/_/g, " "),
-      // The text of a progress, a ring, a chart, and tabs: its label=, else the title of the Section around it, else the caption. Alphy shows at most 300 characters.
-      label: () => at.caption(at.plain(node.props.label) || ctx.title).slice(0, 300),
-      text: (prop) => { const bind = bound(prop); return bind ? { text: "", bind } : { text: at.plain(node.props[prop]) }; },
-      // A text of the screen that is a list or a record is a fault, never "a,b" or "[object Object]".
+      // The text of a progress, a ring, a chart, and tabs: its label=, else the title of the Section around it, else the caption.
+      label: () => at.caption(at.plain(node.props.label) || ctx.title),
+      // Alphy takes a literal text of 1 to 300 characters and a bound text of up to 2048 (ToolUiCatalog, ToolValueSchema), so a longer literal at the top is bound.
+      text: (prop) => {
+        const literal = String(node.props[prop] ?? ""), long = !scope && expr[prop]?.k === "lit" && literal.length > 300;
+        if (MESSAGES && long && literal.length > MAX_TEXT) fault(`the text has ${literal.length} characters, and Alphy keeps at most ${MAX_TEXT}. Use a shorter text`);
+        const bind = bound(prop, long);
+        if (bind) return { text: "", bind };
+        const text = at.plain(node.props[prop]);
+        if (MESSAGES && !text) fault(`a ${node.type} needs a text of 1 to 300 characters`);
+        return { text };
+      },
+      // A text of the screen that is a list or a record is a fault, never "a,b" or "[object Object]". Alphy shows at most 300 characters of a text of the screen.
       plain: (value) => {
-        if (value === null || typeof value !== "object") return String(value ?? "");
-        if (MESSAGES) fault(`it shows a ${Array.isArray(value) ? "list" : "record"} as a text, and Alphy shows one text there. Show one field of it, or join(list)`);
-        return "";
+        if (value !== null && typeof value === "object") {
+          if (MESSAGES) fault(`it shows a ${Array.isArray(value) ? "list" : "record"} as a text, and Alphy shows one text there. Show one field of it, or join(list)`);
+          return "";
+        }
+        const text = String(value ?? "");
+        if (MESSAGES && text.length > 300) fault(`it shows a text of ${text.length} characters here, and Alphy shows at most 300. Use a shorter text`);
+        return text.slice(0, 300);
       },
       value: (prop) => { const bind = bound(prop); return bind ? { bind } : { [prop]: node.props[prop] }; },
       shown: (prop) => bound(prop) ?? at.computed(prop, node.props[prop]),

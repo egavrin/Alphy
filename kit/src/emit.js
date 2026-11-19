@@ -187,7 +187,7 @@ export function emit(file) {
   // A line that the screen shows a second time gives each control in it its action id a second time, and ToolSpec.parse takes each
   // action id once. firstBy keeps the line that shows each line with an id first. The children of the root are the children of the app's column.
   const ids = (node) => [node.action, node.dismissAction, node.reorder?.action, ...(node.surfaces ?? []), ...(node.children ?? []).flatMap(ids), ...(node.rowTemplate ? ids(node.rowTemplate) : [])].filter(Boolean);
-  const firstBy = new Map();
+  const firstBy = new Map(), quiet = faults.length > 0;
   let nodes = 0;
   const measure = (node, depth, owner, again = false) => {
     nodes++;
@@ -206,6 +206,8 @@ export function emit(file) {
     const deep = `${where}: this component is at depth ${depth} of the screen, and Alphy keeps at most depth ${MAX_DEPTH}. The frame of the app takes depths 0 and 1. Put it in fewer containers`;
     if (depth > MAX_DEPTH) { if (!faults.includes(deep)) faults.push(deep); return; }
     if (children.length > MAX_CHILDREN) faults.push(`${where}: this container has ${children.length} children, and Alphy keeps at most ${MAX_CHILDREN}. Put them in groups`);
+    // Alphy refuses a container with no children (ToolUiCatalog). A component with a fault leaves no node, so an earlier fault keeps this one quiet.
+    if (node.children && !children.length && !quiet) faults.push(`${where}: this container has no children, and Alphy keeps 1 to ${MAX_CHILDREN}. Put a component into it, or remove it`);
     for (const child of [...children, ...(node.rowTemplate ? [node.rowTemplate] : [])]) measure(child, depth + 1, owner, again);
   };
   measure(shown.ui, 0, "app");

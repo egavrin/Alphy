@@ -801,9 +801,9 @@ test("source: the source of list.plan is under 60000 bytes and answers an add as
   expect(run(add).state.prodotti).toHaveLength(4);
 });
 
-test("source: the run-time text is at most 48500 bytes", () => {
+test("source: the run-time text is at most 49500 bytes", () => {
   // kit/build.js leaves out each text that only the compile step reads (dsl.js MESSAGES), so each source has room to grow.
-  expect(bytes(runtime.text)).toBeLessThanOrEqual(48500);
+  expect(bytes(runtime.text)).toBeLessThanOrEqual(49500);
   // The icon names of the host (src/icons.js) and the values of the look options (check.js) are compile-side data.
   for (const word of ["Stethoscope", "headline", "Rocket"]) expect([word, runtime.text.includes(word)]).toEqual([word, false]);
 });

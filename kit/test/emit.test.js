@@ -6,7 +6,8 @@ import { App, settings } from "../src/core.js";
 import { ACCENTS, LIMITS, STAGE, budgetOf, polygonsOf } from "../src/draw.js";
 import { emit } from "../src/emit.js";
 import { handle, kitOf, screen } from "../src/run.js";
-import { allPlans, every, fixture, plan, planned, press } from "./helpers.js";
+import { allPlans, every, fixture, plan, planned, press, valueAt } from "./helpers.js";
+import { compileAppFile } from "../src/compile.js";
 
 /** Alphy's rule for a state field and an action id (ToolValueSchema.name, ToolUiCatalog). */
 const SAFE = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
@@ -900,4 +901,41 @@ test("emit: the inner names of the state of a need do not depend on the needs be
   const alone = await inner(['need t2 = timer("B", 5, rounds=2)']);
   expect(alone).toContain("on");
   expect(await inner(['need t1 = timer("A", 5, rounds=2)', 'need t2 = timer("B", 5, rounds=2)'])).toEqual(alone);
+});
+
+/** The faults of the compile step for the lines of a plan, after its header. */
+const faultsOf = async (...lines) => (await compileAppFile(['app("T", lang="en")', ...lines].join("\n"))).faults;
+
+test("emit: a literal text of more than 300 characters is bound, so Alphy shows it in full (final review 11)", async () => {
+  // Alphy takes a literal text of 1 to 300 characters, and a bound text up to 2048 in its value (ToolUiCatalog, ToolValueSchema).
+  const long = "A long text. ".repeat(33).trim(), { faults, definition } = await compileAppFile(`app("T", lang="en")\nneed intro = content(${JSON.stringify(long)})`);
+  expect([long.length, faults]).toEqual([428, []]);
+  const shown = every(definition.ui).filter((node) => node.type === "text" && node.bind).map((node) => [node.text, valueAt(definition.initialState, node.bind)]);
+  expect(shown).toEqual([["", long]]);
+  // A literal text of 300 characters stays a text of its node.
+  const edge = "x".repeat(300), short = await compileAppFile(`app("T", lang="en")\nroot = Column([Text(${JSON.stringify(edge)})])`);
+  expect(every(short.definition.ui).filter((node) => node.text === edge)).toHaveLength(1);
+});
+
+test("emit: each other text, container, choice, and row that Alphy refuses is a fault of its line (final review 11)", async () => {
+  const cases = [
+    [['root = Column([Text("")])'], "root: a Text needs a text of 1 to 300 characters"],
+    [['root = Column([Section("", [Text("a")])])'], "root: a Section needs a title of 1 to 300 characters"],
+    [[`root = Column([Text(${JSON.stringify("x".repeat(2049))})])`], "root: the text has 2049 characters, and Alphy keeps at most 2048"],
+    [[`root = Column([Section(${JSON.stringify("x".repeat(301))}, [Text("a")])])`], "root: it shows a text of 301 characters here, and Alphy shows at most 300"],
+    [['root = Column([Text("a"), Column([])])'], "root: this container has no children, and Alphy keeps 1 to 50"],
+    [["root = Column([Card([])])"], "root: this container has no children"],
+    [['need setup = steps(["A", "B"], [[a], []])', 'need a = input("number", "A", 1)'], "need setup: this container has no children"],
+    [['$/c = "z"', 'root = Column([Segmented("C", $/c, ["a", "b"])])'], 'root: the value "z" of this Segmented is not one of its options'],
+    [['$/c = "a"', 'root = Column([Segmented("C", $/c, [1, 2])])'], "root: the option 1 is not a string"],
+    [['$/c = "a"', 'root = Column([Segmented("C", $/c, [])])'], "root: a choice needs 1 to 30 options, and this one has none"],
+    [['$/c = "o0"', `root = Column([Select("C", $/c, [${Array.from({ length: 31 }, (_, i) => `"o${i}"`).join(", ")}])])`], 'root: the option "o30" is one more than the 30 options'],
+    [['$/c = "a"', `root = Column([Segmented("C", $/c, {a: ${JSON.stringify("y".repeat(101))}, b: "B"})])`], 'root: the option "a" has a text of 101 characters'],
+    [['$/c = "a"', 'root = Column([Segmented("C", $/c, ["a", "a", "b"])])'], 'root: the option "a" is there two times'],
+    [['$/rows = [{id: "a", n: 1}, {id: "a", n: 2}]', "root = Column([List($/rows, Text(text($n)))])"], '$/rows: a row of $/rows has the id "a"'],
+  ];
+  for (const [lines, part] of cases) {
+    const faults = await faultsOf(...lines);
+    expect({ lines, found: faults.some((fault) => fault.startsWith(part)) }, faults.join(" | ")).toEqual({ lines, found: true });
+  }
 });

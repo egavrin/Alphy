@@ -52,7 +52,7 @@ const minutesOf = (text) => {
 };
 export const clockOf = (minutes) => { const at = Math.min(1439, Math.max(0, Math.round(Number(minutes) || 0))); return `${pad(Math.floor(at / 60))}:${pad(at % 60)}`; };
 /** Alphy's state holds a text of at most 2048 characters (ToolValueSchema). */
-const MAX_TEXT = 2048;
+export const MAX_TEXT = 2048;
 /**
  * A value of the kit in the form of its Alphy field. kind is "number", "string", "boolean", "time", or "date". A shown value has the type
  * of its field, which the emitter fixes with its first value (app.types). A number that is not finite is 0, and a text is never null, a list,
