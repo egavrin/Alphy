@@ -372,10 +372,11 @@ test("the text parts, the arguments of a picture, and the kind of the header", a
   same([prop("c_eyebrow"), prop("c_eyebrow", "variant"), prop("c_title"), prop("c_text"), tx.press("n_plus"), prop("c_title"), prop("c_text"), tx.find("c_view").type], ["Look", "eyebrow", "T1", "one", "", "T2", "many", "Card"], "a card with formulas follows the values of the app");
   same([tx.find("l_view").type, tx.find("l_view").props], ["Link", { label: "Site", url: "https://example.org/a", text: "Open" }], "a link only draws: a label, an address, and a note");
   await partFault('need l = link("X", "javascript:alert(1)")', "a Link needs a web address that starts with https://");
-  same([tx.state.les, prop("les_count"), prop("les_bar", "value"), prop("les_bar", "max"), prop("les_title"), prop("les_text"), prop("les_back", "enabled"), tx.press("les_next"), tx.state.les, prop("les_count"), prop("les_title"),
-    tx.press("les_next"), prop("les_count"), prop("les_next", "enabled"), tx.press("les_next"), tx.press("les_back"), tx.state.les, prop("les_text")],
-    [1, "Part · 1 / 3", 1, 3, "A", "a", false, "", 2, "Part · 2 / 3", "B", "", "Part · 3 / 3", false, "les_next is not active", "", 2, "b"], "a lesson shows one step at a time, and $/NAME is the number of the step from 1");
-  same([tx.find("one_next"), tx.find("one_back"), prop("one_count"), prop("one_title")], [null, null, "Step · 1 / 1", "Only"], "a lesson of one step has no buttons");
+  // Alphy writes the count under the dots of a lesson of at most 12 steps ("Part: 1 / 3"), so the lesson has no count line (Task 11b-2b, A.4).
+  same([tx.state.les, prop("les_bar", "label"), prop("les_bar", "value"), prop("les_bar", "max"), prop("les_title"), prop("les_text"), prop("les_back", "enabled"), tx.press("les_next"), tx.state.les, prop("les_bar", "value"), prop("les_title"),
+    tx.press("les_next"), prop("les_bar", "value"), prop("les_next", "enabled"), tx.press("les_next"), tx.press("les_back"), tx.state.les, prop("les_text"), tx.find("les_count")],
+    [1, "Part", 1, 3, "A", "a", false, "", 2, 2, "B", "", 3, false, "les_next is not active", "", 2, "b", null], "a lesson shows one step at a time, and $/NAME is the number of the step from 1");
+  same([tx.find("one_next"), tx.find("one_back"), prop("one_bar", "variant"), prop("one_title")], [null, null, "dots", "Only"], "a lesson of one step has no buttons");
   same([tx.state.ask, prop("ask_text"), prop("ask_result", "visible"), tx.press("ask_opt0"), tx.state.ask, prop("ask_result"), prop("ask_opt0", "selected"), tx.press("ask_opt1"), tx.state.ask, prop("ask_result"), prop("ask_opt0", "selected")],
     [false, "Q?", false, "", false, "Not yet", true, "", true, "Right", false], "a question: $/NAME is true after the right answer");
   await partFault('need ask = question("Q?", options=["Yes", "No"], right="Maybe")', 'right="Maybe" is not one of the options');
@@ -411,7 +412,7 @@ test("screen 2, lesson and experiment: the choice changes the mark of the Moon, 
   // "А если не вращать?": without rotation the mark keeps its direction in space: (142, 50).
   const lesson = await mock("lesson", plan("lesson")), le = new App(lesson), shapes = () => le.find("orbit_view").props.shapes, spot = (shape) => [shape.x, shape.y];
   same([le.input("angle_field", 90), spot(shapes().at(-2)), spot(shapes().at(-1)), le.input("mode_field", "Без вращения"), spot(shapes().at(-2)), spot(shapes().at(-1))], ["", [160, 50], [160, 68], "", [160, 50], [142, 50]], "the choice changes the mark of the Moon");
-  same([shapes().some((shape) => shape.shape === "line"), le.find("lesson_count").props.text, le.press("lesson_next"), le.state.lesson, le.find("lesson_title").props.text, shapes().filter((shape) => shape.shape === "line").map((line) => [line.x1, line.y1, line.x2, line.y2])],
+  same([shapes().some((shape) => shape.shape === "line"), `${le.find("lesson_bar").props.label} · ${le.find("lesson_bar").props.value} / ${le.find("lesson_bar").props.max}`, le.press("lesson_next"), le.state.lesson, le.find("lesson_title").props.text, shapes().filter((shape) => shape.shape === "line").map((line) => [line.x1, line.y1, line.x2, line.y2])],
     [false, "Исследуем · 1 / 3", "", 2, "Метка всё время обращена к Земле", [[160, 160, 160, 50]]], "step 2 of the lesson adds the guide line from the Earth to the Moon");
   // "Один круг": the Moon goes once around in 5 s. After 2.5 s it is at 180 degrees, at (50, 160), and the mark without rotation is at (32, 160).
   const realClock = settings.now;

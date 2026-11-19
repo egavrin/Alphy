@@ -554,9 +554,9 @@ test("emit: tabs-chart.plan gives a tabs control, groups with visibleBind, and a
   // The open tab is a value of the need that the run-time owns: the title of the tab, the first one at the start.
   expect(tabs.children[0]).toEqual({ type: "tabs", text: "Resumen, Añadir", bind: "resumen_s.tab", action: "resumen_view", options: ["Resumen", "Añadir"].map((value) => ({ text: value, value })) });
   expect(tabs.children.slice(1).map((group) => [group.type, group.visibleBind, group.children.map((node) => node.type)])).toEqual([
-    ["column", "v.resumen_view_tab0", ["section", "card"]], ["column", "v.resumen_view_tab1", ["section"]]]);
-  expect(tabs.children[1].children[0]).toEqual({ type: "section", text: title, children: [
-    { type: "chart", text: title, kind: "bar", categories: "grafico_chart_labels", series: [{ text: title, bind: "grafico_chart_values" }] }] });
+    ["column", "v.resumen_view_tab0", ["chart", "card"]], ["column", "v.resumen_view_tab1", ["section"]]]);
+  // The chart shows its title once, as its label (Task 11b-2b, A.6).
+  expect(tabs.children[1].children[0]).toEqual({ type: "chart", text: title, kind: "bar", categories: "grafico_chart_labels", series: [{ text: title, bind: "grafico_chart_values" }] });
   // The figure that is the main element stays the hero card in its tab.
   expect(tabs.children[1].children[1]).toMatchObject({ type: "card", variant: "hero" });
   expect(definition.stateSchema).toMatchObject({ resumen_s: { type: "object", fields: { tab: "string" } },

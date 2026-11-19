@@ -252,9 +252,10 @@ const PARTS = {
   },
 
   // need line = chart("Steps", $/days, $day, $steps, kind="line"): one bar or point for each row of a list.
+  // Alphy shows the label of a chart over it, so the chart has no section with the same title (tabs-chart.png: the title showed two times).
   async chart(name, need) {
     const [title, list, point, value] = need.args;
-    return { lines: [`${name}_chart = Chart(${show(list)}, ${show(point)}, ${show(value)}, kind=${show(need.named.kind ?? { k: "lit", v: "bar" })}, label=${show(title)})`, `${name}_view = Section(${show(title)}, [${name}_chart])`], top: [`${name}_view`] };
+    return { lines: [`${name}_chart = Chart(${show(list)}, ${show(point)}, ${show(value)}, kind=${show(need.named.kind ?? { k: "lit", v: "bar" })}, label=${show(title)})`], top: [`${name}_chart`] };
   },
 
   // need quiz = deck("Quiz", $/words, front=$word, back=$meaning, mark=$known): one row at a time. A tap shows the back, then yes or no goes to the next row.
@@ -458,13 +459,14 @@ const PARTS = {
   // need steps = lesson([{title: "Look", text: "..."}, {title: "Test", text: "..."}], next="Next", back="Back", stepText="Step")
   // One step at a time, with "Step · 1 / 2" and a progress bar. $/NAME is the number of the step, from 1.
   async lesson(name, need, { caption }) {
-    const steps = need.args[0], opt = need.named, text = caption, count = `len($/${name}_steps)`;
+    const steps = need.args[0], opt = need.named, text = caption, count = `len($/${name}_steps)`, dots = steps.k === "list" && steps.items.length <= 12;
     const lines = [`$/${name} = 1`, `$/${name}_steps := ${show(steps)}`, `$/${name}_now := at($/${name}_steps, $/${name} - 1)`,
-      `${name}_count = Text(${text("stepText", "Step")} + " · " + text($/${name}) + " / " + text(${count}), variant="eyebrow")`,
       // A lesson of at most 12 steps shows one dot for each step (Alphy draws at most 12 dots), and a longer one a bar.
-      `${name}_bar = Progress($/${name}, ${count}${steps.k === "list" && steps.items.length <= 12 ? ', variant="dots"' : ""}, label=${text("stepText", "Step")})`,
+      `${name}_bar = Progress($/${name}, ${count}${dots ? ', variant="dots"' : ""}, label=${text("stepText", "Step")})`,
       `${name}_title = Heading(text($/${name}_now/title))`, `${name}_text = Text(text($/${name}_now/text))`];
-    const parts = [`${name}_count`, `${name}_bar`, `${name}_title`, `${name}_text`];
+    // Alphy writes "Step: 1 / 3" under the dots, so only a bar needs the count line over it (lesson.png: the count showed two times).
+    if (!dots) lines.push(`${name}_count = Text(${text("stepText", "Step")} + " · " + text($/${name}) + " / " + text(${count}), variant="eyebrow")`);
+    const parts = [...(dots ? [] : [`${name}_count`]), `${name}_bar`, `${name}_title`, `${name}_text`];
     // One step has no next step, so it gets no buttons: a button that is never active is a fault of the smoke run.
     if (steps.k !== "list" || steps.items.length > 1) {
       lines.push(`${name}_back = Button(${text("back", "Back")}, action=dec($/${name}), enabled=$/${name} > 1, variant="outlined")`, `${name}_next = Button(${text("next", "Next")}, action=inc($/${name}), enabled=$/${name} < ${count}, variant="filled")`);
