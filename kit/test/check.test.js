@@ -5,6 +5,7 @@ import { AppFile } from "../src/dsl.js";
 import { App, settings } from "../src/core.js";
 import { report, smoke } from "../src/check.js";
 import { expand } from "../src/parts.js";
+import { compileAppFile } from "../src/compile.js";
 import { assert, fixture, gateEach, has, plan, planned, same } from "./helpers.js";
 
 gateEach("checks");
@@ -203,4 +204,29 @@ test("the smoke gate is clean on the catalog example and on an app with each new
   same(report(full), { faults: [], checks: [{ name: "slept example", pass: true, detail: "" }], notes: [] }, "the smoke gate is clean on an app with each new item");
   const fullRun = smoke(full).trace.join(" | ");
   for (const part of ["doses_yes", "doses_no", "acts_add", "acts_open", "book_again", "doses_qty_plus", "doses_time", "start_field"]) assert(fullRun.includes(part), `the smoke run did not use ${part}: ${fullRun}`);
+});
+
+test("a chain of figures that read later lines settles: the formulas run once for each formula (final review 1)", async () => {
+  // The probe of the review at depth 5: g1 to g5 each read the next need, and g6 reads n.
+  const lines = [1, 2, 3, 4, 5, 6].map((n) => `need g${n} = figure("number", "G${n}", ${n < 6 ? `$/g${n + 1} + 1` : "$/n"}, example=[{n: 1}, ${7 - n}])`);
+  const chain = await planned(['app("T", lang="en")', ...lines, 'need n = input("number", "N", 1, min=0, max=10)'].join("\n"));
+  same([report(chain).faults, new App(chain).state.g1], [[], 6]);
+});
+
+test("a formula that reads itself, and formulas that read each other, are a fault that names their lines (final review 10)", async () => {
+  const self = await planned('app("T", lang="en")\n$/n = 2\n$/total := number($/total) + $/n\ngo = Button("go", inc($/n))\nroot = Column([Text(text($/total)), go])');
+  assert(report(self).faults.includes("$/total: the formula reads its own value, so the value never settles. Compute it from other values only"), report(self).faults.join(" | "));
+  const pair = await planned('app("T", lang="en")\n$/n = 0\n$/a := text($/b) + text($/b) + "x"\n$/b := $/a\ngo = Button("go", inc($/n))\nroot = Column([Text($/a), Text(text($/n)), go])');
+  assert(report(pair).faults.includes("$/a: the formulas $/a and $/b read each other, so their values never settle. Compute one of them from other values only"), report(pair).faults.join(" | "));
+});
+
+test("a failed example of a figure and a failed check line are faults of their lines, with the values (final review 4)", async () => {
+  const base = ['app("T", lang="en")', 'need n = input("number", "N", 2, min=0, max=10)'];
+  const wrong = await compileAppFile([...base, 'need f = figure("number", "F", $/n * 2, example=[{n: 2}, 5])'].join("\n"));
+  same([wrong.faults, wrong.notes, wrong.definition, wrong.language], [["need f: example=[{n: 2}, 5] gives 4, and the example expects 5. Correct the formula or the example"], [], null, null]);
+  const checked = await compileAppFile([...base, 'need f = figure("number", "F", $/n * 2, example=[{n: 2}, 4])', 'check("Big", expect($/f == 99))'].join("\n"));
+  same(checked.faults, ['check("Big"): expect failed: ($/f == 99): left is 4, right is 99']);
+  // A step that fails before its expect, such as a put on a formula, names the need with the text of the step.
+  const chained = await compileAppFile([...base, 'need b = figure("number", "B", $/n * 2, example=[{n: 2}, 4])', 'need c = figure("number", "C", $/b + 1, example=[{b: 4}, 5])'].join("\n"));
+  same(chained.faults, ["need c: example=[{b: 4}, 5]: $/b is a formula: put the values that it reads"]);
 });

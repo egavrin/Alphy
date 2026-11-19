@@ -84,7 +84,9 @@ test("emit: names that Alphy refuses get safe names", async () => {
   expect(Object.values(row)).toEqual(["r1", "Хліб", false, "x", "y", "z"]);
   expect(lists[0].fields.id).toBe("string");
   for (const name of [...fields, ...rowFields, ...actions]) expect(SAFE.test(name) && !REFUSED.has(name)).toBe(true);
-  expect(new Set([...fields, ...actions]).size).toBe(fields.length + actions.length);
+  // The top-level fields and the action ids differ from each other. The names inside an object differ from each other, and each object has its own (final review 3).
+  const top = Object.keys(schema);
+  expect(new Set([...top, ...actions]).size).toBe(top.length + actions.length);
   expect(new Set(rowFields).size).toBe(rowFields.length);
   // The compiled data keeps only the names of the screen that differ from the name that the kit wishes, each one f<index>.
   expect(Object.values(app.names).filter((name) => actions.includes(name)).length).toBeGreaterThan(0);
@@ -882,4 +884,20 @@ test("emit: each free form of the free fixture becomes its Alphy node", async ()
   // move with a test and flip are buttons of an inline Row.
   expect(tools).toEqual({ type: "flowRow", children: [{ type: "button", text: "Hike first", action: "tools_0" },
     { type: "button", text: "Work", action: "tools_1" }, { type: "text", text: "", bind: "d.tools_2_text" }] });
+});
+
+test("emit: a plan with no state value keeps one hidden field d0, and each event keeps it (final review 2)", async () => {
+  // Alphy keeps 1 to 40 state fields (ToolValueSchema). A static screen and a drawing of fixed shapes have no value of their own.
+  for (const text of ['app("T", lang="en")\nneed intro = content("Hello")\nneed note = card("Title", "Text")', 'app("T", lang="en")\nneed d = drawing("D", 320, 240, [circle(10, 10, 5)])']) {
+    const { definition, faults, app } = emit(await planned(text));
+    expect([faults, definition.stateSchema, definition.initialState]).toEqual([[], { d0: "boolean" }, { d0: false }]);
+    expect(handle({ artifactId: "kit-test", revision: 1, state: definition.initialState, event: { type: "open" } }, app).state).toEqual({ d0: false });
+  }
+});
+
+test("emit: the inner names of the state of a need do not depend on the needs before it (final review 3)", async () => {
+  const inner = async (lines) => Object.keys(emit(await planned(['app("T", lang="en")', ...lines].join("\n"))).definition.stateSchema.t2_s.fields);
+  const alone = await inner(['need t2 = timer("B", 5, rounds=2)']);
+  expect(alone).toContain("on");
+  expect(await inner(['need t1 = timer("A", 5, rounds=2)', 'need t2 = timer("B", 5, rounds=2)'])).toEqual(alone);
 });

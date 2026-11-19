@@ -44,7 +44,7 @@ export function emit(file) {
   // Each event starts its kit with no start values, so a new row gets an id after the ids that the start rows took.
   const app = { lines: "", fields: [], types: {}, names: {}, kinds: {}, lists: {}, caps: {}, next: kit.nextId };
   // The run-time gets the field of each state value from app.fields, so these names stay out of app.names.
-  const name = namer();
+  const name = namer(), keyNames = new Map();
   if (typeof title !== "string" || title.length < 1 || title.length > 100) faults.push("app: the app line needs a title of 1 to 100 characters");
   // The need whose part wrote each line. A line that an author wrote belongs to no need, and a fault of it names the line.
   const partOf = needsOf(file), label = faultName(file, partOf);
@@ -96,7 +96,9 @@ export function emit(file) {
     const field = inner ? name("need:" + need, need + "_s") : name("$/" + root, root.replace(/\W/g, "_"));
     if (!stateSchema[field]) owners.push(owner);
     if (!inner) { stateSchema[field] = schema; app.fields.push([root, field]); return; }
-    const key = name("$/" + root, wish);
+    // Each object has a namer of its own, so the names in it do not depend on the other needs of the plan.
+    if (!keyNames.has(field)) keyNames.set(field, namer());
+    const key = keyNames.get(field)("$/" + root, wish);
     (stateSchema[field] ??= { type: "object", fields: {} }).fields[key] = schema;
     needObjects.set(field, need);
     app.fields.push([root, `${field}.${key}`]);
@@ -166,6 +168,13 @@ export function emit(file) {
   owners.push(...shown.viewOwners.map(label));
   for (const [object, values] of Object.entries(shown.values)) {
     stateSchema[object] = { type: "object", fields: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, typeof value])) };
+  }
+  // Alphy keeps at least one state field. A screen with no value, such as a static card, keeps one hidden field d0: the namer gives
+  // no line of a plan that name, and the screen names its objects d, d2, and so on. load and stateOf carry it as each other field.
+  if (!Object.keys(stateSchema).length) {
+    kit.state["app:empty"] = false;
+    app.fields.push(["app:empty", "d0"]);
+    stateSchema.d0 = "boolean";
   }
   // The objects of the shown values come first, so the fault names the need or the line whose field is the 41st.
   const over = owners[MAX_FIELDS - Object.keys(shown.values).length];

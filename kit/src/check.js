@@ -4,7 +4,7 @@
 import { HOST_ICONS } from "./icons.js";
 import { show } from "./dsl.js";
 import { App, CATALOG, ICON_NAMES, given, settings } from "./core.js";
-import { faultName } from "./parts.js";
+import { faultName, needsOf } from "./parts.js";
 
 /** Calls visit for each node of an expression tree. */
 function walk(node, visit) {
@@ -224,22 +224,27 @@ function smokeRun(file, limit, clock) {
   return { faults: grouped(faults), notes: grouped(notes), trace };
 }
 
+/** The two sides that an expectation compares: a comparison, or near(a, b). Null for each other expression. */
+const sidesOf = (tree) => (tree.k === "bin" && OPS_COMPARE.has(tree.op) ? [tree.left, tree.right] : tree.k === "call" && tree.name === "near" ? tree.args : null);
 /** Why an expectation is false, with the values that it compared. */
 function explain(app, tree) {
   const seen = (node) => JSON.stringify(app.value(node, {}));
   if (tree.k === "bin" && tree.op === "&&") return explain(app, app.value(tree.left, {}) ? tree.right : tree.left);
-  const sides = tree.k === "bin" && OPS_COMPARE.has(tree.op) ? [tree.left, tree.right] : tree.k === "call" && tree.name === "near" ? tree.args : null;
+  const sides = sidesOf(tree);
   return show(tree) + (sides ? `: left is ${seen(sides[0])}, right is ${seen(sides[1])}` : `: value is ${seen(tree)}`);
 }
 const OPS_COMPARE = new Set(["==", "!=", "<", "<=", ">", ">="]);
 
-/** Runs each check on a fresh copy of the app. Steps: set(name, value, row=0), tap(name, row=0), expect(expression). */
+/**
+ * Runs each check on a fresh copy of the app. Steps: set(name, value, row=0), tap(name, row=0), expect(expression).
+ * A failed expectation that compares two sides also gives the value of its left side (got).
+ */
 export function runChecks(file) {
   return file.of("check").map((entry) => {
     const app = new App(file);
     const [title, ...steps] = entry.tree.args;
     for (const step of steps) {
-      let error = "";
+      let error = "", got;
       try {
         const row = step.named?.row ? app.value(step.named.row, {}) : undefined;
         if (step.k !== "call") error = "a step is set(...), tap(...) or expect(...)";
@@ -251,10 +256,12 @@ export function runChecks(file) {
           if (file.get(target)?.kind === "formula") error = `${target} is a formula: put the values that it reads`;
           else { app.write(step.args[0], app.value(step.args[1], {}), {}); app.recompute(); }
         }
-        else if (step.name === "expect") { if (!app.value(step.args[0], {})) error = "expect failed: " + explain(app, step.args[0]); }
-        else error = `unknown step ${step.name}`;
+        else if (step.name === "expect" && !app.value(step.args[0], {})) {
+          error = "expect failed: " + explain(app, step.args[0]);
+          got = sidesOf(step.args[0]) && app.value(sidesOf(step.args[0])[0], {});
+        } else if (step.name !== "expect") error = `unknown step ${step.name}`;
       } catch (failure) { error = failure.message; }
-      if (error) return { name: title?.v ?? "", pass: false, detail: error };
+      if (error) return { name: title?.v ?? "", pass: false, detail: error, ...(got !== undefined && got !== null && { got }) };
     }
     return { name: title?.v ?? "", pass: true, detail: "" };
   });
@@ -376,7 +383,40 @@ function looks(file, named) {
   return out;
 }
 
-/** Everything the host can find wrong without a model: line faults, tree faults, values that are not finite, gaps, and look options. */
+/** Items as one text: "a", "a and b", or "a, b, and c". */
+const joined = (items) => (items.length < 3 ? items.join(" and ") : `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`);
+
+/**
+ * The formulas that read each other in a circle, each circle once, named by its first line. A formula reads each formula whose path
+ * overlaps a path that it reads: $/a overlaps $/a/b. A value of a circle never settles (App.recompute).
+ */
+function circles(file, named) {
+  const keys = file.of("formula").map((entry) => entry.key);
+  const overlap = (a, b) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
+  const reads = new Map(file.of("formula").map((entry) => {
+    const out = new Set();
+    walk(entry.tree, (node) => { if (node.k === "path" && node.abs) keys.filter((key) => overlap(key, "$/" + node.segs.join("/"))).forEach((key) => out.add(key)); });
+    return [entry.key, out];
+  }));
+  const reach = (from) => {
+    const seen = new Set(), next = [...reads.get(from)];
+    while (next.length) { const key = next.pop(); if (!seen.has(key)) { seen.add(key); next.push(...reads.get(key)); } }
+    return seen;
+  };
+  const reached = new Map(keys.map((key) => [key, reach(key)])), done = new Set(), out = [];
+  for (const key of keys.filter((key) => reached.get(key).has(key) && !done.has(key))) {
+    const circle = keys.filter((other) => reached.get(key).has(other) && reached.get(other).has(key));
+    circle.forEach((other) => done.add(other));
+    out.push(circle.length === 1 ? `${named(key)}: the formula reads its own value, so the value never settles. Compute it from other values only`
+      : `${named(key)}: the formulas ${joined(circle)} read each other, so their values never settle. Compute one of them from other values only`);
+  }
+  return out;
+}
+
+/**
+ * Everything the host can find wrong without a model: line faults, tree faults, formulas in a circle, values that are not finite, gaps,
+ * look options, the smoke run, and each check line that fails. The example of a figure is a check line of its part, so its fault names the need.
+ */
 export function report(file) {
   const app = new App(file);
   app.tree(true);
@@ -384,6 +424,7 @@ export function report(file) {
   const faults = [
     ...[...file.faults, ...file.partFaults].map((f) => `${f.line == null ? "line" : "line " + f.line}: ${f.message}: ${f.text}`),
     ...app.faults.map((f) => `${named(f.where)}: ${f.message}`),
+    ...circles(file, named),
     ...broken,
     ...(file.get("root") ? [] : ["no root line"]),
     ...gaps(file, app.reached),
@@ -391,5 +432,11 @@ export function report(file) {
   ];
   // The smoke run needs a screen that builds. So it runs only when nothing else is wrong.
   const run = settings.gate === "smoke" && !faults.length ? smoke(file) : { faults: [], notes: [] };
-  return { faults: [...new Set([...faults, ...run.faults])], checks: runChecks(file), notes: [...(file.partNotes ?? []), ...run.notes.slice(0, 5)] };
+  const checks = runChecks(file), partOf = needsOf(file);
+  const failed = file.of("check").map((entry, index) => [entry, checks[index]]).filter(([, check]) => !check.pass).map(([entry, check]) => {
+    const need = entry.origin === "part" ? partOf.get(entry.key) : undefined, example = need !== undefined ? file.get("need:" + need)?.tree.named.example : undefined;
+    if (!example) return `check(${JSON.stringify(check.name)}): ${check.detail}`;
+    return `need ${need}: example=${show(example)}${"got" in check ? ` gives ${JSON.stringify(check.got)}, and the example expects ${show(example.items[1])}. Correct the formula or the example` : `: ${check.detail}`}`;
+  });
+  return { faults: [...new Set([...faults, ...run.faults, ...failed])], checks, notes: [...(file.partNotes ?? []), ...run.notes.slice(0, 5)] };
 }

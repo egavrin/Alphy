@@ -301,10 +301,13 @@ export class App {
     return [out];
   }
 
-  /** Formulas can depend on each other in any order, so run them until nothing changes. */
+  /**
+   * Formulas can depend on each other in any order, so run them until nothing changes. Each pass settles at least one more formula
+   * of a chain, so a pass for each formula is enough: check.js refuses formulas that read each other in a circle.
+   */
   recompute() {
     const formulas = this.file.of("formula");
-    for (let pass = 0; pass < 5; pass++) {
+    for (let pass = 0; pass <= formulas.length; pass++) {
       const before = JSON.stringify(this.state);
       for (const entry of formulas) this.attempt(entry, () => this.write(this.pathOf(entry.key), this.value(entry.tree, {}), {}));
       if (JSON.stringify(this.state) === before) return;
