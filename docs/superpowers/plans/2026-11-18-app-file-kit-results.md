@@ -537,7 +537,8 @@ A list with `edit=true` and `sort=` on a text field of the row sorts the view ag
 
 A live text field shows no apply button. The run `appfile-live-final` took the pictures of each plan in both themes. A script compared each one with the run `appfile-look-parts-fix2` of Task 11b-2a, pixel by pixel:
 
-- Each first screen is the same, except for the status bar at the top (the clock and the signal icon). This includes each plan with a text field or a slider: `calc`, `habits`, `lesson`, `list`, `look-shopping-it`, `mock-shopping-it`, `section`, `shopping`, and `tabs-chart`.
+- Each first screen is the same, except for the status bar strip at the top (the clock and the signal icon). This includes each plan with a live control (`calc`, `habits`, `list`, `look-shopping-it`, `mock-shopping-it`, `section`, `shopping`, and `tabs-chart`) and `lesson`, which has a number field and a choice but no live control.
+- The first screen of `tabs-chart` is the tab "Resumen", and its text field is on the tab "Añadir", so its picture does not show the field.
 - `mock-shopping-it-added.png` shows two rows ("Latte" and "Pane") and the count 2. Before, it showed one row and the count 1. The field "Prodotto" is empty, and no apply button shows.
 
 ### Runs of Task 11c
