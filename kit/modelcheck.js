@@ -3,7 +3,8 @@
 //   bun kit/modelcheck.js probe MODEL                          one call with a short request; the raw event stream goes to evidence/modelcheck/probe/
 //   bun kit/modelcheck.js run LABEL SET MODEL EFFORT [ID...]   SET is C (the 45 corpus cases), D (8 dialogue requests), E (28 fresh requests), F (16 change requests),
 //                                                              or a combination such as CD. STOP_AT (default 600) refuses a run whose worst case passes it.
-//                                                              REPAIRS is the count of repair calls. A change case of set F gets one repair call.
+//                                                              REPAIRS is the count of repair calls. A change case of set F gets one repair call,
+//                                                              and none after a fault that the saved data blocks or the mismatch fault.
 //   bun kit/modelcheck.js table LABEL...                       the numbers of each label, from its records
 // The key is OPENAI_API_KEY, else its line in ~/.env. The script sends it only to api.openai.com, and writes it nowhere.
 // Each call is counted in evidence/modelcheck/spend.json before it is sent. The count never passes LIMIT.
@@ -13,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { BLOCKS, MISMATCH, isRecord } from "./src/change.js";
 import { LINE, compileAppFile, compileStep, linesOf, needsIn, patchAppFile, readPlanReply } from "./src/compile.js";
 import { dataOf, runtime } from "./src/emit.js";
-import { handle } from "./src/run.js";
+import { MAX_STATE_BYTES, handle } from "./src/run.js";
 import { runtimeText } from "./build.js";
 import { PROMPT, PROMPT_HASH, changeText, repairText, taskText } from "./prompt.js";
 
@@ -26,7 +27,7 @@ const REPORTS = ["/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-17
 /** The output limit of the agent call of the app (ToolEngine.kt 131072, capped by OpenAiProfile.maxOutputTokens). */
 const MAX_OUTPUT = 128000;
 /** The device bars of a clean plan: Bun is about 1.3 times faster than the device, whose compile cap is 3000 ms, and the host refuses a larger start state. */
-export const BARS = { compileMs: 2300, stateBytes: 49152 };
+export const BARS = { compileMs: 2300, stateBytes: MAX_STATE_BYTES };
 
 /** The cases that the kit cannot serve (the code map, section 8): 5 need a picture, 15 are games, a drawing canvas, or 3D. Their expected reply is outside(...). */
 export const OUTSIDE_CASES = new Set(["showcase-image-recipe", "showcase-image-flashcards", "showcase-image-plant", "showcase-image-story", "showcase-image-menu",
@@ -174,7 +175,8 @@ async function compile(input) {
  * The record holds each call with its reply, each report of the kit, the outcome, and the final plan. clean is the step of the first clean report.
  * Each compile is compileStep of the kit, as the app runs it: the first reply as readPlanReply reads it, and a repair reply merged into the plan.
  * A change case (set F) sends the request and the app file of its stored app (changeText), merges the reply into the app file, compiles each plan
- * against the stored state, and gets one repair call. Its record also holds the stored state, the next state, and the comparison of the two (keptOf).
+ * against the stored state, and gets one repair call, or none after a fault that the saved data blocks (blockedBySavedData) or the mismatch
+ * fault (savedDataMismatch), as in the app. Its record also holds the stored state, the next state, and the comparison of the two (keptOf).
  */
 export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
   runtime.text ||= await runtimeText();
@@ -210,6 +212,8 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
       if (stored) Object.assign(record, { state: result.state }, keptOf(stored, result.state, dataOf(result.definition)));
       break;
     }
+    // As in the app (AppFileSteps.outcome): a model cannot fix the saved data, so a fault that it blocks, or the mismatch, gets no repair call.
+    if (result.blockedBySavedData || result.savedDataMismatch) break;
     if (step === limit) break;
     const call = await send(step + 1, "low", repairText({ task, plan, faults: result.faults }));
     if (call.status !== "completed") break;

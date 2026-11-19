@@ -750,6 +750,8 @@ Of the 32 records: 28 yes (with the two `outside("game")` replies), 2 partly (`s
 
 No `MISMATCH` fault came. No other fault came.
 
+These two records stay as records of the old rule of the harness: since task U-K, the harness makes no repair call after a `BLOCKS` or `MISMATCH` fault, as the app does.
+
 ### Rewrites and renames
 
 - No reply wrote the whole plan again. No reply repeated a line of the plan that it did not change.

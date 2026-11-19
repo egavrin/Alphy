@@ -6,6 +6,7 @@ import { BARS, SET_E, SET_F, barFaults, bodyOf, changeNumbers, checkOne, dropped
 import { PROMPT, changeText, repairText, taskText } from "../prompt.js";
 import { BLOCKS } from "../src/change.js";
 import { patchAppFile } from "../src/compile.js";
+import { MAX_STATE_BYTES } from "../src/run.js";
 import "./helpers.js";
 
 const PLAN = 'app("Tip", lang="en")\nneed bill = input("money", "Bill", 80, min=0, max=500)\nneed tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])\n';
@@ -98,7 +99,9 @@ test("modelcheck: an outside reply and a cut reply get no compile", async () => 
 });
 
 test("modelcheck: the device bars and the host forms that the kit takes", () => {
-  expect(barFaults({ compileMs: 2400, stateBytes: 50000, plan: 'need a = figure("number", "", 1)' })).toEqual(["compile 2400 ms > 2300", "start state 50000 bytes > 49152", "a figure with an empty label"]);
+  // The bar of the start state is the state limit of the kit (run.js), which is the limit of the host.
+  expect(barFaults({ compileMs: 2400, stateBytes: MAX_STATE_BYTES + 1, plan: 'need a = figure("number", "", 1)' })).toEqual(["compile 2400 ms > 2300", `start state ${MAX_STATE_BYTES + 1} bytes > ${MAX_STATE_BYTES}`, "a figure with an empty label"]);
+  expect(barFaults({ compileMs: 1, stateBytes: MAX_STATE_BYTES, plan: "" })).toEqual([]);
   const ui = { type: "column", children: [{ type: "card", children: [{ type: "segmented", options: [] }] }] };
   expect(barFaults({ compileMs: 1, stateBytes: 1, plan: "", definition: { ui } })).toEqual(["a choice that is the only child of a card or a row"]);
 });
@@ -157,18 +160,24 @@ test("modelcheck (2b): a change reply goes into the app file, compiles against t
   expect([record.state.tip, record.lost, record.plan.includes('"Чаевые", 15')]).toEqual([12, [], true]);
 });
 
-test("modelcheck (2b): a reply that removes a column with saved rows gets BLOCKS and one repair call at the effort low", async () => {
+test("modelcheck (U-K item 1): a reply that removes a column with saved rows gets BLOCKS and no repair call, as in the app", async () => {
   const entry = caseOf("showcase-lang-shopping-it-b"), line = entry.plan.split("\n")[1];
   const removed = line.replace(', corsia: "text"', "").replace(', corsia: "Corsia"', "").replace(', corsia: "Pin"', "");
-  const { ask, bodies } = fake(removed, line.replace('countText="Prodotti"', 'countText="Articoli"'));
+  const { ask, bodies } = fake(removed, line);
   const record = await checkOne(entry, { ask, model: "m", effort: "medium", repairs: 2 });
-  expect([record.outcome, record.steps.map((step) => [step.blocks, step.mismatch]), record.calls.map((call) => call.effort)]).toEqual(["clean1", [[1, 0], [0, 0]], ["medium", "low"]]);
+  expect([record.outcome, record.steps.map((step) => [step.blocks, step.mismatch]), record.calls.map((call) => call.effort), bodies.length]).toEqual(["not", [[1, 0]], ["medium"], 1]);
   expect(record.steps[0].faults[0]).toContain(BLOCKS);
-  const merged = patchAppFile(entry.plan, removed);
-  expect(bodies[1].input[0].content[0].text).toBe(repairText({ task: changeText(entry), plan: merged, faults: record.steps[0].faults }));
-  expect([record.lost, record.gone]).toEqual([[], []]);
-  // One repair only, also when the run asks for more.
-  const failed = await checkOne(entry, { ...fake(removed, removed, removed), model: "m", effort: "low", repairs: 2 });
+  expect([record.plan, record.state]).toEqual([patchAppFile(entry.plan, removed), undefined]);
+});
+
+test("modelcheck (2b): a change reply with a fault of a line gets one repair call at the effort low over the change input, also when the run asks for more", async () => {
+  const entry = caseOf("holdout-tip-ru-b"), fixed = 'need tip = input("percent", "Чаевые", 15, min=0, max=100)', faulty = fixed.replace("max=100)", "max=100, bogus=1)");
+  const { ask, bodies } = fake(faulty, fixed);
+  const record = await checkOne(entry, { ask, model: "m", effort: "medium", repairs: 2 });
+  expect([record.outcome, record.steps.map((step) => [step.blocks, step.mismatch]), record.calls.map((call) => call.effort)]).toEqual(["clean1", [[0, 0], [0, 0]], ["medium", "low"]]);
+  expect(bodies[1].input[0].content[0].text).toBe(repairText({ task: changeText(entry), plan: patchAppFile(entry.plan, faulty), faults: record.steps[0].faults }));
+  expect([record.state.tip, record.lost]).toEqual([12, []]);
+  const failed = await checkOne(entry, { ...fake(faulty, faulty, faulty), model: "m", effort: "low", repairs: 2 });
   expect([failed.outcome, failed.calls.length, failed.state]).toEqual(["not", 2, undefined]);
 });
 
