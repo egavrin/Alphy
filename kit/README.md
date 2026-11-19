@@ -88,7 +88,7 @@ In a row of a list, a look value must not read a field of the row, such as `$don
 
 | Option | Components | Values |
 | --- | --- | --- |
-| `icon` | `Button`, `IconButton` (first argument), `Metric`, `Badge`, `Notice`, `Card`, `TextField`, `NumberField`, `Select`, `DateField`, `TimeField` | Each icon of Alphy (`src/icons.js`), and the kit names `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, and `Edit`. A `Select` of six options or fewer is a segmented control, which shows no icon. |
+| `icon` | `Button`, `IconButton` (first argument), `Metric`, `Badge`, `Notice`, `Card`, `TextField`, `NumberField`, `Select`, `DateField`, `TimeField` | Each icon of Alphy (`src/icons.js`), and the kit names `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, and `Edit`. A `Select` of six options or fewer is a segmented control or a group of cells (see `input` under Parts), which shows no icon. |
 | `variant` | `Button` | `filled`, `outlined`, `text`, `tonal`. With no variant, the host decides. `selected=` gives `filled` or `tonal`. |
 | `variant` | `Text`, `Card`, `CheckBox`, `Progress` | `muted` and `eyebrow`, `hero`, `circle`, `bar` and `dots`. |
 | `size` | `Emoji` | `small`, `medium`, `large`. |
@@ -99,6 +99,7 @@ In a row of a list, a look value must not read a field of the row, such as `$don
 | `gap` | `Row`, `Column` | `none`, `small`, `medium`, `large`. The root `Column` is the column of the app: its gap is the gap of the app, and its padding is `medium`. |
 | `columns` | `Grid` | 1, 2, 3, 4. The default is 2. |
 
+`Row(children, max=360)` gives the row a largest width in dp, the `maxWidth` of its Alphy layout. A row that is narrower than its column stands at its start.
 `Emoji(sign, size=)` takes a sign, a state value, or a field of a list row.
 `label=` is its text for a screen reader. Without it, the text in a list row is the kit caption of its line, such as "item Emoji", because one template draws all rows. The `entries` part gives it the title of the list.
 `Segmented`, `Select`, and `Choices` take `options` as a list or as a map of a text value to its label, such as `{asc: "Low to high", desc: "High to low"}`.
@@ -115,10 +116,11 @@ A hero card holds the main element, at most one filled button, and at most one t
 
 The captions that a part writes by itself are in the language of `lang=` of the app line (`src/words.js`): "Add", "Remove", "Less", "More", "Reset", and the others of its table.
 A language outside the table gets the English words and one note of the report that names each option of the need that took an English caption.
-The host draws its own words where it has them: the empty text of a list, the close button of a sheet, and the move menu of a reordered list.
+The host draws its own words where it has them: the empty text of a list, the empty text of a chart, the close button of a sheet, and the move menu of a reordered list. Each one is in the language of the app (`NativeToolUi.kt` `miniAppString`).
 
 A figure prints its number with `amount(x, n)`: at most `n` decimals, no zeros at the end, and the digit groups and the decimal sign of the language of the app ("1.234,5" in `de`, "1,234.5" in `en`, "12 345,5" in `pl` with a no-break space). In `es`, `pl`, and `pt` a number of four digits has no group ("1234,5").
-`fixed`, `money`, and `percent` use the same signs. A plain `text(x)` and a `Metric` of a state value print the number as it is, so a year belongs in `text()`, not in a figure.
+`amount` gives a value that is not a number, such as a text that a format function printed, as it is.
+`fixed`, `money`, and `percent` use the same signs. `money` has 2 decimals, and none in `ja` and `ko`, because the yen and the won have no minor unit (L1 item 5). `decimals=` on a money figure gives its decimals in each language. A plain `text(x)` and a `Metric` of a state value print the number as it is, so a year belongs in `text()`, not in a figure.
 A text that a format function printed is for a person: do not read it back as a number. `number(fixed(1234.5))` is 0 in `en`, because "1,234.50" has a group sign.
 
 | Part | Look options | Example |
@@ -143,8 +145,16 @@ A text that a format function printed is for a person: do not read it back as a 
     `total="of"` shows all rows too, such as "5 of 12". `total=` on a list with no hero count is a note, and the kit leaves it out.
   - `icons={nome: "Cart"}` gives a field of the add form its icon. A text, number, count, date, or time field shows an icon, and a choice of more than six options does too. Each other field, a name that is not a field, and each name with `add=false` are notes, and the kit leaves the icon out.
   - `tones={streak: "accent"}` gives the badge of a value of `show=` its tone. A name that `show=` does not give, or the sign of the row, is a note, and the kit leaves it out.
+  - A value of `show=` prints with `amount(x, 2)`: a number in the language of the app with at most 2 decimals, and a text as it is, such as one that `fixed()` or `money()` of the plan printed. A name of `labels=` stands before the value, such as "Серія днів: 0" (L1 item 2).
+  - In a row with values of `show=`, the title and the value cells are one group that wraps: a cell that does not fit beside the title goes under it, with the width of its content. The emoji, the check marks, and the remove button stay at the ends of the line. A row with no value of `show=` keeps its title with the rest of the line.
+  - An editable row (`edit=true`) is one line that wraps (L1 item 1). A text field there is as wide as the host lets it be (up to 300 dp), so on a phone it has a line of its own. The first text field shares its line only with the emoji, and each other control keeps the width of its content.
+    A count of a row is one group of a minus button, a number field with no stepper of its own, and a plus button, on a line of its own.
 - `input`: `options={value: "Label"}` keeps the value in the state and shows the label. `icon=` goes to a text, number, date, or time field and to a choice of more than six options.
-  The host draws a choice of six options or fewer as a segmented control, which shows no icon. Each kind of input takes `icon=`: on a segmented control, a slider, a range slider, a multi-choice, or a toggle it is a note, and the kit leaves it out.
+  A single choice of more than six options is a select. A choice of six options or fewer is a segmented control when its labels fit a segmented row on the phone, else a group of cells that wraps, with one cell selected (L1 item 4, `run.js` `choice`).
+  The labels fit when the number of options times the width of the widest label is 345 dp or less, and 300 dp in a row of a list. The width of a label is 29 dp and, for each letter, 4 dp for a narrow letter, 11 dp for a wide one, 13 dp for a letter of a wide script such as CJK, and 8 dp for another letter.
+  The estimate is fitted to the Roboto and Noto CJK fonts of the phone, within about 1.5 dp. The rule uses the width of the phone also on a wide screen.
+  The host draws no title over the group of cells, so a text with the label of the choice stands over it. In a row of a list the group has no such text, and the host names it to a screen reader.
+  The host draws a segmented control with no icon. Each kind of input takes `icon=`: on a segmented control, a group of cells, a slider, a range slider, a multi-choice, or a toggle it is a note, and the kit leaves it out.
   Each other option of an input is only for its own kinds: `min=` on a text field is a fault.
   The kinds are `number`, `money`, `percent`, `count`, `range`, `choice`, `choices`, `toggle`, `text`, `date`, and `time`. Each other kind, such as `slider`, is a fault of the need.
   The kind `range` writes `RangeSlider(label, $/x, min=, max=, step=)`: one state value of two numbers in order, the low and the high (`$/price[0]`, `$/price[1]`).
@@ -160,6 +170,7 @@ A text that a format function printed is for a person: do not read it back as a 
   `note=`, `goal=`, and `goalText=` show only on the main figure: on another figure they are a note, and the kit leaves them out. `goalText=` with no `goal=` is a note too.
   `decimals=` is the number of decimals of a `number`, `money`, or `percent` figure. A `text` figure shows its value as it is, so `decimals=` on it is a note.
 - `counter`: a section with the title of the counter. It holds an outlined less button, the value with the display emphasis, and a filled more button.
+  The three are one row of at most 360 dp (`Row(..., max=360)`), so on a wide screen the buttons stay beside the value (L1 item 8). The content of a phone is about 346 dp wide, so there the row fills the line.
   With `addText=`, the counter is one filled button that adds the step and a text button that resets the value. The plan shows the value elsewhere, such as in a figure.
   `lessText=` and `moreText=` with `addText=` are a note, and so are `icon=` and `resetText=` without it: the kit leaves them out.
 - `timer`: the card of a timer is a hero card, also the host's own countdown. A timer with rounds has a filled Start with a play icon, a filled Pause with a pause icon while it runs, a Reset text button, and a muted phase text.
@@ -169,6 +180,9 @@ A text that a format function printed is for a person: do not read it back as a 
   The hero card holds the card and its Show button. The row of Yes and No stands under the card.
   With `answer=`, the field, the check button, the notice, and the next button stand under the card.
   A deck of pages (no `back=`) keeps a heading for its front, because a page can be a long text. Its Back and Next row stands under the card.
+  At the end of a deck of pages, Next goes and Back stays, so a person can go back from the end. A deck of one row has a Back button that works.
+  Over an empty list each form of deck shows only a muted centered text: the `emptyText=` of the list need, else "No records yet" in the language of the app (L1 item 3).
+  It shows no end card, no score or counts, and no button. The deck is written again when the `emptyText=` of its list changes.
 - `steps`: the note at the end has the success tone. `question`: its notice has the success tone for a right answer and the warning tone for a wrong one.
 - `lesson`: a lesson of at most 12 steps shows its count only in its dots, where the host writes "Step: 1 / 3". A longer lesson has a bar and a count line over it.
 - `chart`: the title shows once, as the label of the chart, with no section around it.
@@ -178,6 +192,13 @@ A text that a format function printed is for a person: do not read it back as a 
   The stage of a model is the muted tone of the theme. A part chip of a model is tonal, and filled while it is the selected part. The explode button is outlined.
   The line of a part chip has the part id in its name, such as `rover_part_wheels`. An id that is not a word, such as `"wheel-l"`, gives the place of the chip, such as `rover_part_2`.
   The color of a shape or a body is a color name of the kit (`core.js` `TONES`) or a hex such as `"#336699"`. Each other color of a line is a fault of the line.
+  The color `surface` is the surface role of the theme (`NativeToolUi.kt` `drawingRoles`): white in a light theme and near black in a dark one. The host keeps each ink role and the surface role at a contrast of 4.5 or more.
+  A text takes a color that reads on the last filled disk or box under its anchor (`draw.js` `commandsOf`, L1 item 6):
+  - On a shape in a hex color, the text is black or white by the luminance of the shape, so the contrast is 4.5 or more.
+  - On a shape in an ink role (`ink`, `accent`, `success`, `warning`, `error`), the text is in the surface role.
+  - On a muted shape, the text is in the default ink. The host draws a muted shape as the muted ink at the alpha `MUTED_SHAPE_ALPHA` (56), and only the default ink keeps 4.5 on that tint on each canvas.
+  - On a shape in `surface`, or on no shape, the text keeps its color, and a text in `surface` takes the default ink.
+  - A polygon, a line, and an outline cover no text, so a text on a filled polygon keeps its color.
 - The value of an option has its type. `sheet=`, `edit=`, `add=`, `remove=`, `hidden=`, and `reorder=` are `true` or `false` in the line, because a part reads them once when it builds the screen. `step=` and `decimals=` are numbers or formulas. A value of another type is a fault of the need.
 
 ## Look rules
