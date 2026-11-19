@@ -152,3 +152,15 @@ test("entries: a plan whose only main element is a list starts with a hero card 
     expect([lines, every(other.definition.ui).filter((node) => node.variant === "hero" && node.children?.some((child) => child.text === "Items")).length]).toEqual([lines, 0]);
   }
 });
+
+test("entries: a list that a steps or tabs need groups gets no hero count at the root, and the first list that no holder groups gets it", async () => {
+  const counted = (definition) => every(definition.ui).filter((node) => node.variant === "hero").map((node) => node.children.find((child) => child.type === "metric").text);
+  for (const holder of ['need pages = tabs(["A", "B"], [[items], [n]])', 'need pages = steps(["A", "B"], [[items], [n]])']) {
+    const grouped = await built('app("T", lang="en")', holder, 'need n = input("number", "N", 1)', 'need items = entries("Items", fields={name: "text"})');
+    expect([holder, counted(grouped.definition)]).toEqual([holder, []]);
+  }
+  const both = await built('app("T", lang="en")', 'need pages = tabs(["A", "B"], [[items], [n]])', 'need n = input("number", "N", 1)',
+    'need items = entries("Items", fields={name: "text"})', 'need more = entries("More", fields={name: "text"})');
+  expect(counted(both.definition)).toEqual(["More"]);
+  expect(both.definition.ui.children[0].children[0]).toMatchObject({ type: "card", variant: "hero" });
+});

@@ -528,13 +528,14 @@ export async function expand(file, choose = rules) {
   }
   const candidates = needs.filter((entry) => ["figure", "progress"].includes(entry.tree.name)).map((entry) => entry.key);
   const hero = candidates.length ? await choose("main element", candidates, candidates[0]) : null;
-  // A plan with no figure, progress, drawing, timer, or model: the first list that shows gets a hero card with its count (C.6). An author's root gets none.
-  const listHero = !needs.some((entry) => ["figure", "progress", "drawing", "timer", "model3d"].includes(entry.tree.name)) && file.open("root")
-    ? needs.find((entry) => entry.tree.name === "entries" && entry.tree.named.hidden?.v !== true)?.key : undefined;
   // A part that holds other needs, such as steps, is built after them. Its place on the screen stays the place of its line.
   const holder = (entry) => ["steps", "tabs"].includes(entry.tree.name);
   // The places of the screen: each group of a holder, and the root with the needs that no holder groups, each in its order.
   const grouped = needs.filter(holder).flatMap((entry) => (entry.tree.args[1]?.items ?? []).map((group) => (group.items ?? []).map(memberName)));
+  // A plan with no figure, progress, drawing, timer, or model: the first list that shows and that no holder groups gets a hero card with its count
+  // at the root (C.6). An author's root gets none.
+  const listHero = !needs.some((entry) => ["figure", "progress", "drawing", "timer", "model3d"].includes(entry.tree.name)) && file.open("root")
+    ? needs.find((entry) => entry.tree.name === "entries" && entry.tree.named.hidden?.v !== true && !grouped.flat().includes(entry.key))?.key : undefined;
   const places = [needs.map((entry) => entry.key).filter((key) => !grouped.flat().includes(key)), ...grouped];
   // The figures that are not the main element are a set in each place (E.2, fix round 1): two that stand one after the other are one grid of two,
   // three or more are rows of one size, and one stays a metric. A figure keeps its place, and a figure in two places is in no set.
