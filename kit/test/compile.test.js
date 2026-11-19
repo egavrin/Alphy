@@ -8,7 +8,10 @@ import { createContext, runInContext } from "node:vm";
 import { compileAppFile } from "../src/compile.js";
 import { bundle, iconModule, planCopies, plansIn, script, withoutMessages } from "../build.js";
 import { HOST_ICONS } from "../src/icons.js";
-import { plan } from "./helpers.js";
+import { emit } from "../src/emit.js";
+import { handle } from "../src/run.js";
+import { STEPS } from "../src/core.js";
+import { plan, planned } from "./helpers.js";
 
 test("compileAppFile: calc.plan gives a definition and no fault", async () => {
   const result = await compileAppFile(plan("calc"));
@@ -81,4 +84,43 @@ test("build: a copy of a plan whose source is gone is in the outputs with no tex
     writeFileSync(join(root, "copies", "gone.plan"), "gone\n");
     expect(planCopies(plansIn(join(root, "plans")), join(root, "copies"))).toEqual([[join(root, "copies", "kept.plan"), "kept\n"], [join(root, "copies", "gone.plan"), null]]);
   } finally { rmSync(root, { recursive: true }); }
+});
+
+const APP = 'app("T", lang="en")', WORK = `: the app needs more than ${STEPS} steps of work`;
+/** The hostile plans of item 9 of the final review, each with a part of the fault that names its line and what is too large. */
+const HOSTILE = [
+  ["a line that shows itself", `${APP}\nroot = Column([root, root])`, "root: children: root shows itself inside itself"],
+  // 2 to the 18th nodes, at 37 levels: under the limit of 40 levels.
+  ["18 levels of lines that each show the next one two times", [APP, ...Array.from({ length: 18 }, (_, i) => `c${i} = Column([c${i + 1}, c${i + 1}])`), 'c18 = Text("x")', "root = Column([c0])"].join("\n"), ": children: the screen has more than 20000 parts"],
+  // The reviewer's two text formulas that grow each other. Each press of the button doubles the text again.
+  ["two text formulas that grow each other", `${APP}\n$/n = 0\n$/a := text($/b) + text($/b) + "x"\n$/b := $/a\nb1 = Button("go", inc($/n))\nroot = Column([Text($/a), Text(text($/n)), b1])`, "the formulas $/a and $/b read each other"],
+  ["30 formulas that each double a text", [APP, '$/a0 = "xy"', ...Array.from({ length: 30 }, (_, i) => `$/a${i + 1} := $/a${i} + $/a${i}`), "root = Column([Text($/a30)])"].join("\n"), WORK],
+  ["30 formulas that each hold the last one two times", [APP, "$/a0 = [1]", ...Array.from({ length: 30 }, (_, i) => `$/a${i + 1} := [$/a${i}, $/a${i}]`), "root = Column([Text(text(len($/a30)))])"].join("\n"), WORK],
+  ["a join of joins", `${APP}\n$/r = [${Array.from({ length: 100 }, (_, i) => i).join(", ")}]\n$/s = "${"x".repeat(2000)}"\n$/x := len(join(map($/r, join(map($/r, $/s), "")), ""))\nroot = Column([Text(text($/x))])`, `$/x${WORK}`],
+  ["a button that doubles a text", `${APP}\n$/s = "ab"\nb1 = Button("go", set($/s, $/s + $/s))\nroot = Column([Text($/s), b1])`, `smoke run: b1${WORK}`],
+  ["shapes in each of 500 in each of 500 in each of 500", `${APP}\nneed d = drawing("D", 320, 240, [each(500, each(500, each(500, circle(1, 1, 1))))])`, "need d: shapes: the drawing has more than 4096 shapes"],
+  ["a map in a map in a map in a map of 100 rows", `${APP}\n$/r = [${Array.from({ length: 100 }, (_, i) => i).join(", ")}]\n$/x := len(map($/r, map($/r, map($/r, map($/r, $it)))))\nroot = Column([Text(text($/x))])`, `$/x${WORK}`],
+  ["20000 brackets", `${APP}\n$/x := ${"(".repeat(20000)}1${")".repeat(20000)}\nroot = Column([Text(text($/x))])`, "line 2: the line nests more than 100 levels of brackets, signs, calls, or operators. Compute a part of it in a formula of its own: $/x := ((("],
+  ["20000 signs", `${APP}\n$/x := ${"-".repeat(20000)}1\nroot = Column([Text(text($/x))])`, "line 2: the line nests more than 100 levels of brackets, signs, calls, or operators. Compute a part of it in a formula of its own: $/x := ---"],
+  ["10000 operators", `${APP}\n$/x := 1${" + 1".repeat(10000)}\nroot = Column([Text(text($/x))])`, "line 2: the line nests more than 100 levels of brackets, signs, calls, or operators. Compute a part of it in a formula of its own: $/x := 1 + 1"],
+  ["10000 choices", `${APP}\n$/x := ${"1 ? 1 : ".repeat(10000)}1\nroot = Column([Text(text($/x))])`, "line 2: the line nests more than 100 levels of brackets, signs, calls, or operators. Compute a part of it in a formula of its own: $/x := 1 ? 1"],
+];
+
+test("compileAppFile: a plan that would hold the memory or the time of the compile step gets a fault that names its line (final review 9)", async () => {
+  for (const [name, text, part] of HOSTILE) {
+    const started = performance.now(), { faults } = await compileAppFile(text), fast = performance.now() - started < 2000;
+    expect({ name, fast, found: faults.some((fault) => fault.includes(part)) }, faults.slice(0, 3).join(" | ")).toEqual({ name, fast: true, found: true });
+  }
+});
+
+test("run: an event whose work passes the budget of the kit ends in a bounded time (final review 9)", async () => {
+  // At the start one row makes the formula cheap. The rows that a person adds make it pass the budget at run time.
+  const text = [APP, 'need items = entries("Items", fields={name: "text"}, rows=[{name: "a"}])', "$/x := len(map($/items, map($/items, map($/items, map($/items, $name)))))", "root = Column([items_view, Text(text($/x))])"].join("\n");
+  const { definition, faults } = await compileAppFile(text), { app } = emit(await planned(text));
+  expect(faults).toEqual([]);
+  const items = Array.from({ length: 100 }, (_, index) => ({ id: `r${index + 1}`, name: `n${index}` })), state = { ...definition.initialState, items };
+  const started = performance.now(), reply = handle({ artifactId: "kit-test", revision: 1, state, event: { type: "open" } }, app);
+  // The event changes nothing: the host keeps the state that it has.
+  expect([performance.now() - started < 300, reply]).toEqual([true, { state }]);
+  expect(reply.state).toBe(state);
 });

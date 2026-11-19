@@ -3,7 +3,7 @@
 
 import { HOST_ICONS } from "./icons.js";
 import { show } from "./dsl.js";
-import { App, CATALOG, ICON_NAMES, given, settings } from "./core.js";
+import { App, CATALOG, ICON_NAMES, STEPS, given, settings } from "./core.js";
 import { faultName, needsOf } from "./parts.js";
 
 /** Calls visit for each node of an expression tree. */
@@ -33,7 +33,9 @@ function smokeRun(file, limit, clock) {
   // A state of the run is the text of the app's state and the time of the clock at it. A timer keeps the end of its phase in the state,
   // so the run comes back to a state at its own time: a later time would end the phases of a timer that runs at the next press.
   const save = () => ({ text: JSON.stringify(app.state), now: clock.now });
-  const restore = (saved) => { app.state = JSON.parse(saved.text); clock.now = saved.now; app.recompute(); };
+  // Each use of a control starts from a restore, and each look at the screen is new work too, so each one has the budget of work of one event (core.js STEPS).
+  const restore = (saved) => { app.steps = 0; app.state = JSON.parse(saved.text); clock.now = saved.now; app.recompute(); };
+  const screen = () => { app.steps = 0; return app.tree(); };
   // What a person can see of a node. The rows of a list are data, not a look: the look is in the children.
   const look = (node) => JSON.stringify(node, (key, value) => (["row", "list", "template", "action", "bind", "items", "call"].includes(key) ? undefined : value));
   const short = (value) => (Array.isArray(value) ? `[${value.length}]` : JSON.stringify(value) ?? "nothing").slice(0, 40);
@@ -47,7 +49,7 @@ function smokeRun(file, limit, clock) {
       if ((here || !usable) && (node.rowIndex ?? 0) === 0 && (node.props.action || node.props.bind)) out.push({ node, key: node.name ?? key, parent });
       node.children.forEach((child, index) => walkNode(child, key + "." + index, shown && node.props.visible !== false, node));
     };
-    walkNode(app.tree(), "0", true, null);
+    walkNode(screen(), "0", true, null);
     if (usable) out.forEach((control) => reached.add(control.key));
     return out;
   };
@@ -85,12 +87,13 @@ function smokeRun(file, limit, clock) {
   // Each control is used from the state in which it came to the screen. So one control cannot hide or delete what the next one needs.
   const queue = [start];
   const drain = () => {
-    while (queue.length && done.size < limit) {
+    while (queue.length && done.size < limit && !app.tripped) {
       const base = queue.shift();
       const reset = () => restore(base);
       reset();
       const here = controls().map((control) => control.key);
       for (const key of here) {
+        if (app.tripped) break;
         if (done.has(key) || done.size >= limit) continue;
         done.add(key);
         reset();
@@ -99,7 +102,7 @@ function smokeRun(file, limit, clock) {
         // The tab that is open does nothing when a person taps it. That is the rule of the host, not a fault of the app.
         if (found.node.tab && found.node.props.selected) continue;
         const { node, parent } = found, p = node.props, title = node.name ?? `the ${node.type} "${p.label ?? p.icon ?? ""}"`;
-        let seen = look(app.tree());
+        let seen = look(screen());
         const own = look({ ...node, children: [] }), known = new Set(app.faults.map((fault) => `${fault.where}: ${fault.message}`));
         let error;
         if (p.bind) {
@@ -119,7 +122,7 @@ function smokeRun(file, limit, clock) {
         // empty text field that its action reads. It passes only when that press changes a value of the typed state, so a dead button beside a field stays a fault.
         // The typed text shows in its field, so the run looks at the screen again before that press.
         if (!p.bind && JSON.stringify(app.state) === base.text && typeInto(node)) {
-          seen = look(app.tree());
+          seen = look(screen());
           const filled = JSON.stringify(app.state);
           error = app.fire(controls().find((control) => control.key === key)?.node ?? node);
           if (error || JSON.stringify(app.state) === filled) reset();
@@ -136,7 +139,7 @@ function smokeRun(file, limit, clock) {
           const rows = [];
           const find = (other) => { if (other.name === key && other.rowIndex !== undefined) rows.push(other); other.children.forEach(find); };
           reset();
-          find(app.tree());
+          find(screen());
           // With one row the run cannot tell: a row cannot move, and the run does not judge it.
           const alone = node.rowIndex !== undefined && rows.length < 2;
           if (!p.bind && !alone && !(rows.length > 1 && !app.fire(rows.at(-1)) && JSON.stringify(app.state) !== base.text)) idle.set(key, title);
@@ -146,7 +149,7 @@ function smokeRun(file, limit, clock) {
         const was = JSON.parse(base.text);
         trace.push(`${p.bind ? "set" : "tap"} ${title}: ` + Object.keys({ ...was, ...app.state }).filter((name) => JSON.stringify(was[name]) !== JSON.stringify(app.state[name]))
           .map((name) => `${name} ${short(was[name])} -> ${short(app.state[name])}`).join(", "));
-        if (look(app.tree()) === seen) faults.push(`smoke run: ${title} changes a value, and no part of the screen shows it`);
+        if (look(screen()) === seen) faults.push(`smoke run: ${title} changes a value, and no part of the screen shows it`);
         else if (onOff(node) && look({ ...(after.find((control) => control.key === key)?.node ?? {}), children: [] }) === own) {
           // One on-off button can show its effect in a different part of the screen. A group of them cannot: the person must see which ones are on.
           const text = `${title} turns a value on and off, and looks the same in both states. Give it selected=test`;
@@ -176,7 +179,7 @@ function smokeRun(file, limit, clock) {
   const walkFrom = (begin) => {
     restore(begin);
     shapes.add(shape());
-    for (let step = 0; step < 60; step++) {
+    for (let step = 0; step < 60 && !app.tripped; step++) {
       // A tab button is not a step of the walk. There is one walk for each tab, and it stays in that tab.
       const usable = controls().filter((control) => !control.node.props.bind && !deletes(control.node) && !control.node.tab);
       if (usable.some((control) => !done.has(control.key))) queue.push(save());
@@ -207,6 +210,8 @@ function smokeRun(file, limit, clock) {
   });
   [start, ...tabStates].forEach(walkFrom);
   drain();
+  // Work past the budget stops the run: each later step stops at once, so the findings after it would be wrong.
+  if (app.tripped) return { faults: faults.some((fault) => fault.includes(`more than ${STEPS} steps`)) ? faults : [...faults, `smoke run: ${app.told}`], notes, trace };
   // A control that changed nothing in each state that the run tried. A field is not in this list: the run cannot know a value that it accepts.
   for (const title of idle.values()) faults.push(`smoke run: ${title} never changes a value: its action does nothing`);
   const never = all.filter((key) => !reached.has(key) && !/^0(\.\d+)*$/.test(key));
@@ -422,7 +427,8 @@ export function report(file) {
   app.tree(true);
   const broken = Object.keys(app.state).filter((name) => !finite(app.state[name])).map((name) => `$/${name} is not a finite number at the start`), named = faultName(file);
   const faults = [
-    ...[...file.faults, ...file.partFaults].map((f) => `${f.line == null ? "line" : "line " + f.line}: ${f.message}: ${f.text}`),
+    // A line of many thousand characters, such as one with too many levels, gives its start only.
+    ...[...file.faults, ...file.partFaults].map((f) => `${f.line == null ? "line" : "line " + f.line}: ${f.message}: ${f.text.length > 200 ? f.text.slice(0, 200) + "..." : f.text}`),
     ...app.faults.map((f) => `${named(f.where)}: ${f.message}`),
     ...circles(file, named),
     ...broken,
@@ -432,8 +438,9 @@ export function report(file) {
   ];
   // The smoke run needs a screen that builds. So it runs only when nothing else is wrong.
   const run = settings.gate === "smoke" && !faults.length ? smoke(file) : { faults: [], notes: [] };
-  const checks = runChecks(file), partOf = needsOf(file);
-  const failed = file.of("check").map((entry, index) => [entry, checks[index]]).filter(([, check]) => !check.pass).map(([entry, check]) => {
+  // Work past the budget would stop each check again in its own copy of the app.
+  const checks = app.tripped ? [] : runChecks(file), partOf = needsOf(file);
+  const failed = file.of("check").map((entry, index) => [entry, checks[index]]).filter(([, check]) => check && !check.pass).map(([entry, check]) => {
     const need = entry.origin === "part" ? partOf.get(entry.key) : undefined, example = need !== undefined ? file.get("need:" + need)?.tree.named.example : undefined;
     if (!example) return `check(${JSON.stringify(check.name)}): ${check.detail}`;
     return `need ${need}: example=${show(example)}${"got" in check ? ` gives ${JSON.stringify(check.got)}, and the example expects ${show(example.items[1])}. Correct the formula or the example` : `: ${check.detail}`}`;

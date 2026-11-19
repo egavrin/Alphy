@@ -59,10 +59,19 @@ function tokenize(text) {
 
 /** Parses one expression. Returns the tree and the count of tokens that it used. */
 function parseTokens(tokens, start = 0) {
-  let at = start;
+  let at = start, depth = 0;
   const peek = (v) => tokens[at] && tokens[at].t === "op" && tokens[at].v === v;
   const eat = (v) => { if (!peek(v)) throw new DslError(MESSAGES ? `"${v}" expected` : ""); at++; };
+  // The levels of the tree of the line: each bracket, sign, call, list, and operator in a chain is one. Each step of the kit reads a tree level by level.
+  // The run-time reads only lines that the compile step took, so it does not count them (MESSAGES).
+  const deeper = (levels) => { if ((depth += levels) > 100) throw new DslError(MESSAGES ? "the line nests more than 100 levels of brackets, signs, calls, or operators. Compute a part of it in a formula of its own" : ""); };
   function primary() {
+    if (MESSAGES) deeper(1);
+    const node = atom();
+    if (MESSAGES) depth--;
+    return node;
+  }
+  function atom() {
     const token = tokens[at];
     if (!token) throw new DslError(MESSAGES ? "value expected at the end of the line" : "");
     at++;
@@ -130,20 +139,25 @@ function parseTokens(tokens, start = 0) {
     }
   }
   function binary(level) {
-    let left = postfix();
+    let left = postfix(), chain = 0;
     while (tokens[at]?.t === "op" && OPS[tokens[at].v] >= level) {
       const op = tokens[at++].v;
+      if (MESSAGES) { deeper(1); chain++; }
       left = { k: "bin", op, left, right: binary(OPS[op] + 1) };
     }
+    if (MESSAGES) depth -= chain;
     return left;
   }
   function ternary() {
     const test = binary(1);
     if (!peek("?")) return test;
     at++;
+    if (MESSAGES) deeper(1);
     const yes = ternary();
     eat(":");
-    return { k: "if", test, yes, no: ternary() };
+    const no = ternary();
+    if (MESSAGES) depth--;
+    return { k: "if", test, yes, no };
   }
   const tree = ternary();
   return { tree, used: at - start };

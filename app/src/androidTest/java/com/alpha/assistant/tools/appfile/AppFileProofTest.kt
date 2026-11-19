@@ -812,4 +812,14 @@ class AppFileProofTest {
         assertEquals("Bo",app.act("people_remove",row("r1",null)).getString("who"))
         assertEquals("a",app.act(actionOf(spec,"Reset")).getString("k"))
     }
+    @Test fun aPlanOverTheLengthCapIsAFaultOfTheHost(): Unit=runBlocking {
+        // Item 9 of the final review: the host reads at most 65536 characters of a plan, with no call of the sandbox. A plan of 65536 characters goes to the kit.
+        val head="app(\"Long\", lang=\"en\")\nroot = Column([Text(\""
+        fun text(length: Int)=head+"x".repeat(length-head.length-4)+"\")])"
+        assertEquals(65537,text(65537).length)
+        val cap=compiler.compile(text(65537))
+        assertEquals("faults" to listOf("the plan has 65537 characters, and Alphy reads at most 65536. Use shorter texts and fewer lines"),cap.status to cap.faults)
+        val kit=compiler.compile(text(65536))
+        assertTrue(kit.faults.toString(),kit.status == "faults" && kit.faults.isNotEmpty() && kit.faults.none {"reads at most 65536" in it})
+    }
 }

@@ -469,7 +469,8 @@ export function kitOf(app, state) {
 /**
  * Answers one event of the sandbox request {artifactId, revision, state, event}. app is the compiled data of emit.js, and now
  * is the clock of the host. A read-only event, an action id that the app does not have, an action that changes nothing, and an
- * action that takes a list past its count of rows (app.caps), an array past Alphy's limit, or the state past 49152 bytes give the state back as it is.
+ * action that takes a list past its count of rows (app.caps), an array past Alphy's limit, or the state past 49152 bytes, and an event whose work passes
+ * the budget of the kit (core.js STEPS) give the state back as it is.
  * A plain value of another type or a number that is not finite keeps its value from before the event, a bound number past its bounds comes back at
  * its bound, and a choice comes back into its options. The reply holds a new ui only when the screen differs from the screen of the state before the event.
  * An open and a timer event of a timer or a change that runs move each timer and each change to the clock of now. A pointer event
@@ -482,8 +483,10 @@ export function handle(input, app, now = Date.now()) {
   if (event.type === "preview" || event.type === "render") return { state };
   const clock = settings.now;
   settings.now = () => now;
+  let kit;
   try {
-    const kit = kitOf(app, state), kinds = app.kinds ?? {}, before = screen(kit, app);
+    kit = kitOf(app, state);
+    const kinds = app.kinds ?? {}, before = screen(kit, app);
     // A drag that the state kept from an app that stopped in it would refuse the down of each other pointer.
     if (app.drag && event.type === "open") kit.state._drag = IDLE;
     const timed = event.type === "open" || (event.type === "timer" && (event.timerId === app.anim?.field ? Boolean(kit.state._run)
@@ -512,7 +515,8 @@ export function handle(input, app, now = Date.now()) {
     }
     const next = stateOf(kit, app, after), reply = JSON.stringify(after.ui) === JSON.stringify(before.ui) ? { state: next } : { state: next, ui: after.ui };
     // Alphy keeps a state of at most 49152 bytes (ToolSpec): an event past it changes nothing, as an add to a full list does.
-    if (hostBytes(next) > MAX_STATE_BYTES) return { state };
+    // An event whose work passes the budget of the kit (core.js STEPS) changes nothing too.
+    if (kit.tripped || hostBytes(next) > MAX_STATE_BYTES) return { state };
     // Each reply of an app with surfaces draws each one again, inside Alphy's limits of one reply, and names each timer that runs:
     // the bar of a timer by the id of its surface, and the changes of animate by the field of their state. One list for all.
     if (after.drawn.length) {
@@ -521,5 +525,9 @@ export function handle(input, app, now = Date.now()) {
       if (event.type !== "liveInput") reply.timers = [...after.drawn.filter((surface) => surface.running).map(({ id }) => ({ id, intervalMs: TICK_MS })), ...(kit.state._run ? [{ id: app.anim.field, intervalMs: ANIM_MS }] : [])];
     }
     return reply;
+  } catch (failure) {
+    // The stop of the budget can come in a part of the walk with no catch of its own (core.js App.step). The event changes nothing then too.
+    if (kit?.tripped) return { state };
+    throw failure;
   } finally { settings.now = clock; }
 }

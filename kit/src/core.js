@@ -42,6 +42,14 @@ const LAST = { text: "size", line: "width", rect: "radius" };
 /** The colors of a shape or a body by role. "accent" is the palette of the app. A different color is "#RRGGBB", and a renderer draws a text that it does not know as ink. */
 export const TONES = { ink: "#0f172a", muted: "#94a3b8", accent: null, surface: "#ffffff", water: "#38bdf8", land: "#65a30d", sun: "#facc15", sand: "#e7d3a8", wood: "#a16207", success: "#16a34a", warning: "#ea580c" };
 
+/**
+ * The work of one event of the run-time, or of one look of the compile step, in steps: each value, shape, and node, and each item and
+ * text of a value that a formula or an action builds (charge). So a plan cannot hold the memory or the time of the sandbox. The most
+ * nodes of one screen and the most shapes of one drawing have limits of their own, as each one holds more memory than a step.
+ * The saved plans use at most 44662 steps (with each list full of long texts), 1944 nodes, and 60 shapes. Alphy draws at most 512 commands.
+ */
+export const STEPS = 200000;
+const MAX_NODES = 20000, MAX_SHAPES = 4096;
 const round = (x, n = 0) => { const f = 10 ** n; return Math.round((x + Number.EPSILON) * f) / f; };
 /** A deep copy of a value of the app. The sandbox has no structuredClone. NaN and Infinity stay, so the report can find them. */
 const clone = (value) => (Array.isArray(value) ? value.map(clone) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, clone(inner)])) : value);
@@ -77,7 +85,13 @@ const PLAIN = {
   clamp: (x, low, high) => Math.min(high, Math.max(low, x)),
   len: (x) => (x == null ? 0 : x.length), text: (x) => String(x ?? ""), number: (x) => Number(x) || 0,
   pad2: (x) => String(Math.floor(x)).padStart(2, "0"),
-  join: (list, sep = ", ") => (list || []).join(sep), upper: (s) => String(s).toUpperCase(), lower: (s) => String(s).toLowerCase(),
+  join: (list, sep = ", ") => {
+    const items = list || [];
+    // The separator goes between each two items before the kit can count the text, so a long one is counted first.
+    if (items.length * String(sep).length > STEPS) throw new DslError(MESSAGES ? `join gives a text of more than ${STEPS} characters` : "");
+    return items.join(sep);
+  },
+  upper: (s) => String(s).toUpperCase(), lower: (s) => String(s).toLowerCase(),
   at: (list, index) => (Array.isArray(list) ? list[index] ?? null : null),
   // The longest run of true values in a list, such as the days in a row that a habit was done.
   streak: (list) => (list ?? []).reduce(([best, run], on) => (on ? [Math.max(best, run + 1), run + 1] : [best, 0]), [0, 0])[0],
@@ -156,6 +170,9 @@ export class App {
     this.nextId = 1;
     this.state = {};
     this.seen = new Map();
+    // The steps of work so far (step). A caller of the compile step sets steps to 0 for each look. tripped stays: the work stopped.
+    this.steps = 0;
+    this.tripped = false;
     if (start) this.follow();
   }
 
@@ -173,7 +190,33 @@ export class App {
     this.recompute();
   }
 
-  fault(where, message) { this.faults.push({ where, message }); }
+  /** After the work stops (step), each later step fails too. Only the first fault after the stop is kept: the one that names the line. */
+  fault(where, message) {
+    if (MESSAGES && this.told) return;
+    if (MESSAGES && this.tripped) this.told = `${where}: ${message}`;
+    this.faults.push({ where, message });
+  }
+
+  /** Counts n steps of work. Past STEPS the work stops: this step and each later one throw, so no value of a part of the work is kept. */
+  step(n = 1) {
+    if ((this.steps += n) > STEPS || this.tripped) this.stop(MESSAGES ? `the app needs more than ${STEPS} steps of work here, and Alphy stops it. Use fewer rows, shorter texts, or fewer levels of lists` : "");
+  }
+
+  /** Stops the work: this throw and the throw of each later step, so no value of a part of the work is kept. */
+  stop(message) {
+    this.tripped = true;
+    throw new DslError(message);
+  }
+
+  /**
+   * A value that a formula or an action builds counts one step for each item in it, also for each item that it holds two times, and
+   * one step for each 16 characters of a text: a text costs less memory than an item, and the rows of a full list hold up to 49152 bytes of texts.
+   */
+  charge(value) {
+    if (typeof value === "string") this.step(value.length >> 4);
+    else if (value && typeof value === "object") { this.step(); for (const inner of Object.values(value)) this.charge(inner); }
+    return value;
+  }
   attempt(entry, run) { try { return run(); } catch (failure) { this.fault(entry.key, failure.message); return null; } }
   pathOf(key) { return { k: "path", abs: true, segs: key.slice(2).split("/") }; }
 
@@ -210,6 +253,7 @@ export class App {
 
   /** The value of an expression. ctx.it is the row for $field paths. */
   value(node, ctx) {
+    this.step();
     switch (node.k) {
       case "lit": return node.v;
       case "path":
@@ -228,8 +272,8 @@ export class App {
           throw new DslError(MESSAGES ? `the row has no field ${name}` : "");
         }
         return this.read(node, ctx);
-      case "list": return node.items.map((item) => this.value(item, ctx));
-      case "map": return Object.fromEntries(node.entries.map(([key, inner]) => [key, this.value(inner, ctx)]));
+      case "list": return this.charge(node.items.map((item) => this.value(item, ctx)));
+      case "map": return this.charge(Object.fromEntries(node.entries.map(([key, inner]) => [key, this.value(inner, ctx)])));
       case "field": return this.value(node.of, ctx)?.[node.name];
       case "index": { const list = this.value(node.of, ctx); return Array.isArray(list) ? list[this.value(node.at, ctx)] ?? null : null; }
       case "un": return node.op === "-" ? -this.value(node.arg, ctx) : !this.value(node.arg, ctx);
@@ -239,7 +283,7 @@ export class App {
         if (node.op === "||") return this.value(node.left, ctx) || this.value(node.right, ctx);
         const a = this.value(node.left, ctx), b = this.value(node.right, ctx);
         switch (node.op) {
-          case "+": return Array.isArray(a) && Array.isArray(b) ? [...a, ...b] : typeof a === "string" || typeof b === "string" ? String(a ?? "") + String(b ?? "") : a + b;
+          case "+": return this.charge(Array.isArray(a) && Array.isArray(b) ? [...a, ...b] : typeof a === "string" || typeof b === "string" ? String(a ?? "") + String(b ?? "") : a + b);
           case "-": return a - b; case "*": return a * b; case "/": return a / b; case "%": return a % b;
           // Lists and rows are equal when their values are equal. The id that the host gives a row does not count (v1 budget-es: an example of groups).
           case "==": return same(a, b); case "!=": return !same(a, b);
@@ -254,10 +298,10 @@ export class App {
           if (!Array.isArray(rows)) throw new DslError(MESSAGES ? `${node.name} needs a list` : "");
           const perRow = (arg) => arg && ((row) => this.value(arg, { ...ctx, it: row }));
           // The third argument of groups is a formula of the row. The third argument of sort is the order.
-          return ROWWISE[node.name](rows, perRow(node.args[1]), node.name === "groups" ? perRow(node.args[2]) : node.args[2] && this.value(node.args[2], ctx));
+          return this.charge(ROWWISE[node.name](rows, perRow(node.args[1]), node.name === "groups" ? perRow(node.args[2]) : node.args[2] && this.value(node.args[2], ctx)));
         }
-        if (PLAIN[node.name]) return PLAIN[node.name](...node.args.map((arg) => this.value(arg, ctx)));
-        if (PRINT[node.name]) return PRINT[node.name](this.file.get("app")?.tree.named.lang?.v, ...node.args.map((arg) => this.value(arg, ctx)));
+        if (PLAIN[node.name]) return this.charge(PLAIN[node.name](...node.args.map((arg) => this.value(arg, ctx))));
+        if (PRINT[node.name]) return this.charge(PRINT[node.name](this.file.get("app")?.tree.named.lang?.v, ...node.args.map((arg) => this.value(arg, ctx))));
         if (CATALOG[node.name]) throw new DslError(MESSAGES ? `${node.name} is a component. A component line has a plain name with no $/ before it` : "");
         throw new DslError(MESSAGES ? `unknown function ${node.name}` : "");
       }
@@ -271,6 +315,7 @@ export class App {
    * each(list, call) gives one for each row of a list, or for each number below a count. A call with a false visible test gives nothing.
    */
   drawn(kinds, tag, tree, ctx) {
+    this.step();
     if (tree.k === "list") return tree.items.flatMap((item) => this.drawn(kinds, tag, item, ctx));
     const { name = "", args = [], named = {} } = tree.k === "call" ? tree : {};
     if (name === "each" && args.length === 2) {
@@ -298,6 +343,7 @@ export class App {
       const value = this.value(arg, ctx);
       if (key !== "stroke") out[key] = number(value, key); else if (value) out.stroke = true;
     }
+    if (++this.shapes > MAX_SHAPES) this.stop(MESSAGES ? `the drawing has more than ${MAX_SHAPES} shapes, and Alphy stops it. Alphy draws at most 512 commands` : "");
     return [out];
   }
 
@@ -309,7 +355,10 @@ export class App {
     const formulas = this.file.of("formula");
     for (let pass = 0; pass <= formulas.length; pass++) {
       const before = JSON.stringify(this.state);
-      for (const entry of formulas) this.attempt(entry, () => this.write(this.pathOf(entry.key), this.value(entry.tree, {}), {}));
+      for (const entry of formulas) {
+        if (this.tripped) return;
+        this.attempt(entry, () => this.write(this.pathOf(entry.key), this.value(entry.tree, {}), {}));
+      }
       if (JSON.stringify(this.state) === before) return;
     }
   }
@@ -323,13 +372,14 @@ export class App {
       const target = () => { if (!["path", "field", "index"].includes(first?.k)) throw new DslError(MESSAGES ? `${call.name} needs a place: a path, a field of a row, or an item of a list` : ""); return first; };
       const rowsOf = (node) => { const rows = this.value(node, ctx); if (!Array.isArray(rows)) throw new DslError(MESSAGES ? `${call.name} needs a list` : ""); return rows; };
       switch (call.name) {
-        case "set": this.write(target(), clone(this.value(second, ctx)), ctx); break;
+        // A value that an action writes counts as work too (charge): an action can copy a value of the app into itself.
+        case "set": this.write(target(), clone(this.charge(this.value(second, ctx))), ctx); break;
         case "toggle": this.write(target(), !this.value(target(), ctx), ctx); break;
-        case "inc": this.write(target(), (this.value(target(), ctx) || 0) + (second ? this.value(second, ctx) : 1), ctx); break;
+        case "inc": this.write(target(), this.charge((this.value(target(), ctx) || 0) + (second ? this.value(second, ctx) : 1)), ctx); break;
         case "dec": this.write(target(), (this.value(target(), ctx) || 0) - (second ? this.value(second, ctx) : 1), ctx); break;
         case "clear": this.write(target(), [], ctx); break;
         // flip($/list, value): the value joins the list, or leaves it when it is there. For options that a person turns on and off.
-        case "flip": { const rows = rowsOf(target()), value = this.value(second, ctx); this.write(target(), rows.includes(value) ? rows.filter((item) => item !== value) : [...rows, value], ctx); break; }
+        case "flip": { const rows = rowsOf(target()), value = this.charge(this.value(second, ctx)); this.write(target(), rows.includes(value) ? rows.filter((item) => item !== value) : [...rows, value], ctx); break; }
         case "move": {
           // In a list row: move(-1) moves that row one place up. Outside: move($/list, test, by) moves the first row that passes.
           const inRow = call.args.length === 1;
@@ -353,7 +403,7 @@ export class App {
           break;
         }
         case "append": {
-          const row = clone(this.value(second, ctx));
+          const row = clone(this.charge(this.value(second, ctx)));
           rowsOf(target()).push(row);
           this.tagRows([row]);
           break;
@@ -373,9 +423,13 @@ export class App {
   /** The tree that a renderer draws. A name that has no line yet becomes a Missing node, so a stream can draw. */
   tree(strict = false) {
     this.reached = new Set();
-    let unnamed = 0;
-    const visit = (tree, ctx, name, depth) => {
-      if (depth > 40) throw new DslError(MESSAGES ? "components nest too deep or refer to each other" : "");
+    let unnamed = 0, nodes = 0;
+    // inside holds the names of the component lines that hold this node, so a line that shows itself is a fault and not a screen with no end.
+    // The run-time draws only lines that the compile step took, so it does not look (MESSAGES).
+    const visit = (tree, ctx, name, depth, inside) => {
+      this.step();
+      if (++nodes > MAX_NODES) this.stop(MESSAGES ? `the screen has more than ${MAX_NODES} parts, and Alphy stops it. Show fewer rows or fewer lines in each row` : "");
+      if (depth > 40) throw new DslError(MESSAGES ? "components nest more than 40 levels deep" : "");
       if (tree.k === "ref") {
         const entry = this.file.get(tree.name);
         this.reached.add(tree.name);
@@ -383,7 +437,8 @@ export class App {
           if (MESSAGES && strict) this.fault(tree.name, "no component line with this name");
           return { type: "Missing", name: tree.name, props: {}, children: [] };
         }
-        return visit(entry.tree, ctx, tree.name, depth + 1);
+        if (MESSAGES && inside.includes(tree.name)) throw new DslError(`${tree.name} shows itself inside itself, so its screen has no end. Show other lines in it`);
+        return visit(entry.tree, ctx, tree.name, depth + 1, [...inside, tree.name]);
       }
       if (tree.k !== "call" || !CATALOG[tree.name]) {
         this.fault(name ?? "?", MESSAGES ? (tree.k === "path" ? `a child is a component name, not the path ${show(tree)}` : `unknown component ${tree.name ?? tree.k}`) : "");
@@ -399,7 +454,7 @@ export class App {
         if (!CATALOG[tree.name].includes(key) && !NAMED.has(key) && !(key === "action" && props.bind)) { this.fault(name ?? tree.name, MESSAGES ? `${tree.name} has no property ${key}` : ""); continue; }
         if ((tree.name === "Chart" && (key === "point" || key === "value")) || (tree.name === "List" && key === "group") || key === "shapes" || key === "bodies") continue;
         try {
-          if (key === "children") node.children = (arg.k === "list" ? arg.items : [arg]).map((child) => visit(child, ctx, undefined, depth + 1));
+          if (key === "children") node.children = (arg.k === "list" ? arg.items : [arg]).map((child) => visit(child, ctx, undefined, depth + 1, inside));
           else if (key === "groups") groups = arg.k === "list" ? arg.items : [arg];
           else if (key === "action") node.props.action = arg;
           else if (key === "bind") {
@@ -423,6 +478,7 @@ export class App {
       }
       if (tree.name === "Drawing" || tree.name === "Model3d") {
         const key = tree.name === "Drawing" ? "shapes" : "bodies", list = props[key] ?? { k: "list", items: [] };
+        this.shapes = 0;
         // An item that fails, such as a shape whose x is not a number at run time, is a fault and is left out: the other items still draw.
         node.props[key] = (list.k === "list" ? list.items : [list]).flatMap((item) => {
           try { return this.drawn(key === "shapes" ? SHAPES : BODIES, key === "shapes" ? "shape" : "body", item, ctx); }
@@ -447,7 +503,7 @@ export class App {
         node.children = [
           { type: "Row", props: {}, children: (node.props.titles ?? []).map((title, index) => ({ type: "Button", name: name && `${name}_tab${index}`, tab: true, children: [],
             props: { label: title, selected: index === open, action: { k: "call", name: "set", args: [place, { k: "lit", v: index }], named: {} } } })) },
-          ...groups.map((group, index) => ({ type: "Column", props: { visible: index === open }, children: (group.k === "list" ? group.items : [group]).map((child) => visit(child, ctx, undefined, depth + 1)) })),
+          ...groups.map((group, index) => ({ type: "Column", props: { visible: index === open }, children: (group.k === "list" ? group.items : [group]).map((child) => visit(child, ctx, undefined, depth + 1, inside)) })),
         ];
       }
       if (tree.name === "List" && node.template && Array.isArray(node.props.items)) {
@@ -470,16 +526,16 @@ export class App {
           rows = sorted.map((item) => item[0]);
           heads = sorted.map((item, index) => (index === 0 || sorted[index - 1][1] !== item[1] ? [{ type: "Heading", props: { text: String(item[1] ?? "") }, children: [] }] : []));
         } catch (failure) { this.fault(name ?? tree.name, MESSAGES ? `group: ${failure.message}` : ""); }
-        node.children = rows.flatMap((row, index) => [...(heads[index] ?? []), visit(node.template, { it: row, index, list }, undefined, depth + 1)]);
+        node.children = rows.flatMap((row, index) => [...(heads[index] ?? []), visit(node.template, { it: row, index, list }, undefined, depth + 1, inside)]);
         // For the emitter: the stored list of the rows, and the row template drawn for a row that it gives, such as a blank row.
         node.source = list;
-        node.blank = (row) => visit(node.template, { it: row, index: 0, list }, undefined, depth + 1);
+        node.blank = (row) => visit(node.template, { it: row, index: 0, list }, undefined, depth + 1, inside);
       }
       return node;
     };
     const root = this.file.get("root");
     if (!root) return { type: "Missing", name: "root", props: {}, children: [] };
-    return visit(root.tree, {}, "root", 0);
+    try { return visit(root.tree, {}, "root", 0, ["root"]); } catch (failure) { this.fault("root", failure.message); return { type: "Missing", name: "root", props: {}, children: [] }; }
   }
 
   find(name, rowIndex) {
@@ -542,7 +598,7 @@ export class App {
     try {
       this.write(node.props.bind, value, { it: node.row });
       if (node.props.action) this.act(node.props.action, { it: node.row, list: node.list }); else this.recompute();
-    } catch (failure) { return `${node.name ?? node.type}: ${failure.message}`; }
+    } catch (failure) { return this.failed(node, failure); }
     this.tick();
     return "";
   }
@@ -550,13 +606,21 @@ export class App {
   fire(node) {
     if (node.props.enabled === false || node.props.visible === false) return `${node.name ?? node.type} is not active`;
     this.tick();
-    try { this.act(node.props.action, { it: node.row, list: node.list }); } catch (failure) { return `${node.name ?? node.type}: ${failure.message}`; }
+    try { this.act(node.props.action, { it: node.row, list: node.list }); } catch (failure) { return this.failed(node, failure); }
     this.tick();
     return "";
   }
 
-  /** The same by name, for checks and for the agent loop. */
+  /** The error text of a control. A stop of the work in its action is the fault of the stop (fault), as it names the control. */
+  failed(node, failure) {
+    const text = `${node.name ?? node.type}: ${failure.message}`;
+    if (MESSAGES && this.tripped) this.told ??= text;
+    return text;
+  }
+
+  /** The same by name, for checks and for the agent loop. Each one is one event, with the budget of work of one event (step). */
   input(name, value, rowIndex) {
+    this.steps = 0;
     const node = this.find(name, rowIndex);
     if (node?.props.bind) return this.change(node, value);
     const why = !node ? `no field named ${name}` : node.props.action ? `${name} is not a field: use tap(${name})` : `${name} only shows a value and cannot be set. A check sets a field, such as a NumberField`;
@@ -564,6 +628,7 @@ export class App {
   }
 
   press(name, rowIndex) {
+    this.steps = 0;
     const node = this.find(name, rowIndex);
     if (node?.props.action) return this.fire(node);
     return (node?.props.bind ? `${name} is a field with no action: use set(${name}, value)` : `no control named ${name}`) + (rowIndex === undefined ? "" : ` in row ${rowIndex}`);
