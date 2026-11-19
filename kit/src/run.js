@@ -84,10 +84,10 @@ const LIVE = { TextField: (value) => typeof value === "string", Slider: Number.i
  * that it changes, and its action. A component that is not here is a fault "is not built yet".
  */
 const NODES = {
-  // An add form with more than two typed fields is a column of a button and the bottom sheet that the button opens.
+  // An add form with more than two typed fields is a column of a button and the bottom sheet that the button opens, also when an author wrote it as a Row.
   Column: (n, at) => at.form() ?? { type: "column", ...styled(n, ["gap"]), children: at.children(true) },
   // A weighted child needs a row that does not wrap. Alphy draws a row with no wrap=false as a flow row, so that row is a flowRow.
-  Row: (n, at) => (n.children.some((child) => child.props.weight !== undefined) ? { type: "row", wrap: false, ...rowStyle(n, n.props.align ?? "center"), children: at.children(true) }
+  Row: (n, at) => at.form() ?? (n.children.some((child) => child.props.weight !== undefined) ? { type: "row", wrap: false, ...rowStyle(n, n.props.align ?? "center"), children: at.children(true) }
     : { type: "flowRow", ...rowStyle(n), children: at.children() }),
   Grid: (n, at) => ({ type: "grid", columns: n.props.columns ?? 2, children: at.children() }),
   Card: (n, at) => ({ type: "card", ...(n.props.variant === "hero" && { variant: "hero" }), ...iconOf(n), children: at.children() }),

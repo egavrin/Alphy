@@ -112,10 +112,10 @@ export function emit(file) {
       : Array.isArray(value) ? listed(root, value, owner, root === need ? declared.get(need) : undefined) : app.kinds[root] === "time" ? "number" : typeof value;
     if (schema) place(root, need, owner, schema);
   }
-  // The open flag of an add form that the run-time puts into a bottom sheet: a value of its need that only the run-time sets.
+  // The open flag of an add form that the run-time puts into a bottom sheet: a value of its need that only the run-time sets. An author's Row of the form is a form too.
   for (const need of declared.keys()) {
     const form = file.get(`${need}_addRow`);
-    const typed = form?.tree.name === "Column" ? (given(form.tree).children?.items ?? []).filter((item) => item.k === "ref" && TYPED.has(file.get(item.name)?.tree.name)).length : 0;
+    const typed = ["Column", "Row"].includes(form?.tree.name) ? (given(form.tree).children?.items ?? []).filter((item) => item.k === "ref" && TYPED.has(file.get(item.name)?.tree.name)).length : 0;
     if (typed <= 2) continue;
     const root = `${need}_addRow:open`;
     kit.state[root] = false;

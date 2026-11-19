@@ -236,6 +236,19 @@ test("emit: an add form with more than two typed fields is a bottom sheet", asyn
   expect(picks.definition.ui.children[0].children[1].children[0].rowTemplate.type).toBe("flowRow");
 });
 
+test("emit: an author's Row of an add form with more than two typed fields is a bottom sheet, as a Column is", async () => {
+  const { definition, faults } = emit(await planned(['app("Tasks", lang="en")', 'need tasks = entries("Tasks", fields={task: "text", note: "text", due: "date"}, rows=[])',
+    "tasks_addRow = Row([tasks_new_task, tasks_new_note, tasks_new_due, tasks_add])"].join("\n")));
+  expect(faults).toEqual([]);
+  expect(definition.initialState.tasks_s.adding).toBe(false);
+  const form = definition.ui.children[0].children[1].children[1];
+  expect(form.children.map((node) => [node.type, node.visibleBind])).toEqual([["button", undefined], ["bottomSheet", "tasks_s.adding"]]);
+  expect(form.children[1].children.map((node) => node.type)).toEqual(["input", "input", "dateInput", "button"]);
+  // The first screen has no typed field: each field is in the sheet.
+  expect(every(definition.ui).filter((node) => ["input", "numberInput", "dateInput", "timeInput"].includes(node.type)).length).toBe(3);
+  expect(nodes(definition.ui).filter((node) => node.type === "bottomSheet").flatMap(nodes).filter((node) => node.type === "input").length).toBe(2);
+});
+
 test("emit: a row with more than 12 fields is a fault of its need line", async () => {
   const fields = (count) => Array.from({ length: count }, (_, index) => `f${index + 1}: "text"`).join(", ");
   const { definition, faults } = emit(await planned([
