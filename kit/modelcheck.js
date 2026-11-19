@@ -1,8 +1,8 @@
 // The model check of the plan prompt outside the app: a model writes a plan for each request, the kit compiles it, and a faulty plan
-// gets up to 2 repair calls. Each call is a call of the OpenAI Responses API with the body that OpenAiResponsesWire.kt builds.
+// gets up to REPAIRS repair calls (default 2). Each call is a call of the OpenAI Responses API with the body that OpenAiResponsesWire.kt builds.
 //   bun kit/modelcheck.js probe MODEL                          one call with a short request; the raw event stream goes to evidence/modelcheck/probe/
 //   bun kit/modelcheck.js run LABEL SET MODEL EFFORT [ID...]   SET is C (the 45 corpus cases), D (8 dialogue requests), E (28 fresh requests), or a combination such as CD.
-//                                                              STOP_AT (default 600) refuses a run whose worst case passes it.
+//                                                              STOP_AT (default 600) refuses a run whose worst case passes it. REPAIRS is the count of repair calls.
 //   bun kit/modelcheck.js table LABEL...                       the numbers of each label, from its records
 // The key is OPENAI_API_KEY, else its line in ~/.env. The script sends it only to api.openai.com, and writes it nowhere.
 // Each call is counted in evidence/modelcheck/spend.json before it is sent. The count never passes LIMIT.
@@ -15,8 +15,8 @@ import { runtimeText } from "./build.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const EVIDENCE = ROOT + "evidence/modelcheck/";
-/** The calls that the owner approved for the model checks: task A0 used 328 (its decision 5), and task H1 adds at most 70 (its decision 3). */
-const LIMIT = 398;
+/** The calls that the owner approved for the model checks: task A0 used 328 (its decision 5), task H1 used 28, and task P2 adds at most 134 (its decision 3). */
+const LIMIT = 490;
 /** The saved reports of today's agent loop: final-30d43aa, and for the 11 cases that it lacks, the first showcase run of 2026-11-16. */
 const REPORTS = ["/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-17/final-30d43aa/", "/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-16/showcase1/"];
 /** The output limit of the agent call of the app (ToolEngine.kt 131072, capped by OpenAiProfile.maxOutputTokens). */
@@ -122,7 +122,7 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
     return call;
   };
   const first = await send(0, effort, task), kind = first.status === "completed" ? kindOf(first.text) : { kind: first.status };
-  const record = { id: item.id, set: item.set, dialogue: Boolean(item.host), expect: item.expect, model, effort, prompt: PROMPT_HASH, task, calls, steps, first: kind, clean: null, plan: null };
+  const record = { id: item.id, set: item.set, dialogue: Boolean(item.host), expect: item.expect, model, effort, repairs, prompt: PROMPT_HASH, task, calls, steps, first: kind, clean: null, plan: null };
   if (kind.kind !== "plan" && kind.kind !== "other") return finish(record);
   let plan = linesOf(first.text).join("\n") + "\n";
   for (let step = 0; ; step++) {
@@ -145,6 +145,14 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
   }
   return finish(record);
 }
+/** The count of repair calls from the setting REPAIRS: a whole number of 0 or more, default 2. A count that is not one would never end the loop of checkOne. */
+export function repairsOf(text = "2") {
+  if (!/^\d+$/.test(text)) throw new Error(`REPAIRS is a whole number of 0 or more, not ${JSON.stringify(text)}`);
+  return Number(text);
+}
+/** The worst case of a run: each first call, and the repairs for each request that expects a plan. A plan for a request that expects outside also gets repairs, and LIMIT stops them. */
+export const worstCase = (items, repairs) => items.length + repairs * items.filter((item) => item.expect === "plan").length;
+
 function finish(record) {
   const plan = record.plan ?? "";
   record.outcome = record.clean !== null ? `clean${record.clean}` : record.first.kind === "plan" || record.first.kind === "other" ? "not" : record.first.kind;
@@ -291,17 +299,16 @@ if (import.meta.main) {
     writeFileSync(`${EVIDENCE}probe/${model}-${effort}.json`, JSON.stringify(call, null, 1));
     console.log(JSON.stringify({ ...call, text: call.text.slice(0, 1500) }, null, 1));
   } else if (phase === "run") {
-    const [label, set, model, effort, ...ids] = rest, stopAt = Number(process.env.STOP_AT ?? 600);
+    const [label, set, model, effort, ...ids] = rest, stopAt = Number(process.env.STOP_AT ?? 600), repairs = repairsOf(process.env.REPAIRS);
     const items = [...(set.includes("C") ? corpus() : []), ...(set.includes("D") ? SET_D : []), ...(set.includes("E") ? SET_E : [])].filter((item) => !ids.length || ids.includes(item.id))
       .filter((item) => !existsSync(`${EVIDENCE}${label}/${item.id}.json`));
-    // The worst case: each first call, and 2 repairs for each request that expects a plan. A plan for a request that expects outside also gets repairs, and LIMIT stops them.
-    const worst = items.length + 2 * items.filter((item) => item.expect === "plan").length, before = spent().calls;
-    console.log(`${label}: ${items.length} requests, worst case ${worst} calls, spent ${before}, stop at ${stopAt}`);
+    const worst = worstCase(items, repairs), before = spent().calls;
+    console.log(`${label}: ${items.length} requests, up to ${repairs} repairs each, worst case ${worst} calls, spent ${before}, stop at ${stopAt}`);
     if (before + worst > stopAt) { console.log("refused: the worst case passes the stop mark"); process.exit(2); }
     mkdirSync(`${EVIDENCE}${label}`, { recursive: true });
     runtime.text = await runtimeText();
     await pool(items, 4, async (item) => {
-      const record = await checkOne(item, { ask: (body) => openai(body, `${label} ${item.id} ${body.reasoning.effort}`), model, effort });
+      const record = await checkOne(item, { ask: (body) => openai(body, `${label} ${item.id} ${body.reasoning.effort}`), model, effort, repairs });
       // A first call that the transport lost leaves no record, so that the next run of the label tries the request again.
       if (/^(http|failed)/.test(record.outcome)) { console.log(item.id, record.outcome, record.calls[0].error); return; }
       record.calls.forEach((call, index) => writeFileSync(`${EVIDENCE}${label}/${item.id}.${index}.txt`, call.text));

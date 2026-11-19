@@ -2,7 +2,7 @@
 // the merge of a repair, and the record of a request. No test calls the API.
 
 import { expect, test } from "bun:test";
-import { BARS, PROMPT, SET_E, barFaults, bodyOf, checkOne, faultTable, kindOf, merge, numbers, repairText, taskText } from "../modelcheck.js";
+import { BARS, PROMPT, SET_E, barFaults, bodyOf, checkOne, faultTable, kindOf, merge, numbers, repairText, repairsOf, taskText, worstCase } from "../modelcheck.js";
 import "./helpers.js";
 
 const PLAN = 'app("Tip", lang="en")\nneed bill = input("money", "Bill", 80, min=0, max=500)\nneed tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])\n';
@@ -77,6 +77,17 @@ test("modelcheck: a faulty plan gets repair calls at the effort low until it is 
   const failed = await checkOne(item, { ask, model: "m", effort: "low" });
   expect([failed.outcome, failed.calls.length, failed.steps.length, failed.clean]).toEqual(["not", 3, 3, null]);
   expect(bodies[1].input[0].content[0].text).toContain("has no option bogus");
+});
+
+test("modelcheck (P2): the repair count is a setting of 0 or more, default 2, and the worst case of a run counts it for each request that expects a plan", async () => {
+  expect([repairsOf(), repairsOf("1"), repairsOf("0")]).toEqual([2, 1, 0]);
+  // A count that is not a whole number would never end the loop of checkOne before the hard stop.
+  for (const bad of ["", "-1", "1.5", "two"]) expect(() => repairsOf(bad)).toThrow();
+  const items = [{ expect: "plan" }, { expect: "plan" }, { expect: "outside" }];
+  expect([worstCase(items, 2), worstCase(items, 1), worstCase(items, 0)]).toEqual([7, 5, 3]);
+  const { ask, bodies } = fake(PLAN.replace("max=500)", "max=500, bogus=1)"), "nothing", "still nothing");
+  const record = await checkOne(item, { ask, model: "m", effort: "low", repairs: 1 });
+  expect([record.outcome, record.calls.length, record.steps.length, record.repairs, bodies.length]).toEqual(["not", 2, 2, 1, 2]);
 });
 
 test("modelcheck: an outside reply and a cut reply get no compile", async () => {
