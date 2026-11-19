@@ -1,8 +1,8 @@
-// The plan prompt (kit/prompt.md) against the kit: each kind, each option, each icon, and each component that the prompt names exists,
+// The plan prompt (kit/prompt.md) against the kit: each kind, each option, and each icon that the prompt names exists,
 // and each example plan of the prompt compiles with no fault. So the prompt and the kit cannot differ.
 
 import { expect, test } from "bun:test";
-import { CATALOG, ICON_NAMES } from "../src/core.js";
+import { ICON_NAMES } from "../src/core.js";
 import { HOST_ICONS } from "../src/icons.js";
 import { PROMPT as SECTIONS } from "../modelcheck.js";
 import { faultsOf } from "./helpers.js";
@@ -18,8 +18,18 @@ const optionsIn = (text) => [...new Set([...text.matchAll(/\b([A-Za-z]+)=/g)].ma
 test("prompt: the file has the sections System, Repair, and Dialogue", () => {
   expect(Object.keys(SECTIONS)).toEqual(["System", "Repair", "Dialogue"]);
   for (const text of Object.values(SECTIONS)) expect(text.length).toBeGreaterThan(100);
-  expect(KINDS.length).toBe(18);
+  expect(KINDS.length).toBe(17);
   expect(EXAMPLES.length).toBe(4);
+});
+
+test("prompt: the section System names no hole and no rule that only kept a look option from a fault, and a request that no kind serves gets outside (K1 item 5)", () => {
+  // The first loop of the app takes no plan with a section of its own lines, so the prompt names no hole, and the kit still has the kind.
+  expect(KINDS.map(([kind]) => kind)).not.toContain("hole");
+  expect(SYSTEM).not.toContain("Components:");
+  // A look option that cannot apply is a note of the kit now (A0-K4).
+  expect(SYSTEM).not.toContain("which takes no icon");
+  expect(SYSTEM).not.toContain("never with add=false");
+  expect(SYSTEM.split("\n").find((line) => line.includes('outside("game")'))).toContain("a main thing that no kind below gives");
 });
 
 test("prompt: each kind that the prompt names is a part of the kit", async () => {
@@ -29,8 +39,6 @@ test("prompt: each kind that the prompt names is a part of the kit", async () =>
 test("prompt: each option that the prompt names for a kind is an option of its part", async () => {
   let checked = 0;
   for (const [kind, paragraph] of KINDS) {
-    // A hole names the options of its components (the next test), and button gives each option to its Button.
-    if (kind === "hole") continue;
     // A drawing takes no option: visible= and stroke= of its paragraph are options of a shape.
     if (kind === "drawing") {
       expect(optionsIn(paragraph)).toEqual(["visible", "stroke"]);
@@ -46,11 +54,7 @@ test("prompt: each option that the prompt names for a kind is an option of its p
   expect(checked).toBeGreaterThan(80);
 });
 
-test("prompt: each component of a hole is a component of the kit, and each icon of the list is an icon of Alphy or of the kit", () => {
-  const hole = KINDS.find(([kind]) => kind === "hole")[1];
-  const components = [...hole.slice(hole.indexOf("Components:")).split("\n")[0].matchAll(/\b([A-Z]\w+)\(/g)].map(([, name]) => name);
-  expect(components.length).toBeGreaterThan(20);
-  expect(components.filter((name) => !Object.hasOwn(CATALOG, name))).toEqual([]);
+test("prompt: each icon of the list is an icon of Alphy or of the kit", () => {
   const icons = /An icon is one of these names: (.*)\./.exec(SYSTEM)[1].split(", ");
   expect(icons.length).toBeGreaterThan(150);
   expect(icons.filter((name) => !HOST_ICONS.includes(name) && !Object.hasOwn(ICON_NAMES, name))).toEqual([]);
