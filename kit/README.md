@@ -11,21 +11,24 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/parts.js` | The parts: each one changes a need line into component, state, and formula lines. |
 | `src/core.js` | The evaluator: the `App` that holds the state and builds the component tree. It reads no `process` and no file. |
 | `src/check.js` | The report of the host, the check lines, the smoke run that uses each control, and the check of each look option of a component. Only the compile step uses it. |
-| `src/icons.js` | Each icon name of Alphy. `build.js` writes it from `ToolUiCatalog.kt` (`shellIcons`) and `ToolIcons.kt` (the keys of `paths`). Only `check.js` reads it. |
+| `src/icons.js` | Each icon name of Alphy. `build.js` writes it from `ToolUiCatalog.kt` (`shellIcons`) and `ToolIcons.kt` (the keys of `paths`). Only `parts.js` reads it, and `check.js` takes the icon names from `parts.js`. |
 | `src/rows.js` | The list mapping of the run-time: `rows` maps a List to Alphy's list, and the value forms that the screen and the state share (Alphy names, times, dates, shown values). |
 | `src/draw.js` | The drawing of a surface for the run-time: `commandsOf` gives the kit's shapes (circle, rect, line, text, polygon, and their outlines) as Alphy's drawing commands with Alphy's colors, `barOf` is the bar of a timer, `budgetOf` counts what commands cost, and `fit` keeps a reply inside `LIMITS` of one reply. |
 | `src/drag.js` | The drag of a 3D model for the run-time: `dragged` turns a model by 0.6 degrees for each pixel that a pointer moves along x, and `IDLE` is the drag when no drag runs, also after each open. |
 | `src/run.js` | The run-time of a compiled app: `handle` answers each event, and `screen` maps each component to its Alphy node. A timer with rounds, a rest, or no alert draws its bar on a surface and asks for a timer event each second while it runs. A timer with an alert and one phase is Alphy's foreground timer. A Drawing is a canvas with one surface that each reply draws again. A value that an `animate` moves keeps its change in the state field `anim` and asks for a timer event each 50 ms while it moves. |
 | `src/emit.js` | The emitter: an expanded app file as Alphy's app definition, whose `source` is the run-time and the compiled data of the app. It gives a fault for each limit of Alphy that the kit's own mapping can pass: state fields, the fields of a need's object, source bytes, and the nodes and depth of the screen. It also keeps the lower limits: a container with no child is a fault of its line, and a plan with no state value keeps one hidden boolean field `d0`, because Alphy keeps 1 to 40 state fields. No line of a plan gets the name `d0`. Each need object has a namer of its own, so the names in it do not depend on the other needs. |
-| `src/compile.js` | The sandbox entry `compileAppFile`: an app file in; the faults and notes of the report and the definition out. |
-| `build.js` | The bundle of the modules as one plain script for the sandbox, the run-time text in it (minified by `Bun.build`), and the copies of the plans for the device tests. |
-| `prompt.md` | The plan prompt: the section "System" is the instructions of each plan call and repair call, "Repair" is the rule of a repair call, and "Dialogue" is the host line under the request of a screen of a voice dialogue. `test/prompt.test.js` checks each kind, option, icon, component, and example of it against the kit. |
+| `src/compile.js` | The sandbox entry `compileAppFile`: an app file in; the faults and notes of the report and the definition out. The merge `patchAppFile(plan, reply)`: the plan text after a repair reply (section "Repair replies"). |
+| `build.js` | The bundle of the modules as one plain script for the sandbox, with the globals `compileAppFile` and `patchAppFile`, the run-time text in it (minified by `Bun.build`), and the copies of the plans for the device tests. |
+| `prompt.md` | The plan prompt: the section "System" is the instructions of each plan call and repair call, "Repair" is the rule of a repair call, and "Dialogue" is the host line under the request of a screen of a voice dialogue. `test/prompt.test.js` checks each kind, option, icon, and example of it against the kit. The section "System" names no `hole`: the kit keeps the kind and its tests. A request that no kind serves gets `outside(...)`. |
 | `modelcheck.js` | The model check of `prompt.md` outside the app: for each request, a plan call of the OpenAI Responses API with the body of `OpenAiResponsesWire.kt`, the compile of the reply, and up to 2 repair calls at the effort low. It counts each call in `evidence/modelcheck/spend.json` before the call and keeps each reply and record in `evidence/modelcheck/<label>/`. Its sets of requests are C (the 45 cases of the corpus), D (8 requests of a voice dialogue), and E (`test/fixtures/fresh-requests.json`, 28 requests that no earlier run used). `test/modelcheck.test.js` covers its task text, body, repair, sets, and records with a fake of the call. |
 | `look.js` | The look numbers of each saved plan and each look fixture of `build.js`: `score_app` of `tools/agent_corpus/visual_score.py` on the compiled definition, as one table row for each plan. |
 | `plans/` | The saved plans. |
 | `test/` | The Bun tests. `test/fixtures/` holds example plans of the prototype that only the tests read, and the requests of set E of `modelcheck.js`. `test/nodes.plan` holds each component of the emitter's node table: the kit test and the device test `eachNodeOfTheTablePassesParseAndSmoke` read it. `test/lists.plan`, `test/rich.plan`, and `test/cards.plan` hold the lists and modals, the lists full to the render work limit, and the cards, charts, tabs, lessons, and questions: each has a kit test and a device test. `test/free.plan` holds the free forms that no other plan holds (an inline Row as a List template, a row Button with `enabled=`, `flip`, `move` with a test, and a line whose name is the name of an inline child): the kit tests and the device test `eachFreeFormPassesParseAndSmoke` read it. `test/shapes.plan` holds each shape kind, each outline form, `each` over a list, each kind of color, a text, and `animate` beside a timer with rounds: the kit tests and the device test `eachShapeAndColorPassesParseAndSmoke` read it. `test/draw.test.js` holds the commands, colors, and limits of `src/draw.js`. `test/budget.test.js` measures each compiled plan against each limit of Alphy and prints one table row for each plan. `test/timers.test.js` holds the timers of `plans/tea.plan` and `plans/timer-rounds.plan`, and the short plan of the device test `timerRoundsPassesParseAndSmoke`. `test/looks.plan` holds each look option and a `Grid`: `test/looks.test.js` and the device test `eachLookOptionPassesParseAndSmoke` read it. `test/fixtures/look-water-ko.plan` and `test/fixtures/look-shopping-it.plan` are two requests of the corpus with components only, in the tree of their baseline apps. `test/fixtures/mock-water-ko.plan`, `mock-units-pl.plan`, `mock-shopping-it.plan`, `mock-habits-uk.plan`, and `mock-price-filter.plan` are five requests of the corpus with parts: the device test `picturesOfEachPlan` shows each one beside the spec of its baseline app (`app/src/androidTest/assets/appfile/baseline/`). `test/entries.test.js`, `test/inputs.test.js`, `test/figures.test.js`, and `test/counter.test.js` hold the parts of a list app (section "Parts"). `test/fixtures/model/` holds the 52 plans that `gpt-6.1-terra` wrote in the model check: the final plan of each clean record of the runs `final-terra-low` (sets C and D) and `fresh-terra-low` (set E). Its `index.json` holds the request, the dialogue flag, the set, the model, the effort, the prompt hash, and the run label of each plan. `test/modelplans.test.js` compiles each one, and the device tests read them. |
 
 The gate of the kit is `"smoke"`: the smoke run uses each control. The report also runs each check line.
+In each new state, the smoke run presses again each control that it used in an earlier state, such as a tab, when that press shows a control that it did not use yet.
+So a control that only a later state enables is used too, such as the buttons of a deck over an empty list in a tab.
+The report gives the fault "no root line" only when no fault of a need, of a need line, or of the root line says why the screen has no root.
 The example of a figure (`example=[{n: 2}, 4]`) is a check line of its part. A failed example is a fault of the need with the given values, the computed value, and the expected value.
 A check line of the plan (`check("name", [steps])`) that fails is a fault of its line.
 A need takes only the named options of its part (`parts.js` `OPTIONS`): each other option is a fault of the need.
@@ -33,6 +36,23 @@ A fault of a line that a part wrote names the need, such as `need b`, and not th
 This holds for the faults of the report, of the smoke run, and of a value that no line sets, such as `need c reads $/k, and no line sets it`.
 A field of `entries` is a word, and it must not have the name of a line of the part, such as `row` or `add`.
 `__proto__`, `constructor`, and `prototype` are not names of a plan: as a name, a part of a path, or a field, each one is a fault of its line.
+
+A fault is for a thing that changes what the app does. A look option of a need that cannot apply changes only the look, so it is a note:
+the kit leaves the option out, and the note names the need and the option, such as `need tip: the part draws a Slider, which shows no icon, so the kit left out icon="Percent"`.
+A plan with only notes is clean. A look option of a line that the author wrote is still a fault of that line (section "Look options").
+
+## Repair replies
+
+A repair reply writes again each wrong line of a plan (`prompt.md` section "Repair").
+`patchAppFile(plan, reply)` gives the plan text after the reply, as a person applies the reply by hand:
+
+- The reply keeps only the lines of an app file (`compile.js` `LINE`), so its prose and fences go.
+- `delete NAME` and `delete $/NAME` remove that line. A delete of a name that the plan does not have changes nothing.
+- A line with the name of an earlier line replaces it in place, and each other line goes at the end.
+- The text has no delete line, so a name that a delete removed is free again for a later line and for the part of a later need.
+- A plan line that the kit could not read goes. A reply line that the kit cannot read stays at the end, so the compile names its fault.
+
+`modelcheck.js` `merge` uses it, and the device bundle defines it, for the repair loop of the app.
 
 The compile step and the run-time have budgets, so a plan cannot use all the memory or time of the sandbox:
 
@@ -59,6 +79,7 @@ A look option is a named option of a component line, such as `Text("Total", emph
 The run-time puts each value into the Alphy node as it is.
 The compile step checks each value against the table below (`check.js` `looks`).
 An unknown value, a look option of a component that does not take it, and a value that is not in the line are faults of the line.
+In a line that a part wrote, an `icon` that the component cannot show, or that is not a name of the table, is a note: the kit leaves it out.
 A value in the line is a literal, or a choice of literals, such as `tone=$/late ? "error" : "muted"`.
 In a row of a list, a look value must not read a field of the row, such as `$done`, because one template draws each row: a choice on a value of the app is permitted.
 
@@ -109,7 +130,7 @@ A text that a format function printed is for a person: do not read it back as a 
   - The row is the emoji, the first text field as the title with each further text field as a muted line under it, the value cells as small labels, the check marks, and the remove button.
   - In a row with one text field, a choice that the row does not change is the muted line under the title.
   - More than two check marks are circles in a second row under the other cells, each named by `labels=` or its field. The host draws each row of a list on a card of its own, so the row has no card of the part.
-  - `icon="🛒"` gives each row the same sign. `icon=$x` reads `x` from a field of `fields=` or a name of `show=`. A row that the add form makes gets its sign the same way: `show=` computes it from the new row, or the person types the field.
+  - `icon="🛒"` gives each row the same sign. An icon name in its place, such as `icon="Cart"`, is a note, and the rows have no sign. `icon=$x` reads `x` from a field of `fields=` or a name of `show=`. A row that the add form makes gets its sign the same way: `show=` computes it from the new row, or the person types the field.
   - The text of the emoji for a screen reader is the title of the list.
   - The add form is a column of its fields and a filled add button with a plus. A press with an empty first text field adds nothing.
   - A text field of the form is a live input of the host (`inputMode: "live"`): the typed text goes into the state while the person types.
@@ -117,10 +138,11 @@ A text that a format function printed is for a person: do not read it back as a 
     The host refuses a press before the finish and shows a notice, and the baseline apps of the agent loop have the same steps. No step adds a row with one press after the typing.
   - A plan with a list and no figure, progress, drawing, timer, or model starts with a hero card of the count of the shown rows of its first list. `countText=` is its caption, else the title of the list. `icon=` with a sign is its large emoji.
     `total="of"` shows all rows too, such as "5 of 12". `total=` on a list with no hero count is a fault.
-  - `icons={nome: "Cart"}` gives a field of the add form its icon. A text, number, count, date, or time field shows an icon, and a choice of more than six options does too. Each other field, and a name that is not a field, is a fault.
+  - `icons={nome: "Cart"}` gives a field of the add form its icon. A text, number, count, date, or time field shows an icon, and a choice of more than six options does too. Each other field, a name that is not a field, and each name with `add=false` are notes, and the kit leaves the icon out.
   - `tones={streak: "accent"}` gives the badge of a value of `show=` its tone. A name that `show=` does not give is a fault.
 - `input`: `options={value: "Label"}` keeps the value in the state and shows the label. `icon=` goes to a text, number, date, or time field and to a choice of more than six options.
-  The host draws a choice of six options or fewer as a segmented control, which shows no icon. Each kind of input uses only its own options: `icon=` on a segmented control, a multi-choice, or a toggle is a fault, and so is `min=` on a text field.
+  The host draws a choice of six options or fewer as a segmented control, which shows no icon. Each kind of input takes `icon=`: on a segmented control, a slider, a range slider, a multi-choice, or a toggle it is a note, and the kit leaves it out.
+  Each other option of an input is only for its own kinds: `min=` on a text field is a fault.
   The kinds are `number`, `money`, `percent`, `count`, `range`, `choice`, `choices`, `toggle`, `text`, `date`, and `time`. Each other kind, such as `slider`, is a fault of the need.
   The kind `range` writes `RangeSlider(label, $/x, min=, max=, step=)`: one state value of two numbers in order, the low and the high (`$/price[0]`, `$/price[1]`).
   Each `TextField` and each `Slider` is a live input of the host (`inputMode: "live"`), also in a row and in a bottom sheet. The host sends its value as a `liveInput` event while the person types or drags, and `handle` takes only that event for it.
@@ -130,6 +152,7 @@ A text that a format function printed is for a person: do not read it back as a 
   The other figures of one place are a set. A place is one group of a `steps` or `tabs` need, or the screen for the needs that no such need groups. A figure never leaves its place, and a figure that two groups name is a metric in each of them.
   - Two figures of a set that stand one after the other are a grid of two metrics, each with its `icon=`. Two figures with another need between them stay two metrics.
   - Three figures or more of a set are rows of one size: the title at the left and the value at the right. `icon=` is a small sign at the left of the title: an emoji, or an icon of Alphy with no action.
+  - On a figure that is not the main one, an emoji where a metric needs an icon of Alphy and a name that Alphy does not have are notes, and the kit leaves the icon out.
   - One figure of a set is a metric.
   `note=`, `goal=`, and `goalText=` show only on the main figure. `goalText=` with no `goal=` is a fault.
   `decimals=` is the number of decimals of a `number`, `money`, or `percent` figure. A `text` figure shows its value as it is, so `decimals=` on it is a fault.
@@ -138,6 +161,7 @@ A text that a format function printed is for a person: do not read it back as a 
   `lessText=` and `moreText=` with `addText=` are a fault, and so are `icon=` and `resetText=` without it.
 - `timer`: the card of a timer is a hero card, also the host's own countdown. A timer with rounds has a filled Start with a play icon, a filled Pause with a pause icon while it runs, a Reset text button, and a muted phase text.
   Its bar is a surface of 1024 x 64 that the bar fills: a track in the muted tone of the theme, a stop dot near its end, and the share of the phase that passed.
+  A rest phase is between two rounds: after the work phase of the last round the timer is over. 5 rounds of 45 s with 15 s of rest take 5 x 45 + 4 x 15 = 285 s (`core.js` `tick`).
 - `deck`: the front of a card is a centered text with the display emphasis, and the back is a centered text with the headline emphasis. Yes is filled with a check, No is outlined, and the two counts are a grid of two.
   The hero card holds the card and its Show button. The row of Yes and No stands under the card.
   With `answer=`, the field, the check button, the notice, and the next button stand under the card.
