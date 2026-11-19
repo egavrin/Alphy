@@ -53,7 +53,7 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     internal val canQueueLocalButtons: Boolean get() = !threeScene && capabilities.isEmpty() && collections.length() == 0 && surfaces.isEmpty()
 
     fun validateState(value: String): JSONObject {
-        require(value.toByteArray().size <= 49152) { "Данные инструмента превышают 48 КиБ" }
+        require(value.toByteArray().size <= MAX_STATE_BYTES) { "Данные инструмента превышают 48 КиБ" }
         val state = SandboxContract.objectFrom(value)
         ToolValueSchema.state(schema,state)
         return state
@@ -154,6 +154,8 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     companion object {
         private const val THREE_LIBRARY = "three@0.180.0"
         internal const val MAX_DEFINITION_BYTES = 256 * 1024
+        /** The largest stored state of an app, in bytes (validateState). The kit has its own copy (kit/src/run.js MAX_STATE_BYTES). */
+        internal const val MAX_STATE_BYTES = 49152
 
         private const val ICON_ID_FIELD = "iconId"
         private const val APP_LANGUAGE_FIELD = "appLanguage"
