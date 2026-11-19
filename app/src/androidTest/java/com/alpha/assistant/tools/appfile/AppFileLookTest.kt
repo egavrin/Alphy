@@ -70,9 +70,7 @@ class AppFileLookTest {
     @Test fun picturesOfEachPlan() {
         val sandbox=SandboxClient(instrumentation.targetContext)
         val compiled=runBlocking {(SAVED_PLANS+LOOK_FIXTURES).mapValues {(name,language) -> parsedAndSmoked(sandbox,name,language)}}
-        // A baseline is a saved app: its spec keeps the appLanguage field of the host.
-        val baselines=BASELINES.associateWith {ToolSpec.parsePersisted(instrumentation.context.assets.open("appfile/baseline/$it.json").use {stream -> stream.readBytes().decodeToString()})}
-        val specs=compiled+baselines
+        val specs=compiled+BASELINES.associateWith(::baseline)
         val folder=File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)),"appfile-look")
         if(folder.exists()) check(folder.deleteRecursively())
         val shell=ShellRobot("appfile-look")
@@ -89,8 +87,7 @@ class AppFileLookTest {
                         assertEquals(name,spec.surfaces.isNotEmpty(),canvasTexts(spec.ui).isNotEmpty())
                         canvasTexts(spec.ui).forEach {text -> robot.waitUntil {drawn(robot,text)}}
                         val picture=File(directory,"$name.png")
-                        val screen=stillScreen(robot)
-                        try {picture.outputStream().use {assertTrue(screen.compress(Bitmap.CompressFormat.PNG,100,it))}} finally {screen.recycle()}
+                        picture(robot,picture)
                         assertTrue("$picture ${picture.length()} bytes",picture.isFile && picture.length()>10_000)
                         // The shopping list starts empty: one more picture after a person adds a row through the screen.
                         if(name == "mock-shopping-it") added(robot,store,"appfile-$name",File(directory,"$name-added.png"))
@@ -112,8 +109,69 @@ class AppFileLookTest {
         robot.click("Aggiungi")
         robot.waitUntil {state(store,id).getJSONArray("prodotti").length() == 1}
         robot.waitFor("Latte")
+        picture(robot,picture)
+    }
+    /** A saved baseline app: its spec keeps the appLanguage field of the host. */
+    private fun baseline(name: String)=ToolSpec.parsePersisted(instrumentation.context.assets.open("appfile/baseline/$name.json").use {it.readBytes().decodeToString()})
+    /** A picture of the screen when it holds still. */
+    private fun picture(robot: ShellRobot,file: File) {
         val screen=stillScreen(robot)
-        try {picture.outputStream().use {assertTrue(screen.compress(Bitmap.CompressFormat.PNG,100,it))}} finally {screen.recycle()}
+        try {file.outputStream().use {assertTrue(screen.compress(Bitmap.CompressFormat.PNG,100,it))}} finally {screen.recycle()}
+    }
+
+    /**
+     * Step zero of Task 11c, through the UI layer: what the baseline list app of the current agent loop needs between the typing of a
+     * product and its row. Its field is a live input of the host. Each step leaves the texts of the screen and a picture in appfile-step-zero.
+     * The typing is the accessibility action that sets the text of the field, as each test of this class types.
+     */
+    @Test fun theBaselineListNeedsAFinishStepBetweenTheTypingAndTheRow() {
+        val name="showcase-lang-shopping-it"
+        val id="appfile-$name"
+        val spec=baseline(name)
+        val folder=File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)),"appfile-step-zero")
+        if(folder.exists()) check(folder.deleteRecursively())
+        check(folder.mkdirs())
+        val finishFirst=word("it",R.string.tool_live_input_finish_first_en)
+        val finish=word("it",R.string.tool_live_input_finish_en,"Prodotto")
+        inShell("appfile-step-zero",mapOf(id to spec)) {robot,model,store,scenario ->
+            fun items()=state(store,id).getJSONArray("items").length()
+            fun step(label: String) {
+                File(folder,"$label.txt").writeText("draftName=${state(store,id).getString("draftName")} items=${items()}\n"+robot.texts().joinToString("\n"))
+                picture(robot,File(folder,"$label.png"))
+            }
+            open(robot,model,id,spec)
+            // A press of the add button directly after the typing.
+            robot.enter("Prodotto","Latte")
+            robot.click("Aggiungi")
+            robot.waitUntil {items() == 1 || robot.find(finishFirst) != null}
+            step("1-pressed-after-typing")
+            assertEquals("the press directly after the typing adds no row",0,items())
+            // The typed value reaches the state while the edit is open, and the host shows its finish button, not its apply button.
+            robot.waitUntil {state(store,id).getString("draftName") == "Latte"}
+            robot.waitFor(finish)
+            assertNull(robot.find(word("it",R.string.tool_generated_apply_en,"Prodotto")))
+            robot.click(finish)
+            robot.waitGone(finish)
+            step("2-finish-button")
+            robot.click("Aggiungi")
+            robot.waitUntil {items() == 1}
+            robot.waitFor("Preso")
+            robot.waitUntil {robot.field("Prodotto").text.isNullOrEmpty()}
+            step("3-added-after-finish-button")
+            // The action key of the keyboard is the other step that finishes the edit.
+            val editor=Rect().also {robot.field("Prodotto").getBoundsInScreen(it)}
+            robot.shell("input tap ${editor.centerX()} ${editor.centerY()}")
+            robot.waitUntil {robot.keyboardTop(scenario) != null}
+            robot.enter("Prodotto","Pane")
+            robot.waitFor(finish)
+            assertTrue(robot.field("Prodotto").performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id))
+            robot.waitGone(finish)
+            if(robot.keyboardTop(scenario) != null) robot.back()
+            step("4-keyboard-action")
+            robot.click("Aggiungi")
+            robot.waitUntil {items() == 2}
+            step("5-added-after-keyboard-action")
+        }
     }
     private fun nightOf(scenario: ActivityScenario<CloudTestActivity>): Boolean {
         var night=false
