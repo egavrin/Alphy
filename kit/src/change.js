@@ -31,6 +31,9 @@ const kindOf = (kind, schema) => {
 /** The top-level field of each root of a line, and the text of each need line. */
 const topsOf = (app) => new Map(app.fields.filter(([root, path]) => root !== "app:empty" && !path.includes(".")));
 const lineOf = (file, need) => file.of("need").find((entry) => entry.key === need)?.raw.trim();
+/** The blank value of a kept schema: what the kit gives an Alphy type with nothing stored (cast), an empty list, or a record of blanks. */
+const blankValue = (schema) => (!isRecord(schema) ? cast(schema, undefined) : schema.type === "object"
+  ? Object.fromEntries(Object.entries(schema.fields).map(([key, inner]) => [key, blankValue(inner)])) : []);
 /** The result of faults with BLOCKS: each fault of nextState after the check of the stored app is one. */
 const blocked = (faults) => ({ faults, definition: null, state: null, blockedBySavedData: true });
 
@@ -47,6 +50,7 @@ const blocked = (faults) => ({ faults, definition: null, state: null, blockedByS
  * 4. A value of another kind, a column that the change removes or retypes in a list with rows, a saved value that the screen would change, and a
  *    new value with the name of a saved one are faults with BLOCKS, as are more than 40 fields, a state of more than 49152 bytes, and a list past its room.
  * 5. Each stored field that the change does not name stays with its schema and its value (app.keep). A list or an array that the app computed stays empty.
+ *    The start state of the definition gives such a field the blank value of its schema, so only the state holds the kept value.
  * 6. The values that the app computes come from the changed app. A run of animate goes on by its root, and a drag starts again.
  * 7. The inner values of a need (NAME_s) stay when the need line is the same text and 3c does not apply, else they start again.
  */
@@ -176,5 +180,7 @@ export function nextState(file, { app, definition, owners, objects }, previous, 
   if (hostBytes(state) > MAX_STATE_BYTES) faults.push(`app: ${BLOCKS}: the app would keep more than ${MAX_STATE_BYTES} bytes`);
   if (utf8(source) > MAX_SOURCE_BYTES) faults.push(`app: ${BLOCKS}: the fields that the app keeps make its source more than ${MAX_SOURCE_BYTES} bytes`);
   if (faults.length) return blocked(faults);
-  return { faults: [], notes, definition: keep.length ? { ...definition, stateSchema: schema, initialState: { ...start, ...kept }, source } : definition, state };
+  // The start state holds a blank for each kept field, never a value of the person: the host finds the data of the person as the state that differs from it.
+  const blanks = Object.fromEntries(keep.map((field) => [field, blankValue(schemas[field])]));
+  return { faults: [], notes, definition: keep.length ? { ...definition, stateSchema: schema, initialState: { ...start, ...blanks }, source } : definition, state };
 }

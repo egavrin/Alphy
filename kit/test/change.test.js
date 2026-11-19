@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BLOCKS, MISMATCH } from "../src/change.js";
+import { BLOCKS, MISMATCH, isRecord } from "../src/change.js";
 import { compileAppFile } from "../src/compile.js";
 import { handle } from "../src/run.js";
 import { plansIn } from "../build.js";
@@ -156,7 +156,6 @@ test("change: a removed need keeps its stored field, also after the next event o
   expect(result.definition.stateSchema.items).toEqual(previous.stateSchema.items);
   const app = dataOf(result.definition);
   expect(app.keep).toContain("items");
-  expect(result.definition.initialState.items).toEqual(ITEMS);
   const after = event(result.state, app, action("extra_plus"));
   expect([after.extra, after.items]).toEqual([1, ITEMS]);
   // An event that changes nothing gives the stored state back as it is, with the kept field.
@@ -176,6 +175,54 @@ test("change: a kept field survives a second change, and a need that comes back 
   expect(back.state.items).toEqual(ITEMS);
   expect(back.state.d.left_text).toBe("1");
   expect(dataOf(back.definition).keep).toEqual(expect.arrayContaining(["extra"]));
+});
+
+/**
+ * The host's check of a value against its schema (ToolValueSchema.validate): a number is finite and at most 2^53 - 1 either way, a text has at most
+ * 2048 characters, a record has the fields of its schema, and an array or a list has at most maxItems items, each row with an id that is not blank and that no other row has.
+ */
+const fits = (schema, value) => {
+  if (typeof schema === "string") return { number: Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER, string: typeof value === "string" && value.length <= 2048, boolean: typeof value === "boolean" }[schema] === true;
+  if (schema.type === "object") return isRecord(value) && Object.keys(value).sort().join() === Object.keys(schema.fields).sort().join() && Object.entries(schema.fields).every(([key, inner]) => fits(inner, value[key]));
+  const ids = new Set(), list = schema.type === "list", child = list ? { type: "object", fields: schema.fields } : schema.items;
+  return Array.isArray(value) && value.length <= schema.maxItems && value.every((item) => fits(child, item) && (!list || (item.id.trim() !== "" && item.id.length <= 128 && !ids.has(item.id) && ids.add(item.id))));
+};
+/** The start state and the state of a result as the host checks them against the state schema of its definition. */
+const bothFit = ({ definition, state }) => [fits({ type: "object", fields: definition.stateSchema }, definition.initialState), fits({ type: "object", fields: definition.stateSchema }, state)];
+const BLANK_FORM = { new_name: "", new_aisle: "" }, TYPED_FORM = { ...BLANK_FORM, new_name: "Eggs" };
+/** The shopping app with Eggs typed in its add form, changed to the app with no list. */
+const withoutTyped = async () => compileAppFile(WITHOUT, await stored(SHOPPING, [...SHOPPING_EVENTS, { type: "liveInput", actionId: "items_new_name", value: "Eggs" }]));
+
+test("change (kept start): a removed list with two stored rows gives an empty list in the start state and the two rows in the state", async () => {
+  const result = await compileAppFile(WITHOUT, await stored(SHOPPING, SHOPPING_EVENTS));
+  expect(result.faults).toEqual([]);
+  expect([result.definition.initialState.items, result.state.items]).toEqual([[], ITEMS]);
+  // A kept field whose stored value is blank, such as the empty view of the sorted list, makes no difference: it is no data of the person.
+  expect([result.definition.initialState.items_list, result.state.items_list]).toEqual([[], []]);
+  expect(bothFit(result)).toEqual([true, true]);
+});
+
+test("change (kept start): a removed number input with the stored value 7 gives 0 in the start state and 7 in the state", async () => {
+  const result = await compileAppFile(lines('app("Sizes", lang="en")', 'need cups = counter("Cups", 0)'), await stored(SIZE, [action("size_field", 7)]));
+  expect(result.faults).toEqual([]);
+  expect([result.definition.initialState.size, result.state.size]).toEqual([0, 7]);
+  expect(bothFit(result)).toEqual([true, true]);
+});
+
+test("change (kept start): the inner values of a removed need give the blank record in the start state and stay in the state", async () => {
+  const result = await withoutTyped();
+  expect(result.faults).toEqual([]);
+  expect([result.definition.initialState.items_s, result.state.items_s]).toEqual([BLANK_FORM, TYPED_FORM]);
+  expect(bothFit(result)).toEqual([true, true]);
+});
+
+test("change (kept start): a second change keeps the kept values in the state and the blanks in the start state", async () => {
+  const first = await withoutTyped();
+  const second = await compileAppFile(WITHOUT + TWICE, { appFile: WITHOUT, stateSchema: first.definition.stateSchema, state: first.state });
+  expect(second.faults).toEqual([]);
+  expect([second.definition.initialState.items, second.state.items]).toEqual([[], ITEMS]);
+  expect([second.definition.initialState.items_s, second.state.items_s]).toEqual([BLANK_FORM, TYPED_FORM]);
+  expect(bothFit(second)).toEqual([true, true]);
 });
 
 test("change: back to an older plan with one need less keeps the field of that need", async () => {

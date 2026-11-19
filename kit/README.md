@@ -107,6 +107,7 @@ The rules keep each stored value of the person, and they never move a value to a
    - A state of more than 49152 bytes, a list with more rows than the screen of the change has room for, and an app that stops on the saved data.
 5. A stored field that the change does not name stays with its schema and its value, and `app.keep` lists it.
    A list or an array that the app computed, such as the view of a sorted list, stays empty. A root that comes back later gets its kept value again.
+   The start state (`initialState`) gives a kept field the blank value of its schema (0, an empty text, false, an empty list, or a record of blanks), and only the state holds the kept value, so the host finds it as data of the person.
 6. The values that the app computes come from the changed app. A change of `animate` that runs goes on by its root, and a drag starts again.
 7. The inner values of a need (the object `NAME_s`) stay when the need line is the same text and rule 3c does not apply, else they start again.
    So a timer that runs goes on to the same end of its phase when its line stays, and it stands at the start of round 1 when its line changes.
