@@ -2,14 +2,11 @@
 // and each example plan of the prompt compiles with no fault. So the prompt and the kit cannot differ.
 
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { CATALOG, ICON_NAMES } from "../src/core.js";
 import { HOST_ICONS } from "../src/icons.js";
+import { PROMPT as SECTIONS } from "../modelcheck.js";
 import { faultsOf } from "./helpers.js";
 
-const PROMPT = readFileSync(new URL("../prompt.md", import.meta.url), "utf8");
-/** The text under each level-2 heading of the prompt file, by the heading. */
-const SECTIONS = Object.fromEntries(PROMPT.split(/^## /m).slice(1).map((part) => [part.slice(0, part.indexOf("\n")), part.slice(part.indexOf("\n") + 1).trim()]));
 const SYSTEM = SECTIONS.System;
 /** Each kind of the list "Kinds." as [kind, its paragraph]: the line need NAME = kind(...) and the lines under it. */
 const KINDS = SYSTEM.slice(SYSTEM.indexOf("Kinds."), SYSTEM.indexOf("\nFormulas:")).split(/\n(?=need NAME = )/).slice(1)
