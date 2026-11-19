@@ -28,7 +28,10 @@ Task 12 ran the whole proof one time on `9bcd313`, with a clean tree.
 | `com.alpha.assistant.tools.AgentGenerationWorkflowTest` | 48 | passed | 4.9 |
 | `com.alpha.assistant.voice.VoiceModeProtocolTest` | 13 | passed | 0.04 |
 
-The seconds of a class come from the `started` and `finished` lines of the log tag `TestRunner`. The log buffer lost the first lines of `AppFileProofTest`, so its seconds are the rest of the 189.3 s.
+The seconds of a class come from the first `started` and the last `finished` line of the class in the log tag `TestRunner`. The log filter of the run kept only two other tags, and `device.log` is empty.
+So a dump of the tag `TestRunner` after the run holds these lines: `evidence/alphy-ui/appfile-phase1/testrunner.txt`, 165 lines from 09:27:49, copied there in fix round 1 of Task 12.
+The log buffer had lost the first lines of `AppFileProofTest`, so its seconds cannot be checked again. They are the rest of the 189.321 s: the four other classes took 105.906 s from their exact times, and 189.321 minus 105.906 is 83.415.
+The rounded seconds of the table give 83.48 for the same difference.
 The `run.json` names the revision `9bcd313beb826473dfa3cd0b61c4bef6d91cad75`, `dirty: false`, and the serial `emulator-5592`.
 The test APK `lastUpdateTime` was `2026-11-19 09:03:45` before the run (the "after" time of `appfile-look-all-5`) and `2026-11-19 09:26:24` after it.
 The run started at 09:26:17, installed the test APK at 09:26:24, and ended at 09:29:35. No other session installed the test APK.
@@ -74,48 +77,49 @@ Each saved plan compiled with the status `ok` and no fault, and passed `ToolSpec
 ### Sizes at this head
 
 The method is the method of "Sizes and times". The kit test `budget: each saved plan is inside each limit` printed this table at `9bcd313` (`bun test kit/test/budget.test.js`).
+The column `Work` came in fix round 1 of Task 12, with no change of the kit sources. It is the kit's count of render work with each list full, not a count of the host (section "The stop rule").
 It measures the 9 saved plans, the 9 test plans, and the 14 fixtures that compile. The fixtures `catalog`, `dialogue-game`, `dialogue-materials`, and `dialogue-rover` do not compile, and the test skips them.
 
-| Plan | Source | Definition | UI | Nodes | State | Fields | Commands | Pairs | Chars | Bytes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Limit | 65536 (bar 60000) | 262144 | 65536 | 512 | 49152 | 40 | 512 | 2048 | 2048 | 32768 |
-| `plans/tea.plan` | 47194 | 50011 | 577 | 5 | 20 | 1 | 0 | 0 | 0 | 2 |
-| `plans/lesson.plan` | 50316 | 55898 | 1940 | 22 | 637 | 7 | 5 | 5 | 5 | 452 |
-| `plans/calc.plan` | 47495 | 50551 | 661 | 8 | 83 | 4 | 0 | 0 | 0 | 2 |
-| `plans/timer-rounds.plan` | 48887 | 53235 | 1255 | 16 | 282 | 4 | 3 | 3 | 0 | 260 |
-| `plans/list.plan` | 48306 | 52560 | 1159 | 16 | 459 | 4 | 0 | 0 | 0 | 2 |
-| `plans/section.plan` | 49048 | 55157 | 2210 | 26 | 1015 | 4 | 0 | 0 | 0 | 2 |
-| `plans/quiz.plan` | 47875 | 51718 | 857 | 14 | 370 | 7 | 0 | 0 | 0 | 2 |
-| `plans/model3d.plan` | 49951 | 54311 | 1206 | 17 | 301 | 3 | 52 | 253 | 0 | 6445 |
-| `plans/tabs-chart.plan` | 48814 | 53979 | 2015 | 22 | 257 | 7 | 0 | 0 | 0 | 2 |
-| `test/rich.plan` | 49116 | 64767 | 2541 | 26 | 10253 | 5 | 0 | 0 | 0 | 2 |
-| `test/nodes.plan` | 49123 | 55709 | 3121 | 45 | 450 | 12 | 0 | 0 | 0 | 2 |
-| `test/lists.plan` | 51732 | 61229 | 4477 | 55 | 1195 | 13 | 0 | 0 | 0 | 2 |
-| `test/shapes.plan` | 49264 | 53901 | 1193 | 16 | 375 | 7 | 15 | 25 | 7 | 1285 |
-| `test/bytes.plan` | 47202 | 49859 | 413 | 6 | 17 | 2 | 2 | 3 | 1 | 224 |
-| `test/free.plan` | 47685 | 51815 | 1092 | 19 | 426 | 5 | 0 | 0 | 0 | 2 |
-| `test/looks.plan` | 49557 | 57110 | 4075 | 53 | 378 | 11 | 0 | 0 | 0 | 2 |
-| `test/cards.plan` | 53650 | 68779 | 5343 | 71 | 5017 | 18 | 0 | 0 | 0 | 2 |
-| `test/model.plan` | 47961 | 51364 | 758 | 12 | 96 | 3 | 12 | 51 | 0 | 1392 |
-| `test/fixtures/price-filter.plan` | 48200 | 53793 | 1354 | 15 | 1606 | 7 | 0 | 0 | 0 | 2 |
-| `test/fixtures/mock-units-pl.plan` | 48518 | 52998 | 1762 | 21 | 162 | 4 | 0 | 0 | 0 | 2 |
-| `test/fixtures/water-ko.plan` | 47490 | 50679 | 825 | 10 | 62 | 2 | 0 | 0 | 0 | 2 |
-| `test/fixtures/habits.plan` | 47902 | 51588 | 994 | 14 | 228 | 3 | 0 | 0 | 0 | 2 |
-| `test/fixtures/mock-water-ko.plan` | 47858 | 51346 | 979 | 13 | 103 | 2 | 0 | 0 | 0 | 2 |
-| `test/fixtures/mock-price-filter.plan` | 48362 | 55298 | 1363 | 16 | 2814 | 6 | 0 | 0 | 0 | 2 |
-| `test/fixtures/look-water-ko.plan` | 48138 | 52516 | 1669 | 20 | 166 | 5 | 0 | 0 | 0 | 2 |
-| `test/fixtures/units-pl.plan` | 48294 | 52602 | 1651 | 19 | 155 | 4 | 0 | 0 | 0 | 2 |
-| `test/fixtures/mock-shopping-it.plan` | 48901 | 53535 | 1727 | 19 | 117 | 4 | 0 | 0 | 0 | 2 |
-| `test/fixtures/shopping.plan` | 48103 | 52254 | 1108 | 16 | 431 | 4 | 0 | 0 | 0 | 2 |
-| `test/fixtures/look-shopping-it.plan` | 49352 | 55715 | 2589 | 25 | 736 | 8 | 0 | 0 | 0 | 2 |
-| `test/fixtures/look-guide-es.plan` | 49705 | 55661 | 2653 | 35 | 393 | 5 | 0 | 0 | 0 | 2 |
-| `test/fixtures/look-deck-es.plan` | 48616 | 53198 | 1334 | 16 | 533 | 4 | 0 | 0 | 0 | 2 |
-| `test/fixtures/mock-habits-uk.plan` | 48683 | 54447 | 1766 | 21 | 1107 | 3 | 0 | 0 | 0 | 2 |
+| Plan | Source | Definition | UI | Nodes | State | Fields | Work | Commands | Pairs | Chars | Bytes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Limit | 65536 (bar 60000) | 262144 | 65536 | 512 | 49152 | 40 | 2048 | 512 | 2048 | 2048 | 32768 |
+| `plans/tea.plan` | 47194 | 50011 | 577 | 5 | 20 | 1 | 8 | 0 | 0 | 0 | 2 |
+| `plans/lesson.plan` | 50316 | 55898 | 1940 | 22 | 637 | 7 | 24 | 5 | 5 | 5 | 452 |
+| `plans/calc.plan` | 47495 | 50551 | 661 | 8 | 83 | 4 | 8 | 0 | 0 | 0 | 2 |
+| `plans/timer-rounds.plan` | 48887 | 53235 | 1255 | 16 | 282 | 4 | 16 | 3 | 3 | 0 | 260 |
+| `plans/list.plan` | 48306 | 52560 | 1159 | 16 | 459 | 4 | 610 | 0 | 0 | 0 | 2 |
+| `plans/section.plan` | 49048 | 55157 | 2210 | 26 | 1015 | 4 | 1511 | 0 | 0 | 0 | 2 |
+| `plans/quiz.plan` | 47875 | 51718 | 857 | 14 | 370 | 7 | 14 | 0 | 0 | 0 | 2 |
+| `plans/model3d.plan` | 49951 | 54311 | 1206 | 17 | 301 | 3 | 17 | 52 | 253 | 0 | 6445 |
+| `plans/tabs-chart.plan` | 48814 | 53979 | 2015 | 22 | 257 | 7 | 879 | 0 | 0 | 0 | 2 |
+| `test/rich.plan` | 49116 | 64767 | 2541 | 26 | 10253 | 5 | 2030 | 0 | 0 | 0 | 2 |
+| `test/nodes.plan` | 49123 | 55709 | 3121 | 45 | 450 | 12 | 352 | 0 | 0 | 0 | 2 |
+| `test/lists.plan` | 51732 | 61229 | 4477 | 55 | 1195 | 13 | 2034 | 0 | 0 | 0 | 2 |
+| `test/shapes.plan` | 49264 | 53901 | 1193 | 16 | 375 | 7 | 16 | 15 | 25 | 7 | 1285 |
+| `test/bytes.plan` | 47202 | 49859 | 413 | 6 | 17 | 2 | 6 | 2 | 3 | 1 | 224 |
+| `test/free.plan` | 47685 | 51815 | 1092 | 19 | 426 | 5 | 514 | 0 | 0 | 0 | 2 |
+| `test/looks.plan` | 49557 | 57110 | 4075 | 53 | 378 | 11 | 856 | 0 | 0 | 0 | 2 |
+| `test/cards.plan` | 53650 | 68779 | 5343 | 71 | 5017 | 18 | 1182 | 0 | 0 | 0 | 2 |
+| `test/model.plan` | 47961 | 51364 | 758 | 12 | 96 | 3 | 12 | 12 | 51 | 0 | 1392 |
+| `test/fixtures/price-filter.plan` | 48200 | 53793 | 1354 | 15 | 1606 | 7 | 516 | 0 | 0 | 0 | 2 |
+| `test/fixtures/mock-units-pl.plan` | 48518 | 52998 | 1762 | 21 | 162 | 4 | 28 | 0 | 0 | 0 | 2 |
+| `test/fixtures/water-ko.plan` | 47490 | 50679 | 825 | 10 | 62 | 2 | 10 | 0 | 0 | 0 | 2 |
+| `test/fixtures/habits.plan` | 47902 | 51588 | 994 | 14 | 228 | 3 | 410 | 0 | 0 | 0 | 2 |
+| `test/fixtures/mock-water-ko.plan` | 47858 | 51346 | 979 | 13 | 103 | 2 | 13 | 0 | 0 | 0 | 2 |
+| `test/fixtures/mock-price-filter.plan` | 48362 | 55298 | 1363 | 16 | 2814 | 6 | 616 | 0 | 0 | 0 | 2 |
+| `test/fixtures/look-water-ko.plan` | 48138 | 52516 | 1669 | 20 | 166 | 5 | 20 | 0 | 0 | 0 | 2 |
+| `test/fixtures/units-pl.plan` | 48294 | 52602 | 1651 | 19 | 155 | 4 | 26 | 0 | 0 | 0 | 2 |
+| `test/fixtures/mock-shopping-it.plan` | 48901 | 53535 | 1727 | 19 | 117 | 4 | 720 | 0 | 0 | 0 | 2 |
+| `test/fixtures/shopping.plan` | 48103 | 52254 | 1108 | 16 | 431 | 4 | 610 | 0 | 0 | 0 | 2 |
+| `test/fixtures/look-shopping-it.plan` | 49352 | 55715 | 2589 | 25 | 736 | 8 | 832 | 0 | 0 | 0 | 2 |
+| `test/fixtures/look-guide-es.plan` | 49705 | 55661 | 2653 | 35 | 393 | 5 | 35 | 0 | 0 | 0 | 2 |
+| `test/fixtures/look-deck-es.plan` | 48616 | 53198 | 1334 | 16 | 533 | 4 | 16 | 0 | 0 | 0 | 2 |
+| `test/fixtures/mock-habits-uk.plan` | 48683 | 54447 | 1766 | 21 | 1107 | 3 | 1407 | 0 | 0 | 0 | 2 |
 
 The largest source is `test/cards.plan` with 53650 bytes: 6350 bytes under the bar 60000 and 11886 bytes under the limit 65536. The largest saved plan is `plans/lesson.plan` with 50316 bytes.
 The drawing columns are of the open reply. The rover of `model3d.plan` takes 6589 bytes at its largest whole turn: the kit test of `model3d.plan` in `kit/test/emit.test.js` prints it ("most at any whole turn").
 
-The run-time text by module, with the method of "Run-time text" (the scratch script now also reads `icons.js` and `words.js`, which the run-time does not import):
+The run-time text by module, with the method of "Run-time text":
 
 | Module | Bytes at `f1865a5` (Task 10) | Bytes at `9bcd313` |
 | --- | --- | --- |
@@ -193,12 +197,12 @@ The section "Timers" holds the record of Task 6.
 | Rule | Result | Evidence |
 | --- | --- | --- |
 | Each part keeps its inner values in its own state object, next to its value. A plan of 9 needs then has about 20 of the 40 fields. | Changed (Tasks 4 and 9). The inner values of a part are the object `NAME_s` beside its value (Task 3). A list of a part is a top-level list field (Task 4), and the record of a model is a top-level object (`rover`, Task 9). The saved plans have 0 to 6 needs and 1 to 7 of the 40 fields. The most fields of a plan is 18 (`test/cards.plan`). | The column "Fields" of the budget table. Each plan passed `ToolSpec.parse` in this run. |
-| State field names come from need names. For a need that changes, the kit gets the earlier file and the stored state and computes the next state by the rule of section 5. | Proved for the names. The next state of a changed need is not built: section 5 (storage and later changes) belongs to phase 2, and no task of this plan built it. | Each field of a need has the name of the need (`prodotti`, `habits`, `gastos`, `rover`). The kit tests of the names are in `kit/test/emit.test.js`. |
+| State field names come from need names. For a need that changes, the kit gets the earlier file and the stored state and computes the next state by the rule of section 5. | Proved for the names. The purpose of the rule is not proved: a need that a later change keeps keeps its data. That needs the next state of section 5 (storage and later changes), which belongs to phase 2, and no task of this plan built it. | Each field of a need has the name of the need (`prodotti`, `habits`, `gastos`, `rover`). The kit tests `emit: the other values of a part are one object of its need, and a computed test is a field of v` (fields `a`, `b`, `wiz_s`) and `emit: a list or an array that a part keeps beside its need is a state field of its own` (fields `tasks_log`, `tasks_s`) in `kit/test/emit.test.js`. |
 | A `visible=` test needs a boolean state field, or the `source` returns `ui` for each event. Phase 1 picks one by measurement. | Changed: the boolean field, with no measurement. A computed `visible=` is a boolean field of the state object `v` with `visibleBind` (Task 3). A reply holds `ui` only when the screen changed (`kit/src/run.js` 463). The brief of Task 3 made this choice. No run measured the other form. | `eachNodeOfTheTablePassesParseAndSmoke` (a computed `visible=`). `aTypedTextShowsASecondLiveFieldThatTakesItsText` (`visible=len($/first) > 0`). With this form, the slowest action of a saved plan took 33 ms. |
 | A sorted or filtered view of a list is a second list field. A row control writes back to the stored list by the row key. | Proved. | `list.plan` has the list `prodotti` and its sorted view `prodotti_list`, and `section.plan` has `habits` and `streak_list`. A row event carries `{key, value}`. `aTapOnARowControlChangesTheRow` taps the first checkbox of the sorted view, and only the row `r2` of the stored list changes. `eachPlanAnswersInTime` sends the row actions on lists of 100 rows. |
 | `dateInput` cannot bind an empty text. A date field starts at today. | Proved. | The kit test `emit: an empty date start value becomes today, the day of the clock of the kit`. The `dateInput` of `test/lists.plan` passed parse and the smoke step in `eachListAndModalPassesParseAndSmoke`. |
 | `timeInput` holds minutes. The kit converts to and from "HH:MM". | Proved. | The kit test `run: a time field reads "07:30" as 450 minutes and writes it back`. The `timeInput` of `test/lists.plan` holds 480 and 1200 ("08:00" and "20:00") and passed parse and the smoke step in `eachListAndModalPassesParseAndSmoke`. |
-| `numberInput` shows an Apply button, as in today's apps. | Proved for a number field. Changed for a text field and a slider (Task 11c). | A `NumberField` is a `numberInput` with no `inputMode` (`kit/src/run.js` 113), so the host keeps its apply step. A `TextField` and a `Slider` are live inputs with no apply button, as the inputs of the baseline apps: `theKitListTakesTheStepsOfTheBaselineList`, `theTipSliderOfCalcChangesTheTotalWithNoStepByHand`. No device test typed into a number field, so no picture shows its apply button. |
+| `numberInput` shows an Apply button, as in today's apps. | Proved in code and by the action event for a number field. The Apply button is not seen on a device. Changed for a text field and a slider (Task 11c). | A `NumberField` is a `numberInput` with no `inputMode` (`kit/src/run.js` 113), so the host keeps its apply step. A `TextField` and a `Slider` are live inputs with no apply button, as the inputs of the baseline apps: `theKitListTakesTheStepsOfTheBaselineList`, `theTipSliderOfCalcChangesTheTotalWithNoStepByHand`. No device test typed into a number field, so no picture shows its apply button. |
 | `chart` wants a categories array and a number array in the state. | Proved. | `Chart` writes the fields `<key>_labels` and `<key>_values` (Task 5). `tabsChartPassesParseAndSmoke`, `eachCardChartAndTabPassesParseAndSmoke`. |
 | At most 4 images. A picture in each row or card becomes an `emoji`: the row field then holds one emoji sign. | Proved for the emoji. Images are not built in phase 1. | A row field holds one emoji sign, and `icon=$sign` shows it (`mock-habits-uk`, pictures of this run). A `Picture` line is the fault "picture is not built yet" (`kit/src/run.js` 220), so the kit makes no image and has no check of 4 images. |
 | A `picture` need gets its image from the picture maker of the agent (phase 5). In phases 2 to 4, a plan with a `picture` need is not taken. | Proved for phase 1: a `picture` need is a fault. | The kit test `emit: a picture need is a fault "picture is not built yet"`. `model3d.plan` lost its picture line (ruling of Task 9). `kit/test/fixtures/dialogue-rover.plan` keeps the line and gives only that fault. No device test. |
@@ -217,11 +221,13 @@ Verdict: the stop rule does not stop. Each of the nine saved plans passes inside
 So the design does not come back to the user for a limit, and the drawing and the 3D model stay in the prompt.
 
 Each plan against each limit, the smallest margin first. The size limits are the limits of the budget test. A limit of time is the host limit: 500 ms for an event in the sandbox (`SandboxContract.EVALUATION_MS`), 100 ms for a surface event (`GraphicsContract.EVALUATION_MS`).
-"none" marks a limit that does not apply to the plan: no surface, or no live input.
+"none" marks a limit that does not apply to the plan: no surface, or no live input. Two rows are not measures of the host: the render work is the kit's count, and the request is a bound (see the notes under the table).
 
 | Limit | `calc` | `list` | `quiz` | `tabs-chart` | `timer-rounds` | `tea` | `section` | `lesson` | `model3d` | Smallest margin |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Source, 65536 bytes | 47495 | 48306 | 47875 | 48814 | 48887 | 47194 | 49048 | 50316 | 49951 | `lesson`: 76.8 % used, 15220 bytes left |
+| Render work with full lists, 2048 units (kit's count) | 8 | 610 | 14 | 879 | 16 | 8 | 1511 | 24 | 17 | `section`: 73.8 % used, 537 units left |
+| Request of an event with full lists, 65536 bytes (bound) | 14076 | 26488 | 21315 | 21465 | 14275 | 14013 | 45643 | 14630 | 14294 | `section`: 69.6 % used, 19893 bytes left |
 | State with full lists, 49152 bytes | 83 | 12495 | 7322 | 7472 | 282 | 20 | 31650 | 637 | 301 | `section`: 64.4 % used, 17502 bytes left |
 | Definition, 262144 bytes | 50551 | 52560 | 51718 | 53979 | 53235 | 50011 | 55157 | 55898 | 54311 | `lesson`: 21.3 % used |
 | Drawing bytes, 32768 | none | none | none | none | 260 | none | none | 452 | 6589 | `model3d`: 20.1 % used |
@@ -238,15 +244,33 @@ Each plan against each limit, the smallest margin first. The size limits are the
 | Drawing characters, 2048 | none | none | none | none | 0 | none | none | 5 | 0 | `lesson`: 0.2 % used |
 
 - The smallest margin is the source of `lesson.plan`: 50316 of 65536 bytes, 15220 bytes left, and 9684 bytes under the kit bar 60000. The run-time text is 46662 bytes of each source.
-- The next margin is the full state of `section.plan`: 31650 of 49152 bytes with 100 habits. Each other limit is at most 21.3 % used.
-- The drawing cells are the open reply, except `model3d`, which is the rover at its largest whole turn (6589 bytes).
-- The row count of each list keeps the full screen inside the render work limit of 2048 (ruling of Task 4). The open of each plan with full lists went through `executeEvent`, which checks the state and the reply.
-- The sources of these numbers: the budget table and the kit test of `model3d.plan` (`bun test kit`), and the `time` lines and the `event times` lines of `evidence/alphy-ui/appfile-phase1/logcat.txt`. The scratch script that sorts them is not in the tree.
+- The next three margins are of `section.plan`: the render work (1511 of 2048 units with 100 rows in each list), the request of an event (at most 45643 of 65536 bytes), and the full state (31650 of 49152 bytes with 100 habits). Each other limit is at most 21.3 % used.
+- Render work: the host refuses a screen over 2048 units (`ToolUiCatalog.MAX_RENDER_WORK`, `ToolUiCatalog.kt` 15, `validateRenderedWork` 644 to 685). The row is the kit's count, not a count of the host.
+  The kit test `budget: each saved plan is inside each limit` counts it by the rules of `validateRenderedWork`, with each list full to its row count and each series of a chart at 256 points (column `work`, `bun test kit/test/budget.test.js`).
+  The host counts the points that the state holds, at most 256 in all series of a chart (`ToolUiCatalog.kt` 830), so its count is not above the kit's count. The host does not log its count. The host checked each open of the run with full lists, and each open passed.
+  The emitter sets the row count of the lists so that this count stays at most 2048 (`kit/src/emit.js` 216 to 220). In `section.plan`, the row count is 100, the most rows of a list in the kit (`MAX_ROWS`, `kit/src/rows.js` 15).
+- Request: `ToolEngine.kt` 281 builds the request `{artifactId, revision, state, event}` with the stored state. `SandboxContract.validateRequest` (`SandboxContract.kt` 100 to 102) reads it with the limit `MAX_BYTES`, 65536 bytes. No test measured a request.
+  A cell is the full state of the run plus 13993 bytes, the most that the rules of the host permit for the rest of a request. That rest is:
+  an artifact id of 128 characters, a revision of 10 digits, a `liveInput` event with an action id of 48 characters (`[A-Za-z][A-Za-z0-9_]{0,47}`) and a row value with a key of 128 and a text of 2048 characters, each character at 6 bytes (`\uXXXX`), and 111 bytes of keys and signs.
+  A stored state has at most 49152 bytes (`ToolSpec.validateState`), so a request has at most 63145 bytes, 2391 under its limit. So this limit cannot fail before the state limit.
+- The drawing cells are the open reply, except `model3d`. Its three cells are the rover at its largest whole turn (52 commands, 253 pairs, 6589 bytes). At the open, the rover has the same commands and pairs and 6445 bytes.
+- The open of each plan with full lists went through `executeEvent`, which checks the state and the reply.
+- The sources of these numbers: the budget table and the kit test of `model3d.plan` (`bun test kit`), and the `time` lines and the `event times` lines of `evidence/alphy-ui/appfile-phase1/logcat.txt`. The column `work` of the budget table is from fix round 1 of Task 12, and the kit sources did not change since `9bcd313`. The scratch script that sorts the matrix is not in the tree.
+
+The matrix does not hold these limits of the host. Each one is not measured, and each one cannot fail before a limit of the matrix or a fault of the kit:
+
+- The result of an event, 196608 bytes (`SandboxContract.MAX_RESULT_BYTES`, `SandboxContract.kt` 9, read at 169 and in `GraphicsSession.kt` 53). A reply of the kit holds the state, the `ui`, the surfaces, and one timer request for each running surface and for a running change of `animate` (`kit/src/run.js` 469). The state, the `ui`, and the drawing have their own limits, 147456 bytes together.
+- The depth of the `ui`, 8 (`ToolUiCatalog.kt` 205 and 658). The emitter gives a fault that names the line at a depth over 8 (`kit/src/emit.js` 194 to 195). The host checked the depth at each open of the run.
+- The children of a container, 50 (`ToolUiCatalog.kt` 680). The emitter gives a fault that names the line (`kit/src/emit.js` 196).
+- The surfaces of an app, 4 (`ToolSpec.kt` 224). The emitter gives a fault that names the line of a fifth surface (`kit/src/emit.js` 237).
+- The segments of the drawing, 512 (`GraphicsContract.kt` 201 to 202). Only a `path` command has segments, and the kit draws no `path` (`kit/src/draw.js`).
+- The images of a screen, 4 (`ToolUiCatalog.MAX_IMAGES`). The kit makes no image node: a `Picture` line is a fault.
 
 Limits of this verdict:
 
 - `model3d.plan` passes without the picture line of the prototype plan (ruling of Task 9). `kit/test/fixtures/dialogue-rover.plan` keeps the line and gives the fault "picture is not built yet". Pictures belong to phase 5.
-- The times come from the emulator, not from a phone.
+- The times come from the emulator, not from a phone. Each time comes from one run. In the run `appfile-sizes-times-6` of Task 10, the times of `section.plan` rose to 57 ms in the middle of the plan (section "Time of each saved plan").
+- The full lists are copies of the start rows. Rows with longer texts make a larger state and a larger request.
 - The saved plans are fixed plans of this plan, not plans that the model of the app wrote. Phase 2 measures the plans that a model writes.
 
 ### Host items
@@ -297,7 +321,7 @@ This section makes no choice. Each item gives the facts for a decision of the us
    - A year belongs in `text()`, not in a figure: a figure prints a year with a digit group (2,019).
    - The display sizes of a text (`emphasis` `number` and `display`) are too large for a list row.
    - `edit=true` of `entries` puts typed fields into rows. An edit of a row in a dialog has no part form yet.
-   - For an alert timer of one round, the host shows its own buttons and alert. So the prompt must not ask for `start=`, `pause=`, `reset=`, or `done=` there. A done text could go into a notification, which needs the permission `POST_NOTIFICATIONS`.
+   - For an alert timer of one round, the host already shows its own buttons and alert there. The open point is what the prompt says about `start=`, `pause=`, `reset=`, and `done=` for such a timer. A done text could go into a notification, which needs the permission `POST_NOTIFICATIONS`.
 
 ### Pictures
 
@@ -430,6 +454,7 @@ The fixtures `catalog`, `dialogue-game`, `dialogue-materials`, and `dialogue-rov
 - definition, ui, and state: the bytes as org.json writes them (`ToolSpec.MAX_DEFINITION_BYTES`, `ToolUiCatalog.MAX_UI_BYTES`, `ToolSpec.validateState`).
 - nodes: each node of the ui, also each node of a row template (`ToolUiCatalog.MAX_NODES`).
 - fields: the top-level fields of the state schema (`ToolValueSchema`).
+- work (since fix round 1 of Task 12): the kit's count of render work by the rules of `ToolUiCatalog.validateRenderedWork` (`MAX_RENDER_WORK` 2048), with each list full to its row count and each series of a chart at 256 points. It is not a count of the host.
 - commands, pairs, chars, and bytes: the drawing of the open reply over all its surfaces (`GraphicsContract.frame`). A plan with no surface shows 2 bytes: the text `{}`.
 
 At `0b18408` (Task 10), the largest source was `test/cards.plan` with 51476 bytes, and the largest saved plan was `plans/lesson.plan` with 48247 bytes.
@@ -642,8 +667,9 @@ Two requests of the corpus with components only, in the tree of their baseline a
 | `look-water-ko` | 1 | 0 | 0 | `showcase-lang-water-ko`: 1, 0, 0 |
 | `look-shopping-it` | 1 | 1 | 0 | `showcase-lang-shopping-it`: 1, 1, 0 |
 
-The number 1234.5 shows as "1234.5" both from a state value (`Metric("Plain", $/n)`) and from a computed value (`Metric("Computed", $/n * 1)`).
-The kit has no number format with digit groups: "남은 양" shows "2000 ml", and the baseline shows "2,000 ml".
+In Task 11b-1, the number 1234.5 showed as "1234.5" both from a state value (`Metric("Plain", $/n)`) and from a computed value (`Metric("Computed", $/n * 1)`).
+In Task 11b-1, the kit had no number format with digit groups: "남은 양" showed "2000 ml", and the baseline shows "2,000 ml".
+Since Task 11b-2a, a figure prints its numbers with the digit groups of the language of the app (`kit/src/core.js` 53 to 60, section "Look with parts").
 
 The hero cards of the baseline pictures come from the host at `30d43aa`. The host of this branch has `03c6e58` "Stop repeating titles and calm the hero cards".
 That host puts a large emoji at the end of the texts that follow it (`NativeToolUi.kt` `heroEmojiSide`), and it gives a hero card the secondary container color.
@@ -671,10 +697,12 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 python3 tools/compose_acceptance/run.py s
 
 ### Where the two pairs are still worse than the baseline
 
+This table is the state of Task 11b-1. Since Task 11b-2a, a figure has digit groups (section "Look with parts").
+
 | Plan | Difference | Cause |
 | --- | --- | --- |
 | `look-water-ko` | The emoji stands beside the metric, and the hero color differs. | Host revision: the baseline pictures come from `30d43aa`, this branch has `03c6e58`. |
-| `look-water-ko` | "남은 양" shows "2000 ml", the baseline shows "2,000 ml". | Missing option: the kit has no number format with digit groups (C.5). |
+| `look-water-ko` | "남은 양" shows "2000 ml", the baseline shows "2,000 ml". | Missing option in Task 11b-1: the kit had no number format with digit groups (C.5). Task 11b-2a added it. |
 | `look-water-ko` | The success banner has no title "목표 달성". | Missing option: `Notice` takes one text. |
 | `look-water-ko` | The grid "Plain" and "Computed" is not in the baseline. | Choice of the plan: D.3 requires it. |
 | `look-shopping-it` | The button "Aggiungi" is grey on the first screen. | Choice of the plan: `enabled=` keeps the smoke step from a control that changes nothing (the pattern of the entries part). |
@@ -729,7 +757,7 @@ Since Task 11c, the field "Prodotto" is a live input, as in the baseline, and th
 | Label | Revision | Observed | Test APK `lastUpdateTime` before and after |
 | --- | --- | --- | --- |
 | `appfile-look-parts-try1` | `de20585+dirty` (the plans and the baselines) | failed: `ToolSpec.parse` refused the field `appLanguage` of a baseline spec | `04:22:14`, `04:27:20` |
-| `appfile-look-parts-try2` | `de20585+dirty` | failed: the IME action of "Prodotto" did not apply the typed text, so the test now presses the apply button | `04:27:20`, `04:30:53` |
+| `appfile-look-parts-try2` | `de20585+dirty` | failed: the IME action of "Prodotto" did not apply the typed text, so the test then pressed the apply button. Since Task 11c, the field is a live input with no apply button (section "Live inputs") | `04:27:20`, `04:30:53` |
 | `appfile-look-parts-try3` | `9f435e9` tree | passed, 32 tests (`AppFileProofTest` and `AppFileLookTest`), 159.0 s. The pictures of the first round | `04:30:53`, `04:35:18` |
 | `appfile-look-parts-try4` | `c022bdb+dirty` (the tree of `e8af9d2`) | passed, 32 tests, 156.7 s. The pictures of the second round | `04:35:18`, `04:46:51` |
 | `appfile-look-parts` | `e8af9d2` | passed, 32 tests, 161.2 s. The pictures of this section | `04:46:51`, `04:50:49` |
@@ -754,6 +782,9 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
 ```
 
 ### Where the plans with parts are still worse than the baseline
+
+This table is the state of Task 11b-2a. Task 11b-2b gave four of its missing options: the icons of the add form of `mock-shopping-it`, the tone of a `show=` value, the total of the hero count, and the icons of the rows of `mock-units-pl`.
+The section "Look of each plan" gives the state since Task 11b-2b and the differences that stay.
 
 | Plan | Difference | Cause |
 | --- | --- | --- |
