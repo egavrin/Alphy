@@ -87,7 +87,10 @@ function smokeRun(file, limit, clock) {
           const now = Number(p.value) || 0, by = p.step ?? 1;
           const sample = ["Toggle", "CheckBox"].includes(node.type) ? !p.value : ["Segmented", "Select"].includes(node.type) ? (p.options ?? []).find((option) => option !== p.value)
             : node.type === "TextField" ? (p.value === "Test" ? "Test 2" : "Test") : node.type === "DateField" ? (p.value === "2026-01-02" ? "2026-01-03" : "2026-01-02")
-            : node.type === "TimeField" ? (p.value === "08:30" ? "09:30" : "08:30") : now + by > (p.max ?? Infinity) ? now - by : now + by;
+            : node.type === "TimeField" ? (p.value === "08:30" ? "09:30" : "08:30")
+            // A range moves to its bounds, as the smoke step of Alphy does: [min, max], or [min, min] when it is there.
+            : node.type === "RangeSlider" ? [p.min ?? 0, p.value?.[0] === (p.min ?? 0) && p.value?.[1] === (p.max ?? 100) ? p.min ?? 0 : p.max ?? 100]
+            : now + by > (p.max ?? Infinity) ? now - by : now + by;
           // The person uses a Choices through its option buttons, which have their own turn.
           if (sample === undefined || node.type === "Choices") continue;
           error = app.change(node, sample);

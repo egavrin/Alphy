@@ -14,7 +14,7 @@ export const CATALOG = {
   Progress: ["value", "max", "label"], Ring: ["value", "max", "text", "label"], Divider: [], Notice: ["text"],
   // label is the text of an icon button for a person who does not see the icon.
   Button: ["label", "action"], IconButton: ["icon", "action", "label"],
-  TextField: ["label", "bind"], NumberField: ["label", "bind"], Slider: ["label", "bind"],
+  TextField: ["label", "bind"], NumberField: ["label", "bind"], Slider: ["label", "bind"], RangeSlider: ["label", "bind"],
   Toggle: ["label", "bind"], CheckBox: ["label", "bind"],
   Segmented: ["label", "bind", "options"], Select: ["label", "bind", "options"],
   List: ["items", "template", "group"], Chart: ["items", "point", "value", "label"],

@@ -4,14 +4,8 @@ import { expect, test } from "bun:test";
 import { AppFile } from "../src/dsl.js";
 import { report, smoke } from "../src/check.js";
 import { emit } from "../src/emit.js";
-import { every, planned, press } from "./helpers.js";
+import { built, every, planned, press } from "./helpers.js";
 
-/** The definition and the compiled app of a plan that the emitter builds with no fault. */
-const built = async (...lines) => {
-  const result = emit(await planned(lines.join("\n")));
-  expect(result.faults).toEqual([]);
-  return result;
-};
 
 test("entries: the fields of the add form stand one below the other, and the add button is on its own line, enabled, with a plus", async () => {
   const { definition } = await built('app("Spesa", lang="it")', 'need items = entries("Prodotti", fields={name: "text", aisle: ["Frutta", "Forno"]})');

@@ -69,17 +69,21 @@ function readRowFields(file, entry) {
 }
 
 const PARTS = {
-  // need bill = input("money", "Bill", 80, min=0, max=500)
+  // need bill = input("money", "Bill", 80, min=0, max=500, icon="Wallet")
+  // need kind = input("choice", "Type", "road", options={road: "Road", city: "City"}); need price = input("range", "Price", [100, 1500], min=0, max=2000, step=50)
   async input(name, need, { choose }) {
     const [kind, title, value] = need.args, extras = need.named;
     const k = kind?.v;
     const named = Object.entries(extras).filter(([key]) => key !== "options").map(([key, tree]) => `, ${key}=${show(tree)}`).join("");
+    // The options are a list of values or a map of a value to its label. A segmented control takes no icon.
+    const icon = extras.icon ? `, icon=${show(extras.icon)}` : "", options = show(extras.options ?? { k: "list", items: [] }), few = ((extras.options?.items ?? extras.options?.entries)?.length ?? 9) <= 4;
     let widget;
-    if (k === "choice") widget = `${(extras.options?.items.length ?? 9) <= 4 ? "Segmented" : "Select"}(${show(title)}, $/${name}, ${show(extras.options ?? { k: "list", items: [] })})`;
+    if (k === "choice") widget = `${few ? "Segmented" : "Select"}(${show(title)}, $/${name}, ${options}${few ? "" : icon})`;
     else if (k === "toggle") widget = `Toggle(${show(title)}, $/${name})`;
-    else if (k === "text") widget = `TextField(${show(title)}, $/${name})`;
-    else if (k === "choices") widget = `Choices(${show(title)}, $/${name}, ${show(extras.options ?? { k: "list", items: [] })}${extras.max ? `, max=${show(extras.max)}` : ""})`;
-    else if (k === "date" || k === "time") widget = `${k === "date" ? "DateField" : "TimeField"}(${show(title)}, $/${name})`;
+    else if (k === "text") widget = `TextField(${show(title)}, $/${name}${icon})`;
+    else if (k === "choices") widget = `Choices(${show(title)}, $/${name}, ${options}${extras.max ? `, max=${show(extras.max)}` : ""})`;
+    else if (k === "date" || k === "time") widget = `${k === "date" ? "DateField" : "TimeField"}(${show(title)}, $/${name}${icon})`;
+    else if (k === "range") widget = `RangeSlider(${show(title)}, $/${name}${named})`;
     else {
       const ranged = extras.min && extras.max;
       const pick = await choose(`widget for ${name}`, ranged ? ["Slider", "NumberField"] : ["NumberField"], k === "percent" && ranged ? "Slider" : "NumberField");
@@ -451,7 +455,7 @@ export const PART_KINDS = Object.keys(PARTS);
  * button gives each option to its Button, whose own check names each one that a Button does not take.
  */
 const OPTIONS = {
-  input: ["options", "min", "max", "step"], figure: ["decimals", "example"],
+  input: ["options", "min", "max", "step", "icon"], figure: ["decimals", "example"],
   entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText"],
   chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max"],
@@ -519,7 +523,7 @@ export async function expand(file, choose = rules) {
     // What the part builds in a different way than the need line asks. The report shows it as a note.
     if (built.note) file.partNotes.push(built.note);
     // The controls that the part made, by name, so that the report can say when a later step took one off the screen.
-    const control = (made) => made.kind === "component" && made.tree.k === "call" && (made.tree.named.action || ["Button", "IconButton", "TextField", "NumberField", "Slider", "Toggle", "CheckBox", "Segmented", "Select", "DateField", "TimeField"].includes(made.tree.name));
+    const control = (made) => made.kind === "component" && made.tree.k === "call" && (made.tree.named.action || ["Button", "IconButton", "TextField", "NumberField", "Slider", "RangeSlider", "Toggle", "CheckBox", "Segmented", "Select", "DateField", "TimeField"].includes(made.tree.name));
     (file.made ??= new Map()).set(entry.key, parsed.filter(control).map((made) => made.key));
     // Each line of the part, so that a need that changes or goes away leaves no line of its earlier form behind.
     const keys = parsed.map((made) => made.key);

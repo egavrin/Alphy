@@ -48,7 +48,7 @@ internal suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,s
     }
 }
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, a range, a map of options, and an icon of a field, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -100,12 +100,14 @@ class AppFileProofTest {
         assertFalse(ring.toString(),ring.has("children"))
         assertEquals(2.5,state.getJSONObject("d").getDouble("half_value"),0.0)
     }
+    /** The text of each option of a choice. */
+    private fun optionTexts(node: JSONObject)=node.getJSONArray("options").let {options -> List(options.length()) {options.getJSONObject(it).getString("text")}}
     @Test fun eachLookOptionPassesParseAndSmoke(): Unit=runBlocking {
         // looks.plan is kit/test/looks.plan: each look option and a Grid, and the kit test reads the same text.
         val spec=parsedAndSmoked(SandboxClient(instrumentation.targetContext),"looks")
         val all=nodes(spec.ui)
         assertEquals(3,all.single {it.optString("type") == "grid"}.getInt("columns"))
-        assertEquals(listOf("Small","Large"),all.first {it.optString("type") == "segmented"}.getJSONArray("options").let {options -> List(options.length()) {options.getJSONObject(it).getString("text")}})
+        assertEquals(listOf("Small","Large"),optionTexts(all.first {it.optString("type") == "segmented"}))
         assertEquals("display",all.single {it.optString("type") == "progressRing"}.getJSONArray("children").getJSONObject(0).getJSONObject("style").getString("emphasis"))
     }
     @Test fun calcPassesParseAndSmoke(): Unit=runBlocking {
@@ -142,6 +144,23 @@ class AppFileProofTest {
             assertEquals(language,start,shown(JSONObject(spec.initialState)))
             assertEquals(language,after,shown(Session(sandbox,spec,"appfile-numbers-$language").act("x_field",20000)))
         }
+    }
+    @Test fun aRangeAMapOfOptionsAndAnIconOfAFieldPassParseAndSmoke(): Unit=runBlocking {
+        // The plan of kit/test/inputs.test.js. Alphy's smoke step moves the range to its bounds, and an event sends both numbers.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val text="app(\"Bikes\", lang=\"en\")\nneed price = input(\"range\", \"Price\", [100, 1500], min=0, max=2000, step=50)\n" +
+            "need shown = figure(\"count\", \"Shown\", count([300, 900, 1800], \$it >= \$/price[0] && \$it <= \$/price[1]), example=[{price: [0, 2000]}, 3])\n" +
+            "need kind = input(\"choice\", \"Type\", \"road\", options={all: \"All\", road: \"Road\", city: \"City\"})\nneed name = input(\"text\", \"Name\", \"\", icon=\"Pencil\")"
+        val spec=parsedAndSmoked(sandbox,"inputs","en",text)
+        val all=nodes(spec.ui)
+        assertEquals(listOf(0.0,2000.0,50.0),all.single {it.optString("type") == "rangeSlider"}.let {node -> listOf("min","max","step").map {node.getDouble(it)}})
+        assertEquals(listOf("All","Road","City"),optionTexts(all.single {it.optString("type") == "segmented"}))
+        assertEquals("Pencil",all.single {it.optString("type") == "input"}.getString("icon"))
+        val session=Session(sandbox,spec,"appfile-inputs")
+        val moved=session.act("price_field",JSONArray(listOf(500,1000)))
+        assertEquals(listOf(500.0,1000.0),moved.getJSONArray("price").let {range -> List(range.length()) {range.getDouble(it)}})
+        assertEquals("1",moved.getJSONObject("d").getString("shown_text"))
+        assertEquals("city",session.act("kind_field","city").getString("kind"))
     }
     /** Events in sequence through ToolGenerationService.executeEvent: Alphy checks each event against the screen before it, and each reply. */
     private class Session(private val sandbox: SandboxClient,private val spec: ToolSpec,private val id: String,seed: String=spec.initialState) {

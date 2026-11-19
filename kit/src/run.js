@@ -65,13 +65,16 @@ const choice = (n, at) => {
  * A number field or a slider. Alphy wants min below max, the value from min to max, and a step above 0 that fits the range (ToolUiCatalog).
  * The template of a row has no value of its own, so each row checks its value. After each event the run-time clamps the value into the bounds.
  */
-const ranged = (type, low, high) => (n, at) => {
-  const { min = low, max = high, step, value } = n.props;
-  if (MESSAGES && (![min, max].every(Number.isFinite) || !(min < max) || (!at.blank && !(Number.isFinite(value) && value >= min && value <= max)) || (step !== undefined && !(step > 0 && step <= max - min)))) {
-    at.fault(`a ${n.type} needs min below max, its value from min to max, and a step above 0 and at most max - min. Now min is ${min}, max is ${max}, the value is ${value}${step === undefined ? "" : `, and the step is ${step}`}`);
+const ranged = (type, low, high, pair) => (n, at) => {
+  const { min = low, max = high, step, value } = n.props, inside = (x) => Number.isFinite(x) && x >= min && x <= max;
+  // A range is two numbers in order inside the bounds, and Alphy sends both (ToolUiCatalog validRange).
+  const fits = pair ? (x) => Array.isArray(x) && x.length === 2 && x.every(inside) && x[0] <= x[1] : inside;
+  if (MESSAGES && (![min, max].every(Number.isFinite) || !(min < max) || (!at.blank && !fits(value)) || (step !== undefined && !(step > 0 && step <= max - min)))) {
+    at.fault(`a ${n.type} needs min below max, ${pair ? "two numbers in order" : "its value"} from min to max, and a step above 0 and at most max - min. Now min is ${min}, max is ${max}, the value is ${value}${step === undefined ? "" : `, and the step is ${step}`}`);
   }
-  at.bounds(min, max);
-  return { type, ...at.field(), min, max, ...defined(n.props, ["step"]), ...iconOf(n) };
+  // shortcut: an action of the plan that moves a range out of its bounds is not clamped as a number is (handle); the smoke run shows it as a fault of the screen. Clamp it when a plan needs that.
+  if (!pair) at.bounds(min, max);
+  return { type, ...at.field(pair && ((x) => (fits(x) ? x : undefined))), min, max, ...defined(n.props, ["step"]), ...iconOf(n) };
 };
 
 /**
@@ -107,6 +110,7 @@ const NODES = {
   NumberField: ranged("numberInput", 0, 1000000),
   // Alphy gives a slider without bounds 0 to 100.
   Slider: ranged("slider", 0, 100),
+  RangeSlider: ranged("rangeSlider", 0, 100, 1),
   TextField: (n, at) => ({ type: "input", ...at.field(), inputMode: "apply", ...iconOf(n) }),
   Toggle: (n, at) => ({ type: "toggle", ...at.field() }),
   CheckBox: (n, at) => ({ type: "checkbox", ...at.field(), ...defined(n.props, ["variant"]) }),

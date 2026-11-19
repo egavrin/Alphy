@@ -30,6 +30,12 @@ export const allPlans = () => ["plans", "test", "test/fixtures"].flatMap((dir) =
 /** One event of Alphy on a state: a field value, or a press when the value is null. */
 export const press = (state, app, actionId, value = null) => handle({ artifactId: "kit-test", revision: 1, state, event: { type: "action", actionId, value } }, app);
 export const planned = async (text) => { const file = new AppFile().feedText(text); await expand(file); return file; };
+/** The definition and the compiled app of the plan of these lines, which the emitter builds with no fault. */
+export const built = async (...lines) => {
+  const result = emit(await planned(lines.join("\n")));
+  expect(result.faults).toEqual([]);
+  return result;
+};
 /** Each node of a ui, also the nodes of each row template. */
 export const every = (node) => [node, ...(node.children ?? []).flatMap(every), ...(node.rowTemplate ? every(node.rowTemplate) : [])];
 
