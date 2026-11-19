@@ -1,0 +1,12 @@
+# Request: Una guía corta para preparar café de filtro: cuántos gramos de café uso según las tazas, los pasos uno a uno con una explicación, y al final una pregunta para ver si lo entendí.
+# Parts only (Task 11b-2b, round before the review): steps of cards with an icon, and a question with its notice.
+app("Café de filtro", lang="es", preset="soft", palette="brown")
+need cafe = figure("number", "Café molido", $/tazas * 15, icon="☕", unit="g", decimals=0, note="15 g de café por cada taza de 250 ml")
+need tazas = input("count", "Tazas", 2, min=1, max=6)
+need moler = card("Muele el café", "Molienda media, como la sal gruesa. Una molienda fina amarga el café.", icon="Coffee")
+need calentar = card("Calienta el agua", "Entre 92 y 96 °C: deja reposar el agua 30 segundos después de hervir.", icon="Thermometer")
+need verter = card("Vierte poco a poco", "Moja el café, espera 30 segundos y vierte el resto en círculos durante 3 minutos.", icon="Drop")
+need pasos = steps(["1. Moler", "2. Calentar", "3. Verter"], [[moler], [calentar], [verter]], back="Atrás", next="Siguiente", finish="Listo", done="¡Tu café está listo!")
+need prueba = question("¿A qué temperatura debe estar el agua?", options=["100 °C", "92–96 °C", "80 °C"], right="92–96 °C", rightText="¡Correcto! Así el café no se quema.", wrongText="Casi: el agua debe estar entre 92 y 96 °C.")
+check("Tazas y pasos", set(tazas_field, 4), expect($/cafe == 60), tap(pasos_next), tap(pasos_next), tap(pasos_finish), expect($/pasos_done))
+check("Pregunta", tap(prueba_opt0), expect(!$/prueba), tap(prueba_opt1), expect($/prueba))

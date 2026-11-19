@@ -1,0 +1,6 @@
+# Request: Tarjetas para repasar vocabulario de inglés: veo la palabra en español, le doy la vuelta para ver la traducción, marco si la sabía y al final veo cuántas sabía y cuántas no.
+# Parts only (Task 11b-2b, round before the review): a deck with a back, a mark, and the two counts. The words are data for the deck, so the list is hidden.
+app("Vocabulario de inglés", lang="es", preset="soft", palette="indigo")
+need palabras = entries("Palabras", fields={es: "text", en: "text", sabida: "check"}, hidden=true, rows=[{es: "la manzana", en: "the apple", sabida: false}, {es: "el perro", en: "the dog", sabida: false}, {es: "la biblioteca", en: "the library", sabida: false}, {es: "el amanecer", en: "the sunrise", sabida: false}, {es: "aprender", en: "to learn", sabida: false}])
+need tarjetas = deck("Repaso de hoy", $/palabras, front=$es, back=$en, mark=$sabida, show="Ver traducción", yes="La sabía", no="Todavía no", again="Repasar otra vez", done="¡Repaso terminado!")
+check("Ver y marcar", tap(tarjetas_show), expect($/tarjetas_open), tap(tarjetas_yesButton), expect($/tarjetas_yes == 1 && $/tarjetas_i == 1 && $/palabras[0]/sabida), tap(tarjetas_show), tap(tarjetas_noButton), expect($/tarjetas_no == 1 && $/tarjetas_i == 2 && !$/palabras[1]/sabida))

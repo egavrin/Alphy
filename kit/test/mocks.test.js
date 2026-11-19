@@ -1,9 +1,10 @@
-// The five mock plans with parts (Task 11b-2a): their check lines pass, and one event of the main action of each one gives the expected reply.
+// The five mock plans with parts (Task 11b-2a) and the two look fixtures of the deck and the guide (Task 11b-2b, round before the review):
+// their check lines pass, and one event of the main action of each one gives the expected reply.
 
 import { expect, test } from "bun:test";
 import { report } from "../src/check.js";
 import { emit } from "../src/emit.js";
-import { fixture, live, planned, press } from "./helpers.js";
+import { every, fixture, live, planned, press } from "./helpers.js";
 
 /** The report and the compiled app of a mock plan. */
 const mock = async (name) => {
@@ -11,8 +12,8 @@ const mock = async (name) => {
   return { result, app, state: definition.initialState };
 };
 
-test("mocks: each mock plan has no fault, and each of its check lines passes", async () => {
-  for (const name of ["mock-water-ko", "mock-units-pl", "mock-shopping-it", "mock-habits-uk", "mock-price-filter"]) {
+test("mocks: each mock plan and look fixture of parts has no fault, and each of its check lines passes", async () => {
+  for (const name of ["mock-water-ko", "mock-units-pl", "mock-shopping-it", "mock-habits-uk", "mock-price-filter", "look-deck-es", "look-guide-es"]) {
     const { result } = await mock(name);
     expect([name, result.faults, result.checks.length > 0, result.checks.filter((check) => !check.pass)]).toEqual([name, [], true, []]);
   }
@@ -70,4 +71,19 @@ test("mocks: the shopping list gives its add fields their icons, and the streak 
   const shopping = await planned(fixture("mock-shopping-it")), habits = await planned(fixture("mock-habits-uk"));
   expect([shopping.get("prodotti_new_nome").raw, shopping.get("prodotti_new_corsia").raw.endsWith(', icon="Tag")'), habits.get("habits_streak").raw.endsWith(', tone="accent")')])
     .toEqual(['prodotti_new_nome = TextField("Prodotto", $/prodotti_new_nome, icon="Cart")', true, true]);
+});
+
+test("mocks: Ver traducción shows the back of the deck, and La sabía counts one, marks the word as known, and shows the next card", async () => {
+  const { app, state } = await mock("look-deck-es");
+  const shown = press(state, app, "tarjetas_show").state;
+  expect([state.tarjetas_s.open, shown.tarjetas_s.open, shown.d.tarjetas_back_text]).toEqual([false, true, "the apple"]);
+  const known = press(shown, app, "tarjetas_yesButton").state;
+  expect([known.tarjetas_s, known.d.tarjetas_front_text, known.palabras.map((row) => row.sabida)]).toEqual([{ i: 1, open: false, yes: 1, no: 0 }, "el perro", [true, false, false, false, false]]);
+});
+
+test("mocks: Siguiente shows the second step of the guide, and the right answer shows the success notice", async () => {
+  const { app, state } = await mock("look-guide-es");
+  expect([state.d.cafe_text, press(state, app, "pasos_next").state.pasos_s.step]).toEqual(["30 g", 1]);
+  const reply = press(state, app, "prueba_opt1"), notice = every(reply.ui).find((node) => node.type === "banner");
+  expect([reply.state.prueba_s.answer, notice.style, reply.state.v.prueba_result_visible, reply.state.d.prueba_result_text]).toEqual(["92–96 °C", { tone: "success" }, true, "¡Correcto! Así el café no se quema."]);
 });

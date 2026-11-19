@@ -739,7 +739,7 @@ test("emit: the texts that are the name of a line, in each saved plan and fixtur
     "test/fixtures/shopping.plan": [], "test/fixtures/units-pl.plan": [], "test/fixtures/water-ko.plan": [],
     "test/fixtures/look-water-ko.plan": [], "test/fixtures/look-shopping-it.plan": [], "test/looks.plan": [],
     "test/fixtures/mock-water-ko.plan": [], "test/fixtures/mock-units-pl.plan": [], "test/fixtures/mock-shopping-it.plan": [], "test/fixtures/mock-habits-uk.plan": [],
-    "test/fixtures/mock-price-filter.plan": [],
+    "test/fixtures/mock-price-filter.plan": [], "test/fixtures/look-deck-es.plan": [], "test/fixtures/look-guide-es.plan": [],
     "test/lists.plan": [],
     "test/nodes.plan": ["up", "down", "left", "right", "edit"],
     "test/rich.plan": [],

@@ -30,7 +30,7 @@ import java.util.Locale
 /** The fixtures of kit/build.js LOOK_FIXTURES with the language of each app. */
 private val LOOK_FIXTURES=mapOf("water-ko" to "ko","units-pl" to "pl","shopping" to "en","habits" to "en","price-filter" to "en",
     "look-water-ko" to "ko","look-shopping-it" to "it","mock-water-ko" to "ko","mock-units-pl" to "pl","mock-shopping-it" to "it","mock-habits-uk" to "uk",
-    "mock-price-filter" to "en")
+    "mock-price-filter" to "en","look-deck-es" to "es","look-guide-es" to "es")
 /** The apps that the model of the app wrote for the five requests of the mock plans (final-30d43aa): each spec, saved as an app of the same host, with no kit. */
 private val BASELINES=listOf("showcase-lang-water-ko","showcase-lang-units-pl","showcase-lang-shopping-it","showcase-lang-habits-uk","showcase-ui-price-filter")
 
@@ -96,6 +96,9 @@ class AppFileLookTest {
                         assertTrue("$picture ${picture.length()} bytes",picture.isFile && picture.length()>10_000)
                         // The shopping list starts empty: one more picture after a person adds two rows through the screen.
                         if(name == "mock-shopping-it") added(robot,store,scenario,"appfile-$name",File(directory,"$name-added.png"))
+                        // The deck and the question change after their main action: one more picture of the back of the card and of the notice of the answer.
+                        if(name == "look-deck-es") pressed(robot,"Ver traducción","the apple",File(directory,"$name-shown.png"))
+                        if(name == "look-guide-es") pressed(robot,"92–96 °C","¡Correcto! Así el café no se quema.",File(directory,"$name-answered.png"))
                         robot.back()
                         robot.waitGone(robot.text(R.string.tool_refine))
                     }
@@ -108,6 +111,13 @@ class AppFileLookTest {
     /** Adds two products with the steps of the baseline list (addTwoRows), and takes the picture when the rows show. */
     private fun added(robot: ShellRobot,store: ToolStore,scenario: ActivityScenario<CloudTestActivity>,id: String,picture: File) {
         addTwoRows(robot,scenario,KIT_LIST) {state(store,id)}
+        picture(robot,picture)
+    }
+    /** Presses a control through the UI layer, and takes the picture when the text of its reply shows. */
+    private fun pressed(robot: ShellRobot,control: String,reply: String,picture: File) {
+        robot.reveal(control,forward=null)
+        robot.click(control)
+        robot.reveal(reply,forward=null)
         picture(robot,picture)
     }
     /** Where a list app keeps its rows and the text of its field "Prodotto": the baseline app and the kit plan name them differently. */
