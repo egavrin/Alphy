@@ -410,12 +410,14 @@ const PARTS = {
 
   // need orbit = drawing("Top view", 320, 320, [circle(160, 160, 30, "water"), each($/cells, rect($index * 40, 0, 36, 20, "wood"))])
   // A 2D picture from shapes that the host draws. Each number is a formula, so the picture follows the values of the app. Evidence: screens 2 and 3 of the dialogue mocks.
-  async drawing(name, need) {
+  // The drawing that is the main element is in a hero card. Its surface keeps the name NAME_view.
+  async drawing(name, need, { hero }) {
     const [title, width, height, ...shapes] = need.args;
     if (!height || width.k === "list" || height.k === "list") throw new DslError("drawing needs a width and a height before the shapes: drawing(label, 320, 240, [shapes])");
     // Shapes with no list around them are still the shapes.
-    const list = shapes.length === 1 && shapes[0].k === "list" ? show(shapes[0]) : `[${shapes.map(show).join(", ")}]`;
-    return { lines: [`${name}_view = Drawing(${[title, width, height].map(show).join(", ")}, ${list})`], top: [`${name}_view`] };
+    const list = shapes.length === 1 && shapes[0].k === "list" ? show(shapes[0]) : `[${shapes.map(show).join(", ")}]`, lines = [`${name}_view = Drawing(${[title, width, height].map(show).join(", ")}, ${list})`];
+    if (hero !== name) return { lines, top: [`${name}_view`] };
+    return { lines: [...lines, `${name}_card = Card([${name}_view], variant="hero")`], top: [`${name}_card`] };
   },
 
   // need lap = button("One turn", [set($/angle, 0), animate($/angle, 360, 5000)], enabled=$/ready): a button with an action or a list of actions.
@@ -429,16 +431,18 @@ const PARTS = {
   // need rover = model3d("Rover", [box("", 0, 0, 0, 4, 1, 2, "sand"), cylinder("wheels", -1.4, -0.8, 1.2, 0.6, 0.4, "z", "ink")], parts={wheels: "Wheels"})
   // A 3D model from boxes and cylinders. $/NAME/selected is the id of the part that a chip selected, or "". $/NAME/exploded is true when the model is taken apart.
   // Evidence: screen 4 of the dialogue mocks. A second tap on a chip clears the selection.
-  async model3d(name, need, { caption }) {
+  async model3d(name, need, { caption, hero }) {
     const [title, bodies] = need.args, opt = need.named, text = caption, at = (field) => `$/${name}/${field}`;
     const turn = opt.turn?.v !== false, chips = (opt.parts?.entries ?? []).map(([id, caption]) => [`${name}_part_${id}`, q(id), show(caption)]), tools = [];
     const lines = [`$/${name} = {selected: "", exploded: false, turn: 30}`,
       `${name}_model = Model3d(${show(title)}, ${show(bodies)}${turn ? `, ${at("turn")}` : ""}, exploded=${at("exploded")}, selected=${at("selected")})`,
-      ...chips.map(([key, id, caption]) => `${key} = Button(${caption}, action=set(${at("selected")}, ${at("selected")} == ${id} ? "" : ${id}), selected=${at("selected")} == ${id})`)];
+      // A chip that is not selected is outlined: a tonal button has the color of a hero card, so on the hero card it showed no container.
+      ...chips.map(([key, id, caption]) => `${key} = Button(${caption}, action=set(${at("selected")}, ${at("selected")} == ${id} ? "" : ${id}), selected=${at("selected")} == ${id}, variant=${at("selected")} == ${id} ? "filled" : "outlined")`)];
     if (turn) { lines.push(`${name}_left = IconButton("ArrowLeft", action=dec(${at("turn")}, 30), label="−30°")`, `${name}_right = IconButton("ArrowRight", action=inc(${at("turn")}, 30), label="+30°")`); tools.push(`${name}_left`, `${name}_right`); }
-    if (opt.explode?.v !== false) { lines.push(`${name}_explode = Button(${at("exploded")} ? ${text("joinText", "Put together")} : ${text("explodeText", "Take apart")}, action=toggle(${at("exploded")}))`); tools.push(`${name}_explode`); }
+    if (opt.explode?.v !== false) { lines.push(`${name}_explode = Button(${at("exploded")} ? ${text("joinText", "Put together")} : ${text("explodeText", "Take apart")}, action=toggle(${at("exploded")}), variant="outlined")`); tools.push(`${name}_explode`); }
     const rows = [chips.map(([key]) => key), tools].filter((row) => row.length).map((row) => `Row([${row.join(", ")}])`);
-    return { lines: [...lines, `${name}_view = Card([${[`${name}_model`, ...rows].join(", ")}])`], top: [`${name}_view`] };
+    // The model that is the main element is in a hero card (Task 11b-2b, A.8).
+    return { lines: [...lines, `${name}_view = Card([${[`${name}_model`, ...rows].join(", ")}]${hero === name ? ', variant="hero"' : ""})`], top: [`${name}_view`] };
   },
 
   // need focus = card("Title", $/rover/selected == "camera" ? "The camera" : "The rover", eyebrow="In focus", icon="Layers"): a card of text with a muted body.
@@ -547,7 +551,10 @@ export async function expand(file, choose = rules) {
     drop(lines);
     for (const map of [file.partLines, file.expanded, file.tops, file.made]) map?.delete(key);
   }
-  const candidates = needs.filter((entry) => ["figure", "progress"].includes(entry.tree.name)).map((entry) => entry.key);
+  // A plan with no figure or progress has its first drawing or 3D model as the main element (Task 11b-2b, A.8). An author's root places
+  // the drawing itself (it can name NAME_view), so then no drawing or model is the main element, as no list is.
+  const kinds = (names) => needs.filter((entry) => names.includes(entry.tree.name)).map((entry) => entry.key);
+  const counted = kinds(["figure", "progress"]), candidates = counted.length ? counted : file.open("root") ? kinds(["drawing", "model3d"]) : [];
   const hero = candidates.length ? await choose("main element", candidates, candidates[0]) : null;
   // A part that holds other needs, such as steps, is built after them. Its place on the screen stays the place of its line.
   const holder = (entry) => ["steps", "tabs"].includes(entry.tree.name);

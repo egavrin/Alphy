@@ -482,9 +482,9 @@ test("run: the part buttons and the arrows give the values of the kit's App, and
   const camera = twin.send(0, press("rover_part_camera"));
   sameStored(twin);
   expect([camera.state.rover.selected, camera.surfaces.rover_model.commands]).toEqual(["camera", rover(twin.kit)]);
-  // The chip of the selected part is filled, and the faces of the other parts are dimmed: the commands change with the selection.
+  // The chip of the selected part is filled and the others are outlined (Task 11b-2b, A.8), and the faces of the other parts are dimmed: the commands change with the selection.
   expect(nodes(camera.ui).filter((node) => node.type === "button" && node.action.startsWith("rover_part_")).map((node) => [node.text, node.variant]))
-    .toEqual([["Камера", "filled"], ["Панель", "tonal"], ["Колёса", "tonal"]]);
+    .toEqual([["Камера", "filled"], ["Панель", "outlined"], ["Колёса", "outlined"]]);
   expect(camera.surfaces.rover_model.commands.filter((command) => command.color.length === 9).length).toBeGreaterThan(0);
   for (const [id, turn] of [["rover_left", 0], ["rover_left", -30], ["rover_right", 0], ["rover_right", 30], ["rover_right", 60]]) {
     const reply = twin.send(0, press(id));

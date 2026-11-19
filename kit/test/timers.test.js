@@ -86,7 +86,8 @@ test("check: alert with rounds is a note, not a fault", async () => {
  * The bar of a phase: the track in the muted tone of the theme, then the share of the phase that passed in its tone. Each fills the
  * surface of 1024 x 64 (Task 11b-2b: a 16-high bar in a 320 x 64 surface left empty bands above and under it).
  */
-const bar = (width, color) => [{ type: "roundRect", x: 0, y: 0, width: 1024, height: 64, radius: 32, color: "muted" }, { type: "roundRect", x: 0, y: 0, width, height: 64, radius: 32, color }];
+const bar = (width, color) => [{ type: "roundRect", x: 0, y: 0, width: 1024, height: 64, radius: 32, color: "muted" }, { type: "circle", x: 960, y: 32, radius: 10, color },
+  { type: "roundRect", x: 0, y: 0, width, height: 64, radius: 32, color }];
 
 test("run: start asks for a 1000 ms timer and stop returns timers: []", async () => {
   const { kit, send } = await rounds();

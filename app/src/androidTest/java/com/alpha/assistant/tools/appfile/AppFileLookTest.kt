@@ -273,13 +273,14 @@ class AppFileLookTest {
     }
     /**
      * True when the canvas with this text is whole on the screen and its inside holds more than one color: before its first frame the canvas
-     * is one color. The inside leaves out 16 dp at each edge, where the clip of the rounded corners shows the color behind the canvas.
+     * is one color. The inside leaves out 16 dp at the left and right edges, where the clip of the rounded corners shows the color behind the canvas,
+     * and 16 dp or a third of the height at the top and bottom: the bar of a timer is about 20 dp high (Task 11b-2b).
      */
     private fun drawn(robot: ShellRobot,text: String): Boolean {
         val canvas=described(robot.diagnostics.freshRoot(),"$text.")?.takeIf {it.isVisibleToUser} ?: return false
         val bounds=Rect().also(canvas::getBoundsInScreen)
         val edge=(16*instrumentation.targetContext.resources.displayMetrics.density).toInt()
-        val inside=Rect(bounds).apply {inset(edge,edge)}
+        val inside=Rect(bounds).apply {inset(edge,minOf(edge,bounds.height()/3))}
         val screen=checkNotNull(robot.automation.takeScreenshot())
         try {
             if(inside.isEmpty || !Rect(0,0,screen.width,screen.height).contains(bounds)) return false

@@ -1,7 +1,10 @@
 // The look of the part templates (Task 11b-2b, A): each part in the look vocabulary of the baseline apps.
 
 import { expect, test } from "bun:test";
-import { built, every, press } from "./helpers.js";
+import { emit } from "../src/emit.js";
+import { expand } from "../src/parts.js";
+import { handle } from "../src/run.js";
+import { built, every, planned, press } from "./helpers.js";
 
 /** The node of a type whose text or name is the given one. */
 const named = (definition, type, text) => every(definition.ui).find((node) => node.type === type && (node.text === text || node.name === text));
@@ -59,6 +62,33 @@ test("template: icon= gives a card its icon, and the body text of a card is mute
   const { definition } = await built('app("T", lang="en")', 'need legend = card("Legend", "Teal is the Moon", icon="Layers")');
   const card = every(definition.ui).find((node) => node.type === "card");
   expect([card.icon, card.children.map((node) => [node.text, node.style])]).toEqual(["Layers", [["Legend", { emphasis: "title" }], ["Teal is the Moon", { tone: "muted" }]]]);
+});
+
+test("template: a drawing or a 3D model that is the main element is a hero card, and the button that takes a model apart is outlined", async () => {
+  const shape = 'need art = drawing("Art", 320, 200, [circle(160, 100, 40, "accent")])';
+  const drawn = await built('app("T", lang="en")', 'need n = input("number", "N", 1)', shape);
+  const [first] = drawn.definition.ui.children[0].children;
+  expect([first.type, first.variant, first.children.map((node) => node.type)]).toEqual(["card", "hero", ["canvas"]]);
+  const { definition, app } = await built('app("T", lang="en")', 'need toy = model3d("Toy", [box("", 0, 0, 0, 2, 1, 1, "sand"), box("top", 0, 1, 0, 1, 1, 1, "accent")], parts={top: "Top"})');
+  const card = definition.ui.children[0].children[0];
+  expect([card.type, card.variant, look(named(definition, "button", "Take apart"))]).toEqual(["card", "hero", ["Take apart", "outlined", undefined]]);
+  // The stage under the faces is the muted tone of the theme, not a light hex: Alphy draws it as a mid tint on a light and on a dark card.
+  const opened = handle({ artifactId: "kit-test", revision: 1, state: definition.initialState, event: { type: "open" } }, app);
+  expect(opened.surfaces.toy_model.commands[0]).toEqual({ type: "rect", x: 0, y: 0, width: 320, height: 240, color: "muted" });
+  // A part chip is outlined, and filled while it is the selected part.
+  const chosen = press(definition.initialState, app, "toy_part_top");
+  expect([named(definition, "button", "Top").variant, named(chosen, "button", "Top").variant]).toEqual(["outlined", "filled"]);
+  // A figure is the main element before a drawing: the drawing stays a plain canvas.
+  const counted = await built('app("T", lang="en")', 'need f = figure("number", "F", 1)', shape);
+  expect(counted.definition.ui.children[0].children.map((node) => [node.type, node.variant])).toEqual([["card", "hero"], ["canvas", undefined]]);
+});
+
+test("template: a figure that a later step adds writes the drawing again with no hero card", async () => {
+  const file = await planned('app("T", lang="en")\nneed art = drawing("Art", 320, 200, [circle(160, 100, 40, "accent")])');
+  expect(file.get("art_card")?.raw).toBe('art_card = Card([art_view], variant="hero")');
+  file.feed('need f = figure("number", "F", 1)');
+  await expand(file);
+  expect([file.get("art_card"), emit(file).definition.ui.children[0].children.map((node) => node.type)]).toEqual([undefined, ["card", "canvas"]]);
 });
 
 test("template: the title of a chart shows once, as the label of the chart, with no section around it", async () => {

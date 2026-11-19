@@ -66,18 +66,24 @@ export const commandsOf = (shapes, palette = PALETTE) => shapes.flatMap((shape) 
 /**
  * The bar of a timer's phase: the track, and the share of the phase that passed (0 to 1) in the color of the phase. Two shapes.
  * The track is the muted tone of the theme, which Alphy draws as a light tint of its muted ink (SurfaceDrawing.kt), so it reads in both themes.
+ * A dot in the color of the phase near the end of the track is the stop sign of a Material bar: it shows where the bar ends before the phase moves.
  */
 export const barOf = (share, color) => [
   { shape: "rect", x: 0, y: 0, w: BAR_SURFACE.width, h: BAR_SURFACE.height, color: "muted", radius: BAR_SURFACE.height / 2 },
+  { shape: "circle", x: BAR_SURFACE.width - BAR_SURFACE.height, y: BAR_SURFACE.height / 2, r: 10, color },
   { shape: "rect", x: 0, y: 0, w: Math.round(BAR_SURFACE.width * share), h: BAR_SURFACE.height, color, radius: BAR_SURFACE.height / 2 },
 ];
 
-/** The surface of a model, and its stage: a light box under the faces, so the model reads on a light and on a dark theme (the prototype's canvas). */
+/**
+ * The surface of a model, and its stage: a box under the faces in the muted tone of the theme, a tint that Alphy draws at alpha 64 (SurfaceDrawing.kt).
+ * It is a mid tone on a light and on a dark card, so the dark and the white faces both read (Task 11b-2b: a light stage was a bright panel in a dark card).
+ */
 export const MODEL = { width: 320, height: 240 };
-export const STAGE = { type: "rect", x: 0, y: 0, ...MODEL, color: "#e8f1ef" };
+export const STAGE = { type: "rect", x: 0, y: 0, ...MODEL, color: "muted" };
 /**
  * The accent of each palette of Alphy on a light theme, for a body whose color is "accent": the primary color of ToolPalettes, and the
- * text color of the shell for graphite (AlphaTheme). The stage of a model is light in a dark theme too. A preset with no palette has its own palette (NativeToolUi.presetPalette).
+ * text color of the shell for graphite (AlphaTheme). The faces of a body keep these colors in a dark theme too, because the light shades each
+ * face from a hex color. A preset with no palette has its own palette (NativeToolUi.presetPalette).
  */
 export const ACCENTS = { graphite: "#242424", blue: "#0056d0", teal: "#006b5f", green: "#006e1d", amber: "#7f5700", orange: "#b02e00", red: "#c00015", pink: "#bc004f", purple: "#9e00c3", indigo: "#1a41ff", brown: "#a83900" };
 const PRESETS = { clean: "blue", soft: "teal", expressive: "purple", editorial: "brown", technical: "indigo" };
