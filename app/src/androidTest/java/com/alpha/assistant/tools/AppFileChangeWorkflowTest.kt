@@ -31,7 +31,7 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * The change of a saved app with an app file, through the real ToolEngine, the real AppAgent, the real kit, and the real sandbox,
+ * The change and the test and fix of a saved app with an app file, through the real ToolEngine, the real AppAgent, the real kit, and the real sandbox,
  * with scripted replies. One change call gives the lines that change, the kit computes the next state from the saved state,
  * and no way out loses, moves, or overwrites a saved value of the person.
  */
@@ -45,13 +45,14 @@ class AppFileChangeWorkflowTest {
     private val calls = CopyOnWriteArrayList<CloudRequest>()
     /** Runs at the start of each model call, inside it. */
     @Volatile private var duringCall: suspend (CloudRequest) -> Unit = {}
-    private val engine = ToolEngine(store, ToolGenerationService(object : ChatProvider {
+    private val service = ToolGenerationService(object : ChatProvider {
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             calls += request
             duringCall(request)
             script.respond(key, request, session, emit)
         }
-    }, SandboxClient(context)))
+    }, SandboxClient(context))
+    private val engine = ToolEngine(store, service)
     private val shopping get() = plan("shopping")
     private val prompt get() = AppFilePrompt.load(context)
     private val refused get() = context.getString(R.string.tool_generation_state)
@@ -281,24 +282,99 @@ class AppFileChangeWorkflowTest {
     }
 
     // Failure case: a press during the change call was lost, because the save wrote the state from before the press.
-    @Test fun aPressDuringTheChangeCallKeepsTheNewerState() {
-        val before = shoppingWithData()
+    /** The person marks Apples (r3) as bought while the change call of [before] runs. Gives the record after that press. */
+    private fun pressDuringTheChangeCall(before: ToolRecord): () -> ToolRecord {
         var newer: ToolRecord? = null
         duringCall = {
             if (it.generationStage == APP_FILE_CHANGE) newer = engine.interact(before.id, before.revision, before.stateVersion, "items_done", row("r3", true))
         }
+        return { checkNotNull(newer) }
+    }
+
+    @Test fun aPressDuringTheChangeCallKeepsTheNewerState() {
+        val before = shoppingWithData()
+        val newer = pressDuringTheChangeCall(before)
         val changed = change(before, listOf(Scripted.Text(BOUGHT)))
         assertEquals("accepted", changed.outcome)
         assertTrue(changed.failure.toString(), changed.failure is IllegalStateException)
         assertEquals("Инструмент изменился. Открой текущую версию.", changed.failure.message)
         // The store holds the press, and no revision of the change.
-        assertEquals(checkNotNull(newer), store.tool(before.id))
+        assertEquals(newer(), store.tool(before.id))
         assertEquals(listOf(true, true), items(checkNotNull(store.tool(before.id))).map { it.getBoolean("done") })
         assertEquals(1, store.revisions(before.id).size)
     }
 
+    /** Test and fix of [base] by the report FIX with [replies], as the chat runs it. calls holds its model calls. */
+    private fun testFix(base: ToolRecord, replies: List<Scripted>): TestFixResult {
+        script = AgentScriptProvider(replies)
+        calls.clear()
+        return runBlocking { service.testAndFix("fixture", FIX, base, false, CloudSession()) }
+    }
+
+    /** The save of a verified repair, as the chat saves it. */
+    private fun saveFix(base: ToolRecord, result: TestFixResult) =
+        runBlocking { engine.acceptTestFix(UUID.randomUUID().toString(), "chat", base, FIX, checkNotNull(result.candidate)) { true } }
+
+    // Failure case: test and fix of an app with an app file went to the loop, which edits the kit source and can drop the rows.
+    @Test fun aTestFixByLinesSavesAVerifiedRepair() {
+        val before = shoppingWithData()
+        val result = testFix(before, listOf(Scripted.Text(BOUGHT)) + LOOP)
+        assertEquals(result.detail, TestFixStatus.VERIFIED, result.status)
+        assertEquals("Shopping list", result.detail)
+        // The report of the person is the request of one change call.
+        assertEquals(listOf(APP_FILE_CHANGE), calls.map { it.generationStage })
+        assertEquals(listOf(prompt.changeText(FIX, shopping)), calls.single().turns.map { it.text })
+        val saved = saveFix(before, result)
+        assertEquals(2, saved.revision)
+        assertEquals(shopping + BOUGHT + "\n", ToolSpec.parsePersisted(saved.spec).appFile)
+        assertSameRows(items(before), items(saved))
+        assertEquals(2, store.revisions(saved.id).size)
+    }
+
+    /** Test and fix of the shopping list with data and the change [reply] ends with [status] and [detail] after one call. The store keeps the app. */
+    private fun assertTestFixKeepsTheApp(reply: String, status: TestFixStatus, detail: String) {
+        val before = shoppingWithData()
+        val result = testFix(before, listOf(Scripted.Text(reply)) + LOOP)
+        assertEquals(result.detail, status, result.status)
+        assertEquals(detail, result.detail)
+        assertNull(result.candidate)
+        assertEquals(listOf(APP_FILE_CHANGE), calls.map { it.generationStage })
+        assertEquals(before, store.tool(before.id))
+        assertEquals(1, store.revisions(before.id).size)
+    }
+
+    @Test fun aTestFixWithNoLineIsPassed() = assertTestFixKeepsTheApp(shopping.lines()[1], TestFixStatus.PASSED, "No change was needed.")
+
+    @Test fun aRefusedTestFixWithStoredDataIsUnrepaired() = assertTestFixKeepsTheApp(AISLE_NUMBER, TestFixStatus.UNREPAIRED, refused)
+
+    // The literal rule of the task: with no data of the person, the test-and-fix loop of a new app gets the report. That loop has no app to run,
+    // and it refuses each write before a reproduced problem, so it ends unverified after its steps. This test pins that behavior.
+    @Test fun aRefusedTestFixWithNoStoredDataGoesToTheLoopOfANewApp() {
+        val before = created()
+        val result = testFix(before, listOf(Scripted.Text("outside(\"game\")")) + LOOP)
+        assertEquals(result.detail, TestFixStatus.UNVERIFIED, result.status)
+        assertEquals(APP_FILE_CHANGE, calls.first().generationStage)
+        assertTrue(calls.drop(1).all { it.generationStage == AGENT })
+        val task = calls[1].turns.first().text
+        assertTrue(task, "Build a new app." in task && "Current app definition" !in task && shopping.lines()[2] !in task)
+        assertEquals(before, store.tool(before.id))
+    }
+
+    // Failure case: a press during the change call of test and fix was lost, because the save wrote the state from before the press.
+    @Test fun aPressDuringATestFixByLinesKeepsTheNewerState() {
+        val before = shoppingWithData()
+        val newer = pressDuringTheChangeCall(before)
+        val result = testFix(before, listOf(Scripted.Text(BOUGHT)))
+        assertEquals(result.detail, TestFixStatus.VERIFIED, result.status)
+        val failure = runCatching { saveFix(before, result) }.exceptionOrNull()
+        assertTrue(failure.toString(), failure is TestFixNotSaved)
+        assertEquals(newer(), store.tool(before.id))
+        assertEquals(1, store.revisions(before.id).size)
+    }
+
     private companion object {
-        const val NEW = "User request: Make a shopping list by aisle\nWidget brief: A shopping list sorted by aisle"
+        const val FIX = "The bought items are not counted. Test and fix this app."
+        const val NEW ="User request: Make a shopping list by aisle\nWidget brief: A shopping list sorted by aisle"
         const val CHANGE = "User request: Count the bought items too\nWidget brief: Add a count of the bought items"
         const val BOUGHT = "need bought = figure(\"count\", \"Bought\", count(\$/items, \$done), example=[{items: [{done: true}]}, 1])"
         /** A fault: count reads a value that no line sets. */

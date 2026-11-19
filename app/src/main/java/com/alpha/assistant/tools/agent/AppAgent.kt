@@ -422,9 +422,10 @@ internal class AppAgent(
             request.phase("plan_outcome", detail)
         }
 
-        // The change step of a saved app with an app file. The loop never gets such an app, so no write or edit can drop a saved value.
+        // The change step of a saved app with an app file, for a change and for test and fix. The report of test and fix is the request.
+        // The loop never gets such an app, so no write or edit can drop a saved value.
         val base = request.base
-        if (previous?.appFile != null && base != null && !request.testFix) {
+        if (previous?.appFile != null && base != null) {
             val call = checkNotNull(appFileCall) { "An app with an app file changes only through the kit." }
             val outcome = appFileSteps(call).change(request.prompt, AppFilePrevious(previous.appFile, previous.schema.toString(), base.state),
                 AppFileLimits())
@@ -435,7 +436,11 @@ internal class AppAgent(
                 is AppFileOutcome.Fallback -> outcome.reason
             }
             request.phase("plan_outcome", "fallback:$reason")
-            if (reason == "empty") throw CloudFailure("widget_agent_incomplete", sandbox.context.getString(R.string.tool_generation_unchanged))
+            if (reason == "empty") {
+                // Test and fix that changes no line found nothing to repair. A change request that changes no line is not finished.
+                if (request.testFix) return AppAgentResult(ToolPreview(previous, base.state, base.ui), NO_CHANGE_NEEDED, 1, changed = false)
+                throw CloudFailure("widget_agent_incomplete", sandbox.context.getString(R.string.tool_generation_unchanged))
+            }
             // A value that differs from the start state is data of the person: the app, its data, and its revision stay.
             if (!sameToolJson(JSONObject(base.state), JSONObject(previous.initialState)))
                 throw CloudFailure("widget_state", sandbox.context.getString(R.string.tool_generation_state))
@@ -886,6 +891,7 @@ internal class AppAgent(
 
     private companion object {
         const val REPRODUCE_FIRST = "Reproduce the reported problem with run on the current app before you change it."
+        const val NO_CHANGE_NEEDED = "No change was needed."
         const val PRIVATE_EDIT = "This app keeps private device data. The host keeps its ui and initialState private and unchanged. " +
             "Use edit_app without ui or initialState."
         const val REVIEW_SCREEN = "Review this screen as the user: a calculator shows real results for sample inputs, not 0 or dashes, and no label or value repeats."
