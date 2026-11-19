@@ -87,17 +87,21 @@ class AppFileProofTest {
         results.forEach {assertTrue(it.status,it.status in setOf("faults","ok","BUSY"))}
     }
     @Test fun compileTakesUnderOneSecond(): Unit=runBlocking {
-        val text=plan("quiz")
-        val times=List(5) {
-            val started=SystemClock.elapsedRealtime()
-            val result=compiler.compile(text)
-            assertEquals(result.toString(),"ok",result.status)
-            assertEquals(emptyList<String>(),result.faults)
-            SystemClock.elapsedRealtime()-started
+        // quiz is a saved plan. cards and rich cost the most of the test plans on Bun, about 30 times quiz (item 14 of the final review).
+        val medians=listOf("quiz","cards","rich").associateWith {name ->
+            val text=plan(name)
+            val times=List(5) {
+                val started=SystemClock.elapsedRealtime()
+                val result=compiler.compile(text)
+                assertEquals(result.toString(),"ok",result.status)
+                assertEquals(emptyList<String>(),result.faults)
+                SystemClock.elapsedRealtime()-started
+            }
+            val median=times.sorted()[2]
+            Log.i("AppFileProofTest","compile $name times ms=$times median=$median")
+            median
         }
-        val median=times.sorted()[2]
-        Log.i("AppFileProofTest","compile times ms=$times median=$median")
-        assertTrue("median $median ms of $times",median<1000)
+        assertTrue("medians $medians",medians.values.all {it<1000})
     }
     /** Each node of a ui, also the nodes of each row template. */
     private fun nodes(node: JSONObject): List<JSONObject> =listOf(node)+
@@ -821,5 +825,29 @@ class AppFileProofTest {
         assertEquals("faults" to listOf("the plan has 65537 characters, and Alphy reads at most 65536. Use shorter texts and fewer lines"),cap.status to cap.faults)
         val kit=compiler.compile(text(65536))
         assertTrue(kit.faults.toString(),kit.status == "faults" && kit.faults.isNotEmpty() && kit.faults.none {"reads at most 65536" in it})
+    }
+    @Test fun aHostilePlanGivesAFaultAndTheSandboxStaysUsable(): Unit=runBlocking {
+        // Item 14: the hostile plans of item 9 of the final review. Each one gives a fault in the time of a compile, and calc compiles directly after it in the same sandbox.
+        val context=instrumentation.targetContext
+        val compiler=AppFileCompiler(context,SandboxClient(context))
+        val app="app(\"T\", lang=\"en\")"
+        val hostile=mapOf("cycle" to "$app\nroot = Column([root, root])",
+            "growth" to "$app\n\$/n = 0\n\$/a := text(\$/b) + text(\$/b) + \"x\"\n\$/b := \$/a\nb1 = Button(\"go\", inc(\$/n))\nroot = Column([Text(\$/a), Text(text(\$/n)), b1])",
+            "each" to "$app\nneed d = drawing(\"D\", 320, 240, [each(500, each(500, each(500, circle(1, 1, 1))))])",
+            "map" to "$app\n\$/r = [${(0 until 100).joinToString(", ")}]\n\$/x := len(map(\$/r, map(\$/r, map(\$/r, map(\$/r, \$it)))))\nroot = Column([Text(text(\$/x))])",
+            // The other budgets of the kit: the most parts of one screen, a text that a button doubles, and a join of joins.
+            "parts" to (listOf(app)+(0 until 18).map {"c$it = Column([c${it+1}, c${it+1}])"}+listOf("c18 = Text(\"x\")","root = Column([c0])")).joinToString("\n"),
+            "double" to "$app\n\$/s = \"ab\"\nb1 = Button(\"go\", set(\$/s, \$/s + \$/s))\nroot = Column([Text(\$/s), b1])",
+            "join" to "$app\n\$/r = [${(0 until 100).joinToString(", ")}]\n\$/s = \"${"x".repeat(2000)}\"\n\$/x := len(join(map(\$/r, join(map(\$/r, \$/s), \"\")), \"\"))\nroot = Column([Text(text(\$/x))])")
+        val calc=plan("calc")
+        val seen=hostile.map {(name,text) ->
+            val started=SystemClock.elapsedRealtime()
+            val result=compiler.compile(text)
+            val took=SystemClock.elapsedRealtime()-started
+            val after=compiler.compile(calc)
+            Log.i("AppFileProofTest","hostile $name status=${result.status} ms=$took faults=${result.faults} calc=${after.status}")
+            listOf(name,result.status,result.faults.isNotEmpty(),took<APP_FILE_COMPILE_MS,after.status)
+        }
+        assertEquals(hostile.keys.map {listOf(it,"faults",true,true,"ok")},seen)
     }
 }
