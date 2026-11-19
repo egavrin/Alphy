@@ -646,14 +646,15 @@ test("run: a tab press shows its group and hides the others", async () => {
   // A title that changes takes the open tab with it to the first tab.
   const renamed = await compiled(['app("Names", lang="en")', '$/first = "A"', "root = Column([pages, rename, clash])", 'one = Text("One")', 'two = Text("Two")',
     'pages = Tabs([$/first, "B"], [[one], [two]])', 'rename = Button("Rename", action=set($/first, "Z"))', 'clash = Button("Clash", action=set($/first, "B"))'].join("\n"));
-  const names = session(renamed.definition, renamed.app);
-  expect(names.state.pages_tab).toBe("A");
+  // pages:tab is not a name that Alphy takes, so its field has the stable name of its key (emit.js rootWish).
+  const names = session(renamed.definition, renamed.app), tab = Object.fromEntries(renamed.app.fields)["pages:tab"];
+  expect(names.state[tab]).toBe("A");
   names.act("rename");
-  expect(names.state.pages_tab).toBe("Z");
+  expect(names.state[tab]).toBe("Z");
   // Titles that become the same text are numbered, so the reply still holds a tabs control that Alphy takes, and the first tab opens.
   const clashed = names.act("clash");
   expect(nodes(clashed.ui).find((node) => node.type === "tabs").options.map((option) => option.value)).toEqual(["1", "2"]);
-  expect([names.state.pages_tab, names.state.v.pages_tab0, names.state.v.pages_tab1]).toEqual(["1", true, false]);
+  expect([names.state[tab], names.state.v.pages_tab0, names.state.v.pages_tab1]).toEqual(["1", true, false]);
 });
 
 test("run: a quiz answer counts a point", async () => {

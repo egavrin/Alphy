@@ -13,8 +13,11 @@ import { ALERT_CAPABILITIES, MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, l
 export const runtime = { text: "" };
 /** The source of an app: the run-time and the compiled data. */
 export const sourceOf = (app) => `${runtime.text}\nreturn handle(input, ${JSON.stringify(app)});`;
-/** The name that the field of the value $/root wishes, and the one of the object of the inner values of a need: stable names (rows.js). */
-export const rootWish = (root) => stable("$/" + root, root.replace(/\W/g, "_"));
+/**
+ * The name that the field of the value $/root wishes, and the one of the object of the inner values of a need: stable names (rows.js).
+ * A root that Alphy does not take as a name, such as yaş or pages:tab, gets the hash of its key, so two roots never wish one name.
+ */
+export const rootWish = (root) => stable("$/" + root, root);
 export const objectWish = (need) => stable("need:" + need, need + "_s");
 /**
  * The limits of Alphy that come from the kit's own mapping, so the author of a plan cannot see them: top-level state fields

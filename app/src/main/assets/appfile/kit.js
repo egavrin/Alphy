@@ -3244,8 +3244,11 @@ const { runtime, sourceOf, rootWish, objectWish, MAX_FIELDS, MAX_SOURCE_BYTES, e
 const runtime = { text: "" };
 /** The source of an app: the run-time and the compiled data. */
 const sourceOf = (app) => `${runtime.text}\nreturn handle(input, ${JSON.stringify(app)});`;
-/** The name that the field of the value $/root wishes, and the one of the object of the inner values of a need: stable names (rows.js). */
-const rootWish = (root) => stable("$/" + root, root.replace(/\W/g, "_"));
+/**
+ * The name that the field of the value $/root wishes, and the one of the object of the inner values of a need: stable names (rows.js).
+ * A root that Alphy does not take as a name, such as yaş or pages:tab, gets the hash of its key, so two roots never wish one name.
+ */
+const rootWish = (root) => stable("$/" + root, root);
 const objectWish = (need) => stable("need:" + need, need + "_s");
 /**
  * The limits of Alphy that come from the kit's own mapping, so the author of a plan cannot see them: top-level state fields
@@ -3681,14 +3684,16 @@ function nextState(file, { app, definition, owners, objects }, previous) {
   // A list or an array that the app computed, such as the view of a sorted list, stays empty: the app computes it again when it comes back.
   const kept = Object.fromEntries(keep.map((field) => [field, Array.isArray(stored[field]) && !person.has(field) ? [] : stored[field]]));
   const full = keep.length ? { ...app, keep } : app, source = keep.length ? sourceOf(full) : definition.source;
-  let kit, shown;
+  // The budget of the kit can stop the work in a part with a catch of its own, so kit.tripped is the stop too, as in handle.
+  let kit, shown, stop = null;
   try {
     kit = kitOf(full, next);
     shown = screen(kit, full);
   } catch (failure) {
-    if (!(failure instanceof DslError) && !kit?.tripped) throw failure;
-    return { faults: [`app: ${BLOCKS}: the app stops on the saved data: ${failure.message}`], definition: null, state: null };
+    if (!(failure instanceof DslError)) throw failure;
+    stop = failure.message;
   }
+  if (stop !== null || kit.tripped) return { faults: [`app: ${BLOCKS}: the app stops on the saved data: ${stop ?? kit.told ?? "it needs more work than Alphy gives an app"}`], definition: null, state: null };
   const fieldOf = new Map(app.fields);
   for (const [node, value] of shown.fixes) {
     const bind = node.props.bind, root = bind.abs ? bind.segs[0] : Object.keys(app.lists).find((list) => kit.state[list]?.includes(node.row));

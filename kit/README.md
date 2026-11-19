@@ -68,6 +68,7 @@ The rules keep each stored value of the person, and they never move a value to a
 1. The kit compiles `previous.appFile` again. A fault there is the one fault `kit: the saved data does not match the app file` (`MISMATCH`).
    So are a field of the person that `previous.stateSchema` does not hold with the same schema, and a field of the schema that the state does not hold.
 2. The name of a stored value comes from its key alone (`rows.js` `stable`), so a line that a change adds before it cannot change its name.
+   A root that Alphy does not take as a name, such as `yaş` or the open tab `pages:tab` of a Tabs line, gets the hash name, so two roots never share a name.
 3. A root of a line that stays with the same kind keeps its value. A list keeps its rows by id.
    A new column gets the value that the first `append` of the list gives a new row, such as the start value of the add form.
 4. These changes are faults that start with `need NAME: the saved data blocks this change: ` (`BLOCKS`), and the kit names what blocks it:

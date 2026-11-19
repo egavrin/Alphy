@@ -200,6 +200,33 @@ test("change: names stay when an earlier need with a name that Alphy does not ta
   expect([third.state[names.v], third.state[names["вода"]], third.state[now.d]]).toEqual([1, 7, 0]);
 });
 
+test("change: a need that comes back gets only its own kept value, also when another name differs only in letters that Alphy does not take", async () => {
+  const first = lines('app("Oil", lang="tr")', 'need other = counter("Other", 0)', 'need yaş = counter("Yaş", 0)');
+  const yas = Object.fromEntries(appOf((await compileAppFile(first)).definition).fields)["yaş"], start = await stored(first);
+  start.state = { ...start.state, [yas]: 3 };
+  const without = lines('app("Oil", lang="tr")', 'need other = counter("Other", 0)');
+  const kept = await compileAppFile(without, start);
+  expect(kept.state[yas]).toBe(3);
+  const keptApp = { appFile: without, stateSchema: kept.definition.stateSchema, state: kept.state };
+  // yağ and ya_ are other needs: each one starts at 0, and the value of yaş stays kept.
+  for (const name of ["yağ", "ya_"]) {
+    const result = await compileAppFile(without + `need ${name} = counter("${name}", 0)\n`, keptApp);
+    expect(result.faults).toEqual([]);
+    expect([result.state[Object.fromEntries(appOf(result.definition).fields)[name]], result.state[yas]]).toEqual([0, 3]);
+  }
+  expect((await compileAppFile(first, keptApp)).state[yas]).toBe(3);
+});
+
+test("change: an app that stops on the saved data is a fault, as each event of that app would change nothing", async () => {
+  // At the start one row makes the formula cheap. 100 stored rows make it pass the budget of the kit.
+  const text = lines('app("T", lang="en")', 'need items = entries("Items", fields={name: "text"}, rows=[{name: "a"}])', "$/x := len(map($/items, map($/items, map($/items, map($/items, $name)))))", "root = Column([items_view, Text(text($/x))])");
+  const previous = await stored(text);
+  previous.state = { ...previous.state, items: Array.from({ length: 100 }, (_, index) => ({ id: `r${index + 1}`, name: `n${index}` })) };
+  const result = await compileAppFile(text, previous);
+  expect(result.faults).toHaveLength(1);
+  expect(result.faults[0]).toStartWith(`app: ${BLOCKS}: the app stops on the saved data: `);
+});
+
 test("change: inner values stay when the need line is the same, and start again when it changed", async () => {
   const text = plan("tabs-chart"), previous = await stored(text, [action("resumen_view", "Añadir")]);
   expect(previous.state.resumen_s).toEqual({ tab: "Añadir" });
