@@ -5,7 +5,7 @@ import { App, settings } from "../src/core.js";
 import { report } from "../src/check.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
-import { T0, clocked, gateEach, plan, planned } from "./helpers.js";
+import { T0, clocked, fixture, gateEach, plan, planned } from "./helpers.js";
 
 gateEach("smoke");
 
@@ -124,8 +124,8 @@ test("run: a timer event after the end of the work phase starts the rest phase",
 test("run: the count of finished rounds follows", async () => {
   const { kit, send } = await rounds();
   send(0, press("timer_start"));
-  // One timer event 10 s before the end of each rest phase: round r has 40 s of work and 20 s of rest.
-  for (let round = 1; round <= 8; round++) {
+  // One timer event 10 s before the end of each rest phase: round r has 40 s of work and 20 s of rest, and round 8 has no rest (K1 item 6).
+  for (let round = 1; round <= 7; round++) {
     const reply = send((60 * round - 10) * 1000, timer("timer_bar")), state = reply.state;
     expect([state.timer, state.timer_s.round, state.timer_s.resting]).toEqual([round, round, true]);
     expect(state.timer).toBe(kit.state.timer);
@@ -134,7 +134,9 @@ test("run: the count of finished rounds follows", async () => {
     expect(kit.state.ring_text).toBe(`${round} / 8`);
     expect(reply.timers).toEqual([{ id: "timer_bar", intervalMs: 1000 }]);
   }
-  const over = send(480000, timer("timer_bar"));
+  // 8 x 40 + 7 x 20 = 460 s.
+  expect(send(459000, timer("timer_bar")).state.timer_s).toMatchObject({ on: true, round: 8, resting: false });
+  const over = send(460000, timer("timer_bar"));
   expect([over.state.timer, over.state.timer_s.over, over.state.timer_s.on, over.state.timer_s.end, over.timers]).toEqual([8, true, false, 0, []]);
   expect(over.state.timer_s).toEqual({ on: kit.state.timer_on, round: kit.state.timer_round, resting: kit.state.timer_resting, over: kit.state.timer_over, spent: kit.state.timer_spent, end: kit.state.timer_end });
 });
@@ -182,19 +184,31 @@ test("emit: a fifth timer on a surface is a fault of its need line", async () =>
   expect(five.faults).toEqual(["need t5: the app draws 5 surfaces, and Alphy draws at most 4: one for each drawing and each timer with rounds or with no alert. Use fewer"]);
 });
 
-test("run: the short plan of the device test ends after its second rest", async () => {
+test("run: the short plan of the device test ends after its second work phase, with no rest after its last round (K1 item 6)", async () => {
   const { definition, app } = await compiled(SHORT);
   expect(definition.surfaces).toEqual([{ id: "t_bar", width: 1024, height: 64 }]);
   let { state } = handle(request(definition.initialState, press("t_start")), app, T0);
   const seen = [];
   // The device waits until 300 ms after the end of each phase in the state of the reply before it.
-  for (let step = 0; step < 4; step++) {
+  for (let step = 0; step < 3; step++) {
     const reply = handle(request(state, timer("t_bar")), app, state.t_s.end + 300);
     state = reply.state;
     seen.push([state.t_s.over ? "over" : state.t_s.resting ? "rest" : "work", state.t_s.round, state.t, reply.timers]);
   }
   const ticks = [{ id: "t_bar", intervalMs: 1000 }];
-  expect(seen).toEqual([["rest", 1, 1, ticks], ["work", 2, 1, ticks], ["rest", 2, 2, ticks], ["over", 2, 2, []]]);
+  expect(seen).toEqual([["rest", 1, 1, ticks], ["work", 2, 1, ticks], ["over", 2, 2, []]]);
+});
+
+test("run: a timer with rounds does not rest after its last round (K1 item 6): 5 rounds of 45 s with 15 s of rest between them end at 285 s", async () => {
+  const { kit, send } = await clocked(fixture("model/e-plank-fr"));
+  send(0, press("planche_start"));
+  // 4 rests: the fourth one ends at 4 x 60 = 240 s, and the fifth work phase ends at 285 s.
+  expect(send(230000, timer("planche_bar")).state.planche_s).toMatchObject({ on: true, round: 4, resting: true });
+  expect(send(284000, timer("planche_bar")).state.planche_s).toMatchObject({ on: true, round: 5, resting: false, over: false });
+  const over = send(285000, timer("planche_bar"));
+  expect([over.state.planche, over.state.planche_s.over, over.state.planche_s.on, over.timers]).toEqual([5, true, false, []]);
+  // The end shows the full bar of the last work phase and the done text.
+  expect([kit.state.planche_left, kit.find("planche_doneNote").props.visible]).toEqual([0, true]);
 });
 
 test("emit: a Timer in a row of a list is a fault of its line", async () => {

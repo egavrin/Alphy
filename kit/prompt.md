@@ -62,7 +62,7 @@ need NAME = counter(label, value, step=, min=, max=, lessText=, moreText=)
   With addText="Add a cup" the counter is one button that adds the step, with icon= as its icon, and a reset button with resetText=. Show the value with a figure then.
 need NAME = timer(label, seconds, rounds=, rest=, alert=, start=, pause=, reset=, done=, workText=, restText=)
   A countdown that shows the time that is left, with start, pause, and reset buttons. seconds is a number or a formula, such as the time of the kind that a choice input holds.
-  With rest above 0 each round is a work phase of seconds and then a rest phase of rest seconds, and rounds is the number of rounds. alert=true gives a sound or a vibration at the end of a timer with one phase.
+  With rest above 0 each round is a work phase of seconds, a rest phase of rest seconds is between two rounds, and rounds is the number of rounds. alert=true gives a sound or a vibration at the end of a timer with one phase.
   $/NAME is the number of work phases that ended since the app opened. A figure or a progress can show it.
 need NAME = chart(label, list, point, value, kind=)
   One bar for each row of a list. point and value are formulas of the row, such as $day and $steps. kind="line" draws a line.

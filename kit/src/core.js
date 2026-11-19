@@ -563,7 +563,7 @@ export class App {
    * The host looks at the clock (settings.now). Each timer need that runs keeps the end of its phase in $/NAME_end, in ms of
    * the clock, and 0 while it stands. So a kit that starts from a stored state, as each event of the run-time does, knows
    * the time that is left. Each phase whose end passed ends: a work phase counts in $/NAME, then its rest phase runs when
-   * it has one, then the next round starts. The timer part made the state names. A test and the smoke run move the clock and call this.
+   * it has one and a round follows, then the next round starts. The timer part made the state names. A test and the smoke run move the clock and call this.
    */
   tick() {
     const now = settings.now(), s = this.state;
@@ -589,10 +589,11 @@ export class App {
       if (!s[n + "_end"]) s[n + "_end"] = now + Math.max(0, phase() - s[n + "_spent"]) * 1000;
       // 1000 phases at most in one look, so a phase of no length cannot hold the host.
       for (let guard = 0; s[n + "_on"] && now >= s[n + "_end"] && guard < 1000; guard++) {
-        const ended = s[n + "_end"];
+        const ended = s[n + "_end"], last = s[n + "_round"] >= number(entry.tree.named.rounds, 1);
         if (!s[n + "_resting"]) s[n] += 1;
-        if (!s[n + "_resting"] && number(entry.tree.named.rest, 0) > 0) { s[n + "_resting"] = true; s[n + "_spent"] = 0; }
-        else if (s[n + "_round"] >= number(entry.tree.named.rounds, 1)) { s[n + "_over"] = true; s[n + "_on"] = false; s[n + "_spent"] = phase(); s[n + "_end"] = 0; }
+        // A rest is between two rounds: after the work phase of the last round the timer is over (K1 item 6: 5 x 45 + 4 x 15 = 285 s).
+        if (!s[n + "_resting"] && !last && number(entry.tree.named.rest, 0) > 0) { s[n + "_resting"] = true; s[n + "_spent"] = 0; }
+        else if (last) { s[n + "_over"] = true; s[n + "_on"] = false; s[n + "_spent"] = phase(); s[n + "_end"] = 0; }
         else { s[n + "_round"] += 1; s[n + "_resting"] = false; s[n + "_spent"] = 0; }
         this.recompute();
         // The next phase starts at the end of the last one, not at the look: a late look loses no time.

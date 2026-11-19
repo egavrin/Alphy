@@ -419,7 +419,7 @@ class AppFileProofTest {
             val ticks=mapOf("t_bar" to 1000)
             assertEquals(emptyMap<String,Int>(),short.open().timers)
             assertEquals(ticks,short.send(press("t_start")).timers)
-            val seen=List(4) {
+            val seen=List(3) {
                 // Each timer event comes 300 ms after the end of the phase in the state of the reply before it.
                 val end=JSONObject(short.state).getJSONObject("t_s").getLong("end")
                 delay(maxOf(0L,end+300-System.currentTimeMillis()))
@@ -428,8 +428,8 @@ class AppFileProofTest {
                 val t=state.getJSONObject("t_s")
                 listOf(if(t.getBoolean("over")) "over" else if(t.getBoolean("resting")) "rest" else "work",t.getInt("round"),state.getInt("t"),reply.timers)
             }
-            // The whole timers of each reply: the id and the interval of each timer that runs.
-            assertEquals(listOf(listOf("rest",1,1,ticks),listOf("work",2,1,ticks),listOf("rest",2,2,ticks),listOf("over",2,2,emptyMap<String,Int>())),seen)
+            // The whole timers of each reply: the id and the interval of each timer that runs. No rest follows the last round.
+            assertEquals(listOf(listOf("rest",1,1,ticks),listOf("work",2,1,ticks),listOf("over",2,2,emptyMap<String,Int>())),seen)
         } finally {short.close()}
         // Five timer events of the 40 s work phase of timer-rounds through the same path.
         val app=Host(context,sandbox,rounds,"appfile-timer-rounds")

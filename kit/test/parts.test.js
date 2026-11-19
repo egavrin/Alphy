@@ -269,13 +269,14 @@ test("timer: a clock that the test sets, rounds with a rest, and seconds from a 
   same([eg.press("egg_start"), (after(eg, 60), face(eg, "egg")), eg.find("egg_doneNote").props.visible, eg.find("egg_doneNote").props.text, eg.state.egg, eg.state.count, eg.find("egg_start").props.visible],
     ["", "00:00", true, "Time is up", 1, 1, false], "60 s more and the time is up: the done text shows, and $/egg is 1 for a figure");
   same([eg.press("egg_reset"), face(eg, "egg"), eg.find("egg_doneNote").props.visible, eg.state.egg], ["", "01:30", false, 1], "reset gives the full time again, and the count stays");
-  // Rounds with a rest: work, rest, work, and the end after the rest of round 8.
+  // Rounds with a rest: work, rest, work, and the end after the work phase of round 8, with no rest after it (K1 item 6).
   const workout = await planned('app("T")\nneed set = timer("Workout", 40, rounds=8, rest=20, workText="Go", restText="Rest")');
   const wo = new App(workout), phase = () => wo.find("set_phaseText").props.text;
   same([phase(), wo.press("set_start"), (after(wo, 39), [face(wo, "set"), phase()]), (after(wo, 1), [face(wo, "set"), phase(), wo.state.set]), (after(wo, 20), [face(wo, "set"), phase()])],
     ["Go 1 / 8", "", ["00:01", "Go 1 / 8"], ["00:20", "Rest 1 / 8", 1], ["00:40", "Go 2 / 8"]], "work, rest, and the work phase of round 2");
-  after(wo, 7 * 60 - 1);
-  same([wo.state.set, wo.state.set_over, face(wo, "set"), phase()], [8, false, "00:01", "Rest 8 / 8"], "one second before the end of round 8");
+  // Round 8 works from 420 s to 460 s: 8 x 40 + 7 x 20.
+  after(wo, 7 * 60 - 21);
+  same([wo.state.set, wo.state.set_over, face(wo, "set"), phase()], [7, false, "00:01", "Go 8 / 8"], "one second before the end of round 8");
   after(wo, 500);
   same([wo.state.set, wo.state.set_over, wo.state.set_on, wo.find("set_doneNote").props.visible], [8, true, false, true], "the timer ends after 8 rounds with $/set 8");
   // The seconds come from a choice input, and the choice changes the time before the start.
