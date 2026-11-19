@@ -8,11 +8,12 @@ import { emit } from "./emit.js";
 /**
  * The faults hold the line faults and the report faults, or, when the report is clean, what the emitter cannot build yet.
  * A definition comes only with no fault. A throw inside the kit is the one fault "kit: <message>".
+ * The host reads the result as a promise (AppFileCompiler.kt: compileAppFile(...).then(JSON.stringify)), so the entry stays async.
  */
 export async function compileAppFile(text) {
   try {
     const file = new AppFile().feedText(text);
-    await expand(file);
+    expand(file);
     const { faults, notes } = report(file);
     if (faults.length) return { faults, notes, definition: null, language: null };
     const emitted = emit(file);

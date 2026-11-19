@@ -252,8 +252,8 @@ test("look: a value of the wrong type, and an option that the form of a part doe
   // A number as a formula, and a choice of more than six options with an icon, are not faults.
   expect(await faultsOf("$/s = 2", 'need cups = counter("Cups", 0, step=$/s)', 'need total = figure("number", "Total", $/cups, decimals=1, example=[{cups: 1}, 1])',
     'need kind = input("choice", "Kind", "a", options=["a", "b", "c", "d", "e", "f", "g"], icon="Pin")')).toEqual([]);
-  // A kind that is the name of a property of Object is a number field, as each other kind outside the table.
-  expect(await faultsOf('need n = input("constructor", "N", 1, min=1)')).toEqual([]);
+  // A kind outside the table, also the name of a property of Object, is a fault that lists the kinds (final review, Minor).
+  expect((await faultsOf('need n = input("constructor", "N", 1, min=1)')).some((fault) => fault.includes("an input of kind constructor is not built"))).toBe(true);
 });
 
 test("look: the button back of the pages of a deck, of the steps, and of a lesson is outlined, and each button forward is filled", async () => {

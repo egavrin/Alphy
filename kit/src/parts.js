@@ -3,11 +3,8 @@
 // A part is a kind of need, never a named app.
 
 import { DslError, parseLine, show } from "./dsl.js";
-import { foreground, phased } from "./core.js";
+import { MAX_DOTS, foreground, own, phased } from "./core.js";
 import { hasWords, wordOf } from "./words.js";
-
-/** The choice step. Rules here. A closed-choice model (Jev, or the local one) can take its place. */
-export const rules = (question, options, fallback) => fallback ?? options[0];
 
 const q = JSON.stringify;
 // A member of a tabs or steps group is the name of a need. A plan that knows $/NAME as the value of a need also writes $/NAME or $NAME
@@ -21,6 +18,10 @@ function rebase(tree, name) {
   return Object.fromEntries(Object.entries(tree).map(([key, inner]) => [key, rebase(inner, name)]));
 }
 const label = (id) => id.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+/** The kind of each field kind of an entries need, as a row shows it and the add form takes it. A list of options is a choice, and each other kind is a text. */
+export const FIELD_KINDS = { number: "number", money: "number", percent: "number", count: "count", check: "check", switch: "switch", date: "date", time: "time", picture: "picture" };
+/** A name of a line or a field of a plan (dsl.js parseLine). */
+const WORD = /^[\p{L}_][\p{L}\p{N}_]*$/u;
 /** The lines NAME_X of an entries part that are not a field: the rows, the list, the add form, the remove dialog, the arrows, the emoji, and the hero. */
 const ENTRIES_LINES = new Set(["row", "list", "view", "main", "add", "addRow", "open", "remove", "confirm", "yes", "no", "up", "down", "emoji", "hero"]);
 
@@ -73,11 +74,12 @@ function readRowFields(file, entry) {
 const PARTS = {
   // need bill = input("money", "Bill", 80, min=0, max=500, icon="Wallet")
   // need kind = input("choice", "Type", "road", options={road: "Road", city: "City"}); need price = input("range", "Price", [100, 1500], min=0, max=2000, step=50)
-  async input(name, need, { choose }) {
+  input(name, need) {
     const [kind, title, value] = need.args, extras = need.named;
     const k = kind?.v;
     // Each kind of input uses its own options, and any other one is a fault (G.4).
-    const uses = Object.hasOwn(INPUT_USES, k) ? INPUT_USES[k] : ["min", "max", "step", "icon"], unused = Object.keys(extras).filter((key) => !uses.includes(key));
+    if (!Object.hasOwn(INPUT_USES, k)) throw new DslError(`an input of kind ${k ?? (kind ? show(kind) : "nothing")} is not built. Use one of the kinds ${Object.keys(INPUT_USES).join(", ")}`);
+    const uses = INPUT_USES[k], unused = Object.keys(extras).filter((key) => !uses.includes(key));
     if (unused.length) throw new DslError(`an input of kind ${k} does not use ${unused.map((key) => key + "=").join(", ")}. ${uses.length ? `It uses ${uses.map((key) => key + "=").join(", ")}` : "It uses no option"}`);
     const named = Object.entries(extras).filter(([key]) => key !== "options").map(([key, tree]) => `, ${key}=${show(tree)}`).join("");
     // The options are a list of values or a map of a value to its label. The host draws a choice of six options or fewer as a segmented control, which shows no icon (run.js).
@@ -93,7 +95,7 @@ const PARTS = {
     else if (k === "range") widget = `RangeSlider(${show(title)}, $/${name}${named})`;
     else {
       const ranged = extras.min && extras.max;
-      const pick = await choose(`widget for ${name}`, ranged ? ["Slider", "NumberField"] : ["NumberField"], k === "percent" && ranged ? "Slider" : "NumberField");
+      const pick = k === "percent" && ranged ? "Slider" : "NumberField";
       widget = `${pick}(${show(title)}, $/${name}${named}${k === "count" && !extras.step ? ", step=1" : ""})`;
     }
     return { lines: [`$/${name} = ${show(value)}`, `${name}_field = ${widget}`], top: [`${name}_field`] };
@@ -102,7 +104,7 @@ const PARTS = {
   // need perPerson = figure("money", "Per person", $/bill / $/people, example=[{bill: 100, people: 4}, 25])
   // need today = figure("number", "Today", $/ml, icon="💧", unit="ml", goal=2000, goalText="Of the goal", note="250 ml for each cup"): the main figure is a hero card with a large emoji, a bar to its goal, and a muted note.
   // icon="Drop" (a name of a host icon) is the icon of the metric. role (expand): the place of a figure that is not the main one.
-  async figure(name, need, { hero, role }) {
+  figure(name, need, { hero, role }) {
     const [format, title, formula] = need.args, f = format?.v, { icon, note, goal, goalText, unit } = need.named, main = hero === name;
     if ((note || goal || goalText) && !main) throw new DslError(`note=, goal=, and goalText= show only on the main figure, and ${name} is not it`);
     if (goalText && !goal) throw new DslError(`goalText= is the caption of the bar to goal=, and ${name} has no goal=. Give goal=, or remove goalText=`);
@@ -139,13 +141,14 @@ const PARTS = {
 
   // need tasks = entries("Tasks", fields={task: "text", level: ["high", "low"], done: "check"}, rows=[], edit=true, reorder=true, filter=$done, sort=$task, order=$/order, show={double: $n * 2})
   // More: field kinds "date", "time", "switch", "count". confirm="Delete?", sheet=true, group=$field, sort=[$day, $time], hidden=true.
-  async entries(name, need, { caption, word, count }) {
+  entries(name, need, { caption, word, count }) {
     const title = need.args[0], opt = need.named, fields = opt.fields?.entries ?? [["name", { k: "lit", v: "text" }]];
+    const names = [...fields, ...(opt.show?.entries ?? [])].map(([field]) => field), odd = names.find((field) => !WORD.test(field)), taken = names.find((field) => ENTRIES_LINES.has(field));
     // Alphy keys each row by its id: not blank and of no other row (ToolValueSchema). A field that a person types must not be that key.
-    if ([...fields, ...(opt.show?.entries ?? [])].some(([field]) => field === "id")) throw new DslError("a field named id is the key of each row, which the host gives. Give the field a different name");
-    // The part names a line NAME_FIELD for each field, so a field must not have the name of one of its other lines.
-    const taken = [...fields, ...(opt.show?.entries ?? [])].find(([field]) => ENTRIES_LINES.has(field));
-    if (taken) throw new DslError(`a field named ${taken[0]} has the name of the line ${name}_${taken[0]} of the list part. Give the field a different name`);
+    if (names.includes("id")) throw new DslError("a field named id is the key of each row, which the host gives. Give the field a different name");
+    // The part names a line NAME_FIELD for each field, so a field is a word and does not have the name of one of its other lines.
+    if (odd !== undefined) throw new DslError(`a field named ${q(odd)} is not a word, and the part names its lines and $FIELD by it. Give the field a name of letters, digits, and _`);
+    if (taken) throw new DslError(`a field named ${taken} has the name of the line ${name}_${taken} of the list part. Give the field a different name`);
     // A Map, so that a field named "constructor" does not read a property of Object.
     const labels = new Map((opt.labels?.entries ?? []).map(([key, tree]) => [key, tree.v])), text = caption;
     const lines = [`$/${name} = ${show(opt.rows ?? { k: "list", items: [] })}`];
@@ -161,7 +164,7 @@ const PARTS = {
     if (icon?.k === "lit" && /^[A-Za-z]+$/.test(icon.v)) throw new DslError(`icon= of a list is an emoji, such as icon="🛒", and ${q(icon.v)} is not one`);
     // More than 2 check marks are circles of one weight in a second row (C.3).
     const many = fields.filter(([, kindTree]) => kindTree.v === "check").length > 2;
-    const kindOf = (kindTree) => kindTree.k === "list" ? "choice" : ["number", "money", "percent"].includes(kindTree.v) ? "number" : ["check", "switch", "count", "date", "time", "picture"].includes(kindTree.v) ? kindTree.v : "text";
+    const kindOf = (kindTree) => (kindTree.k === "list" ? "choice" : own(FIELD_KINDS, kindTree.v) ?? "text");
     const others = fields.filter(([field]) => field !== sign);
     // In a row with one text, a choice that the row does not change is the muted line under the title: as a label beside it, "Frutta e verdura" broke into two lines.
     const under = !edit && others.filter(([, kindTree]) => kindOf(kindTree) === "text").length === 1 ? others.find(([, kindTree]) => kindOf(kindTree) === "choice")?.[0] : undefined;
@@ -260,13 +263,13 @@ const PARTS = {
 
   // need line = chart("Steps", $/days, $day, $steps, kind="line"): one bar or point for each row of a list.
   // Alphy shows the label of a chart over it, so the chart has no section with the same title (tabs-chart.png: the title showed two times).
-  async chart(name, need) {
+  chart(name, need) {
     const [title, list, point, value] = need.args;
     return { lines: [`${name}_chart = Chart(${show(list)}, ${show(point)}, ${show(value)}, kind=${show(need.named.kind ?? { k: "lit", v: "bar" })}, label=${show(title)})`], top: [`${name}_chart`] };
   },
 
   // need quiz = deck("Quiz", $/words, front=$word, back=$meaning, mark=$known): one row at a time. A tap shows the back, then yes or no goes to the next row.
-  async deck(name, need, { caption }) {
+  deck(name, need, { caption }) {
     const [title, list] = need.args, opt = need.named, text = caption;
     // A field of the row in front, such as $word, is a field of the row that the deck shows now.
     const now = (tree) => show(rebase(tree, `${name}_now`));
@@ -325,7 +328,7 @@ const PARTS = {
   },
 
   // need setup = steps(["Genres", "Pages"], [[genres], [pages, week]], finish="Start"): other needs in groups, one group at a time.
-  async steps(name, need, { tops, caption }) {
+  steps(name, need, { tops, caption }) {
     const [titles, groups] = need.args, opt = need.named, text = caption, last = groups.items.length - 1;
     const lines = [`$/${name}_step = 0`, `$/${name}_done = false`, `${name}_title = Heading(at(${show(titles)}, $/${name}_step))`];
     groups.items.forEach((group, index) => lines.push(`${name}_step${index} = Column([${group.items.flatMap((member) => tops(memberName(member))).join(", ")}], visible=$/${name}_step == ${index})`));
@@ -339,14 +342,14 @@ const PARTS = {
 
   // need pages = tabs(["Summary", "Add"], [[total, chart], [costs]], title="Month"): other needs in groups, one group at a time. The person opens a tab at any time.
   // The caption of the tabs is the title, else the titles of the tabs.
-  async tabs(name, need, { tops }) {
+  tabs(name, need, { tops }) {
     const [titles, groups] = need.args, label = need.named.title ? show(need.named.title) : `join(${show(titles)})`;
     return { lines: [`${name}_view = Tabs(${show(titles)}, [${groups.items.map((group) => `[${group.items.flatMap((member) => tops(memberName(member))).join(", ")}]`).join(", ")}], label=${label})`],
       top: [`${name}_view`], holds: groups.items.flatMap((group) => group.items.map(memberName)) };
   },
 
   // need done = progress("Done today", count($/habits, $done), len($/habits))
-  async progress(name, need, { hero }) {
+  progress(name, need, { hero }) {
     const [title, value, goal] = need.args;
     const ring = `Ring($/${name}, $/${name}_goal, $/${name}_text, label=${show(title)})`;
     return {
@@ -358,7 +361,7 @@ const PARTS = {
 
   // need cups = counter("Cups", 0, step=1, min=0): a section of an outlined less button, the value, and a filled more button (lessText=, moreText=).
   // need ml = counter("Water", 0, step=250, addText="Add a cup", icon="Cup"): one filled button that adds the step, and a text button that resets the value.
-  async counter(name, need, { caption }) {
+  counter(name, need, { caption }) {
     const [title, value] = need.args, opt = need.named, step = opt.step ? show(opt.step) : "1", start = show(value ?? { k: "lit", v: 0 });
     const down = opt.min ? `set($/${name}, max(${show(opt.min)}, $/${name} - ${step}))` : `dec($/${name}, ${step})`;
     const up = opt.max ? `set($/${name}, min(${show(opt.max)}, $/${name} + ${step}))` : `inc($/${name}, ${step})`;
@@ -381,7 +384,7 @@ const PARTS = {
   // need set = timer("Workout", 40, rounds=8, rest=20): each round is a work phase and then a rest phase. $/NAME counts the work phases that ended.
   // A timer with more than one phase, or with no alert, is plain lines with start, pause, and reset. The host moves it with its clock (App.tick).
   // Evidence: 4 of Alphy's 45 corpus cases are timers (workout-de, tea-tr, pomodoro-zh, eggs-it). Only the passing of time is the host's.
-  async timer(name, need, { caption }) {
+  timer(name, need, { caption }) {
     const [title, seconds] = need.args, opt = need.named, text = caption, at = (part) => `$/${name}_${part}`;
     if (foreground(need)) {
       const unshown = ["start", "pause", "reset", "done"].filter((key) => opt[key]);
@@ -412,7 +415,7 @@ const PARTS = {
 
   // need photo = picture("A plate of pasta with tomato sauce"): the host makes the picture from the description. The prototype draws a box with the description.
   // With found="search words" the host finds a real photo. caption=, credit=, and tag= are texts with the picture, each a line of its own (screen 1 of the dialogue mocks).
-  async picture(name, need) {
+  picture(name, need) {
     const opt = need.named, picture = `Picture(${show(need.args[0] ?? opt.found)}${opt.found ? `, found=${show(opt.found)}` : ""})`;
     const texts = [["caption", "Text(", ")"], ["credit", "Text(", ', variant="muted")'], ["tag", "Badge(", ")"]].filter(([key]) => opt[key]);
     if (!texts.length) return { lines: [`${name}_view = ${picture}`], top: [`${name}_view`] };
@@ -423,7 +426,7 @@ const PARTS = {
   // need orbit = drawing("Top view", 320, 320, [circle(160, 160, 30, "water"), each($/cells, rect($index * 40, 0, 36, 20, "wood"))])
   // A 2D picture from shapes that the host draws. Each number is a formula, so the picture follows the values of the app. Evidence: screens 2 and 3 of the dialogue mocks.
   // The drawing that is the main element is in a hero card. Its surface keeps the name NAME_view.
-  async drawing(name, need, { hero }) {
+  drawing(name, need, { hero }) {
     const [title, width, height, ...shapes] = need.args;
     if (!height || width.k === "list" || height.k === "list") throw new DslError("drawing needs a width and a height before the shapes: drawing(label, 320, 240, [shapes])");
     // Shapes with no list around them are still the shapes.
@@ -433,7 +436,7 @@ const PARTS = {
   },
 
   // need lap = button("One turn", [set($/angle, 0), animate($/angle, 360, 5000)], enabled=$/ready): a button with an action or a list of actions.
-  async button(name, need) {
+  button(name, need) {
     const action = need.args[1] ?? need.named.action;
     if (!action) throw new DslError("button needs an action: button(label, set($/NAME, value))");
     const more = Object.entries(need.named).filter(([key]) => key !== "action").map(([key, tree]) => `, ${key}=${show(tree)}`).join("");
@@ -443,9 +446,11 @@ const PARTS = {
   // need rover = model3d("Rover", [box("", 0, 0, 0, 4, 1, 2, "sand"), cylinder("wheels", -1.4, -0.8, 1.2, 0.6, 0.4, "z", "ink")], parts={wheels: "Wheels"})
   // A 3D model from boxes and cylinders. $/NAME/selected is the id of the part that a chip selected, or "". $/NAME/exploded is true when the model is taken apart.
   // Evidence: screen 4 of the dialogue mocks. A second tap on a chip clears the selection.
-  async model3d(name, need, { caption, hero }) {
+  model3d(name, need, { caption, hero }) {
     const [title, bodies] = need.args, opt = need.named, text = caption, at = (field) => `$/${name}/${field}`;
-    const turn = opt.turn?.v !== false, chips = (opt.parts?.entries ?? []).map(([id, caption]) => [`${name}_part_${id}`, q(id), show(caption)]), tools = [];
+    // The line of a chip is named by its part id, or by its place when the id is no name, such as "wheel-l".
+    const chipOf = (id, index) => `${name}_part_${WORD.test(id) ? id : index + 1}`;
+    const turn = opt.turn?.v !== false, chips = (opt.parts?.entries ?? []).map(([id, caption], index) => [chipOf(id, index), q(id), show(caption)]), tools = [];
     const lines = [`$/${name} = {selected: "", exploded: false, turn: 30}`,
       `${name}_model = Model3d(${show(title)}, ${show(bodies)}${turn ? `, ${at("turn")}` : ""}, exploded=${at("exploded")}, selected=${at("selected")})`,
       ...chips.map(([key, id, caption]) => `${key} = Button(${caption}, action=set(${at("selected")}, ${at("selected")} == ${id} ? "" : ${id}), selected=${at("selected")} == ${id}, variant=${at("selected")} == ${id} ? "filled" : "tonal")`)];
@@ -459,7 +464,7 @@ const PARTS = {
 
   // need focus = card("Title", $/rover/selected == "camera" ? "The camera" : "The rover", eyebrow="In focus", icon="Layers"): a card of text with a muted body.
   // The title and the text can be formulas.
-  async card(name, need) {
+  card(name, need) {
     const [title, text] = need.args, made = [], icon = need.named.icon;
     if (need.named.eyebrow) made.push(["eyebrow", `Text(${show(need.named.eyebrow)}, variant="eyebrow")`]);
     made.push(["title", `Heading(${show(title)})`]);
@@ -468,15 +473,15 @@ const PARTS = {
   },
 
   // need source = link("Apollo 17 photo", "https://science.nasa.gov/...", note="Open the source"): a link to a web page. The prototype only draws it.
-  async link(name, need) {
+  link(name, need) {
     const [title, url] = need.args;
     return { lines: [`${name}_view = Link(${show(title)}, ${show(url)}${need.named.note ? `, ${show(need.named.note)}` : ""})`], top: [`${name}_view`] };
   },
 
   // need steps = lesson([{title: "Look", text: "..."}, {title: "Test", text: "..."}], next="Next", back="Back", stepText="Step")
   // One step at a time, with "Step · 1 / 2" and a progress bar. $/NAME is the number of the step, from 1.
-  async lesson(name, need, { caption }) {
-    const steps = need.args[0], opt = need.named, text = caption, count = `len($/${name}_steps)`, dots = steps.k === "list" && steps.items.length <= 12;
+  lesson(name, need, { caption }) {
+    const steps = need.args[0], opt = need.named, text = caption, count = `len($/${name}_steps)`, dots = steps.k === "list" && steps.items.length <= MAX_DOTS;
     const lines = [`$/${name} = 1`, `$/${name}_steps := ${show(steps)}`, `$/${name}_now := at($/${name}_steps, $/${name} - 1)`,
       // A lesson of at most 12 steps shows one dot for each step (Alphy draws at most 12 dots), and a longer one a bar.
       `${name}_bar = Progress($/${name}, ${count}${dots ? ', variant="dots"' : ""}, label=${text("stepText", "Step")})`,
@@ -494,7 +499,7 @@ const PARTS = {
 
   // need ask = question("Is the Moon a star?", options=["Yes", "No"], right="No", rightText="Right", wrongText="Not yet")
   // One button for each answer, and a text that says right or wrong. $/NAME is true while the right answer is the chosen one.
-  async question(name, need, { caption }) {
+  question(name, need, { caption }) {
     const opt = need.named, options = opt.options?.k === "list" ? opt.options.items : [], text = caption;
     if (options.length < 2 || !opt.right) throw new DslError('question needs options and the right one: question("Text", options=["Yes", "No"], right="No")');
     if (!options.some((option) => show(option) === show(opt.right))) throw new DslError(`right=${show(opt.right)} is not one of the options`);
@@ -509,13 +514,12 @@ const PARTS = {
   },
 
   // need intro = content("Shown as text")
-  async content(name, need) { return { lines: [`${name}_view = Text(${show(need.args[0])})`], top: [`${name}_view`] }; },
+  content(name, need) { return { lines: [`${name}_view = Text(${show(need.args[0])})`], top: [`${name}_view`] }; },
 
   // need chart = hole("A bar chart of spending by category"): nothing ready does it, so a model writes NAME_view later.
-  async hole(name, need) { return { lines: [`${name}_view = Notice("Not built yet: " + ${show(need.args[0])})`], top: [`${name}_view`] }; },
+  hole(name, need) { return { lines: [`${name}_view = Notice("Not built yet: " + ${show(need.args[0])})`], top: [`${name}_view`] }; },
 };
 
-export const PART_KINDS = Object.keys(PARTS);
 /**
  * The named options of each part. An option that is not here is a fault of the need, never an option that the part drops with no word.
  * button gives each option to its Button, whose own check names each one that a Button does not take.
@@ -529,8 +533,9 @@ const OPTIONS = {
   model3d: ["turn", "parts", "explode", "joinText", "explodeText"], card: ["eyebrow", "icon"], link: ["note"], lesson: ["next", "back", "stepText"],
   question: ["options", "right", "rightText", "wrongText"], content: [], hole: [],
 };
-/** The options that each kind of input uses. A kind that is not here is a number field or a slider. */
-const INPUT_USES = { choice: ["options", "icon"], choices: ["options", "max"], toggle: [], text: ["icon"], date: ["icon"], time: ["icon"] };
+/** The options that each kind of input uses. A number kind is a number field or a slider, and a kind that is not here is a fault of the need. */
+const NUMBER_USES = ["min", "max", "step", "icon"];
+const INPUT_USES = { number: NUMBER_USES, money: NUMBER_USES, percent: NUMBER_USES, count: NUMBER_USES, range: NUMBER_USES, choice: ["options", "icon"], choices: ["options", "max"], toggle: [], text: ["icon"], date: ["icon"], time: ["icon"] };
 /**
  * The type of the value of an option (G.4). A part reads a flag once when it builds the screen, so a flag is true or false in the line.
  * A number can be a formula, which the kit cannot check here.
@@ -549,9 +554,9 @@ export const faultName = (file, partOf = needsOf(file)) => (line) => (file.get(l
 
 /**
  * Expands every need of the file that is new or changed. Returns the new lines and feeds them into the file.
- * The main element is the first figure or progress need, unless the choice step picks a different one.
+ * The main element is the first figure or progress need.
  */
-export async function expand(file, choose = rules) {
+export function expand(file) {
   file.expanded ??= new Map();
   file.partFaults = [];
   // What the host read in a different way than a need line says. The report shows these as notes.
@@ -567,7 +572,7 @@ export async function expand(file, choose = rules) {
   // the drawing itself (it can name NAME_view), so then no drawing or model is the main element, as no list is.
   const kinds = (names) => needs.filter((entry) => names.includes(entry.tree.name)).map((entry) => entry.key);
   const counted = kinds(["figure", "progress"]), candidates = counted.length ? counted : file.open("root") ? kinds(["drawing", "model3d"]) : [];
-  const hero = candidates.length ? await choose("main element", candidates, candidates[0]) : null;
+  const hero = candidates[0] ?? null;
   // A part that holds other needs, such as steps, is built after them. Its place on the screen stays the place of its line.
   const holder = (entry) => ["steps", "tabs"].includes(entry.tree.name);
   // The places of the screen: each group of a holder, and the root with the needs that no holder groups, each in its order.
@@ -610,7 +615,7 @@ export async function expand(file, choose = rules) {
         return wordOf(lang, text);
       };
       const caption = (option, text) => (entry.tree.named[option] ? show(entry.tree.named[option]) : q(word(text, option)));
-      built = await part(entry.key, entry.tree, { choose, hero, word, caption, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
+      built = part(entry.key, entry.tree, { hero, word, caption, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
       // A part line that the host cannot read is a fault of this need, never an exception. The other needs still expand.
       parsed = built.lines.map((line) => parseLine(line));
       if (parsed.includes(null)) throw new DslError("the part made an empty line");

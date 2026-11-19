@@ -1,10 +1,10 @@
 // The emitter: an expanded app file as Alphy's app definition (formatVersion 3). The source of the definition is the
 // run-time (run.js and the modules that it needs) and the compiled data of the app. The run-time answers each event.
 
-import { App, foreground, given, shownFormulas } from "./core.js";
+import { App, foreground, given, own, shownFormulas } from "./core.js";
 import { show } from "./dsl.js";
-import { faultName, needsOf } from "./parts.js";
-import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, own } from "./rows.js";
+import { FIELD_KINDS, faultName, needsOf } from "./parts.js";
+import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer } from "./rows.js";
 import { LIMITS, budgetOf, utf8 } from "./draw.js";
 import { IDLE } from "./drag.js";
 import { ALERT_CAPABILITIES, MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
@@ -21,8 +21,8 @@ const MAX_FIELDS = 40, MAX_SOURCE_BYTES = 65536, MAX_NODES = 512, MAX_DEPTH = 8,
 /** The nodes whose options cost render work (ToolUiCatalog.choiceTypes). */
 const CHOICES = new Set(["select", "tabs", "singleChoice", "multiChoice", "segmented", "navigationBar", "navigationRail", "menu"]);
 const SCALARS = new Set(["number", "string", "boolean"]);
-/** The kind of each field kind of an entries need. A choice and a text are strings. */
-const FIELD_KINDS = { number: "number", money: "number", percent: "number", count: "number", check: "boolean", switch: "boolean", time: "time", date: "date" };
+/** The stored type of each kind of an entries field (parts.js FIELD_KINDS). A choice, a text, and a picture are strings. */
+const STORED = { number: "number", count: "number", check: "boolean", switch: "boolean", time: "time", date: "date" };
 /** Alphy declares at most 4 surfaces (ToolSpec). */
 const MAX_SURFACES = 4;
 /** The fields of the change of a value that an animate moves: its start and end values, its start and end times in ms of the host's clock, and its value now. */
@@ -60,7 +60,7 @@ export function emit(file) {
   for (const [root, component] of bound) if (component !== "Choices") app.kinds[root] = component === "TimeField" ? "time" : "date";
   // The kind of each field of the rows of an entries need, from its fields= line.
   const declared = new Map(file.of("need").filter((entry) => entry.tree.name === "entries")
-    .map((entry) => [entry.key, (entry.tree.named.fields?.entries ?? [["name", { k: "lit", v: "text" }]]).map(([field, kind]) => [field, own(FIELD_KINDS, kind.v) ?? "string"])]));
+    .map((entry) => [entry.key, (entry.tree.named.fields?.entries ?? [["name", { k: "lit", v: "text" }]]).map(([field, kind]) => [field, own(STORED, own(FIELD_KINDS, kind.v)) ?? "string"])]));
   /** The schema of a list value: a list of flat rows, or an array of plain values. A list that Alphy cannot hold is a fault of its owner. */
   const listed = (root, value, owner, fields) => {
     const fault = (text) => { faults.push(`${owner}: ${text}`); return null; };

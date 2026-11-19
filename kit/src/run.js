@@ -3,8 +3,8 @@
 // The emitter (emit.js) builds the first screen and the first state with the same screen and stateOf functions.
 
 import { AppFile, parseExpression, show } from "./dsl.js";
-import { App, ICON_NAMES, foreground, given, settings } from "./core.js";
-import { MAX_ROWS, MAX_TEXT, cast, castRow, clockOf, namer, own, relative, rows, wished } from "./rows.js";
+import { App, ICON_NAMES, MAX_DOTS, foreground, given, own, settings } from "./core.js";
+import { MAX_ROWS, MAX_TEXT, cast, castRow, clockOf, namer, relative, rows, wished } from "./rows.js";
 import { BAR_SURFACE, MODEL, STAGE, accentOf, barOf, commandsOf, fit, hostBytes, polygonsOf, sideOf } from "./draw.js";
 import { IDLE, dragged } from "./drag.js";
 
@@ -163,7 +163,7 @@ const NODES = {
   // Alphy's progress binds the share in percent. Dots show the step itself: at most 12, and with one max for all rows of a list.
   // The bar of a timer that the run-time moves is a surface that the run-time draws.
   Progress: (n, at) => {
-    const { value, max } = n.props, dots = n.props.variant === "dots" && !at.scope && Number.isInteger(max) && max >= 1 && max <= 12;
+    const { value, max } = n.props, dots = n.props.variant === "dots" && !at.scope && Number.isInteger(max) && max >= 1 && max <= MAX_DOTS;
     return at.drawn(percent(value, max) / 100) ?? { type: "progress", text: at.label(), variant: dots ? "dots" : "bar", min: 0, max: dots ? max : 100,
       bind: at.computed("value", dots ? (Number.isFinite(value) ? Math.min(max, Math.max(0, value)) : 0) : percent(value, max)) };
   },

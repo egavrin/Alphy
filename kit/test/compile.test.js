@@ -36,8 +36,9 @@ test("compileAppFile: a fault of a line that a part wrote names its need, and no
   const cases = [
     // The smoke run names a control of a part line by its caption in its need.
     [['need n = counter("N", 0, min=0, max=0)'], ['smoke run: the Button "Less" of need n never changes a value', 'smoke run: the Button "More" of need n never changes a value']],
-    // A path that no line sets, read by a need and by the formula of its part.
+    // A path that no line sets, read by a need and by the formula of its part, or by a line NAME_text of its part.
     [['need c = figure("number", "C", $/k * 2)'], ["need c reads $/k, and no line sets it", "need c: $/c is not a finite number at the start"]],
+    [['need q = question($/k, right="a", options=["a", "b"])'], ["need q reads $/k, and no line sets it"]],
     // A line that does not have the form of its kind.
     [['check("a") + 1'], ['line 2: a check line is one call of check, such as check("name", [steps]): check("a") + 1']],
     [["need x = entries"], ['line 2: a need line is one call of a part, such as need x = entries("Items"): need x = entries']],
@@ -46,9 +47,11 @@ test("compileAppFile: a fault of a line that a part wrote names its need, and no
     const faults = await faultsOf(...lines), text = faults.join(" | ");
     const lost = parts.filter((part) => !faults.some((fault) => fault.includes(part)));
     // A name that a part wrote, such as n_minus, c_text, or $/c alone, and a throw of the kit.
-    const stray = faults.filter((fault) => /\b(n_minus|n_plus)\b|^kit: |^c reads|^\$\/c /.test(fault));
+    const stray = faults.filter((fault) => /\b(n_minus|n_plus|q_text)\b|^kit: |^[cq] reads|^\$\/c /.test(fault));
     expect({ lines, lost, stray }, text).toEqual({ lines, lost: [], stray: [] });
   }
+  // The app line has its own form too.
+  expect((await compileAppFile('app("T", lang="en") + 1\nroot = Column([Text("a")])')).faults).toEqual(['line 1: an app line is one call of app, such as app("Title", lang="en"): app("T", lang="en") + 1']);
 });
 
 test("compileAppFile: a field of a list with the name of a line of the list part is a fault of the need (final review 13)", async () => {
@@ -154,4 +157,57 @@ test("run: an event whose work passes the budget of the kit ends in a bounded ti
   // The event changes nothing: the host keeps the state that it has.
   expect([performance.now() - started < 300, reply]).toEqual([true, { state }]);
   expect(reply.state).toBe(state);
+});
+
+test("compileAppFile: __proto__, constructor, and prototype as a name, a path part, or a field are a fault of the line (final review, Minor)", async () => {
+  const cases = [
+    ["$/__proto__/polluted = 1"], ['need __proto__ = input("number", "N", 1)'], ["$/x := constructor([1])"], ["x = constructor()"],
+    ["$/x = 1", "b = Button(\"go\", set($/__proto__/polluted, 7))"], ["$/rows = [{constructor: 1}]"], ['$/m = {"prototype": 1}'],
+    ['need list = entries("L", fields={constructor: "text"})'], ["$/a = {b: 1}", "$/x := $/a.constructor"],
+  ];
+  for (const lines of cases) {
+    const faults = await faultsOf(...lines), found = faults.some((fault) => /^line \d+: .*(__proto__|constructor|prototype) is not a name that a plan can use/.test(fault));
+    expect({ lines, found, polluted: {}.polluted }, faults.join(" | ")).toEqual({ lines, found: true, polluted: undefined });
+  }
+});
+
+test("compileAppFile: a member of Object.prototype, such as toString, is no function, component, or field of the kit (final review, Minor)", async () => {
+  expect(await faultsOf("$/x := toString([1])", "root = Column([Text(text($/x))])")).toEqual(["$/x: unknown function toString"]);
+  expect(await faultsOf("x = toString()", "root = Column([x])")).toEqual(["x: unknown component toString"]);
+  // A field that the row or the record does not have: a member of Object.prototype is no field of it.
+  const { faults, definition } = await compileAppFile([APP, "$/rows = [{b: 1}]", "$/x := text($/rows[0].toString)", "root = Column([Text($/x)])"].join("\n"));
+  expect([faults, definition.initialState.d.x]).toEqual([[], ""]);
+  expect((await faultsOf("$/rows = [{b: 1}]", "root = Column([List($/rows, Text(text($toString)))])")).some((fault) => fault.includes("the row has no field toString"))).toBe(true);
+});
+
+/** The start state of the plan of these lines, after its header, and its faults. */
+const started = async (...lines) => { const { faults, definition } = await compileAppFile([APP, ...lines].join("\n")); return { faults, state: JSON.stringify(definition?.initialState ?? null) }; };
+
+test("compileAppFile: a time after 23:59 is no time for hours, as for a time field (final review, Minor)", async () => {
+  expect(await started('$/x := hours("25:00", "10:00")', "root = Column([Text(text($/x))])")).toEqual({ faults: [], state: '{"d":{"root_0_text":"0"}}' });
+});
+
+test("compileAppFile: a number that the kit prints in exponent form reads back (final review, Minor)", async () => {
+  expect(await started("$/x = 2.5e-7", "$/y := $/x * 1e+7", "root = Column([Text(text($/y))])")).toEqual({ faults: [], state: '{"x":2.5e-7,"d":{"root_0_text":"2.5"}}' });
+});
+
+test("compileAppFile: a part id of a 3D model that is not a word still gives its chip (final review, Minor)", async () => {
+  const { faults, definition } = await compileAppFile([APP, 'need m = model3d("M", [box("wheel-l", 0, 0, 0, 1, 1, 1, "ink"), box("", 0, 1, 0, 1, 1, 1, "ink")], parts={"wheel-l": "Wheel"})'].join("\n"));
+  expect([faults, JSON.stringify(definition?.ui ?? null).includes('"text":"Wheel"')]).toEqual([[], true]);
+});
+
+test("compileAppFile: a list field that is not a word, an input of an unknown kind, and a color that the kit does not have are each a fault of the need (final review, Minor)", async () => {
+  const cases = [
+    [['need shop = entries("Shop", fields={"my field": "text"})'], 'need shop: a field named "my field" is not a word'],
+    [['need s = input("slider", "S", 1)'], "need s: an input of kind slider is not built. Use one of the kinds number, money, percent, count, range, choice, choices, toggle, text, date, time"],
+    [['need d = drawing("D", 100, 100, [circle(1, 1, 1, "blu")])'], 'need d: shapes: the color "blu" of circle is not a color of the kit. Use one of ink, muted, accent'],
+  ];
+  for (const [lines, part] of cases) {
+    const faults = await faultsOf(...lines);
+    expect({ lines, found: faults.some((fault) => fault.includes(part)) }, faults.join(" | ")).toEqual({ lines, found: true });
+  }
+});
+
+test("smoke: the run starts at the clock of the compile step, so a control that shows only after a date comes to its screen (final review, Minor)", async () => {
+  expect(await faultsOf("$/n = 0", 'b = Button("go", inc($/n), visible=year(today()) > 2000)', "root = Column([Text(text($/n)), b])")).toEqual([]);
 });

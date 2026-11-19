@@ -1,6 +1,6 @@
 // The drawing of a surface: the kit's shapes as Alphy's drawing commands (GraphicsContract.frame), and the limits of one reply.
 
-import { TONES, explode } from "./core.js";
+import { HEX, TONES, explode } from "./core.js";
 
 /** The surface of a timer's bar, in Alphy's pixels of a surface: the bar fills it, 16 to 1, as a thick bar of the card's width. Alphy takes 64 pixels high at least. */
 export const BAR_SURFACE = { width: 1024, height: 64 };
@@ -11,7 +11,6 @@ export const LIMITS = { commands: 512, pairs: 2048, chars: 2048, bytes: 32768 };
 /** The kit's color names as Alphy's colors: a tone of the theme for a role, else the hex of the kit. */
 const ROLES = { ink: "default", muted: "muted", accent: "accent", success: "success", warning: "warning" };
 export const PALETTE = Object.fromEntries(Object.keys(TONES).map((name) => [name, ROLES[name] ?? TONES[name]]));
-const HEX = /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 /** A color name of the palette, a hex that passes as it is, or the default ink for each other text. */
 const colorOf = (color, palette) => (Object.hasOwn(palette, color) ? palette[color] : HEX.test(color) ? color : "default");
 
@@ -64,7 +63,7 @@ function commandOf({ shape, x, y, r, w, h, x1, y1, x2, y2, text, points, radius,
 export const commandsOf = (shapes, palette = PALETTE) => shapes.flatMap((shape) => { const command = commandOf(shape); return command ? [{ ...command, color: colorOf(shape.color, palette) }] : []; });
 
 /**
- * The bar of a timer's phase: the track, and the share of the phase that passed (0 to 1) in the color of the phase. Two shapes.
+ * The bar of a timer's phase: the track, and the share of the phase that passed (0 to 1) in the color of the phase. Three shapes.
  * The track is the muted tone of the theme, which Alphy draws as a light tint of its muted ink (SurfaceDrawing.kt), so it reads in both themes.
  * A dot in the color of the phase near the end of the track is the stop sign of a Material bar: it shows where the bar ends before the phase moves.
  */

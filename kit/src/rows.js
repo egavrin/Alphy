@@ -2,7 +2,7 @@
 // the kit's names, a time as minutes, a date as a real date, and a shown value in the type of its field. run.js builds the
 // screen and gives each List to rows.
 
-import { dayNumber } from "./core.js";
+import { dayNumber, minutes, own } from "./core.js";
 
 /** False in the run-time text of an app (dsl.js). */
 const MESSAGES = true;
@@ -45,11 +45,6 @@ export function namer(differ = {}, taken = new Set(Object.values(differ))) {
 export const wished = (key) => key.replaceAll(":", "_");
 
 const pad = (number) => String(number).padStart(2, "0");
-/** A time of the kit, "HH:MM", as Alphy's minutes from 0 to 1439. A text that is not a time is 0. */
-const minutesOf = (text) => {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? "").trim());
-  return match && Number(match[1]) < 24 && Number(match[2]) < 60 ? Number(match[1]) * 60 + Number(match[2]) : 0;
-};
 export const clockOf = (minutes) => { const at = Math.min(1439, Math.max(0, Math.round(Number(minutes) || 0))); return `${pad(Math.floor(at / 60))}:${pad(at % 60)}`; };
 /** Alphy's state holds a text of at most 2048 characters (ToolValueSchema). */
 export const MAX_TEXT = 2048;
@@ -58,12 +53,11 @@ export const MAX_TEXT = 2048;
  * of its field, which the emitter fixes with its first value (app.types). A number that is not finite is 0, and a text is never null, a list,
  * or a record. Each value stays inside what Alphy's state holds: a number of at most 2^53 - 1 either way, and a text of at most 2048 characters.
  */
-export const cast = (kind, value, today) => (kind === "time" ? minutesOf(value) : kind === "date" ? (dayNumber(value) === null ? today : String(value).trim())
+export const cast = (kind, value, today) => (kind === "time" ? minutes(value) ?? 0 : kind === "date" ? (dayNumber(value) === null ? today : String(value).trim())
   : kind === "number" ? (Number.isFinite(value) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(-Number.MAX_SAFE_INTEGER, value)) : 0) : kind === "boolean" ? value === true
   : (value === null || value === undefined || typeof value === "object" ? "" : String(value)).slice(0, MAX_TEXT));
 /** A row of the kit as an Alphy row. spec is the field, the Alphy name, and the kind of each stored field (app.lists). */
 export const castRow = (row, spec, today) => ({ id: String(row?.id ?? ""), ...Object.fromEntries(spec.map(([field, safe, kind]) => [safe, cast(kind, row?.[field], today)])) });
-export const own = (map, key) => (Object.hasOwn(map, key) ? map[key] : undefined);
 /** The field name of a path of the row, such as $name, or null. */
 export const relative = (expr) => (expr?.k === "path" && !expr.abs && expr.segs.length === 1 ? expr.segs[0] : null);
 

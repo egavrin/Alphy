@@ -71,7 +71,7 @@ class AppFileProofTest {
 
     @Test fun compilesAPlanInTheSandbox(): Unit=runBlocking {
         val result=compiler.compile(plan("calc"))
-        assertTrue(result.status,result.status in setOf("faults","ok"))
+        assertEquals("ok",result.status)
         assertEquals(emptyList<String>(),result.faults)
     }
     @Test fun reportsAFaultOfALine(): Unit=runBlocking {

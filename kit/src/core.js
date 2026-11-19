@@ -39,8 +39,12 @@ const TEXTS = new Set(["text", "part", "axis"]), EXTRAS = ["radius", "width", "s
 // A shape also takes its own extra value after the color with no name. The dev run of the dialogue check: 5 of 16 plans
 // that think wrote text(x, y, "Земля", "muted", 12) or line(x1, y1, x2, y2, "muted", 2), and no repair step found the cause.
 const LAST = { text: "size", line: "width", rect: "radius" };
-/** The colors of a shape or a body by role. "accent" is the palette of the app. A different color is "#RRGGBB", and a renderer draws a text that it does not know as ink. */
+/**
+ * The colors of a shape or a body by role. "accent" is the palette of the app. A different color is "#RRGGBB" (HEX). Each other color of a line is a
+ * fault of the line, and a renderer draws a computed color that it does not know as ink.
+ */
 export const TONES = { ink: "#0f172a", muted: "#94a3b8", accent: null, surface: "#ffffff", water: "#38bdf8", land: "#65a30d", sun: "#facc15", sand: "#e7d3a8", wood: "#a16207", success: "#16a34a", warning: "#ea580c" };
+export const HEX = /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
 /**
  * The work of one event of the run-time, or of one look of the compile step, in steps: each value, shape, and node, and each item and
@@ -119,7 +123,11 @@ export function dayNumber(text) {
   const time = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])), date = new Date(time);
   return date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]) ? time / 864e5 : null;
 }
-function minutes(text) { const match = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? "").trim()); return match ? Number(match[1]) * 60 + Number(match[2]) : null; }
+/** A "HH:MM" time of the kit as minutes from 0 to 1439, or null when the text is not a time of a day. */
+export function minutes(text) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? "").trim());
+  return match && Number(match[1]) < 24 && Number(match[2]) < 60 ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
 /** The order of two sort values. A list of values is in order by its first value, then by the next one. */
 const order = (x, y) => (Array.isArray(x) && Array.isArray(y) ? x.reduce((found, value, index) => found || order(value, y[index]), 0) : x < y ? -1 : x > y ? 1 : 0);
 /** Helpers whose later arguments are evaluated for each row, with $field as the row's field. */
@@ -141,8 +149,6 @@ const ROWWISE = {
   },
 };
 
-export const FUNCTIONS = new Set([...Object.keys(PLAIN), ...Object.keys(PRINT), ...Object.keys(ROWWISE), "if"]);
-
 /** Equal values. Two lists or two rows are equal when each value in them is equal, with no look at the row id of the host. */
 function same(a, b) {
   if (a === b) return true;
@@ -159,8 +165,14 @@ export const foreground = (need) => need.named.alert?.v === true && !phased(need
 /** The values that the entries needs of a file show for each row, show={name: formula}, as [name, formula] pairs. */
 export const shownFormulas = (file) => file.of("need").filter((entry) => entry.tree.name === "entries" && entry.tree.named?.show?.k === "map").flatMap((entry) => entry.tree.named.show.entries);
 
+/** The value of a key of a table of the kit, never a member of Object.prototype such as toString (final review, Minor). */
+export const own = (map, key) => (Object.hasOwn(map, key) ? map[key] : undefined);
+
+/** Alphy draws at most 12 dots of a progress (ToolUiCatalog). A longer lesson, and a progress with a larger max, show a bar. */
+export const MAX_DOTS = 12;
+
 /** The arguments of a component call by property name: positional ones by the catalog order, then the named ones. */
-export const given = (tree) => ({ ...Object.fromEntries((CATALOG[tree.name] ?? []).map((key, index) => [key, tree.args[index]])), ...tree.named });
+export const given = (tree) => ({ ...Object.fromEntries((own(CATALOG, tree.name) ?? []).map((key, index) => [key, tree.args[index]])), ...tree.named });
 
 export class App {
   /** start=false: no state line starts and no formula runs, so the caller puts a stored state in first (run.js kitOf). */
@@ -227,7 +239,7 @@ export class App {
 
   read(path, ctx) {
     let value = path.abs ? this.state : ctx.it;
-    for (const seg of path.segs) value = value == null ? undefined : value[seg];
+    for (const seg of path.segs) value = value == null ? undefined : own(value, seg);
     return value;
   }
 
@@ -237,7 +249,7 @@ export class App {
       let holder = node.abs ? this.state : ctx.it;
       if (holder == null) throw new DslError(MESSAGES ? "a $field path needs a row" : "");
       if (typeof holder !== "object") throw new DslError(MESSAGES ? "the row is a plain value with no fields to set" : "");
-      for (const seg of node.segs.slice(0, -1)) holder = holder[seg] ??= {};
+      for (const seg of node.segs.slice(0, -1)) holder = own(holder, seg) ?? (holder[seg] = {});
       return [holder, node.segs.at(-1)];
     }
     if (node.k !== "field" && node.k !== "index") throw new DslError(MESSAGES ? "a place to set is a path, a field of a row, or an item of a list" : "");
@@ -258,24 +270,24 @@ export class App {
       case "lit": return node.v;
       case "path":
         // A row field that the row does not have is a mistake of the line, not an empty value.
-        if (!node.abs && node.segs[0] === "it") return node.segs.slice(1).reduce((value, seg) => value?.[seg], ctx.it);
+        if (!node.abs && node.segs[0] === "it") return node.segs.slice(1).reduce((value, seg) => (value == null ? undefined : own(value, seg)), ctx.it);
         // Inside each(list, shape), $index is the number of the row, from 0. A row field with that name wins.
-        if (!node.abs && ctx.each !== undefined && node.segs.join() === "index" && !(ctx.it && typeof ctx.it === "object" && "index" in ctx.it)) return ctx.each;
+        if (!node.abs && ctx.each !== undefined && node.segs.join() === "index" && !(ctx.it && typeof ctx.it === "object" && Object.hasOwn(ctx.it, "index"))) return ctx.each;
         if (!node.abs && ctx.it === undefined) throw new DslError(MESSAGES ? `$${node.segs.join("/")} is a field of a list row, and there is no row here. A value of the app is $/${node.segs.join("/")}` : "");
         if (!node.abs && ctx.it !== undefined && (ctx.it === null || typeof ctx.it !== "object")) throw new DslError(MESSAGES ? "the row is a plain value with no fields. $it reads the row itself" : "");
-        if (!node.abs && ctx.it && !(node.segs[0] in ctx.it)) {
+        if (!node.abs && ctx.it && !Object.hasOwn(ctx.it, node.segs[0])) {
           // A value that an entries need computes for each row, show={name: formula}, reads as a field of the row
           // in each other formula of a row (v1 sleep-en: a chart of $slept). busy stops a show formula that reads itself.
           const name = node.segs[0];
           this.shown ??= Object.fromEntries(shownFormulas(this.file));
-          if (node.segs.length === 1 && this.shown[name] && !ctx.busy?.includes(name)) return this.value(this.shown[name], { ...ctx, busy: [...(ctx.busy ?? []), name] });
+          if (node.segs.length === 1 && own(this.shown, name) && !ctx.busy?.includes(name)) return this.value(this.shown[name], { ...ctx, busy: [...(ctx.busy ?? []), name] });
           throw new DslError(MESSAGES ? `the row has no field ${name}` : "");
         }
         return this.read(node, ctx);
       case "list": return this.charge(node.items.map((item) => this.value(item, ctx)));
       case "map": return this.charge(Object.fromEntries(node.entries.map(([key, inner]) => [key, this.value(inner, ctx)])));
-      case "field": return this.value(node.of, ctx)?.[node.name];
-      case "index": { const list = this.value(node.of, ctx); return Array.isArray(list) ? list[this.value(node.at, ctx)] ?? null : null; }
+      case "field": { const of = this.value(node.of, ctx); return of == null ? undefined : own(of, node.name); }
+      case "index": { const list = this.value(node.of, ctx); return Array.isArray(list) ? own(list, this.value(node.at, ctx)) ?? null : null; }
       case "un": return node.op === "-" ? -this.value(node.arg, ctx) : !this.value(node.arg, ctx);
       case "if": return this.value(node.test, ctx) ? this.value(node.yes, ctx) : this.value(node.no, ctx);
       case "bin": {
@@ -293,16 +305,17 @@ export class App {
       }
       case "call": {
         if (node.name === "if") return this.value(node.args[0], ctx) ? this.value(node.args[1], ctx) : this.value(node.args[2], ctx);
-        if (ROWWISE[node.name]) {
+        const rowwise = own(ROWWISE, node.name), plain = own(PLAIN, node.name), print = own(PRINT, node.name);
+        if (rowwise) {
           const rows = this.value(node.args[0], ctx);
           if (!Array.isArray(rows)) throw new DslError(MESSAGES ? `${node.name} needs a list` : "");
           const perRow = (arg) => arg && ((row) => this.value(arg, { ...ctx, it: row }));
           // The third argument of groups is a formula of the row. The third argument of sort is the order.
-          return this.charge(ROWWISE[node.name](rows, perRow(node.args[1]), node.name === "groups" ? perRow(node.args[2]) : node.args[2] && this.value(node.args[2], ctx)));
+          return this.charge(rowwise(rows, perRow(node.args[1]), node.name === "groups" ? perRow(node.args[2]) : node.args[2] && this.value(node.args[2], ctx)));
         }
-        if (PLAIN[node.name]) return this.charge(PLAIN[node.name](...node.args.map((arg) => this.value(arg, ctx))));
-        if (PRINT[node.name]) return this.charge(PRINT[node.name](this.file.get("app")?.tree.named.lang?.v, ...node.args.map((arg) => this.value(arg, ctx))));
-        if (CATALOG[node.name]) throw new DslError(MESSAGES ? `${node.name} is a component. A component line has a plain name with no $/ before it` : "");
+        if (plain) return this.charge(plain(...node.args.map((arg) => this.value(arg, ctx))));
+        if (print) return this.charge(print(this.file.get("app")?.tree.named.lang?.v, ...node.args.map((arg) => this.value(arg, ctx))));
+        if (own(CATALOG, node.name)) throw new DslError(MESSAGES ? `${node.name} is a component. A component line has a plain name with no $/ before it` : "");
         throw new DslError(MESSAGES ? `unknown function ${node.name}` : "");
       }
       case "ref": throw new DslError(MESSAGES ? `${node.name} is a component name, not a value` : "");
@@ -336,6 +349,9 @@ export class App {
     });
     if (out.axis !== undefined && !["x", "y", "z"].includes(out.axis)) throw new DslError(MESSAGES ? `axis of ${name} is "x", "y", or "z"` : "");
     out.color = String((args[keys.length] ? this.value(args[keys.length], ctx) : null) ?? "ink");
+    if (MESSAGES && !Object.hasOwn(TONES, out.color) && !HEX.test(out.color)) {
+      throw new DslError(`the color ${JSON.stringify(out.color)} of ${name} is not a color of the kit. Use one of ${Object.keys(TONES).join(", ")}, or a hex such as "#336699"`);
+    }
     if (args.length === keys.length + 2) out[last] = number(this.value(args[keys.length + 1], ctx), last);
     for (const [key, arg] of Object.entries(named)) {
       if (key === "visible") continue;
@@ -440,7 +456,7 @@ export class App {
         if (MESSAGES && inside.includes(tree.name)) throw new DslError(`${tree.name} shows itself inside itself, so its screen has no end. Show other lines in it`);
         return visit(entry.tree, ctx, tree.name, depth + 1, [...inside, tree.name]);
       }
-      if (tree.k !== "call" || !CATALOG[tree.name]) {
+      if (tree.k !== "call" || !own(CATALOG, tree.name)) {
         this.fault(name ?? "?", MESSAGES ? (tree.k === "path" ? `a child is a component name, not the path ${show(tree)}` : `unknown component ${tree.name ?? tree.k}`) : "");
         return { type: "Missing", name, props: {}, children: [] };
       }

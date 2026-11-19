@@ -20,6 +20,10 @@ const MESSAGES = true;
 
 export class DslError extends Error {}
 
+/** A name that reaches Object.prototype in the kit: a plan must not use it as a name, a path part, or a field (final review, Minor). */
+const REFUSED = /(^|\/)(__proto__|constructor|prototype)(\/|$)/;
+const refused = (name) => `${REFUSED.exec(name)[2]} is not a name that a plan can use. Use a different name`;
+
 function tokenize(text) {
   const tokens = [];
   let i = 0;
@@ -41,13 +45,16 @@ function tokenize(text) {
     if (ch === "$") {
       const match = /^\$(\/?)([\p{L}_][\p{L}\p{N}_]*(?:\/[\p{L}_][\p{L}\p{N}_]*)*)/u.exec(text.slice(i));
       if (!match) fail(MESSAGES ? "path expected after $" : "");
+      if (MESSAGES && REFUSED.test(match[2])) fail(refused(match[2]));
       tokens.push({ t: "path", abs: match[1] === "/", segs: match[2].split("/") });
       i += match[0].length;
       continue;
     }
-    const number = /^(\d+\.?\d*|\.\d+)/.exec(text.slice(i));
+    // A number can have an exponent, as show prints a large or a small one: 1e+21, 1e-7.
+    const number = /^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(text.slice(i));
     if (number) { tokens.push({ t: "num", v: Number(number[0]) }); i += number[0].length; continue; }
     const word = /^[\p{L}_][\p{L}\p{N}_]*/u.exec(text.slice(i));
+    if (MESSAGES && word && REFUSED.test(word[0])) fail(refused(word[0]));
     if (word) { tokens.push({ t: "id", v: word[0] }); i += word[0].length; continue; }
     const two = text.slice(i, i + 2);
     if ([":=", "==", "!=", "<=", ">=", "&&", "||"].includes(two)) { tokens.push({ t: "op", v: two }); i += 2; continue; }
@@ -107,6 +114,7 @@ function parseTokens(tokens, start = 0) {
       while (!peek("}")) {
         const key = tokens[at++];
         if (!key || (key.t !== "id" && key.t !== "str")) throw new DslError(MESSAGES ? "field name expected in { }" : "");
+        if (MESSAGES && REFUSED.test(key.v)) throw new DslError(refused(key.v));
         eat(":");
         entries.push([key.v, ternary()]);
         if (!peek("}")) eat(",");
@@ -175,8 +183,13 @@ export function parseLine(raw) {
   const line = raw.trim();
   if (!line || line.startsWith("#")) return null;
   const entry = (kind, key, text) => {
+    if (MESSAGES && REFUSED.test(key)) throw new DslError(refused(key));
     const tree = parseExpression(text);
-    if (kind === "need" && tree.k !== "call") throw new DslError(MESSAGES ? 'a need line is one call of a part, such as need x = entries("Items")' : "");
+    // A need line calls a part, and an app line or a check line calls app or check. Each other form is a fault of its line.
+    if (["need", "app", "check"].includes(kind) && (tree.k !== "call" || (kind !== "need" && tree.name !== kind))) {
+      throw new DslError(MESSAGES ? { need: 'a need line is one call of a part, such as need x = entries("Items")', app: 'an app line is one call of app, such as app("Title", lang="en")',
+        check: 'a check line is one call of check, such as check("name", [steps])' }[kind] : "");
+    }
     return { kind, key, tree, raw: line };
   };
   let match;
@@ -188,9 +201,8 @@ export function parseLine(raw) {
   if ((match = /^(\$\/[\p{L}\p{N}_/]+)\s*=(?!=)(.*)$/u.exec(line))) return entry("state", match[1], match[2]);
   if (/^app\s*\(/.test(line)) return entry("app", "app", line);
   if (/^check\s*\(/.test(line)) {
-    const tree = parseExpression(line);
-    if (tree.k !== "call" || tree.name !== "check") throw new DslError(MESSAGES ? 'a check line is one call of check, such as check("name", [steps])' : "");
-    return { kind: "check", key: "check:" + (tree.args[0]?.v ?? ""), tree, raw: line };
+    const check = entry("check", "", line);
+    return { ...check, key: "check:" + (check.tree.args[0]?.v ?? "") };
   }
   if ((match = /^([\p{L}_][\p{L}\p{N}_]*)\s*=(?!=)(.*)$/u.exec(line))) return entry("component", match[1], match[2]);
   throw new DslError(MESSAGES ? "line not understood" : "");

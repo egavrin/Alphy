@@ -22,8 +22,8 @@ const finite = (value) => (typeof value === "number" ? Number.isFinite(value) : 
  * It finds faults. It does not decide that the app does what the request asks.
  */
 export function smoke(file, limit = 60) {
-  // The run has its own clock, so an app with a timer gives the same result in each run. Only the run moves that clock.
-  const real = settings.now, clock = { now: 0 };
+  // The run has its own clock, which starts at the clock of the compile step, so today() is the day of the compile. Only the run moves that clock.
+  const real = settings.now, clock = { now: real() };
   settings.now = () => clock.now;
   try { return smokeRun(file, limit, clock); } finally { settings.now = real; }
 }
@@ -324,7 +324,7 @@ function gaps(file, reached, named) {
     if (entry.kind !== "component") continue;
     if (given(entry.tree).action && !used.has(entry.key)) out.push(`${entry.key}: no check taps or sets this control`);
     walk(entry.tree, (node) => {
-      if (node === entry.tree || node.k !== "call" || !CATALOG[node.name]) return;
+      if (node === entry.tree || node.k !== "call" || !Object.hasOwn(CATALOG, node.name)) return;
       const props = given(node);
       if (props.action || props.bind) out.push(`${entry.key}: give the ${node.name} inside it its own named line, so that a check can use it`);
     });

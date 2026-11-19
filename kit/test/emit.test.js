@@ -65,10 +65,10 @@ test("emit: names that Alphy refuses get safe names", async () => {
   const { definition, faults, app } = emit(await planned([
     'app("Names", lang="en")',
     'need 단어 = input("number", "Word", 1, min=0, max=10)',
-    'need constructor = input("number", "Build", 2, min=0, max=10)',
+    'need toString = input("number", "Build", 2, min=0, max=10)',
     `need ${long} = input("number", "Long", 3, min=0, max=10)`,
-    `need sum = figure("number", "Sum", $/단어 + $/constructor + $/${long})`,
-    `need покупки = entries("Покупки", fields={назва: "text", куплено: "check", constructor: "text", ${longField}: "text", 가격: "text"}, rows=[{назва: "Хліб", куплено: false, constructor: "x", ${longField}: "y", 가격: "z"}])`,
+    `need sum = figure("number", "Sum", $/단어 + $/toString + $/${long})`,
+    `need покупки = entries("Покупки", fields={назва: "text", куплено: "check", toString: "text", ${longField}: "text", 가격: "text"}, rows=[{назва: "Хліб", куплено: false, toString: "x", ${longField}: "y", 가격: "z"}])`,
   ].join("\n")));
   expect(faults).toEqual([]);
   const schema = definition.stateSchema;
@@ -96,7 +96,7 @@ test("emit: names that Alphy refuses get safe names", async () => {
   const labels = nodes(definition.ui).flatMap((node) => [node, ...nodes(node.rowTemplate ?? { type: "" })]).filter((node) => node.action).map((node) => node.text);
   expect(labels).toContain("Remove");
   expect(labels).toContain("Куплено");
-  expect(labels).toContain("Constructor");
+  expect(labels).toContain("To String");
   for (const text of labels) expect(text).not.toMatch(/^f\d+$/);
 });
 

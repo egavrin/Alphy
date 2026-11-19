@@ -149,6 +149,8 @@ test("the smoke run comes back to a state at the time of that state", async () =
   // A button that shows only while the timer runs, and that changes nothing. The run comes back to the state after the start
   // when its own clock is 30 days later. At that time each phase of the timer is over, and a press would end them.
   const running = await planned('app("T", lang="en")\n$/x = 1\nneed t = timer("T", 40, rounds=2, rest=10)\nsame = Button("Same", action=set($/x, $/x), visible=$/t_on)\nshown = Text($/x)\nroot = Column([t_view, same, shown])');
+  // The run starts at the clock of the compile step (final review, Minor). At 0 the end of a phase is its length in ms. gateEach brings the real clock back.
+  settings.now = () => 0;
   const run = smoke(running);
   same(run.faults, ["smoke run: same never changes a value: its action does nothing"], "a button that does nothing while the timer runs is dead");
   same(run.trace.find((line) => line.startsWith("tap t_pause")), "tap t_pause: t_on true -> false, t_end 40000 -> 0", "the pause stops the timer and ends no phase");

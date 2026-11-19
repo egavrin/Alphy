@@ -1,6 +1,6 @@
 app("Shapes", lang="en", preset="clean", palette="blue")
 $/cells = [{n: 1, on: true}, {n: 2, on: false}, {n: 3, on: true}]
 need size = input("number", "Size", 40, min=10, max=100, step=10)
-need art = drawing("Each shape and color", 320, 200, [rect(0, 0, 320, 200, "surface"), rect(10, 10, 60, 40, "wood", radius=6), rect(80, 10, 60, 40, "ink", stroke=true), circle(200, 50, $/size / 2, "#336699"), circle(270, 50, 20, "#80ff0000", stroke=true), line(10, 190, 310, 190, "muted", width=3), polygon([10, 120, 50, 80, 90, 120], "success"), polygon([110, 120, 150, 80, 190, 120], "warning", stroke=true), text(250, 110, "Size " + text($/size), "accent", size=16), each($/cells, rect(200 + $index * 30, 140, 20, $n * 10, "sun", visible=$on)), circle(300, 180, 5, "purple")])
+need art = drawing("Each shape and color", 320, 200, [rect(0, 0, 320, 200, "surface"), rect(10, 10, 60, 40, "wood", radius=6), rect(80, 10, 60, 40, "ink", stroke=true), circle(200, 50, $/size / 2, "#336699"), circle(270, 50, 20, "#80ff0000", stroke=true), line(10, 190, 310, 190, "muted", width=3), polygon([10, 120, 50, 80, 90, 120], "success"), polygon([110, 120, 150, 80, 190, 120], "warning", stroke=true), text(250, 110, "Size " + text($/size), "accent", size=16), each($/cells, rect(200 + $index * 30, 140, 20, $n * 10, "sun", visible=$on)), circle(300, 180, 5, "ink")])
 need grow = button("Grow", animate($/size, 100, 2000))
 need laps = timer("Laps", 2, rounds=2, rest=1)

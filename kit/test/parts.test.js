@@ -204,8 +204,8 @@ test("an odd need gives a fault or a correct expansion, and the other needs stil
   settings.gate = "smoke";
   const odd = await planned('app("T")\nneed n = figure("count", "N", 1 + 1, example=[{}, 2])\nneed s = steps([], [])\nneed bad = entries("L", fields={"my field": "text"})\nneed kind = toString(1)\nneed ok = input("text", "Ok", "")');
   const oddReport = report(odd);
-  same([oddReport.faults.map((fault) => ["line: need bad: line not understood", "line: no part for need kind toString"].find((start) => fault.startsWith(start)) ?? fault), oddReport.checks, odd.get("check:n example").raw, odd.get("root").raw],
-    [["line: need bad: line not understood", "line: no part for need kind toString"], [{ name: "n example", pass: true, detail: "" }], 'check("n example", expect(near($/n, 2)))', "root = Column([n_view, s_view, ok_field])"], "an example with no value, steps with no group, an odd field name, and a kind that is no part");
+  same([oddReport.faults.map((fault) => ["line: need bad: a field named \"my field\" is not a word", "line: no part for need kind toString"].find((start) => fault.startsWith(start)) ?? fault), oddReport.checks, odd.get("check:n example").raw, odd.get("root").raw],
+    [["line: need bad: a field named \"my field\" is not a word", "line: no part for need kind toString"], [{ name: "n example", pass: true, detail: "" }], 'check("n example", expect(near($/n, 2)))', "root = Column([n_view, s_view, ok_field])"], "an example with no value, steps with no group, an odd field name, and a kind that is no part");
 });
 
 test("the host never throws for model text in a need", async () => {
