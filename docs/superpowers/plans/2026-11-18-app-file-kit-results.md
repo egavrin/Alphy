@@ -568,12 +568,13 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
 Task 11b-2b gave the parts `timer`, `deck`, `steps`, `question`, `lesson`, `chart`, `card`, `drawing`, and `model3d` the look of the baseline apps.
 It also made the look rules kit tests (`kit/README.md`, sections "Parts" and "Look rules").
 The numbers come from `bun kit/look.js`, before at `c92230b` and after at `f614e9f`.
-The last column is what the pictures of the run `appfile-look-all-3` show in both themes, against the pictures of `appfile-live-final`.
+The last column is what the pictures of the run `appfile-look-all-5` show in both themes, against the pictures of `appfile-live-final`.
 
 The round before the review added a hero card rule: a hero card holds the main element and at most a filled button or a text button.
 A field and an outlined or tonal control stand under the card, because their outline shows no contrast on a hero card in the dark theme.
 The rule moved the controls of `model3d` and of the three forms of `deck` under their hero card, and a running timer now has a filled Pause.
 The round also added two Spanish look fixtures: `look-deck-es` (a deck with a back, a mark, and the two counts) and `look-guide-es` (steps of cards with icons, and a question).
+The second round before the review centered the back of a deck under its front (`403c573`), and it found the cause of the add that failed one time (see "The add that failed one time").
 
 | Plan | Hero, before and after | Typed fields, first screen | Typed fields in rows | Seen in the pictures |
 | --- | --- | --- | --- | --- |
@@ -598,16 +599,19 @@ The round also added two Spanish look fixtures: `look-deck-es` (a deck with a ba
 | `mock-shopping-it` | 1, 1 | 1 | 0 | The field "Prodotto" has a cart icon, and the choice "Corsia" has a tag icon. `mock-shopping-it-added.png` shows the same icons and the two rows. |
 | `mock-habits-uk` | 1, 1 | 0 | 0 | The streak badge of each row has the accent tone. |
 | `mock-price-filter` | 1, 1 | 0 | 0 | The hero shows "12 of 12". |
-| `look-deck-es` | new, 1 | 0 | 0 | The hero card holds the front "la manzana" (centered, display emphasis) and the filled "Ver traducción". The counts "La sabía" and "Todavía no" are a grid of two under it. `look-deck-es-shown.png`: the back "the apple" (headline emphasis) is on the card, and the row of the filled "La sabía" with a check and the outlined "Todavía no" is under the card. The back is at the start of the card, not centered under the front. |
+| `look-deck-es` | new, 1 | 0 | 0 | The hero card holds the front "la manzana" (centered, display emphasis) and the filled "Ver traducción". The counts "La sabía" and "Todavía no" are a grid of two under it. `look-deck-es-shown.png`: the back "the apple" (centered, headline emphasis) is on the card under the front, and the row of the filled "La sabía" with a check and the outlined "Todavía no" is under the card. |
 | `look-guide-es` | new, 1 | 1 | 0 | The hero card "Café molido" shows "30 g", a large coffee emoji, and the muted note. The field "Tazas" with its two step buttons follows, then the step title "1. Moler", the card "Muele el café" with its coffee icon and muted body, the disabled outlined "Atrás" and the filled "Siguiente", and the card of the question with three tonal answers. "Atrás" is faint because the host draws a disabled button so. `look-guide-es-answered.png`: the chosen "92–96 °C" is filled, and the success notice "¡Correcto! Así el café no se quema." shows under the answers. |
 
 A script compared each picture with the same picture of `appfile-live-final`, pixel by pixel under the status bar.
 Only the pictures of the 10 plans with a note in the last column changed, and `mock-shopping-it-added.png`, in both themes. Each other picture is the same, also each picture of a baseline app.
 Against `appfile-look-all-2`, only `model3d` changed in the run `appfile-look-all-3` (22.9 % of the pixels in both themes). The four pictures of the two new fixtures are new.
+Against `appfile-look-all-3`, the runs `appfile-look-all-4` and `appfile-look-all-5` changed only the back in `look-deck-es-shown.png` (0.6 % in both themes), which is now centered.
+`look-guide-es-answered.png` shows the same screen at a different scroll offset in each run (33 % of the pixels), because the reveal of the notice does not always scroll by the same distance.
 No picture shows cut text, an overlap, an empty first screen, or a control with no label.
 A text at the bottom edge of a picture continues under the first screen.
 The captions of the two counts of `quiz` and of the deck of `look-deck-es` are the texts of their two buttons, because each count is the number of presses of its button.
 So in `look-deck-es-shown.png`, "La sabía" and "Todavía no" show two times: on the buttons and over the counts. The template of `deck` has no option for a different caption of a count.
+The second round kept these captions by a ruling: each count is the tally of its button, and the saved plan `quiz.plan` has the same form.
 
 The 4 items of "Where the plans with parts are still worse than the baseline" (section "Look with parts") that had a missing option now use it: the icons of `mock-shopping-it`, the tone of `mock-habits-uk`, the total of `mock-price-filter`, and the icons of the rows of `mock-units-pl`.
 These differences stay:
@@ -625,11 +629,36 @@ Host limits that the pictures show (no change of the host in this task):
 - A shape of the muted role has the alpha 64 (`SurfaceDrawing.kt`, `MUTED_SHAPE_ALPHA`). The orbit of `lesson` was a muted line with the contrast 1.5 to 1 (light) and 1.6 to 1 (dark). It now has the role `ink`, and a look rule of the kit keeps lines out of the muted role.
 - The faces of a model keep their hex colors, because the shading of a face needs a hex color.
 
-| Measure | Before (`c92230b`) | After (`6715b30`) | After the round before the review (`f614e9f`) |
-| --- | --- | --- | --- |
-| Run-time text | 46580 bytes | 46662 bytes (bar 48500) | 46662 bytes |
-| Largest source | `test/cards.plan`, 53628 bytes | `test/cards.plan`, 53591 bytes (bar 60000) | `test/cards.plan`, 53650 bytes. The new fixtures: 49705 and 48598 bytes |
-| Kit tests | 289 pass | 315 pass | 319 pass |
+| Measure | Before (`c92230b`) | After (`6715b30`) | After the round before the review (`f614e9f`) | After the second round (`403c573`) |
+| --- | --- | --- | --- | --- |
+| Run-time text | 46580 bytes | 46662 bytes (bar 48500) | 46662 bytes | 46662 bytes |
+| Largest source | `test/cards.plan`, 53628 bytes | `test/cards.plan`, 53591 bytes (bar 60000) | `test/cards.plan`, 53650 bytes. The new fixtures: 49705 and 48598 bytes | `test/cards.plan`, 53650 bytes. `look-deck-es`: 48616 bytes |
+| Kit tests | 289 pass | 315 pass | 319 pass | 320 pass |
+
+### The add that failed one time
+
+In `appfile-look-r2-pre`, a press of "Aggiungi" right after the finish button showed "Не удалось выполнить действие инструмента. Сохранённые данные доступны." and added no row.
+The cause is a race in the host, not in the kit. The baseline list app `showcase-lang-shopping-it` shows it too.
+
+- The finish button goes when the host accepts the final live value and saves it as state version V (`NativeToolUi.kt` `NativeLiveDraft.complete`).
+- The screen takes the state version of an action from the record that the shell model publishes (`ToolUi.kt` `MiniAppContent`, `current`).
+  The shell model publishes V later: a watcher of the store reads every saved app again (`ToolController.kt` `watchStore`, `loadSnapshots`), and then the screen composes the new record.
+- A press in that interval sends V-1. The host refuses it with `java.lang.IllegalStateException: The mini-app data changed. Reopen it.` (`ArtifactCoordinator.current`), because the final live value set its quiet version to V (`committed`).
+  `ToolController.run` shows the generic text for an exception with an English message, and it writes no log.
+
+A temporary device test pressed "Aggiungi" right after the end of the finish button, 20 times for each app and theme (80 presses in each loop):
+
+| Loop | Store of the shell | Presses that failed |
+| --- | --- | --- |
+| `appfile-addloop-3` | the list app only | 0 of 80 |
+| `appfile-addloop-4` | the 28 apps of the look run, as in `picturesOfEachPlan` | 3 of 80: 2 of 40 in `mock-shopping-it`, 1 of 40 in the baseline app |
+| `appfile-addloop-5`, publication held | the 28 apps. The test held the publication of the shell model until the press | 4 of 4: the same error text as in `appfile-look-r2-pre`, the typed text in the field, and no row |
+| `appfile-addloop-5`, with the wait | the 28 apps. Each press waits for the condition below | 0 of 80 |
+
+Each failed press showed the error in 24 to 28 ms. In loops 3 and 4, each row took at least 30 ms in the baseline app and at least 56 ms in the kit app. So the host refused the press before the app ran.
+On the failed state, the same add through `ToolEngine` at V added the row, and at V-1 it threw the exception above.
+The helper of `AppFileLookTest` (`published`, `902a904`) now presses an action after a live value only when the shell model publishes the stored state version and two frames compose it.
+A person can see the same error when a press comes in that interval after the finish button or the action key of the keyboard. The typed text stays, and a second press adds the row.
 
 ### Runs of Task 11b-2b
 
@@ -641,14 +670,21 @@ Host limits that the pictures show (no change of the host in this task):
 | `appfile-look-all` | `2705ed4+dirty` (the two documents) | passed, 37 tests (`AppFileProofTest` and `AppFileLookTest`), 182.0 s. Under the status bar, each picture is the same as in `appfile-look-pre` | `07:41:21`, `07:44:37` |
 | `appfile-look-all-2` | `6715b30` (the orbit in the role `ink`) | passed, 37 tests, 184.6 s. Against `appfile-look-all`, only the orbit of `lesson` changed | `07:44:37`, `07:56:12` |
 | `appfile-look-r2-pre` | `f614e9f` (the hero card rule and the two new fixtures) | failed (`picturesOfEachPlan`). The light pass took each picture, also the four new ones. In the dark pass, the press of "Aggiungi" after the finish button of `mock-shopping-it` showed the host error "Не удалось выполнить действие инструмента" and added no row (`AppFileLookTest.kt` 153). The log has no cause, because the host keeps the exception only as the error text (`ToolController.kt` `run`). The same step passed in the light pass of this run, in `appfile-look-all-3`, and in `appfile-look-r2-solo`. The round changed no line of that plan or of the run-time | `07:56:12`, `08:17:03` |
-| `appfile-look-all-3` | `f614e9f+dirty` (the two documents) | passed, 37 tests, 182.0 s. The final run and the pictures of this section | `08:17:03`, `08:20:34` |
+| `appfile-look-all-3` | `f614e9f+dirty` (the two documents) | passed, 37 tests, 182.0 s | `08:17:03`, `08:20:34` |
 | `appfile-look-r2-solo` | `d0cdf9f+dirty` (only `kit/test/lookrules.test.js`, which is not in the APK) | passed (`picturesOfEachPlan` alone), 65.9 s. A second check of the step that failed in `appfile-look-r2-pre` | `08:20:34`, `08:30:17` |
+| `appfile-addloop-1` | `5528920+dirty` (the centered back and a temporary loop test) | stopped after 4 presses (4 rows): the loop waited for the notice of the host at the top of the screen, off the screen | `08:30:17`, `08:37:09` |
+| `appfile-addloop-2` | `5528920+dirty` | stopped after 5 presses (5 rows): the loop waited for the finish button off the screen | `08:37:09`, `08:38:32` |
+| `appfile-addloop-3` | `5528920+dirty` | 80 presses, 0 failed, 166.8 s. A store of one app | `08:38:32`, `08:44:56` |
+| `appfile-addloop-4` | `5528920+dirty` | 80 presses, 3 failed, 181.5 s. A store of 28 apps | `08:44:56`, `08:49:04` |
+| `appfile-addloop-5` | `5528920+dirty` | 4 presses with the publication held, 4 failed. Then 80 presses with the wait, 0 failed, 191.4 s | `08:49:04`, `08:54:25` |
+| `appfile-look-all-4` | `902a904` (the centered back and the wait of the helper, with no temporary test in the tree) | passed, 37 tests, 196.0 s | `08:54:25`, `09:00:12` |
+| `appfile-look-all-5` | `902a904` | passed, 37 tests, 190.1 s. The final run and the pictures of this section | `09:00:12`, `09:03:45` |
 
 All times are on 2026-11-19. Each "before" time is the "after" time of the run before it, so no other session installed the test APK during these runs.
-The pictures are in `evidence/alphy-ui/appfile-look-all-3/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png` and the pair sheet `pairs-light.png`. Git does not keep these files.
+The pictures are in `evidence/alphy-ui/appfile-look-all-5/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png` and the pair sheet `pairs-light.png`. Git does not keep these files.
 
 Command:
 
 ```text
-JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-all-3 com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-all-5 com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
 ```
