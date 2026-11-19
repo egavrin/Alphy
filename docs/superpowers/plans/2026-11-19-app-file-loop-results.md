@@ -680,7 +680,15 @@ Implementation choice: a row through the add form counts as one event, as decisi
 
 ### The worst outcome
 
-No clean plan lost or moved a stored value of the person. This holds for 28 of 28 clean plans (14 at each effort), by the comparison of each record.
+No clean plan lost or moved a stored value of a line. The runs gave 28 clean plans (14 at each effort), and the comparison of each record gives these counts (a scratch count over the records):
+
+- 24 of 24 clean plans that compared a value of a line kept each one.
+- 4 clean plans compared no value of a line: `showcase-lang-kanji-ja-a` and `-b` at each effort. Their only compared field is the inner values of the deck.
+- 8 clean plans started inner values of the person again, by design:
+  - Rule 3c: the place and the counts of the deck in `showcase-lang-kanji-ja-a` and `-b`, at each effort.
+  - Rule 7: the open tab in `showcase-lang-budget-es-a` and `-b`, at each effort.
+
+The table row "stored values of the lines stayed in 14/14 clean plans" of each run counts the kanji records too, because they lost no value of a line.
 No clean plan kept a value only in `app.keep`, and no reply renamed a need or a field of a list.
 
 ### Numbers
@@ -758,6 +766,9 @@ The task changed nothing in `kit/src` and nothing in the prompt.
 2. **A new default does not reach a person who changed the value.** In `holdout-tip-ru-b` the plan has the start value 15, and the stored 12 stays (rule 3). The result has no note, so the person sees the same tip after the change. Evidence: `evidence/modelcheck/change-terra-low/holdout-tip-ru-b.0.txt`.
 3. **A new figure becomes the main element at the top.** `showcase-lang-tea-tr-b` asks for the temperature under the timer. The reply adds a figure, the merge puts it at the end, and the kit makes the first figure of the app the hero card at the top. Both runs did it. Candidate sentence for the section "Change", which did not run: "A line that you add goes at the end of the app file, and the first figure of an app is its main element at the top: to show a new value under a thing, use content or card." Evidence: `evidence/modelcheck/change-terra-low/showcase-lang-tea-tr-b.0.txt`.
 4. **A new column of kind count starts at 0 in each stored row.** In `showcase-lang-shopping-it-a` the stored "Latte" gets the quantity 0, the value of the add form (rule 3). Evidence: the next state in `evidence/modelcheck/change-terra-low/showcase-lang-shopping-it-a.json`.
+5. **A deck starts again when its cards get one more value.** `showcase-lang-kanji-ja-b` asks for an example sentence on each card. The reply keeps the same five cards in the same order and adds the column `example`. The untouched list takes the new start rows (rule 3b), so rule 3c starts the deck again: the person loses the place 2 and both counts (1 and 1).
+   - This is the first case from a model reply of the open question 3 of fix round 2 in `.superpowers/sdd/2026-11-19-app-file-loop/t2-report.md`: a deck over a list with the same cards starts again.
+   - Evidence: `evidence/modelcheck/change-terra-low/showcase-lang-kanji-ja-b.0.txt` and the stored and next states in `showcase-lang-kanji-ja-b.json`, the same in `change-terra-medium/`.
 
 Decision 5 permits one change of the section "Change". It did not apply:
 
@@ -770,11 +781,12 @@ Decision 5 permits one change of the section "Change". It did not apply:
 - The time limits:
   - First text: 15 s. The maximum was 7.924 s.
   - Total: 30 s. The maximum whole path was 13.26 s. The slowest first call and the slowest repair together take about 17.1 s.
-- One repair is sufficient for these 16 cases, because no plan had a fault after the repair. But the one repair that ran only undid the change (finding 1), so the decision on finding 1 matters more than the count of repairs.
+- One repair is sufficient for these 16 cases, because no plan had a fault after the repair. This rests on 2 repair calls on one case, and both only undid the change (finding 1). So the decision on finding 1 matters more than the count of repairs.
 
 ### What the numbers do not show
 
-- One run of each effort, on 16 cases. A result of 0 losses in 28 clean plans says nothing about a rare loss.
+- One run of each effort, on 16 cases. A result of 0 losses in 24 clean plans that compared a value of a line says nothing about a rare loss.
+- No first reply of the 32 had a fault other than `BLOCKS`. So the runs show nothing about the repair of an ordinary fault, such as a formula that reads nothing, in a change call.
 - The kanji cases compared no value of a line. The list of the plan is hidden and the deck has no `mark=`, so the person cannot change the rows. The branch of decision 2 with "a stored mark of the person" cannot happen with this plan.
 - No reply renamed a need, so no model reply tested the path "kept, but not shown". Only the kit test covers it.
 - Each stored state comes from 2 to 5 events, and each list holds at most 3 rows. A state of months of use is larger.
