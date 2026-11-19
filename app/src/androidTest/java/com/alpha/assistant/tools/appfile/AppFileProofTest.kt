@@ -48,7 +48,7 @@ internal suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,s
     }
 }
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, a range, a map of options, and an icon of a field, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, a range, a map of options, and an icon of a field, a hero figure with an emoji, a bar, and a note, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -161,6 +161,17 @@ class AppFileProofTest {
         assertEquals(listOf(500.0,1000.0),moved.getJSONArray("price").let {range -> List(range.length()) {range.getDouble(it)}})
         assertEquals("1",moved.getJSONObject("d").getString("shown_text"))
         assertEquals("city",session.act("kind_field","city").getString("kind"))
+    }
+    @Test fun aHeroFigureWithAnEmojiABarAndANotePassesParseAndSmoke(): Unit=runBlocking {
+        // The first plan of kit/test/figures.test.js.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val text="app(\"물\", lang=\"ko\")\nneed ml = input(\"number\", \"물 (ml)\", 500)\n" +
+            "need today = figure(\"number\", \"오늘 마신 물\", \$/ml, icon=\"💧\", goal=2000, note=\"하루 목표 2,000 ml\", example=[{ml: 750}, 750])"
+        val spec=parsedAndSmoked(sandbox,"hero","ko",text)
+        val hero=nodes(spec.ui).single {it.optString("variant") == "hero"}
+        assertEquals(listOf("emoji","metric","progress","text"),hero.getJSONArray("children").let {children -> List(children.length()) {children.getJSONObject(it).getString("type")}})
+        val after=Session(sandbox,spec,"appfile-hero").act("ml_field",1500).getJSONObject("d")
+        assertEquals(listOf("1,500","75"),listOf(after.getString("today_text"),after.get(hero.getJSONArray("children").getJSONObject(2).getString("bind").removePrefix("d.")).toString()))
     }
     /** Events in sequence through ToolGenerationService.executeEvent: Alphy checks each event against the screen before it, and each reply. */
     private class Session(private val sandbox: SandboxClient,private val spec: ToolSpec,private val id: String,seed: String=spec.initialState) {

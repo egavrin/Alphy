@@ -93,13 +93,22 @@ const PARTS = {
   },
 
   // need perPerson = figure("money", "Per person", $/bill / $/people, example=[{bill: 100, people: 4}, 25])
-  async figure(name, need, { hero }) {
-    const [format, title, formula] = need.args, f = format?.v;
+  // need today = figure("number", "Today", $/ml, icon="💧", goal=2000, note="Goal 2000 ml"): the main figure is a hero card with a large emoji, a bar to its goal, and a muted note.
+  // icon="Drop" (a name of a host icon) is the icon of the metric. role (expand): the place of a figure that is not the main one.
+  async figure(name, need, { hero, role }) {
+    const [format, title, formula] = need.args, f = format?.v, { icon, note, goal } = need.named, main = hero === name;
+    if ((note || goal) && !main) throw new DslError(`note= and goal= show only on the main figure, and ${name} is not it`);
     const text = { money: `money($/${name})`, percent: `percent($/${name})`, text: `text($/${name})` }[f] ?? `amount($/${name}, ${need.named.decimals ? show(need.named.decimals) : f === "count" ? 0 : 2})`;
     const lines = [`$/${name} := ${show(formula)}`, `$/${name}_text := ${text}`];
-    lines.push(hero === name
-      ? `${name}_view = Card([Metric(${show(title)}, $/${name}_text, emphasis="display")], variant="hero")`
-      : `${name}_view = Metric(${show(title)}, $/${name}_text)`);
+    // An emoji, or a formula that gives one, is the sign of the main figure. A word of letters is the name of a host icon.
+    const sign = main && icon && !(icon.k === "lit" && /^[A-Za-z]+$/.test(icon.v)), metric = (look) => `Metric(${show(title)}, $/${name}_text${look}${icon && !sign ? `, icon=${show(icon)}` : ""})`;
+    if (main) {
+      const parts = [sign && `Emoji(${show(icon)}, size="large", label=${show(title)})`, metric(', emphasis="display"'), goal && `Progress($/${name}, ${show(goal)}, label=${show(title)})`, note && `Text(${show(note)}, tone="muted")`];
+      lines.push(`${name}_view = Card([${parts.filter(Boolean).join(", ")}], variant="hero")`);
+    } else lines.push(`${name}_view = ${role === "row" ? `Row([Text(${show(title)}, weight=1), Text($/${name}_text, emphasis="number")])` : metric("")}`);
+    // The first of two figures in a grid holds the second one, whose own place stays empty.
+    const pair = role?.startsWith("grid ") && role.slice(5);
+    if (pair) lines.push(`${name}_grid = Grid([${name}_view, ${pair}_view], columns=2)`);
     const example = need.named.example;
     if (example) {
       const [given, result] = example.items ?? [];
@@ -110,7 +119,7 @@ const PARTS = {
       // An example with no given value, example=[{}, 0], has no put step (f0 words-ko-3 threw "unexpected ','" here).
       lines.push(`check(${[q(name + " example"), ...puts, `expect(${test})`].join(", ")})`);
     }
-    return { lines, top: [`${name}_view`] };
+    return { lines, top: role === "held" ? [] : [pair ? `${name}_grid` : `${name}_view`] };
   },
 
   // need tasks = entries("Tasks", fields={task: "text", level: ["high", "low"], done: "check"}, rows=[], edit=true, reorder=true, filter=$done, sort=$task, order=$/order, show={double: $n * 2})
@@ -455,7 +464,7 @@ export const PART_KINDS = Object.keys(PARTS);
  * button gives each option to its Button, whose own check names each one that a Button does not take.
  */
 const OPTIONS = {
-  input: ["options", "min", "max", "step", "icon"], figure: ["decimals", "example"],
+  input: ["options", "min", "max", "step", "icon"], figure: ["decimals", "example", "icon", "note", "goal"],
   entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText"],
   chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max"],
@@ -489,6 +498,11 @@ export async function expand(file, choose = rules) {
   // A plan with no figure, progress, drawing, timer, or model: the first list that shows gets a hero card with its count (C.6). An author's root gets none.
   const listHero = !needs.some((entry) => ["figure", "progress", "drawing", "timer", "model3d"].includes(entry.tree.name)) && file.open("root")
     ? needs.find((entry) => entry.tree.name === "entries" && entry.tree.named.hidden?.v !== true)?.key : undefined;
+  // The figures that are not the main element (E.2): the first two, when they stand one after the other, are one grid of two, and each figure
+  // after them is a row. Without such a pair each one stays a metric.
+  const others = needs.filter((entry) => entry.tree.name === "figure" && entry.key !== hero).map((entry) => entry.key), order = needs.map((entry) => entry.key).filter((key) => key !== hero);
+  const paired = others.length > 1 && order.indexOf(others[1]) === order.indexOf(others[0]) + 1;
+  const roleOf = (key) => (!others.includes(key) || !paired ? "" : key === others[0] ? `grid ${others[1]}` : key === others[1] ? "held" : "row");
   const out = [], top = [], fresh = [], held = new Set(), heads = [];
   // A part that holds other needs, such as steps, is built after them. Its place on the screen stays the place of its line.
   const holder = (entry) => ["steps", "tabs"].includes(entry.tree.name);
@@ -510,7 +524,7 @@ export async function expand(file, choose = rules) {
         return wordOf(lang, text);
       };
       const caption = (option, text) => (entry.tree.named[option] ? show(entry.tree.named[option]) : q(word(text, option)));
-      built = await part(entry.key, entry.tree, { choose, hero, word, caption, count: entry.key === listHero, tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
+      built = await part(entry.key, entry.tree, { choose, hero, word, caption, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
       // A part line that the host cannot read is a fault of this need, never an exception. The other needs still expand.
       parsed = built.lines.map((line) => parseLine(line));
       if (parsed.includes(null)) throw new DslError("the part made an empty line");
@@ -532,8 +546,8 @@ export async function expand(file, choose = rules) {
     (built.holds ?? []).forEach((other) => held.add(other));
     heads.push(...(built.lead ?? []));
     place.set(entry.key, built.top);
-    // A change of the language of the app writes the part again, in the words of the new language.
-    const made = `${entry.raw}${entry.key === hero || entry.key === listHero}${lang}`;
+    // A change of the language of the app, or of the place of a figure, writes the part again.
+    const made = `${entry.raw}${entry.key === hero || entry.key === listHero}${lang}${roleOf(entry.key)}`;
     if (file.expanded.get(entry.key) === made) continue;
     if (!file.expanded.has(entry.key)) fresh.push(entry.key);
     file.expanded.set(entry.key, made);

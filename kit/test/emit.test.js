@@ -153,7 +153,8 @@ test("emit: a fault names the need of a line that a part wrote, and the author's
 });
 
 test("emit: a container with more than 50 children is a fault of its component, or of the app", async () => {
-  const needs = Array.from({ length: 51 }, (_, index) => `need y${index + 1} = figure("number", "Y ${index + 1}", ${index + 1})`);
+  // 52 figures: the hero, a grid of the next two, and 49 rows (E.2) are 51 children of the screen.
+  const needs = Array.from({ length: 52 }, (_, index) => `need y${index + 1} = figure("number", "Y ${index + 1}", ${index + 1})`);
   const { definition, faults } = emit(await planned(['app("Figures", lang="en")', ...needs].join("\n")));
   expect(definition).toBeNull();
   expect(faults).toEqual([expect.stringMatching(/^app: .*51 children.*50/)]);
@@ -465,7 +466,8 @@ test("emit: shown values past 32 go to the object d2", async () => {
   expect(faults).toEqual([]);
   expect(Object.keys(definition.stateSchema.d.fields)).toHaveLength(32);
   expect(definition.stateSchema.d2).toEqual({ type: "object", fields: { y33_text: "string" } });
-  expect(nodes(definition.ui).at(-1)).toMatchObject({ type: "metric", bind: "d2.y33_text" });
+  // The last figure is a row of its title and its value (E.2).
+  expect(nodes(definition.ui).at(-1)).toMatchObject({ type: "text", bind: "d2.y33_text", style: { emphasis: "number" } });
 });
 
 test("emit: each component of the node table becomes its Alphy node", async () => {
