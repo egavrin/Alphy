@@ -45,11 +45,12 @@ test("modelcheck: a reply is outside, a plan, or other", () => {
   expect(kindOf("I cannot do that.")).toEqual({ kind: "other" });
 });
 
-test("modelcheck: a repair is patchAppFile of the kit: it replaces a line by its name in place, deletes a line, drops prose, and drops a plan line that the kit could not read", () => {
-  const plan = PLAN + "need broken = figure(\n";
+test("modelcheck: a repair is patchAppFile of the kit: it replaces a line by its name in place, deletes a line, drops prose, keeps a need line that the kit could not read, and drops each other such plan line", () => {
+  const plan = PLAN + "need broken = figure(\nwide = Row([\n";
   const { text, dropped } = merge(plan, 'Here is the fix:\n```\nneed bill = input("money", "Bill", 50, min=0, max=500)\ndelete tip\nneed share = content("x")\n```');
   expect(dropped).toBe(1);
-  expect(text).toBe('app("Tip", lang="en")\nneed bill = input("money", "Bill", 50, min=0, max=500)\nneed share = content("x")\n');
+  // The reply did not write the broken need again, so it stays and the compile gives its fault again (K1 fix 2).
+  expect(text).toBe('app("Tip", lang="en")\nneed bill = input("money", "Bill", 50, min=0, max=500)\nneed broken = figure(\nneed share = content("x")\n');
   expect(repairText({ task: "TASK", plan: text, faults: ["f1", "f2"] })).toBe(`TASK\n\nYour plan:\n${text.trimEnd()}\n\nFaults of the kit:\n- f1\n- f2\n\n${PROMPT.Repair}`);
 });
 

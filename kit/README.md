@@ -50,7 +50,8 @@ A repair reply writes again each wrong line of a plan (`prompt.md` section "Repa
 - `delete NAME` and `delete $/NAME` remove that line. A delete of a name that the plan does not have changes nothing.
 - A line with the name of an earlier line replaces it in place, and each other line goes at the end.
 - The text has no delete line, so a name that a delete removed is free again for a later line and for the part of a later need.
-- A plan line that the kit could not read goes. A reply line that the kit cannot read stays at the end, so the compile names its fault.
+- A need line of the plan that the kit could not read keeps its place until a reply writes that need or deletes it, so the compile gives its fault again and the plan never loses a need with no fault.
+  Each other plan line that the kit could not read goes. A reply line that the kit cannot read stays at the end, so the compile names its fault.
 
 `modelcheck.js` `merge` uses it, and the device bundle defines it, for the repair loop of the app.
 

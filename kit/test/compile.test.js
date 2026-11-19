@@ -104,6 +104,23 @@ test("patchAppFile (A0-K1): a repair reply that deletes a name and writes it aga
     .toBe('app("T", lang="en")\n$/days = []\nneed note = content("c")\nneed old = content("b")\nneed broken = figure(\n');
 });
 
+test("patchAppFile (K1 fix 2): a need line that the kit cannot read stays in its place until a reply writes that need or deletes it, so the plan never loses a need with no fault", async () => {
+  const lines = ['app("Tip", lang="en")', 'need bill = input("money", "Bill", 80, min=0, max=500)', 'need tip = figure("money", "Tip", $/bill * , example=[{bill: 100}, 10])', 'need note = content("Hi")'];
+  const plan = lines.join("\n") + "\n", { faults } = await compileAppFile(plan);
+  expect(faults.length).toBe(1);
+  // (a) The reply repairs a different line: the broken need stays, and the compile gives its fault again.
+  const other = patchAppFile(plan, 'need note = content("Hello")');
+  expect([other, (await compileAppFile(other)).faults]).toEqual([[...lines.slice(0, 3), 'need note = content("Hello")'].join("\n") + "\n", faults]);
+  // (b) The reply writes the need again: it takes the place of the broken line, and the plan is clean.
+  const fixed = 'need tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])', again = patchAppFile(plan, fixed);
+  expect([again, (await compileAppFile(again)).faults]).toEqual([[...lines.slice(0, 2), fixed, lines[3]].join("\n") + "\n", []]);
+  // A reply that writes it broken again keeps one line of it, in its place.
+  expect(patchAppFile(plan, 'need tip = figure("money", "Tip", $/bill *, example=[{bill: 100}, 10])').split("\n")[2]).toBe('need tip = figure("money", "Tip", $/bill *, example=[{bill: 100}, 10])');
+  // (c) The reply deletes the need: it is gone, and the plan compiles as its other lines say.
+  const gone = patchAppFile(plan, "delete tip");
+  expect([gone, (await compileAppFile(gone)).faults]).toEqual([[lines[0], lines[1], lines[3]].join("\n") + "\n", []]);
+});
+
 test("patchAppFile (A0-K1): the saved repairs of pomodoro-zh (final-terra-low) and alarm (r0-sol-medium) delete a line and write it again, and are clean after the second repair", async () => {
   for (const key of ["final-terra-low/showcase-lang-pomodoro-zh", "r0-sol-medium/showcase-ui-alarm"]) {
     const plans = stepsOf(REPLIES[key].slice(0, 3));
