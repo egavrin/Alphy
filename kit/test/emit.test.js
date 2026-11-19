@@ -153,8 +153,8 @@ test("emit: a fault names the need of a line that a part wrote, and the author's
 });
 
 test("emit: a container with more than 50 children is a fault of its component, or of the app", async () => {
-  // 52 figures: the hero, a grid of the next two, and 49 rows (E.2) are 51 children of the screen.
-  const needs = Array.from({ length: 52 }, (_, index) => `need y${index + 1} = figure("number", "Y ${index + 1}", ${index + 1})`);
+  // 51 figures: the hero and 50 rows (E.2, fix round 1: three figures or more in a place are rows) are 51 children of the screen.
+  const needs = Array.from({ length: 51 },(_, index) => `need y${index + 1} = figure("number", "Y ${index + 1}", ${index + 1})`);
   const { definition, faults } = emit(await planned(['app("Figures", lang="en")', ...needs].join("\n")));
   expect(definition).toBeNull();
   expect(faults).toEqual([expect.stringMatching(/^app: .*51 children.*50/)]);

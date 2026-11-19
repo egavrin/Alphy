@@ -1,4 +1,4 @@
-// The figure part in the look of the baseline apps (Task 11b-2a, E): the hero card, a grid of the next two figures, and rows after them.
+// The figure part in the look of the baseline apps (Task 11b-2a, E): the hero card, then in each place a grid of two figures or rows of three or more.
 
 import { expect, test } from "bun:test";
 import { report } from "../src/check.js";
@@ -33,17 +33,35 @@ test("figures: the main figure is a hero card of a large emoji, a display metric
   expect([emoji.type, emoji.text, chosen.definition.initialState.d[emoji.bind.slice(2)]]).toEqual(["emoji", "F", "🌾"]);
 });
 
-test("figures: the two figures after the main one are a grid of two metrics with their icons, and each further figure is a row of its title and its value", async () => {
-  const { definition } = await built('app("Przelicznik", lang="pl")', 'need g = figure("number", "Gramy", 125, example=[{}, 125])',
-    'need ilosc = input("number", "Ilość", 1)',
-    'need gestosc = figure("number", "Gęstość", 0.5, icon="Weight", example=[{}, 0.5])', 'need ml = figure("number", "Mililitry", 250, icon="Drop", example=[{}, 250])',
-    'need szklanki = figure("number", "Szklanki", 1, example=[{}, 1])', 'need lyzki = figure("number", "Łyżki", $/ilosc * 50 / 3, example=[{ilosc: 1}, 16.67])');
+test("figures: two figures after the main one are a grid of two metrics with their icons, and three or more are rows of one size", async () => {
+  // Fix round 1: a grid of two small figures beside a large row looked uneven (mock-units-pl), so a place has a grid or rows, never both.
+  const two = await built('app("Przelicznik", lang="pl")', 'need g = figure("number", "Gramy", 125, example=[{}, 125])', 'need ilosc = input("number", "Ilość", 1)',
+    'need gestosc = figure("number", "Gęstość", 0.5, icon="Weight", example=[{}, 0.5])', 'need ml = figure("number", "Mililitry", 250, icon="Drop", example=[{}, 250])');
+  const [, , grid] = tops(two.definition);
+  expect([shape(grid), grid.columns, grid.children.map((node) => [node.text, node.icon])]).toEqual([["grid", ["metric", "metric"]], 2, [["Gęstość", "Weight"], ["Mililitry", "Drop"]]]);
+  const { definition } = await built('app("Przelicznik", lang="pl")', 'need g = figure("number", "Gramy", 125, example=[{}, 125])', 'need ilosc = input("number", "Ilość", 1)',
+    'need ml = figure("number", "Mililitry", 250, example=[{}, 250])', 'need szklanki = figure("number", "Szklanki", 1, example=[{}, 1])',
+    'need lyzki = figure("number", "Łyżki", $/ilosc * 50 / 3, example=[{ilosc: 1}, 16.67])');
   const nodes = tops(definition);
-  expect(nodes.map(shape)).toEqual([["card", ["metric"]], "numberInput", ["grid", ["metric", "metric"]], ["row", ["text", "text"]], ["row", ["text", "text"]]]);
-  const [, , grid, row, last] = nodes;
-  expect([grid.columns, grid.children.map((node) => [node.text, node.icon])]).toEqual([2, [["Gęstość", "Weight"], ["Mililitry", "Drop"]]]);
-  expect(row.children).toMatchObject([{ type: "text", text: "Szklanki", layout: { weight: 1 } }, { type: "text", style: { emphasis: "number" } }]);
-  expect(definition.initialState.d[last.children[1].bind.slice(2)]).toBe("16,67");
+  expect(nodes.map(shape)).toEqual([["card", ["metric"]], "numberInput", ...Array(3).fill(["row", ["text", "text"]])]);
+  for (const [row, title] of nodes.slice(2).map((node, index) => [node, ["Mililitry", "Szklanki", "Łyżki"][index]])) {
+    expect(row.children).toMatchObject([{ type: "text", text: title, layout: { weight: 1 } }, { type: "text", style: { emphasis: "number" } }]);
+  }
+  expect(definition.initialState.d[nodes[4].children[1].bind.slice(2)]).toBe("16,67");
+});
+
+test("figures: the figures of one group of steps or tabs are a set of their own, and a figure never leaves its group", async () => {
+  const head = ['app("T", lang="en")', 'need h = figure("number", "H", 1, example=[{}, 1])', 'need a = figure("number", "A", 2, example=[{}, 2])', 'need b = figure("number", "B", 3, example=[{}, 3])'];
+  // Two figures in one step: a grid in that step.
+  const one = await planned([...head, 'need n = input("number", "N", 1)', 'need p = steps(["One", "Two"], [[a, b], [n]])'].join("\n"));
+  expect([report(one).faults, one.get("p_step0").raw, one.get("a_grid")?.raw]).toEqual([[], 'p_step0 = Column([a_grid], visible=$/p_step == 0)', "a_grid = Grid([a_view, b_view], columns=2)"]);
+  // Two figures in two steps: one in each step, each a metric (the reviewer's plan put both into step 1 and left step 2 empty).
+  const apart = await planned([...head, 'need p = steps(["One", "Two"], [[a], [b]])'].join("\n"));
+  expect([report(apart).faults, apart.get("p_step0").raw, apart.get("p_step1").raw]).toEqual([[], "p_step0 = Column([a_view], visible=$/p_step == 0)", "p_step1 = Column([b_view], visible=$/p_step == 1)"]);
+  expect(apart.get("a_view").raw).toStartWith('a_view = Metric("A"');
+  // The reviewer's tabs plan: the main figure and a in one tab, b in the other. It has no fault.
+  const tabbed = await planned([...head, 'need p = tabs(["X", "Y"], [[h, a], [b]])'].join("\n"));
+  expect([report(tabbed).faults, tabbed.get("p_view").raw]).toEqual([[], 'p_view = Tabs(["X", "Y"], [[h_view, a_view], [b_view]], label=join(["X", "Y"]))']);
 });
 
 test("figures: one figure beside the main one, or two that do not stand one after the other, stay metrics", async () => {

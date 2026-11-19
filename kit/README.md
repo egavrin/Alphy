@@ -89,7 +89,10 @@ A figure prints its number with `amount(x, n)`: at most `n` decimals, no zeros a
   The kind `range` writes `RangeSlider(label, $/x, min=, max=, step=)`: one state value of two numbers in order, the low and the high (`$/price[0]`, `$/price[1]`).
 - `figure`: the main figure is a hero card of the emoji, the metric with the display emphasis, the bar of `goal=`, and the muted `note=`.
   The caption of the bar is `goalText=`, else the title of the figure. `unit=` follows the shown number ("2,000 ml"), and the value of the figure stays a number.
-  The next two figures that stand one after the other are a grid of two metrics, each with its `icon=`. Each figure after them is a row of its title and its value. Without such a pair, each figure is a metric.
+  The other figures of one place are a set. A place is one group of a `steps` or `tabs` need, or the screen for the needs that no such need groups. A figure never leaves its place.
+  - Two figures of a set that stand one after the other are a grid of two metrics, each with its `icon=`. Two figures with another need between them stay two metrics.
+  - Three figures or more of a set are rows of one size: the title at the left and the value at the right. A row shows no `icon=`.
+  - One figure of a set is a metric.
   `note=`, `goal=`, and `goalText=` show only on the main figure.
 - `counter`: a section with the title of the counter. It holds an outlined less button, the value with the display emphasis, and a filled more button.
   With `addText=`, the counter is one filled button that adds the step and a text button that resets the value. The plan shows the value elsewhere, such as in a figure.

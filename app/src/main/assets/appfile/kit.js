@@ -1443,14 +1443,21 @@ async function expand(file, choose = rules) {
   // A plan with no figure, progress, drawing, timer, or model: the first list that shows gets a hero card with its count (C.6). An author's root gets none.
   const listHero = !needs.some((entry) => ["figure", "progress", "drawing", "timer", "model3d"].includes(entry.tree.name)) && file.open("root")
     ? needs.find((entry) => entry.tree.name === "entries" && entry.tree.named.hidden?.v !== true)?.key : undefined;
-  // The figures that are not the main element (E.2): the first two, when they stand one after the other, are one grid of two, and each figure
-  // after them is a row. Without such a pair each one stays a metric.
-  const others = needs.filter((entry) => entry.tree.name === "figure" && entry.key !== hero).map((entry) => entry.key), order = needs.map((entry) => entry.key).filter((key) => key !== hero);
-  const paired = others.length > 1 && order.indexOf(others[1]) === order.indexOf(others[0]) + 1;
-  const roleOf = (key) => (!others.includes(key) || !paired ? "" : key === others[0] ? `grid ${others[1]}` : key === others[1] ? "held" : "row");
-  const out = [], top = [], fresh = [], held = new Set(), heads = [];
   // A part that holds other needs, such as steps, is built after them. Its place on the screen stays the place of its line.
   const holder = (entry) => ["steps", "tabs"].includes(entry.tree.name);
+  // The places of the screen: each group of a holder, and the root with the needs that no holder groups, each in its order.
+  const grouped = needs.filter(holder).flatMap((entry) => (entry.tree.args[1]?.items ?? []).map((group) => (group.items ?? []).map(memberName)));
+  const places = [needs.map((entry) => entry.key).filter((key) => !grouped.flat().includes(key)), ...grouped];
+  // The figures that are not the main element are a set in each place (E.2, fix round 1): two that stand one after the other are one grid of two,
+  // three or more are rows of one size, and one stays a metric. A figure keeps its place.
+  const roles = new Map(), figure = (key) => key !== hero && needs.some((entry) => entry.key === key && entry.tree.name === "figure");
+  for (const members of places.map((keys) => keys.filter((key) => key !== hero))) {
+    const set = members.filter(figure);
+    if (set.length > 2) set.forEach((key) => roles.set(key, "row"));
+    else if (set.length === 2 && members.indexOf(set[1]) === members.indexOf(set[0]) + 1) roles.set(set[0], `grid ${set[1]}`).set(set[1], "held");
+  }
+  const roleOf = (key) => roles.get(key) ?? "";
+  const out = [], top = [], fresh = [], held = new Set(), heads = [];
   const place = new Map();
   // The captions that a part writes by itself are in the language of the app (words.js). A language outside the table gets the English
   // words and one note that names each option of a need that took an English caption, so that the author can give it.
