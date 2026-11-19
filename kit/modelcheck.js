@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { BLOCKS, MISMATCH, isRecord } from "./src/change.js";
-import { LINE, compileAppFile, linesOf, needsIn, patchAppFile, readPlanReply } from "./src/compile.js";
+import { LINE, compileAppFile, compileStep, linesOf, needsIn, patchAppFile, readPlanReply } from "./src/compile.js";
 import { dataOf, runtime } from "./src/emit.js";
 import { handle } from "./src/run.js";
 import { runtimeText } from "./build.js";
@@ -82,10 +82,8 @@ export function changeKindOf(text) {
   const reply = readPlanReply(text);
   return reply.kind === "outside" ? reply : { kind: "lines" };
 }
-/** The plan after a repair: patchAppFile of the kit, as the loop of the app calls it. dropped counts the prose lines of the reply. */
-export function merge(plan, reply) {
-  return { text: patchAppFile(plan, reply), dropped: linesOf(reply).filter((line) => !LINE.test(line)).length };
-}
+/** The count of the prose lines of a repair reply: patchAppFile of the kit drops each line that is no line of an app file (LINE). */
+export const droppedOf = (reply) => linesOf(reply).filter((line) => !LINE.test(line)).length;
 
 /** The faults that the device bars add to a plan that the kit calls clean (BARS), and the forms that the host refuses with no fault of the kit. */
 export function barFaults({ compileMs, stateBytes, plan, definition }) {
@@ -164,15 +162,17 @@ function changeOf(item, stored, reply, plan, definition) {
     same: plan === patchAppFile(item.plan, ""), gone: plan === null ? [] : [...needsIn(item.plan).filter((need) => !needs.has(need)), ...columns] };
 }
 
-async function compile(plan, previous) {
-  const started = performance.now(), result = await compileAppFile(plan, previous), compileMs = Math.round((performance.now() - started) * 10) / 10;
+/** One step of the app (compileStep of the kit): the merged plan, and the result with its time and the bytes of the start state of a clean plan. */
+async function compile(input) {
+  const started = performance.now(), { text, result } = await compileStep(input), compileMs = Math.round((performance.now() - started) * 10) / 10;
   const stateBytes = result.definition ? Buffer.byteLength(JSON.stringify(result.definition.initialState)) : null;
-  return { ...result, compileMs, stateBytes };
+  return { plan: text, result: { ...result, compileMs, stateBytes } };
 }
 
 /**
  * One request: the plan call, the compile, and up to `repairs` repair calls at the effort low. ask(body) is the call of the API.
  * The record holds each call with its reply, each report of the kit, the outcome, and the final plan. clean is the step of the first clean report.
+ * Each compile is compileStep of the kit, as the app runs it: the first reply as readPlanReply reads it, and a repair reply merged into the plan.
  * A change case (set F) sends the request and the app file of its stored app (changeText), merges the reply into the app file, compiles each plan
  * against the stored state, and gets one repair call. Its record also holds the stored state, the next state, and the comparison of the two (keptOf).
  */
@@ -191,9 +191,14 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
   const done = () => finish(stored ? Object.assign(record, { fixture: item.fixture, request: item.request, events: item.events.length, stored: stored.previous.state,
     compared: stored.fields, inner: stored.inner }, changeOf(item, stored, first.text, record.plan, record.clean !== null && result.definition)) : record);
   if (!["plan", "other", "lines"].includes(kind.kind)) return done();
-  let plan = stored ? merge(item.plan, first.text).text : readPlanReply(first.text).text;
+  // The stored app as the app sends it: the state schema and the state as JSON text. Implementation choice: no cap, so the record keeps
+  // the compile of a plan of each length.
+  const previous = stored && { appFile: stored.previous.appFile, stateSchema: JSON.stringify(stored.previous.stateSchema), state: JSON.stringify(stored.previous.state) };
+  const stepOf = (text, plan, read) => compile({ text, plan, read, previous, cap: Infinity });
+  // A repair reply is merged with no read: an outside line in it is no line of an app file, so the merge drops it.
+  let next = await stepOf(first.text, stored ? item.plan : null, true), plan;
   for (let step = 0; ; step++) {
-    result = await compile(plan, stored?.previous);
+    ({ plan, result } = next);
     steps.push({ faults: result.faults, notes: result.notes, compileMs: result.compileMs, stateBytes: result.stateBytes, dropped: step ? calls.at(-1).dropped : 0,
       ...(stored && { blocks: result.faults.filter((fault) => fault.includes(BLOCKS)).length, mismatch: result.faults.filter((fault) => fault.includes(MISMATCH)).length }) });
     record.plan = plan;
@@ -208,9 +213,8 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
     if (step === limit) break;
     const call = await send(step + 1, "low", repairText({ task, plan, faults: result.faults }));
     if (call.status !== "completed") break;
-    const merged = merge(plan, call.text);
-    calls.at(-1).dropped = merged.dropped;
-    plan = merged.text;
+    calls.at(-1).dropped = droppedOf(call.text);
+    next = await stepOf(call.text, plan, false);
   }
   return done();
 }

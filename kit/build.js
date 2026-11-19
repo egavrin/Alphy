@@ -86,11 +86,12 @@ export async function runtimeText() {
 }
 
 /**
- * The bundle defines globalThis.compileAppFile, globalThis.patchAppFile (the plan after a repair reply), and globalThis.readPlanReply
- * (a plan or an outside word from the reply of a plan call), and no other global.
+ * The bundle defines globalThis.compileAppFile, globalThis.patchAppFile (the plan after a repair reply), globalThis.readPlanReply
+ * (a plan or an outside word from the reply of a plan call), and globalThis.compileStep (one step of the host with the other three),
+ * and no other global.
  */
 export async function bundle() {
-  return `// Built by kit/build.js from kit/src with Bun ${Bun.version}. Do not edit: run bun kit/build.js.\n(() => {\n"use strict";\n${script(MODULES.map(source))}runtime.text = ${JSON.stringify(await runtimeText())};\nglobalThis.compileAppFile = compileAppFile;\nglobalThis.patchAppFile = patchAppFile;\nglobalThis.readPlanReply = readPlanReply;\n})();\n`;
+  return `// Built by kit/build.js from kit/src with Bun ${Bun.version}. Do not edit: run bun kit/build.js.\n(() => {\n"use strict";\n${script(MODULES.map(source))}runtime.text = ${JSON.stringify(await runtimeText())};\nglobalThis.compileAppFile = compileAppFile;\nglobalThis.patchAppFile = patchAppFile;\nglobalThis.readPlanReply = readPlanReply;\nglobalThis.compileStep = compileStep;\n})();\n`;
 }
 
 /**

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext, runInContext } from "node:vm";
-import { LINE, NEED_NAME, compileAppFile, needsIn, patchAppFile, readPlanReply } from "../src/compile.js";
+import { LINE, NEED_NAME, compileAppFile, compileStep, needsIn, patchAppFile, readPlanReply } from "../src/compile.js";
 import { AppFile, HEADS, parseLine } from "../src/dsl.js";
 import { expand } from "../src/parts.js";
 import { bundle, iconModule, outputs, planCopies, plansIn, script, withoutMessages } from "../build.js";
@@ -14,7 +14,7 @@ import { HOST_ICONS } from "../src/icons.js";
 import { emit } from "../src/emit.js";
 import { handle } from "../src/run.js";
 import { STEPS } from "../src/core.js";
-import { faultsOf, plan, planned } from "./helpers.js";
+import { faultsOf, fixture, plan, planned } from "./helpers.js";
 
 test("compileAppFile: calc.plan gives a definition and no fault", async () => {
   const result = await compileAppFile(plan("calc"));
@@ -182,13 +182,46 @@ test("patchAppFile (A0-K1): each of the 41 saved repairs that writes a need of i
   expect(hits).toBe(41);
 });
 
-test("bundle: it defines only compileAppFile, patchAppFile, and readPlanReply, and the sandbox expression compiles calc.plan, patches a plan, and reads a reply through them", async () => {
+/** One step of the host with the plan call defaults: the reply read, no plan, no stored app, and the cap of the host (AppFileCompiler.kt). */
+const step = (input) => compileStep({ text: "", plan: null, read: true, previous: null, cap: 65536, ...input });
+
+test("compileStep (U-K item 2): an outside reply returns at once, a plan and a reply that is not a plan compile, a repair merges, and a text over the cap is not compiled", async () => {
+  const calc = plan("calc");
+  expect(await step({ text: '```\noutside("game")\n```' })).toEqual({ kind: "outside", word: "game" });
+  expect(await step({ text: "```\n" + calc + "```" })).toEqual({ kind: "plan", text: calc, result: await compileAppFile(calc) });
+  // A reply of prose is a plan, and the compile reports it.
+  const prose = await step({ text: "I cannot do that." });
+  expect([prose.kind, prose.text, prose.result.faults.length > 0, prose.result.definition]).toEqual(["plan", "I cannot do that.\n", true, null]);
+  // A repair reply goes into the plan, with or without the read of the reply.
+  const reply = 'Here is the fix:\nneed tip = input("percent", "Tip", 20)\ndelete people', merged = patchAppFile(calc, reply);
+  for (const read of [true, false]) expect(await step({ text: reply, plan: calc, read })).toEqual({ kind: "plan", text: merged, result: await compileAppFile(merged) });
+  // The cap counts the characters of the merged text.
+  expect(await step({ text: calc, cap: calc.length - 1 })).toEqual({ kind: "plan", text: calc, result: null });
+  expect((await step({ text: calc, cap: calc.length })).result.faults).toEqual([]);
+});
+
+test("compileStep (U-K item 2): a change merges the reply into the stored app file and compiles it with the stored app, whose schema and state come as JSON text", async () => {
+  const shopping = fixture("shopping"), { definition } = await compileAppFile(shopping);
+  // The person checked the first row, so the next state keeps that value.
+  const state = { ...definition.initialState, items: definition.initialState.items.map((row, index) => ({ ...row, done: index === 0 })) };
+  const reply = 'need bought = figure("count", "Bought", count($/items, $done), example=[{items: [{done: true}]}, 1])', merged = patchAppFile(shopping, reply);
+  const previous = { appFile: shopping, stateSchema: JSON.stringify(definition.stateSchema), state: JSON.stringify(state) };
+  const changed = await step({ text: reply, plan: shopping, previous });
+  expect(changed).toEqual({ kind: "plan", text: merged, result: await compileAppFile(merged, { appFile: shopping, stateSchema: definition.stateSchema, state }) });
+  expect([changed.result.faults, changed.result.state.items]).toEqual([[], state.items]);
+  // A state that is no JSON text rejects the step, as in the script of the host.
+  await expect(step({ text: reply, plan: shopping, previous: { ...previous, state: "{" } })).rejects.toThrow();
+});
+
+test("bundle: it defines only compileAppFile, patchAppFile, readPlanReply, and compileStep, and the sandbox expression compiles calc.plan, patches a plan, reads a reply, and runs a step through them", async () => {
   // The sandbox has no structuredClone and no host API: a fresh context of the language is closer to it than Bun's own.
   const context = createContext();
   const names = () => [...runInContext("Object.getOwnPropertyNames(globalThis)", context)];
   const before = names();
   const text = await runInContext(`${await bundle()}\ncompileAppFile(${JSON.stringify(plan("calc"))}).then(JSON.stringify)`, context);
-  expect(names().filter((name) => !before.includes(name))).toEqual(["compileAppFile", "patchAppFile", "readPlanReply"]);
+  expect(names().filter((name) => !before.includes(name))).toEqual(["compileAppFile", "patchAppFile", "readPlanReply", "compileStep"]);
+  const input = { text: 'need tip = input("percent", "Tip", 20)', plan: plan("calc"), read: true, previous: null, cap: 65536 };
+  expect(JSON.parse(await runInContext(`compileStep(${JSON.stringify(input)}).then(JSON.stringify)`, context))).toEqual(JSON.parse(JSON.stringify(await compileStep(input))));
   for (const reply of ["```\noutside(\"game\")\n```", "```\n" + plan("calc") + "```"]) {
     expect(JSON.parse(runInContext(`JSON.stringify(readPlanReply(${JSON.stringify(reply)}))`, context))).toEqual(readPlanReply(reply));
   }

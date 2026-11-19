@@ -1,5 +1,5 @@
 // The sandbox entry of the kit: an app file in, the report of the host and the app definition out. kit/build.js makes compileAppFile,
-// patchAppFile, and readPlanReply the globals of the bundle.
+// patchAppFile, readPlanReply, and compileStep (one step of the host with the other three) the globals of the bundle.
 
 import { AppFile, HEADS } from "./dsl.js";
 import { expand } from "./parts.js";
@@ -83,4 +83,19 @@ export function patchAppFile(plan, reply) {
   plan.split("\n").forEach((line) => file.feed(line) || keep(line));
   reply.split("\n").filter((line) => LINE.test(line)).forEach((line) => file.feed(line) || keep(line) || unread.push(line.trim() + "\n"));
   return file.text() + unread.join("");
+}
+
+/**
+ * One step of the host (AppFileCompiler.kt) in one call: the reply text as readPlanReply reads it when read is true, where an outside
+ * reply returns at once; then the reply merged into plan by patchAppFile when plan is not null; then compileAppFile of the merged text
+ * with the stored app previous. A merged text of more than cap characters gives result null and no compile.
+ * previous is {appFile, stateSchema, state} with stateSchema and state as JSON text, as the host sends them, or null. A text that is no
+ * JSON makes the step reject. The result is {kind: "outside", word} or {kind: "plan", text, result}, where text is the merged text.
+ */
+export async function compileStep({ text, plan, read, previous, cap }) {
+  const reply = read ? readPlanReply(text) : { kind: "plan", text };
+  if (reply.kind !== "plan") return reply;
+  const merged = plan === null ? reply.text : patchAppFile(plan, reply.text);
+  const stored = previous && { appFile: previous.appFile, stateSchema: JSON.parse(previous.stateSchema), state: JSON.parse(previous.state) };
+  return { kind: "plan", text: merged, result: merged.length > cap ? null : await compileAppFile(merged, stored) };
 }

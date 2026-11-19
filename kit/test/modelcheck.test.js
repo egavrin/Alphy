@@ -1,10 +1,11 @@
 // The pure parts of the model check (kit/modelcheck.js) with a fake of the API call: the task text, the body, the repair text,
-// the merge of a repair, and the record of a request. No test calls the API.
+// the prose count of a repair reply, and the record of a request. No test calls the API.
 
 import { expect, test } from "bun:test";
-import { BARS, SET_E, SET_F, barFaults, bodyOf, changeNumbers, checkOne, faultTable, keptOf, kindOf, merge, numbers, repairsOf, storedOf, worstCase } from "../modelcheck.js";
+import { BARS, SET_E, SET_F, barFaults, bodyOf, changeNumbers, checkOne, droppedOf, faultTable, keptOf, kindOf, numbers, repairsOf, storedOf, worstCase } from "../modelcheck.js";
 import { PROMPT, changeText, repairText, taskText } from "../prompt.js";
 import { BLOCKS } from "../src/change.js";
+import { patchAppFile } from "../src/compile.js";
 import "./helpers.js";
 
 const PLAN = 'app("Tip", lang="en")\nneed bill = input("money", "Bill", 80, min=0, max=500)\nneed tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])\n';
@@ -49,13 +50,10 @@ test("modelcheck: a reply is outside, a plan, or other", () => {
   expect(kindOf("I cannot do that.")).toEqual({ kind: "other" });
 });
 
-test("modelcheck: a repair is patchAppFile of the kit: it replaces a line by its name in place, deletes a line, drops prose, keeps a need line that the kit could not read, and drops each other such plan line", () => {
-  const plan = PLAN + "need broken = figure(\nwide = Row([\n";
-  const { text, dropped } = merge(plan, 'Here is the fix:\n```\nneed bill = input("money", "Bill", 50, min=0, max=500)\ndelete tip\nneed share = content("x")\n```');
-  expect(dropped).toBe(1);
-  // The reply did not write the broken need again, so it stays and the compile gives its fault again (K1 fix 2).
-  expect(text).toBe('app("Tip", lang="en")\nneed bill = input("money", "Bill", 50, min=0, max=500)\nneed broken = figure(\nneed share = content("x")\n');
-  expect(repairText({ task: "TASK", plan: text, faults: ["f1", "f2"] })).toBe(`TASK\n\nYour plan:\n${text.trimEnd()}\n\nFaults of the kit:\n- f1\n- f2\n\n${PROMPT.Repair}`);
+test("modelcheck: a repair reply counts its prose lines, which the merge of the kit drops, and the repair text holds the task, the plan, and the faults", () => {
+  // compile.test.js tests the merge itself (patchAppFile).
+  expect(droppedOf('Here is the fix:\n```\nneed bill = input("money", "Bill", 50, min=0, max=500)\ndelete tip\nneed share = content("x")\n```')).toBe(1);
+  expect(repairText({ task: "TASK", plan: PLAN, faults: ["f1", "f2"] })).toBe(`TASK\n\nYour plan:\n${PLAN.trimEnd()}\n\nFaults of the kit:\n- f1\n- f2\n\n${PROMPT.Repair}`);
 });
 
 test("modelcheck: a clean plan is clean at the first try, with its compile time, start state, and look forms", async () => {
@@ -166,7 +164,7 @@ test("modelcheck (2b): a reply that removes a column with saved rows gets BLOCKS
   const record = await checkOne(entry, { ask, model: "m", effort: "medium", repairs: 2 });
   expect([record.outcome, record.steps.map((step) => [step.blocks, step.mismatch]), record.calls.map((call) => call.effort)]).toEqual(["clean1", [[1, 0], [0, 0]], ["medium", "low"]]);
   expect(record.steps[0].faults[0]).toContain(BLOCKS);
-  const merged = merge(entry.plan, removed).text;
+  const merged = patchAppFile(entry.plan, removed);
   expect(bodies[1].input[0].content[0].text).toBe(repairText({ task: changeText(entry), plan: merged, faults: record.steps[0].faults }));
   expect([record.lost, record.gone]).toEqual([[], []]);
   // One repair only, also when the run asks for more.
