@@ -656,7 +656,7 @@ A temporary device test pressed "Aggiungi" right after the end of the finish but
 | `appfile-addloop-5`, with the wait | the 28 apps. Each press waits for the condition below | 0 of 80 |
 
 Each failed press showed the error in 24 to 28 ms. In loops 3 and 4, each row took at least 30 ms in the baseline app and at least 56 ms in the kit app. So the host refused the press before the app ran.
-On the failed state, the same add through `ToolEngine` at V added the row, and at V-1 it threw the exception above.
+On the state of each natural failure, the same add through `ToolEngine` at V added the row. In the forced probe, the same add at V-1 threw the exception above, and at V it added the row.
 The helper of `AppFileLookTest` (`published`, `902a904`) now presses an action after a live value only when the shell model publishes the stored state version and two frames compose it.
 A person can see the same error when a press comes in that interval after the finish button or the action key of the keyboard. The typed text stays, and a second press adds the row.
 
