@@ -214,6 +214,9 @@ class ComparisonChatCaptureTest {
                     phases.map { it.getString("name") })
                 assertEquals(setOf("operation_id", "attempt", "at_ns", "kind", "name", "detail", "ms"), phases.first().keys().asSequence().toSet())
                 assertEquals(setOf(report.getString("operation_id")), events.map { it.getString("operation_id") }.toSet())
+                // The Open action of this request's own app, not a card of the earlier chat, ends its time.
+                val finished = events.single { it.getString("kind") == "finished" }.getLong("at_ns")
+                assertTrue(report.getLong("send_action_elapsed_ns") + (measurements.getLong("completed_ui_ms") + 1) * 1_000_000 > finished)
             }
             assertNotEquals(first.getString("operation_id"), second.getString("operation_id"))
             assertNotEquals(first.getString("fresh_conversation"), second.getString("fresh_conversation"))
@@ -629,6 +632,9 @@ class ComparisonChatCaptureTest {
                     vm.openSurface(null)
                     vm.select(null)
                 }
+                // Closing the app refreshes the library (busy for a moment). The Open card of the first chat must be gone,
+                // or it would end the time of the second request.
+                await(15_000) { onMain { !vm.tools.busy && vm.activeConversationId == null } && visible(R.string.tool_open) == null }
                 val second = JSONObject().put("measurements", JSONObject().put("first_ui_ms", JSONObject.NULL)
                     .put("completed_ui_ms", JSONObject.NULL).put("provider_http_calls", JSONObject.NULL))
                 report.put("second", second)
