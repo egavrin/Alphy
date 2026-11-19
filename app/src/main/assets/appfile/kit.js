@@ -3531,9 +3531,9 @@ const { BLOCKS, MISMATCH, nextState } = (() => {
 
 
 
-/** The text of each fault of a change that a saved value of the person blocks (task 2). The host looks for it. */
+/** The text of each fault of a change that a saved value of the person blocks (task 2). Such a fault sets blockedBySavedData of the result. */
 const BLOCKS = "the saved data blocks this change";
-/** The text of the one fault of a stored state that the previous app file does not give (task 2). The host looks for it. */
+/** The text of the one fault of a stored state that the previous app file does not give (task 2). It sets savedDataMismatch of the result. */
 const MISMATCH = "the saved data does not match the app file";
 
 /** The word of each kind of a stored value in a fault of a change. */
@@ -3552,6 +3552,8 @@ const kindOf = (kind, schema) => {
 /** The top-level field of each root of a line, and the text of each need line. */
 const topsOf = (app) => new Map(app.fields.filter(([root, path]) => root !== "app:empty" && !path.includes(".")));
 const lineOf = (file, need) => file.of("need").find((entry) => entry.key === need)?.raw.trim();
+/** The result of faults with BLOCKS: each fault of nextState after the check of the stored app is one. */
+const blocked = (faults) => ({ faults, definition: null, state: null, blockedBySavedData: true });
 
 /**
  * The next state of a changed app, and its definition with each field that it keeps (loop plan, task 2). previous is the stored app.
@@ -3570,7 +3572,7 @@ const lineOf = (file, need) => file.of("need").find((entry) => entry.key === nee
  * 7. The inner values of a need (NAME_s) stay when the need line is the same text and 3c does not apply, else they start again.
  */
 function nextState(file, { app, definition, owners, objects }, previous, build) {
-  const mismatch = { faults: [`kit: ${MISMATCH}`], definition: null, state: null };
+  const mismatch = { faults: [`kit: ${MISMATCH}`], definition: null, state: null, savedDataMismatch: true };
   const { appFile, stateSchema: schemas, state: stored } = previous;
   if (typeof appFile !== "string" || !isRecord(schemas) || !isRecord(stored) || Object.keys(schemas).some((field) => !Object.hasOwn(stored, field))) return mismatch;
   const was = build(appFile);
@@ -3668,7 +3670,7 @@ function nextState(file, { app, definition, owners, objects }, previous, build) 
   if (!faults.length && Object.keys(schema).length > MAX_FIELDS) {
     faults.push(`${[...owners].find(([field]) => !Object.hasOwn(schemas, field))?.[1] ?? "app"}: ${BLOCKS}: the app would keep more than ${MAX_FIELDS} values`);
   }
-  if (faults.length) return { faults, definition: null, state: null };
+  if (faults.length) return blocked(faults);
   // A list or an array that the app computed, such as the view of a sorted list, stays empty: the app computes it again when it comes back.
   const kept = Object.fromEntries(keep.map((field) => [field, Array.isArray(stored[field]) && !person.has(field) ? [] : stored[field]]));
   const full = keep.length ? { ...app, keep } : app, source = keep.length ? sourceOf(full) : definition.source;
@@ -3681,7 +3683,7 @@ function nextState(file, { app, definition, owners, objects }, previous, build) 
     if (!(failure instanceof DslError)) throw failure;
     stop = failure.message;
   }
-  if (stop !== null || kit.tripped) return { faults: [`app: ${BLOCKS}: the app stops on the saved data: ${stop ?? kit.told ?? "it needs more work than Alphy gives an app"}`], definition: null, state: null };
+  if (stop !== null || kit.tripped) return blocked([`app: ${BLOCKS}: the app stops on the saved data: ${stop ?? kit.told ?? "it needs more work than Alphy gives an app"}`]);
   const fieldOf = new Map(app.fields);
   for (const [node, value] of shown.fixes) {
     const bind = node.props.bind, root = bind.abs ? bind.segs[0] : Object.keys(app.lists).find((list) => kit.state[list]?.includes(node.row));
@@ -3694,7 +3696,7 @@ function nextState(file, { app, definition, owners, objects }, previous, build) 
   }
   if (hostBytes(state) > MAX_STATE_BYTES) faults.push(`app: ${BLOCKS}: the app would keep more than ${MAX_STATE_BYTES} bytes`);
   if (utf8(source) > MAX_SOURCE_BYTES) faults.push(`app: ${BLOCKS}: the fields that the app keeps make its source more than ${MAX_SOURCE_BYTES} bytes`);
-  if (faults.length) return { faults, definition: null, state: null };
+  if (faults.length) return blocked(faults);
   return { faults: [], notes, definition: keep.length ? { ...definition, stateSchema: schema, initialState: { ...start, ...kept }, source } : definition, state };
 }
 
@@ -3733,9 +3735,11 @@ function build(text) {
  * The host reads the result as a promise (AppFileCompiler.kt: compileAppFile(...).then(JSON.stringify)), so the entry stays async.
  * hole is true when the file has a need of kind hole, also with faults: the plan step of the app gives such a plan to its loop.
  * previous is the stored app {appFile, stateSchema, state} of a change: then state is the next state of the stored one (nextState), else null.
+ * blockedBySavedData is true when a saved value of the person blocks the change (each fault holds BLOCKS), and savedDataMismatch is true for
+ * the one fault MISMATCH. nextState sets them where it makes these faults, so the host reads the two flags and never the texts of the faults.
  */
 async function compileAppFile(text, previous) {
-  const { file, emitted, ...result } = build(text);
+  const { file, emitted, ...built } = build(text), result = { ...built, blockedBySavedData: false, savedDataMismatch: false };
   if (!previous || !result.definition) return { ...result, state: null };
   try {
     // A change adds its own notes to the notes of the report.

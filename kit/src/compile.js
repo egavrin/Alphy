@@ -29,9 +29,11 @@ function build(text) {
  * The host reads the result as a promise (AppFileCompiler.kt: compileAppFile(...).then(JSON.stringify)), so the entry stays async.
  * hole is true when the file has a need of kind hole, also with faults: the plan step of the app gives such a plan to its loop.
  * previous is the stored app {appFile, stateSchema, state} of a change: then state is the next state of the stored one (nextState), else null.
+ * blockedBySavedData is true when a saved value of the person blocks the change (each fault holds BLOCKS), and savedDataMismatch is true for
+ * the one fault MISMATCH. nextState sets them where it makes these faults, so the host reads the two flags and never the texts of the faults.
  */
 export async function compileAppFile(text, previous) {
-  const { file, emitted, ...result } = build(text);
+  const { file, emitted, ...built } = build(text), result = { ...built, blockedBySavedData: false, savedDataMismatch: false };
   if (!previous || !result.definition) return { ...result, state: null };
   try {
     // A change adds its own notes to the notes of the report.

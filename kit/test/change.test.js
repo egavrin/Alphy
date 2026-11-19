@@ -48,8 +48,19 @@ test("change: the two fault texts are constants of the kit", () => {
   expect(MISMATCH).toBe("the saved data does not match the app file");
 });
 
+/** The two flags of a result: a saved value of the person blocks the change, and the stored state does not match its app file. */
+const flagsOf = (result) => [result.blockedBySavedData, result.savedDataMismatch];
+
+test("change: a plan line that quotes the words of BLOCKS and has a line fault sets no flag", async () => {
+  const quoted = SHOPPING + `need note = card("Note", "${BLOCKS}", bogus=)\n`, result = await compileAppFile(quoted, await stored(SHOPPING, SHOPPING_EVENTS));
+  // The line fault holds the text of its line, so a search of the fault texts would find the words.
+  expect(result.faults.some((fault) => fault.startsWith("line ") && fault.includes(BLOCKS))).toBe(true);
+  expect(flagsOf(result)).toEqual([false, false]);
+});
+
 test("change: with no previous the result has no state, and with a previous the definition is the one of the same text", async () => {
   const alone = await compileAppFile(SHOPPING), previous = await stored(SHOPPING, SHOPPING_EVENTS), again = await compileAppFile(SHOPPING, previous);
+  expect([flagsOf(alone), flagsOf(again)]).toEqual([[false, false], [false, false]]);
   expect(alone.state).toBeNull();
   expect(again.faults).toEqual([]);
   expect(again.definition).toEqual(alone.definition);
@@ -82,6 +93,7 @@ async function aisleBlocked(line) {
   expect(result.faults[0]).toStartWith(`need items: ${BLOCKS}: `);
   expect(result.faults[0]).toContain("aisle");
   expect([result.definition, result.state]).toEqual([null, null]);
+  expect(flagsOf(result)).toEqual([true, false]);
 }
 
 test("change: a removed column of a list with rows is a fault that names the column", async () => {
@@ -108,10 +120,12 @@ test("change: a retyped input is a fault, also when the need goes and comes back
   const retyped = await compileAppFile(SIZE.replace('input("number", "Size", 3, min=0, max=10)', 'input("text", "Size", "3")'), previous);
   expect(retyped.faults).toEqual([`need size: ${BLOCKS}: it holds a saved number, and the change makes it a text. Keep its kind, or give the new need another name`]);
   expect(retyped.state).toBeNull();
+  expect(flagsOf(retyped)).toEqual([true, false]);
   // A time is a number of minutes for Alphy, and a different value for the person.
   const time = await stored(lines('app("T", lang="en")', 'need at = input("time", "At", "08:00")'), [action("at_field", 600)]);
   const number = await compileAppFile(time.appFile.replace('input("time", "At", "08:00")', 'input("number", "At", 0)'), time);
   expect(number.faults).toEqual([`need at: ${BLOCKS}: it holds a saved time, and the change makes it a number. Keep its kind, or give the new need another name`]);
+  expect(flagsOf(number)).toEqual([true, false]);
 });
 
 test("change: an input value and a counter value stay", async () => {
@@ -227,6 +241,7 @@ test("change: an app that stops on the saved data is a fault, as each event of t
   const result = await compileAppFile(text, previous);
   expect(result.faults).toHaveLength(1);
   expect(result.faults[0]).toStartWith(`app: ${BLOCKS}: the app stops on the saved data: `);
+  expect(flagsOf(result)).toEqual([true, false]);
 });
 
 test("change: inner values stay when the need line is the same, and start again when it changed", async () => {
@@ -262,11 +277,12 @@ test("change: a timer that runs keeps its end when its need line is the same, so
 test("change: a stored state that does not match the app file is the one fault of the kit", async () => {
   const previous = await stored(SHOPPING, SHOPPING_EVENTS);
   const wrong = { ...previous, stateSchema: { ...previous.stateSchema, items_s: { type: "object", fields: { new_name: "number", new_aisle: "string" } } } };
-  expect((await compileAppFile(SHOPPING, wrong)).faults).toEqual([`kit: ${MISMATCH}`]);
   const missing = { ...previous, stateSchema: Object.fromEntries(Object.entries(previous.stateSchema).filter(([field]) => field !== "items")) };
-  expect((await compileAppFile(SHOPPING, missing)).faults).toEqual([`kit: ${MISMATCH}`]);
-  expect((await compileAppFile(SHOPPING, { ...previous, appFile: "need x = nothing(1)" })).faults).toEqual([`kit: ${MISMATCH}`]);
-  expect((await compileAppFile(SHOPPING, { appFile: SHOPPING })).faults).toEqual([`kit: ${MISMATCH}`]);
+  for (const each of [wrong, missing, { ...previous, appFile: "need x = nothing(1)" }, { appFile: SHOPPING }]) {
+    const result = await compileAppFile(SHOPPING, each);
+    expect(result.faults).toEqual([`kit: ${MISMATCH}`]);
+    expect(flagsOf(result)).toEqual([false, true]);
+  }
 });
 
 test("change: a saved value outside the options of the changed need is a fault", async () => {
@@ -274,6 +290,7 @@ test("change: a saved value outside the options of the changed need is a fault",
   const previous = await stored(text, [action("kind_field", "trail")]);
   const result = await compileAppFile(text.replace('["road", "city", "trail"]', '["road", "city"]'), previous);
   expect(result.faults).toEqual([`need kind: ${BLOCKS}: the saved value "trail" is not one of the options or inside the bounds of the change, and the app would change it to "road". Keep the saved value possible`]);
+  expect(flagsOf(result)).toEqual([true, false]);
 });
 
 test("change: a sort that goes and comes back again keeps the list, and the kept view of the list is empty", async () => {
@@ -292,6 +309,7 @@ test("change: more than 40 values with the kept ones is a fault of the first nee
   const previous = await stored(lines('app("Many", lang="en")', ...counters("a", 20)));
   const result = await compileAppFile(lines('app("Many", lang="en")', ...counters("b", 21)), previous);
   expect(result.faults).toEqual([`need b1: ${BLOCKS}: the app would keep more than 40 values`]);
+  expect(flagsOf(result)).toEqual([true, false]);
 });
 
 // ---- Rule 3b: a value that still equals its start value of the previous plan takes the start value of the change. ----
@@ -357,6 +375,7 @@ test("change (rule 3b): an untouched value takes the start value of a change tha
   expect(untouched.state.size).toBe("3");
   const changed = await compileAppFile(text, await stored(SIZE, [action("size_field", 5)]));
   expect(changed.faults).toEqual([`need size: ${BLOCKS}: it holds a saved number, and the change makes it a text. Keep its kind, or give the new need another name`]);
+  expect([flagsOf(untouched), flagsOf(changed)]).toEqual([[false, false], [true, false]]);
 });
 
 // ---- Rule 3c: when rule 3b gives a list other start rows, the inner values that point into its old rows start again. ----
