@@ -4,8 +4,8 @@
 
 import { AppFile, parseExpression, show } from "./dsl.js";
 import { App, ICON_NAMES, foreground, given, settings } from "./core.js";
-import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, shownAs, wished } from "./rows.js";
-import { BAR_SURFACE, MODEL, STAGE, accentOf, barOf, commandsOf, fit, polygonsOf, sideOf } from "./draw.js";
+import { MAX_ROWS, cast, castRow, clockOf, namer, own, relative, rows, wished } from "./rows.js";
+import { BAR_SURFACE, MODEL, STAGE, accentOf, barOf, commandsOf, fit, hostBytes, polygonsOf, sideOf } from "./draw.js";
 import { IDLE, dragged } from "./drag.js";
 
 /** False in the run-time text of an app (dsl.js): the run-time reads no fault of the screen. */
@@ -15,6 +15,8 @@ const MESSAGES = true;
 export const PER_OBJECT = 32;
 /** An array of Alphy holds at most 512 values (ToolValueSchema). */
 export const MAX_ARRAY = 512;
+/** Alphy keeps a state of at most 49152 bytes (ToolSpec). */
+const MAX_STATE_BYTES = 49152;
 /** The fields that a person types into. An add form with more than two of them is a bottom sheet. A Dialog that holds any field is one too. */
 export const TYPED = new Set(["TextField", "NumberField", "DateField", "TimeField"]);
 /** A chart of Alphy draws at most 256 points (ToolUiCatalog), so the run-time writes the last 256. */
@@ -54,11 +56,33 @@ const styled = (n, keys, base) => { const style = { ...base, ...defined(n.props,
 const rowStyle = (n, cross = n.props.align) => styled(n, ["gap"], cross && { crossAlign: cross });
 /** The icon of the plan in Alphy's name: a kit name that differs (ICON_NAMES) becomes Alphy's. check.js checks each name. */
 const iconOf = (n) => (n.props.icon === undefined ? {} : { icon: own(ICON_NAMES, n.props.icon) ?? n.props.icon });
-/** The options of a choice as Alphy's options: each value with its label of the plan (core.js labels), else with the value as its text. */
-const optionsOf = (n, at) => (Array.isArray(n.props.options) ? n.props.options : []).map((value, index) => ({ text: at.plain(n.props.labels?.[index] ?? value), value }));
-// A choice of six options or fewer is a segmented control, which takes no icon (ToolUiCatalog).
+/** Alphy shows at most 30 options of a choice, each with a text of 1 to 100 characters (ToolUiCatalog). */
+const MAX_OPTIONS = 30, MAX_OPTION_TEXT = 100;
+/**
+ * The options of a choice as Alphy's options: each value with its label of the plan (core.js labels), else with the value as its text.
+ * Alphy takes a value of the type of the value of the choice once, a text that is not blank, and at most 30 options (ToolUiCatalog).
+ * The run-time leaves out each option that breaks a rule and cuts a long text, and the compile step names each one. value is the value of the choice, or an item of it.
+ */
+const optionsOf = (n, at, value) => {
+  const given = Array.isArray(n.props.options) ? n.props.options : [], type = typeof (value ?? given[0]), seen = new Set(), out = [];
+  given.forEach((option, index) => {
+    const text = at.plain(n.props.labels?.[index] ?? option), key = type + option;
+    const why = typeof option !== type || !["string", "number", "boolean"].includes(type) || (type === "number" && !Number.isFinite(option)) ? 1 : seen.has(key) ? 2 : !text.trim() ? 3 : out.length === MAX_OPTIONS ? 4 : 0;
+    if (MESSAGES && !at.rowOptions && (why || text.length > MAX_OPTION_TEXT)) {
+      at.fault(`the option ${JSON.stringify(option)} ${["has a text of " + text.length + " characters", `is not a ${type}, and the value of the choice is one`, "is there two times", "has an empty text", `is one more than the ${MAX_OPTIONS} options that Alphy keeps`][why]}. A choice has 1 to ${MAX_OPTIONS} options, each one with a value of its own of the type of the choice and a text of 1 to ${MAX_OPTION_TEXT} characters`);
+    }
+    if (why) return;
+    seen.add(key);
+    out.push({ text: text.slice(0, MAX_OPTION_TEXT), value: option });
+  });
+  if (MESSAGES && !at.rowOptions && !given.length) at.fault(`a choice needs 1 to ${MAX_OPTIONS} options, and this one has none`);
+  return out;
+};
+// A choice of six options or fewer is a segmented control, which takes no icon (ToolUiCatalog). A choice with no option that Alphy takes is not on the screen.
 const choice = (n, at) => {
-  const options = optionsOf(n, at), select = options.length > 6;
+  const options = optionsOf(n, at, n.props.value), select = options.length > 6;
+  if (!options.length) return null;
+  at.inside(options);
   return { type: select ? "select" : "segmented", ...at.field(), ...(select && iconOf(n)), options };
 };
 /**
@@ -73,7 +97,7 @@ const ranged = (type, low, high, pair) => (n, at) => {
     at.fault(`a ${n.type} needs min below max, ${pair ? "two numbers in order" : "its value"} from min to max, and a step above 0 and at most max - min. Now min is ${min}, max is ${max}, the value is ${value}${step === undefined ? "" : `, and the step is ${step}`}`);
   }
   // shortcut: an action of the plan that moves a range out of its bounds is not clamped as a number is (handle); the smoke run shows it as a fault of the screen. Clamp it when a plan needs that.
-  if (!pair) at.bounds(min, max);
+  if (!pair && !inside(value)) at.keep(Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min);
   return { type, ...at.field(pair && ((x) => (fits(x) ? x : undefined))), min, max, ...defined(n.props, ["step"]), ...iconOf(n) };
 };
 /** The controls that the host gives a live input (inputMode "live"), each with the test of the value that the host sends for it (ToolUiCatalog). */
@@ -123,8 +147,12 @@ const NODES = {
   // Alphy keeps a time as minutes, and the kit as "HH:MM".
   TimeField: (n, at) => ({ type: "timeInput", ...at.field(clockOf), ...iconOf(n) }),
   // max= is the kit's own limit: a choice over it changes nothing.
-  Choices: (n, at) => ({ type: "multiChoice", ...at.field((value) => (Array.isArray(value) && !(n.props.max !== undefined && value.length > n.props.max) ? value : undefined)),
-    options: optionsOf(n, at) }),
+  Choices: (n, at) => {
+    const options = optionsOf(n, at, Array.isArray(n.props.value) ? n.props.value[0] : undefined);
+    if (!options.length) return null;
+    at.inside(options);
+    return { type: "multiChoice", ...at.field((value) => (Array.isArray(value) && !(n.props.max !== undefined && value.length > n.props.max) ? value : undefined)), options };
+  },
   Dialog: (n, at) => at.modal(),
   List: (n, at) => at.list(),
   // Alphy's progress binds the share in percent. Dots show the step itself: at most 12, and with one max for all rows of a list.
@@ -164,7 +192,7 @@ const readsRow = (tree) => tree !== null && typeof tree === "object" && ((tree.k
  * The Alphy screen of the kit's tree in the state of now. app is the compiled data: the field of each state value, the kind of
  * each time, date, list, and array, the type of each shown value, and the names. Returns the ui, the shown values by object
  * (d, v, ...), the views of lists that the run-time writes (views, their schemas, and their lines), the controls by action id,
- * the bounds of each number control, the faults as [line, text], for the emitter the line of each node of the ui (owners)
+ * the value that each number control and each choice keeps after the event (fixes), the faults as [line, text], for the emitter the line of each node of the ui (owners)
  * and the stored list of each list node (listRoots), and each surface that the walk draws as {id, width, height, running, commands, line} (drawn).
  */
 export function screen(kit, app, first = false) {
@@ -174,7 +202,7 @@ export function screen(kit, app, first = false) {
   const fields = new Map(app.fields), kinds = app.kinds ?? {}, lists = app.lists ?? {}, day = today(kit);
   // The first walk (the emitter's) fixes the type of each shown value with its first value. The compiled data keeps the numbers, and each other shown value is a text.
   const typeOf = (key, value) => (first ? (app.types[key] ??= typeof value === "number" ? "number" : "string") : app.types[key] ?? "string");
-  const faults = [], controls = new Map(), liveIds = new Set(), rowControls = new Map(), owners = new Map(), listRoots = new Map(), bounds = [], views = {}, viewSchemas = {}, viewOwners = [];
+  const faults = [], controls = new Map(), liveIds = new Set(), rowControls = new Map(), owners = new Map(), listRoots = new Map(), fixes = [], views = {}, viewSchemas = {}, viewOwners = [];
   const slots = { d: new Map(), v: new Map() }, values = {};
   // The bar of each timer need that the run-time moves, by the name of its line, and each surface that the walk draws.
   const timed = new Map(kit.file.of("need").filter((entry) => entry.tree.name === "timer" && !foreground(entry.tree)).map((entry) => [`${entry.key}_bar`, entry.key]));
@@ -192,7 +220,7 @@ export function screen(kit, app, first = false) {
       const field = scope.name(`${kind}:${key}`, key.replace(/\W/g, "_"));
       const type = kind === "v" ? "boolean" : typeOf(`${scope.key}/${field}`, value);
       scope.computed.set(field, type);
-      if (scope.out) scope.out[field] = kind === "v" ? Boolean(value) : shownAs(type, value);
+      if (scope.out) scope.out[field] = kind === "v" ? Boolean(value) : cast(type, value);
       return field;
     }
     const root = expr?.k === "path" && expr.abs ? expr.segs : null;
@@ -201,7 +229,7 @@ export function screen(kit, app, first = false) {
     if (!slots[kind].has(field)) {
       const object = kind + (slots[kind].size < PER_OBJECT ? "" : Math.floor(slots[kind].size / PER_OBJECT) + 1);
       slots[kind].set(field, `${object}.${field}`);
-      (values[object] ??= {})[field] = kind === "v" ? Boolean(value) : shownAs(typeOf(field, value), value);
+      (values[object] ??= {})[field] = kind === "v" ? Boolean(value) : cast(typeOf(field, value), value);
     }
     return slots[kind].get(field);
   };
@@ -234,6 +262,8 @@ export function screen(kit, app, first = false) {
     const bound = (prop) => (expr[prop] && expr[prop].k !== "lit" ? slot("d", `${key}.${prop}`, expr[prop], node.props[prop], at) : null);
     const at = {
       scope, fault, off,
+      // Options that read the row are a fault of their own (above), so their rules give no fault more.
+      rowOptions: MESSAGES && Boolean(scope) && readsRow(expr.options),
       blank: Boolean(scope && !scope.out),
       children: (weighted = false, inner = within) => node.children.map((child, index) => walk(child, child.name ?? `${key}:${index}`, line, { ...inner, weighted })).filter(Boolean),
       // The text of a control: its label, else the kit's name of its line, which a person can read. Never a safe name such as f3.
@@ -251,7 +281,17 @@ export function screen(kit, app, first = false) {
       shown: (prop) => bound(prop) ?? at.computed(prop, node.props[prop]),
       // A value that the run-time computes for the node, such as the share of a progress.
       computed: (prop, value) => slot("d", `${key}.${prop}`, null, value, at),
-      bounds: (min, max) => { if (!at.blank) bounds.push([node, min, max]); },
+      // The value that the bound place of the node gets after the event (handle): a number back into its bounds, a choice back into its options.
+      keep: (value) => { if (!at.blank) fixes.push([node, value]); },
+      // A choice keeps a value that is one of its options, else its first option, and a multi-choice each of its values that is an option, once.
+      // At the start, a value that is no option is a fault of the line.
+      inside: (options) => {
+        const value = node.props.value, members = options.map((option) => option.value);
+        const kept = node.type !== "Choices" ? (members.includes(value) ? value : members[0]) : (Array.isArray(value) ? value : []).filter((item, index, all) => members.includes(item) && all.indexOf(item) === index);
+        if (JSON.stringify(kept) === JSON.stringify(value)) return;
+        if (MESSAGES && !at.blank && !at.rowOptions) fault(`the value ${JSON.stringify(value)} of this ${node.type} is not ${node.type === "Choices" ? "a list of its options, each one once" : "one of its options"}`);
+        at.keep(kept);
+      },
       field: (convert = (value) => value) => {
         let bind;
         if (scope) {
@@ -316,7 +356,7 @@ export function screen(kit, app, first = false) {
         if (MESSAGES && kind !== "bar" && kind !== "line") fault(`a Chart of kind ${at.plain(kind)} is not built yet: give kind="bar" or kind="line"`);
         const [categories, values] = [["labels", "string", "label"], ["values", "number", "value"]].map(([suffix, type, prop]) => {
           const field = name(`chart:${key}:${suffix}`, wished(`${key}_${suffix}`));
-          views[field] = points.map((point) => shownAs(type, point[prop]));
+          views[field] = points.map((point) => cast(type, point[prop]));
           viewSchemas[field] = { type: "array", maxItems: MAX_POINTS, items: type };
           viewOwners.push(line);
           return field;
@@ -361,7 +401,7 @@ export function screen(kit, app, first = false) {
   const tree = kit.tree(), top = walk(tree, "root", "root", { scope: null, weighted: true });
   const children = [...(kind ? [{ type: "text", text: String(kind), style: STYLES.eyebrow }] : []), ...(tree.type === "Column" ? top?.children ?? [] : [top].filter(Boolean))];
   const ui = { type: "theme", preset: preset ?? "clean", ...(palette && { palette }), cornerRadius: 20, children: [{ type: "column", style: { gap: "medium", ...(tree.type === "Column" && top?.style), padding: "medium" }, children }] };
-  return { ui, values, views, viewSchemas, viewOwners, controls, liveIds, bounds, faults, owners, listRoots, drawn };
+  return { ui, values, views, viewSchemas, viewOwners, controls, liveIds, fixes, faults, owners, listRoots, drawn };
 }
 
 /** The Alphy value of a stored value of the kit: a time as minutes, a date as a real date (today for a text that is not one), and each row cast. */
@@ -369,7 +409,8 @@ function alphyOf(app, root, value, day) {
   const kind = app.kinds?.[root];
   if (kind === "list") return Array.isArray(value) ? value.map((row) => castRow(row, app.lists[root], day)) : [];
   if (kind === "array") return Array.isArray(value) ? value : [];
-  return kind === "time" || kind === "date" ? cast(kind, value, day) : value;
+  // A plain number or text stays inside what Alphy's state holds.
+  return kind === "time" || kind === "date" ? cast(kind, value, day) : typeof value === "number" || typeof value === "string" ? cast(typeof value, value) : value;
 }
 
 /** The Alphy state of the kit's state: each value of a state line in its field, the change of each value that an animate moves, then the views and the shown values. */
@@ -428,8 +469,9 @@ export function kitOf(app, state) {
 /**
  * Answers one event of the sandbox request {artifactId, revision, state, event}. app is the compiled data of emit.js, and now
  * is the clock of the host. A read-only event, an action id that the app does not have, an action that changes nothing, and an
- * action that takes a list past its count of rows (app.caps) or an array past Alphy's limit give the state back as it is. A bound
- * number past its bounds comes back at its bound. The reply holds a new ui only when the screen differs from the screen of the state before the event.
+ * action that takes a list past its count of rows (app.caps), an array past Alphy's limit, or the state past 49152 bytes give the state back as it is.
+ * A plain value of another type or a number that is not finite keeps its value from before the event, a bound number past its bounds comes back at
+ * its bound, and a choice comes back into its options. The reply holds a new ui only when the screen differs from the screen of the state before the event.
  * An open and a timer event of a timer or a change that runs move each timer and each change to the clock of now. A pointer event
  * of the surface of a model turns the model (drag.js dragged), and an open ends a drag. A timer event of nothing that runs, also a late one after a pause or after
  * the end of a change, and each other event of a surface give the state back as it is. The host sends a liveInput, never an action, for a live
@@ -452,15 +494,25 @@ export function handle(input, app, now = Date.now()) {
     for (const [root, kind] of Object.entries(kinds)) {
       if ((kind === "list" && kit.state[root]?.length > (own(app.caps, root) ?? MAX_ROWS)) || (kind === "array" && kit.state[root]?.length > MAX_ARRAY)) return { state };
     }
+    // A plain value that the event set to a value of another type, or to a number that is not finite, keeps its value from before the event.
+    let typed = false;
+    for (const [root, path] of app.fields) {
+      const [field, inner] = path.split("."), was = inner ? state[field]?.[inner] : state[field], value = kit.state[root], type = typeof was;
+      if (kinds[root] || !["string", "number", "boolean"].includes(type) || (type === "number" ? Number.isFinite(value) : typeof value === type)) continue;
+      kit.state[root] = type === "number" ? was : cast(type, value);
+      typed = true;
+    }
+    if (typed) kit.recompute();
     let after = screen(kit, app);
     // shortcut: a timed change (animate) that passes the bounds of a field of its value stops at the bound and ends at the next timer event, while the kit's App moves on; make it a fault of the emitter when a plan animates past a bound.
-    const outside = after.bounds.filter(([node, min, max]) => !(node.props.value >= min && node.props.value <= max));
-    if (outside.length) {
-      for (const [node, min, max] of outside) kit.write(node.props.bind, Number.isFinite(node.props.value) ? Math.min(max, Math.max(min, node.props.value)) : min, { it: node.row });
+    if (after.fixes.length) {
+      for (const [node, value] of after.fixes) kit.write(node.props.bind, value, { it: node.row });
       kit.recompute();
       after = screen(kit, app);
     }
     const next = stateOf(kit, app, after), reply = JSON.stringify(after.ui) === JSON.stringify(before.ui) ? { state: next } : { state: next, ui: after.ui };
+    // Alphy keeps a state of at most 49152 bytes (ToolSpec): an event past it changes nothing, as an add to a full list does.
+    if (hostBytes(next) > MAX_STATE_BYTES) return { state };
     // Each reply of an app with surfaces draws each one again, inside Alphy's limits of one reply, and names each timer that runs:
     // the bar of a timer by the id of its surface, and the changes of animate by the field of their state. One list for all.
     if (after.drawn.length) {

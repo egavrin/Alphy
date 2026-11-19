@@ -54,6 +54,15 @@ internal suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,s
     }
 }
 
+/** The plan of items 5 of the final review: a division, a doubling, and a text that grows. kit/test/run.test.js has the same plan. */
+internal val PLAIN_VALUES="app(\"Big\", lang=\"en\")\n\$/r = 0\n\$/n = 1\n\$/note = \"x\"\nneed a = input(\"number\", \"A\", 6, min=0, max=100)\n" +
+    "need b = input(\"number\", \"B\", 2, min=0, max=100)\ndivide = Button(\"Divide\", set(\$/r, \$/a / \$/b))\ndouble = Button(\"Double\", set(\$/n, \$/n * 2))\n" +
+    "grow = Button(\"Grow\", set(\$/note, \$/note + \"0123456789\"))\nroot = Column([a_field, b_field, Text(text(\$/r)), divide, Text(text(\$/n)), double, Text(\$/note), grow])\n"
+/** The plan of item 7: a choice whose options are the names of a list, and a button that sets a choice to a value that is no option. kit/test/run.test.js has the same plan. */
+internal val PICK="app(\"Pick\", lang=\"en\")\nneed people = entries(\"People\", fields={name: \"text\"}, rows=[{name: \"Ann\"}, {name: \"Bo\"}])\n\$/who = \"Ann\"\n" +
+    "pick = Select(\"Who\", \$/who, map(\$/people, \$name))\nneed k = input(\"choice\", \"K\", \"b\", options=[\"a\", \"b\"])\nreset = Button(\"Reset\", set(\$/k, \"\"))\n" +
+    "root = Column([pick, people_view, k_field, reset])\n"
+
 /** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, a range, a map of options, and an icon of a field, a hero figure with an emoji, a bar, and a note, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, and the time of each saved plan with its lists full. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
@@ -761,5 +770,46 @@ class AppFileProofTest {
             if(host != null && host>=50) over+="$name host $host ms"
         }
         assertEquals(emptyList<String>(),over)
+    }
+    /** The action of the node of a ui with this text. */
+    private fun actionOf(spec: ToolSpec,text: String)=nodes(spec.ui).single {it.optString("text") == text}.getString("action")
+    @Test fun aPlainValueThatAnActionWritesKeepsTheRuleOfItsField(): Unit=runBlocking {
+        // Item 5 of the final review: a division by zero, a doubling past the largest safe number, and a text that grows past 2048 characters.
+        // Before the fix, executeEvent refuses each reply. The kit test of item 5 has the same plan.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val spec=parsedAndSmoked(sandbox,"plain",text=PLAIN_VALUES)
+        val app=Session(sandbox,spec,"appfile-plain",JSONObject(spec.initialState).put("n",4503599627370496L).put("note","x".repeat(2040)).toString())
+        val divide=actionOf(spec,"Divide")
+        assertEquals(3.0,app.act(divide).getDouble("r"),0.0)
+        app.act("b_field",0)
+        // A number that is not finite keeps the value from before the action.
+        assertEquals(3.0,app.act(divide).getDouble("r"),0.0)
+        assertEquals(9007199254740991L,app.act(actionOf(spec,"Double")).getLong("n"))
+        assertEquals(2048,app.act(actionOf(spec,"Grow")).getString("note").length)
+    }
+    @Test fun anEventPastTheStateLimitKeepsTheState(): Unit=runBlocking {
+        // Item 6: names of 300 characters fill the state of list.plan to 49152 bytes before its 100 rows (the sorted view holds each row again).
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val app=Session(sandbox,parsedAndSmoked(sandbox,"list","it"),"appfile-list")
+        var rows=3
+        while(true) {
+            app.live("prodotti_new_nome","N".repeat(297)+"%03d".format(rows))
+            app.live("prodotti_new_corsia","Latticini")
+            val added=app.act("prodotti_add").getJSONArray("prodotti").length()
+            if(added == rows) break
+            assertEquals(rows+1,added)
+            rows=added
+        }
+        Log.i("AppFileProofTest","state limit rows=$rows bytes=${app.state.toByteArray().size}")
+        assertTrue("$rows rows",rows in 50 until 100)
+    }
+    @Test fun aChoiceStaysInsideItsOptions(): Unit=runBlocking {
+        // Item 7: the remove of the row whose name the choice holds, and a button that sets a choice to a value that is no option.
+        // The kit test of item 7 has the same plan.
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val spec=parsedAndSmoked(sandbox,"pick",text=PICK)
+        val app=Session(sandbox,spec,"appfile-pick")
+        assertEquals("Bo",app.act("people_remove",row("r1",null)).getString("who"))
+        assertEquals("a",app.act(actionOf(spec,"Reset")).getString("k"))
     }
 }

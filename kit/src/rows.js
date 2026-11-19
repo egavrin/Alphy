@@ -51,22 +51,19 @@ const minutesOf = (text) => {
   return match && Number(match[1]) < 24 && Number(match[2]) < 60 ? Number(match[1]) * 60 + Number(match[2]) : 0;
 };
 export const clockOf = (minutes) => { const at = Math.min(1439, Math.max(0, Math.round(Number(minutes) || 0))); return `${pad(Math.floor(at / 60))}:${pad(at % 60)}`; };
-/** A value of the kit in the form of its Alphy field. kind is "number", "string", "boolean", "time", or "date". */
-export const cast = (kind, value, today) => (kind === "time" ? minutesOf(value) : kind === "date" ? (dayNumber(value) === null ? today : String(value).trim())
-  : kind === "number" ? (typeof value === "number" && Number.isFinite(value) ? value : 0) : kind === "boolean" ? value === true
-  : value === null || value === undefined || typeof value === "object" ? "" : String(value));
-/** A row of the kit as an Alphy row. spec is the field, the Alphy name, and the kind of each stored field (app.lists). */
-export const castRow = (row, spec, today) => ({ id: String(row?.id ?? ""), ...Object.fromEntries(spec.map(([field, safe, kind]) => [safe, cast(kind, row?.[field], today)])) });
-export const own = (map, key) => (Object.hasOwn(map, key) ? map[key] : undefined);
 /** Alphy's state holds a text of at most 2048 characters (ToolValueSchema). */
 const MAX_TEXT = 2048;
 /**
- * A shown value in the type of its field, which the emitter fixes with the first value (app.types): the stateSchema keeps that
- * type. A number field takes 0 for a value that is not a finite number, and a text field is never null, a list, or a record.
- * Each value stays inside what Alphy's state holds: a number of at most 2^53 - 1 either way, and a text of at most 2048 characters.
+ * A value of the kit in the form of its Alphy field. kind is "number", "string", "boolean", "time", or "date". A shown value has the type
+ * of its field, which the emitter fixes with its first value (app.types). A number that is not finite is 0, and a text is never null, a list,
+ * or a record. Each value stays inside what Alphy's state holds: a number of at most 2^53 - 1 either way, and a text of at most 2048 characters.
  */
-export const shownAs = (type, value) => (type === "number" ? (Number.isFinite(value) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(-Number.MAX_SAFE_INTEGER, value)) : 0)
-  : (value !== null && typeof value === "object" ? "" : String(value ?? "")).slice(0, MAX_TEXT));
+export const cast = (kind, value, today) => (kind === "time" ? minutesOf(value) : kind === "date" ? (dayNumber(value) === null ? today : String(value).trim())
+  : kind === "number" ? (Number.isFinite(value) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(-Number.MAX_SAFE_INTEGER, value)) : 0) : kind === "boolean" ? value === true
+  : (value === null || value === undefined || typeof value === "object" ? "" : String(value)).slice(0, MAX_TEXT));
+/** A row of the kit as an Alphy row. spec is the field, the Alphy name, and the kind of each stored field (app.lists). */
+export const castRow = (row, spec, today) => ({ id: String(row?.id ?? ""), ...Object.fromEntries(spec.map(([field, safe, kind]) => [safe, cast(kind, row?.[field], today)])) });
+export const own = (map, key) => (Object.hasOwn(map, key) ? map[key] : undefined);
 /** The field name of a path of the row, such as $name, or null. */
 export const relative = (expr) => (expr?.k === "path" && !expr.abs && expr.segs.length === 1 ? expr.segs[0] : null);
 
@@ -99,7 +96,7 @@ export function rows(screen, node, key, line, expr, at, title) {
   const shown = node.children.filter((child) => child.row).map((child) => {
     const out = {};
     walk(child, keyOf(child), line, { scope: { ...scope, out, id: String(child.row.id ?? "") }, weighted: false, off: at.off });
-    if (scope.computed.has(groupBy)) { try { out[groupBy] = shownAs("string", kit.value(group, { it: child.row })); } catch { out[groupBy] = ""; } }
+    if (scope.computed.has(groupBy)) { try { out[groupBy] = cast("string", kit.value(group, { it: child.row })); } catch { out[groupBy] = ""; } }
     // Alphy reads the label of a row to a person who moves it, so it is never blank: the first text of the row, else its id.
     if (label) out[label] = (spec.filter(([, , kind]) => kind === "string").map(([field]) => cast("string", child.row[field]).trim()).find(Boolean) ?? String(child.row.id)).slice(0, 300);
     return { ...castRow(child.row, spec, day), ...out };

@@ -5,9 +5,10 @@ import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 import { ACTIONS, App, settings } from "../src/core.js";
 import { parseLine } from "../src/dsl.js";
-import { ACCENTS, LIMITS, STAGE, budgetOf, commandsOf, polygonsOf } from "../src/draw.js";
+import { ACCENTS, LIMITS, STAGE, budgetOf, commandsOf, hostBytes, polygonsOf } from "../src/draw.js";
 import { IDLE } from "../src/drag.js";
 import { emit, runtime } from "../src/emit.js";
+import { compileAppFile } from "../src/compile.js";
 import { handle, kitOf } from "../src/run.js";
 import { T0, allPlans, clocked, gateEach, plan, planned, valueAt } from "./helpers.js";
 
@@ -848,4 +849,72 @@ test("source: the source of calc.plan is under 64 KiB and evaluates as a functio
   const reply = run(action);
   expect(reply.state.bill).toBe(200);
   expect(reply).toEqual(handle(action, app));
+});
+
+/** The plan of item 5 of the final review: a division, a doubling, and a text that grows. AppFileProofTest has the same plan. */
+const PLAIN_VALUES = ['app("Big", lang="en")', "$/r = 0", "$/n = 1", '$/note = "x"', 'need a = input("number", "A", 6, min=0, max=100)', 'need b = input("number", "B", 2, min=0, max=100)',
+  'divide = Button("Divide", set($/r, $/a / $/b))', 'double = Button("Double", set($/n, $/n * 2))', 'grow = Button("Grow", set($/note, $/note + "0123456789"))',
+  "root = Column([a_field, b_field, Text(text($/r)), divide, Text(text($/n)), double, Text($/note), grow])"].join("\n");
+/** The action id of the node of a ui with this text. */
+const actionOf = (definition, text) => nodes(definition.ui).find((node) => node.text === text).action;
+
+test("run: a plain value that an action writes keeps the rule of its field (final review 5)", async () => {
+  // ToolValueSchema: a number is finite and at most 2^53 - 1 either way, and a text has at most 2048 characters.
+  const { definition, app } = await compiled(PLAIN_VALUES);
+  const run = session({ initialState: { ...definition.initialState, n: 2 ** 52, note: "x".repeat(2040) } }, app);
+  expect(run.act(actionOf(definition, "Divide")).state.r).toBe(3);
+  run.act("b_field", 0);
+  // A number that is not finite keeps the value from before the action.
+  expect(run.act(actionOf(definition, "Divide")).state.r).toBe(3);
+  expect(run.act(actionOf(definition, "Double")).state.n).toBe(Number.MAX_SAFE_INTEGER);
+  expect(run.act(actionOf(definition, "Grow")).state.note).toHaveLength(2048);
+});
+
+test("run: an event whose state passes 49152 bytes keeps the state (final review 6)", async () => {
+  // Names of 300 characters fill the state of list.plan before its 100 rows: the sorted view holds each row again. AppFileProofTest has the same steps.
+  const { definition, app } = await compiled(plan("list"));
+  const run = session(definition, app);
+  let rows = 3;
+  for (;;) {
+    run.live("prodotti_new_nome", "N".repeat(297) + String(rows).padStart(3, "0"));
+    run.live("prodotti_new_corsia", "Latticini");
+    const added = run.act("prodotti_add").state.prodotti.length;
+    if (added === rows) break;
+    expect(added).toBe(rows + 1);
+    rows = added;
+  }
+  expect(rows).toBeGreaterThan(50);
+  expect(rows).toBeLessThan(100);
+  expect(hostBytes(run.state)).toBeLessThanOrEqual(49152);
+});
+
+/** The plan of item 7: a choice whose options are the names of a list, and a button that sets a choice to a value that is no option. AppFileProofTest has the same plan. */
+const PICK = ['app("Pick", lang="en")', 'need people = entries("People", fields={name: "text"}, rows=[{name: "Ann"}, {name: "Bo"}])', '$/who = "Ann"',
+  'pick = Select("Who", $/who, map($/people, $name))', 'need k = input("choice", "K", "b", options=["a", "b"])', 'reset = Button("Reset", set($/k, ""))',
+  "root = Column([pick, people_view, k_field, reset])"].join("\n");
+
+test("run: a choice stays inside its options, and a choice with no option leaves the screen (final review 7)", async () => {
+  // ToolUiCatalog: 1 to 30 options (6 for segmented), each value once, a text of 1 to 100 characters, and the value of the choice is an option.
+  const { definition, app } = await compiled(PICK);
+  const run = session(definition, app);
+  expect(run.act("people_remove", { key: "r1", value: null }).state.who).toBe("Bo");
+  expect(run.act(actionOf(definition, "Reset")).state.k).toBe("a");
+  const empty = run.act("people_remove", { key: "r2", value: null });
+  expect(nodes(empty.ui).some((node) => node.type === "select" || (node.type === "segmented" && node.text === "Who"))).toBe(false);
+  // A multi-choice keeps only the values that are options, each one once.
+  const tags = await compiled(['app("Tags", lang="en")', '$/opts = ["a", "b"]', '$/tags = ["a", "b"]', 'tags = Choices("Tags", $/tags, $/opts)',
+    'only = Button("Only b", set($/opts, ["b", "b", ""]))', "root = Column([tags, only])"].join("\n"));
+  const picked = session(tags.definition, tags.app).act(actionOf(tags.definition, "Only b"));
+  expect([picked.state.tags, nodes(picked.ui).find((node) => node.type === "multiChoice").options]).toEqual([["b"], [{ text: "b", value: "b" }]]);
+});
+
+test("run: an entries field named id is a fault of the need, and start rows need ids of their own (final review 8)", async () => {
+  // ToolValueSchema: the id of a row is not blank, has at most 128 characters, and no other row has it.
+  const typed = await compileAppFile('app("T", lang="en")\nneed things = entries("Things", fields={id: "text", name: "text"})');
+  // The need made no line, so the plan has no root line either.
+  expect(typed.faults).toEqual(["line: need things: a field named id is the key of each row, which the host gives. Give the field a different name: need things = entries(\"Things\", fields={id: \"text\", name: \"text\"})", "no root line"]);
+  for (const id of ['"a"', '""', `"${"x".repeat(129)}"`]) {
+    const rows = await compileAppFile(`app("T", lang="en")\nneed things = entries("Things", fields={name: "text"}, rows=[{id: "a", name: "x"}, {id: ${id}, name: "y"}])`);
+    expect(rows.faults).toEqual([`need things: a row of $/things has the id ${id.length > 40 ? `"${"x".repeat(129)}"` : id}, and Alphy keys each row by an id of 1 to 128 characters that no other row has. Give each row an id of its own, or no id`]);
+  }
 });

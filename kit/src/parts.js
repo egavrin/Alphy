@@ -139,6 +139,8 @@ const PARTS = {
   // More: field kinds "date", "time", "switch", "count". confirm="Delete?", sheet=true, group=$field, sort=[$day, $time], hidden=true.
   async entries(name, need, { caption, word, count }) {
     const title = need.args[0], opt = need.named, fields = opt.fields?.entries ?? [["name", { k: "lit", v: "text" }]];
+    // Alphy keys each row by its id: not blank and of no other row (ToolValueSchema). A field that a person types must not be that key.
+    if ([...fields, ...(opt.show?.entries ?? [])].some(([field]) => field === "id")) throw new DslError("a field named id is the key of each row, which the host gives. Give the field a different name");
     // A Map, so that a field named "constructor" does not read a property of Object.
     const labels = new Map((opt.labels?.entries ?? []).map(([key, tree]) => [key, tree.v])), text = caption;
     const lines = [`$/${name} = ${show(opt.rows ?? { k: "list", items: [] })}`];

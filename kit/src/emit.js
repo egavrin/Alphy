@@ -73,6 +73,9 @@ export function emit(file) {
       return { type: "array", maxItems: MAX_ARRAY, items: [...types][0] ?? "string" };
     }
     if (!value.every((row) => row && typeof row === "object" && !Array.isArray(row))) return fault(`$/${root} mixes rows and plain values, and a list of Alphy holds one kind`);
+    // Alphy keys each row by an id that is not blank, has at most 128 characters, and that no other row has (ToolValueSchema).
+    const ids = value.map((row) => String(row.id ?? "")), id = ids.find((each, index) => !each.trim() || each.length > 128 || ids.indexOf(each) !== index);
+    if (id !== undefined) fault(`a row of $/${root} has the id ${JSON.stringify(id)}, and Alphy keys each row by an id of 1 to 128 characters that no other row has. Give each row an id of its own, or no id`);
     const kinds = new Map(fields ?? []);
     for (const row of value) for (const [field, inner] of Object.entries(row)) {
       if (field === "id" || kinds.has(field)) continue;
