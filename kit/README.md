@@ -67,7 +67,8 @@ A language outside the table gets the English words and one note of the report t
 The host draws its own words where it has them: the empty text of a list, the close button of a sheet, and the move menu of a reordered list.
 
 A figure prints its number with `amount(x, n)`: at most `n` decimals, no zeros at the end, and the digit groups and the decimal sign of the language of the app ("1.234,5" in `de`, "1,234.5" in `en`, "12 345,5" in `pl` with a no-break space). In `es`, `pl`, and `pt` a number of four digits has no group ("1234,5").
-`fixed`, `money`, and `percent` use the same signs. A plain `text(x)` and a `Metric` of a state value print the number as it is, so a year belongs in `text()`.
+`fixed`, `money`, and `percent` use the same signs. A plain `text(x)` and a `Metric` of a state value print the number as it is, so a year belongs in `text()`, not in a figure.
+A text that a format function printed is for a person: do not read it back as a number. `number(fixed(1234.5))` is 0 in `en`, because "1,234.50" has a group sign.
 
 | Part | Look options | Example |
 | --- | --- | --- |

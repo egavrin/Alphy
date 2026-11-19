@@ -49,6 +49,18 @@ test("entries: an empty press in each add sheet leaves the sheet open and adds n
   expect([done.state.tasks.length, done.state.tasks_s.adding]).toEqual([1, false]);
 });
 
+test("entries: a press in an add sheet that changes a value and adds no row leaves the sheet open", async () => {
+  // An author's add button that counts each press: the empty press changes $/tries, and only a press that adds a row closes the sheet.
+  const { definition, app } = await built('app("Tasks", lang="en")', "$/tries = 0", 'need tasks = entries("Tasks", fields={task: "text", note: "text", due: "date"}, rows=[])',
+    'tasks_add = Button("Add", action=[inc($/tries), when(len(trim($/tasks_new_task)) > 0, append($/tasks, {task: $/tasks_new_task, note: $/tasks_new_note, due: $/tasks_new_due}))], icon="Plus")',
+    'need tries = figure("count", "Tries", $/tries)');
+  const shown = press(definition.initialState, app, "tasks_addRow_open");
+  const kept = press(shown.state, app, "tasks_add");
+  expect([kept.state.tasks, kept.state.tries, kept.state.tasks_s.adding]).toEqual([[], 1, true]);
+  const done = press(live(kept.state, app, "tasks_new_task", "Call").state, app, "tasks_add");
+  expect([done.state.tasks.length, done.state.tries, done.state.tasks_s.adding]).toEqual([1, 2, false]);
+});
+
 test("entries: the smoke run types into the form before it presses the add button, and a button that never changes a value is still a fault", async () => {
   const shop = await planned('app("Spesa", lang="it")\nneed items = entries("Prodotti", fields={name: "text", aisle: "text"}, rows=[])');
   const run = smoke(shop);

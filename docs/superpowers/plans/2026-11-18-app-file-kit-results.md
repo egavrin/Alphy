@@ -454,7 +454,7 @@ The side of the large emoji now depends only on the tree of the card:
 - `shopping-it`: the baseline card holds a `Row` of the emoji and a column, so its emoji is at the start. The plan puts it at the end.
 - `price-filter`: the baseline card has `align: "center"`, so its emoji is above the texts. The plan puts it at the end.
 
-The shopping list starts empty, as in the baseline. The test also types "Latte", presses the apply button of the field and "Aggiungi", and takes the picture `mock-shopping-it-added.png` with the new row.
+The shopping list starts empty, as in the baseline. In Task 11b-2a, the test also typed "Latte", pressed the apply button of the field and "Aggiungi", and took the picture `mock-shopping-it-added.png` with the new row.
 Since Task 11c, the field "Prodotto" is a live input, as in the baseline, and the add of `mock-shopping-it` needs no apply step. The test adds "Latte" and "Pane" with the steps of the baseline (section "Live inputs"), and the picture shows two rows.
 
 ### Runs of Task 11b-2a

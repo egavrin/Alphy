@@ -272,8 +272,9 @@ export function screen(kit, app, first = false) {
         if (live) liveIds.add(action);
         return { text: at.caption(node.props.label), bind, action, ...(live && { inputMode: "live" }) };
       },
-      // An action returns "" or the kit's error text, or false for an event that changes nothing. A press of the add button of an add sheet that adds a row closes the sheet.
-      action: (run = () => { const was = ctx.sheet?.add === node && JSON.stringify(kit.state), done = kit.fire(node); if (done === "" && was && was !== JSON.stringify(kit.state)) kit.state[ctx.sheet.flag] = false; return done; }, suffix = "") => {
+      // An action returns "" or the kit's error text, or false for an event that changes nothing. A press of the add button of an add sheet that adds a row
+      // closes the sheet: an appended row takes the next id of the kit, and a press that changes only other values leaves the sheet open.
+      action: (run = () => { const was = ctx.sheet?.add === node && kit.nextId, done = kit.fire(node); if (done === "" && was && kit.nextId > was) kit.state[ctx.sheet.flag] = false; return done; }, suffix = "") => {
         const id = name("@" + key + suffix, wished(key + suffix));
         register(scope, id, run);
         return id;

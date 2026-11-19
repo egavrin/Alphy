@@ -24,6 +24,12 @@ test("mocks: a cup adds 250 ml to the hero, its bar, and the amount that is left
   expect([d.today_text, d.today_view_2_value, d.left_text]).toEqual(["250 ml", 12.5, "1,750 ml"]);
 });
 
+test("mocks: the daily goal of water is in one need, so a new goal moves the bar and the amount that is left", async () => {
+  const file = await planned(fixture("mock-water-ko").replace('figure("number", "하루 목표", 2000', 'figure("number", "하루 목표", 3000')), { definition, app } = emit(file);
+  const { d } = press(definition.initialState, app, "ml_plus").state;
+  expect([d.today_view_2_value, d.left_text, d.goal_text]).toEqual([(250 / 3000) * 100, "2,750 ml", "3,000 ml"]);
+});
+
 test("mocks: a change of the product and then of the quantity converts each unit again", async () => {
   const { app, state } = await mock("mock-units-pl");
   const sugar = press(state, app, "produkt_field", "cukier").state;

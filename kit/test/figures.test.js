@@ -103,3 +103,8 @@ test("figures: a new figure writes the figures before it again in their new plac
   expect(report(await planned(['app("T")', 'need h = figure("number", "H", 0)', 'need a = figure("number", "A", 1)', 'need b = figure("number", "B", 2)', line].join("\n"))).faults)
     .toContain(`line: need c: c is a row, because three figures or more in one place are rows of one size, and a row shows no icon. Remove icon=: ${line}`);
 });
+
+test("figures: a format that is a name of an Object property, such as constructor, is a plain number", async () => {
+  const { definition } = await built('app("T", lang="en")', 'need x = figure("constructor", "X", 5)', 'need y = figure("toString", "Y", 2.5)');
+  expect([definition.initialState.d.x_text, definition.initialState.d.y_text]).toEqual(["5", "2.5"]);
+});

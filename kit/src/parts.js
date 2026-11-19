@@ -105,7 +105,9 @@ const PARTS = {
     if ((note || goal || goalText) && !main) throw new DslError(`note=, goal=, and goalText= show only on the main figure, and ${name} is not it`);
     if (goalText && !goal) throw new DslError(`goalText= is the caption of the bar to goal=, and ${name} has no goal=. Give goal=, or remove goalText=`);
     if (icon && role === "row") throw new DslError(`${name} is a row, because three figures or more in one place are rows of one size, and a row shows no icon. Remove icon=`);
-    const text = { money: `money($/${name})`, percent: `percent($/${name})`, text: `text($/${name})` }[f] ?? `amount($/${name}, ${need.named.decimals ? show(need.named.decimals) : f === "count" ? 0 : 2})`;
+    // An own key, so that a format such as "constructor" is a number and never a property of Object.
+    const formats = { money: `money($/${name})`, percent: `percent($/${name})`, text: `text($/${name})` };
+    const text = Object.hasOwn(formats, f) ? formats[f] : `amount($/${name}, ${need.named.decimals ? show(need.named.decimals) : f === "count" ? 0 : 2})`;
     // unit="ml" follows the shown number ("2,000 ml"), and the value stays a number for a bar, a check, or an example.
     const lines = [`$/${name} := ${show(formula)}`, `$/${name}_text := ${text}${unit ? ` + " " + ${show(unit)}` : ""}`];
     // An emoji, or a formula that gives one, is the sign of the main figure. A word of letters is the name of a host icon.

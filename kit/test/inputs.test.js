@@ -73,6 +73,27 @@ test("live: a slider is a live input that takes a finite number in its bounds, a
   expect(press(start, app, "price_field", [200, 300]).state.price).toEqual([200, 300]);
 });
 
+test("live: a slider in a list row and in an add sheet takes a liveInput, and a hidden live field of a row changes nothing", async () => {
+  const { definition, app } = await built('app("T", lang="en")', '$/rows = [{name: "A", level: 2, note: ""}, {name: "B", level: 5, note: ""}]', "$/editing = false", "$/adding = false", "$/newLevel = 1",
+    "root = Column([items, open, form])", "items = List($/rows, item)", 'item = Row([Text($name), Slider("Level", $level, min=0, max=10), TextField("Note", $note, visible=$/editing)])',
+    'open = Button("Add", action=set($/adding, true))', 'form = Dialog("Add", [Slider("Level", $/newLevel, min=0, max=10), Button("Save", action=[append($/rows, {name: "C", level: $/newLevel, note: ""}), set($/adding, false)])], visible=$/adding)');
+  const start = definition.initialState, key = start.rows[1].id;
+  expect(every(definition.ui).filter((node) => node.inputMode === "live").map((node) => [node.type, node.action])).toEqual([["slider", "item_1"], ["input", "item_2"], ["slider", "form_0"]]);
+  // The slider of a row sets its row by the key, in the bounds, and an action for it changes nothing.
+  expect(live(start, app, "item_1", { key, value: 7 }).state.rows.map((row) => row.level)).toEqual([2, 7]);
+  expect(live(start, app, "item_1", { key, value: 50 }).state.rows.map((row) => row.level)).toEqual([2, 10]);
+  expect(press(start, app, "item_1", { key, value: 7 })).toEqual({ state: start });
+  // The note field of each row is hidden while $/editing is false.
+  expect(live(start, app, "item_2", { key, value: "x" })).toEqual({ state: start });
+  const editing = { ...start, editing: true };
+  expect(live(editing, app, "item_2", { key, value: "x" }).state.rows.map((row) => row.note)).toEqual(["", "x"]);
+  // The slider of the closed sheet is hidden. In the open sheet it takes the value, and the sheet stays open.
+  expect(live(start, app, "form_0", 4)).toEqual({ state: start });
+  const opened = press(start, app, "open"), moved = live(opened.state, app, "form_0", 4);
+  expect([moved.state.newLevel, moved.state.adding]).toEqual([4, true]);
+  expect(press(moved.state, app, "form_1").state.rows.map((row) => row.level)).toEqual([2, 5, 4]);
+});
+
 test("live: a liveInput in an app with a surface timer draws the surfaces with no timers, and the timer goes on", async () => {
   const { definition, app } = await built('app("T", lang="en")', 'need t = timer("Run", 60, rounds=2, rest=10)', 'need note = input("text", "Note", "")');
   const send = (state, event, ms) => handle({ artifactId: "kit-test", revision: 1, state, event }, app, T0 + ms);

@@ -561,7 +561,9 @@ class AppFileProofTest {
     }
     @Test fun aLiveInputBesideASurfaceTimerKeepsTheTimer(): Unit=runBlocking {
         // A text field beside a timer with rounds on a surface: the kit test of the timer case has the same plan. The reply to a liveInput
-        // holds no timers (SandboxContract), so the host keeps the timer that runs, and the next timer event moves it.
+        // holds no timers (SandboxContract). This test proves that the host's checks take such a reply and that the kit still moves the timer
+        // at the next timer event. The helper Host has no coordinator: in the app, the coordinator keeps its timers when a reply has none
+        // (ArtifactCoordinator.kt 110), and the clock of the surface sends a timer event for each timer that it keeps (NativeToolSurface.kt 228 to 234).
         val context=instrumentation.targetContext
         val sandbox=SandboxClient(context)
         val text="app(\"Note\", lang=\"en\")\nneed t = timer(\"Run\", 60, rounds=2, rest=10)\nneed note = input(\"text\", \"Note\", \"\")\n"

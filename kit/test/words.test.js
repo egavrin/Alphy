@@ -3,6 +3,7 @@
 import { expect, test } from "bun:test";
 import { compileAppFile } from "../src/compile.js";
 import { emit } from "../src/emit.js";
+import { expand } from "../src/parts.js";
 import { WORDS } from "../src/words.js";
 import { runtimeText } from "../build.js";
 import { every, planned } from "./helpers.js";
@@ -65,6 +66,24 @@ test("words: each language of Alphy has each word of the table, and the run-time
   expect(Object.keys(WORDS).sort()).toEqual(["de", "es", "fr", "it", "ja", "ko", "pl", "pt", "ru", "tr", "uk", "zh"]);
   const english = Object.keys(WORDS.ru);
   for (const [language, words] of Object.entries(WORDS)) expect([language, Object.keys(words)]).toEqual([language, english]);
-  const text = await runtimeText();
-  for (const word of ["Добавить", "Aggiungi", "Hinzufügen", "Rimuovi", "Zurücksetzen", "ポイント"]) expect(text.includes(word)).toBe(false);
+  // Each word of more than 3 letters of each language of the table. The English keys are not words of the table: the run-time text holds
+  // them in its own names (CheckBox, ArrowRight, beginStep, the icon Back). Two words of the table are there for another reason: the icon
+  // name Plus (More in fr) and the function padStart (Start in pl). Each one shows only there.
+  const text = await runtimeText(), words = new Set(Object.values(WORDS).flatMap((each) => Object.values(each)).filter((word) => [...word].length > 3));
+  const elsewhere = { Plus: 'icon:"Plus"', Start: "padStart" };
+  expect(words.size).toBeGreaterThan(200);
+  for (const word of words) {
+    const found = text.split(word).length - 1;
+    expect([word, found]).toEqual([word, Object.hasOwn(elsewhere, word) ? text.split(elsewhere[word]).length - 1 : 0]);
+  }
+});
+
+test("words: a change of lang= of the app writes each part again with the words of the new language", async () => {
+  const lines = (lang) => [`app("T", lang="${lang}")`, 'need items = entries("Items", fields={name: "text"})', 'need t = timer("T", 60, rounds=2)', 'need d = deck("D", $/items, front=$name, back=$name)'];
+  const file = await planned(lines("en").join("\n"));
+  const captions = () => every(emit(file).definition.ui).filter((node) => node.type === "button").map((node) => node.text);
+  expect(captions()).toEqual(["Add", "Start", "Pause", "Reset", "Show", "Yes", "No", "Again"]);
+  file.feed(lines("it")[0]);
+  await expand(file);
+  expect(captions()).toEqual(["Aggiungi", "Avvia", "Pausa", "Azzera", "Mostra", "Sì", "No", "Di nuovo"]);
 });
