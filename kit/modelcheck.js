@@ -10,9 +10,9 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { BLOCKS, MISMATCH } from "./src/change.js";
-import { LINE, compileAppFile, linesOf, patchAppFile, readPlanReply } from "./src/compile.js";
-import { runtime } from "./src/emit.js";
+import { BLOCKS, MISMATCH, isRecord } from "./src/change.js";
+import { LINE, compileAppFile, linesOf, needsIn, patchAppFile, readPlanReply } from "./src/compile.js";
+import { dataOf, runtime } from "./src/emit.js";
 import { handle } from "./src/run.js";
 import { runtimeText } from "./build.js";
 import { PROMPT, PROMPT_HASH, changeText, repairText, taskText } from "./prompt.js";
@@ -101,14 +101,9 @@ export function barFaults({ compileMs, stateBytes, plan, definition }) {
 
 // ---- A change case: the stored app of the person and the comparison of its values with the next state.
 
-const HEAD = "\nreturn handle(input, ";
-/** The compiled data of a definition: the JSON that its source gives the run-time. */
-const dataOf = (definition) => JSON.parse(definition.source.slice(definition.source.lastIndexOf(HEAD) + HEAD.length, -2));
 /** The fields of the person in compiled data: the value of each line, and each object of the inner values of a need (change.js nextState). */
 const ownOf = (data) => [...new Set(data.fields.filter(([root]) => root !== "app:empty").map(([, path]) => path.split(".")[0]))];
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const needsIn = (text) => [...text.matchAll(/^\s*need\s+([\p{L}_][\p{L}\p{N}_]*)\s*=/gmu)].map(([, name]) => name);
 
 /**
  * The stored app of a change case: the plan compiled, and its start state after the events of the person through the run-time, as the host keeps it.

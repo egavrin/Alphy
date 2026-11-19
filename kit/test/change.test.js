@@ -12,20 +12,18 @@ import { plansIn } from "../build.js";
 import { T0, fixture, gateEach, plan, valueAt } from "./helpers.js";
 import { settings } from "../src/core.js";
 import { AppFile, show } from "../src/dsl.js";
+import { dataOf } from "../src/emit.js";
 
 // After each test the real clock comes back, also after a failure.
 gateEach("smoke");
 
-const HEAD = "\nreturn handle(input, ";
-/** The compiled data of a definition: the JSON at the end of its source, as the sandbox gives it to handle. */
-const appOf = (definition) => JSON.parse(definition.source.slice(definition.source.lastIndexOf(HEAD) + HEAD.length, -2));
 const event = (state, app, value, now = T0) => handle({ artifactId: "kit-test", revision: 1, state, event: value }, app, now).state;
 const action = (actionId, value = null) => ({ type: "action", actionId, value });
 /** A stored app: its app file, its state schema, and its state after the events, as the host keeps them. */
 async function stored(text, events = [], now = T0) {
   const { definition, faults } = await compileAppFile(text);
   expect(faults).toEqual([]);
-  const app = appOf(definition);
+  const app = dataOf(definition);
   let state = definition.initialState;
   for (const each of events) state = event(state, app, each, now);
   return { appFile: text, stateSchema: definition.stateSchema, state };
@@ -156,7 +154,7 @@ test("change: a removed need keeps its stored field, also after the next event o
   expect(result.faults).toEqual([]);
   expect(result.state.items).toEqual(ITEMS);
   expect(result.definition.stateSchema.items).toEqual(previous.stateSchema.items);
-  const app = appOf(result.definition);
+  const app = dataOf(result.definition);
   expect(app.keep).toContain("items");
   expect(result.definition.initialState.items).toEqual(ITEMS);
   const after = event(result.state, app, action("extra_plus"));
@@ -171,13 +169,13 @@ test("change: a kept field survives a second change, and a need that comes back 
   const second = await compileAppFile(WITHOUT + TWICE, { appFile: WITHOUT, stateSchema: first.definition.stateSchema, state: first.state });
   expect(second.faults).toEqual([]);
   expect(second.state.items).toEqual(ITEMS);
-  expect(appOf(second.definition).keep).toContain("items");
+  expect(dataOf(second.definition).keep).toContain("items");
   // A restore of the first plan: the list need comes back, and so do its rows.
   const back = await compileAppFile(SHOPPING, { appFile: WITHOUT + TWICE, stateSchema: second.definition.stateSchema, state: second.state });
   expect(back.faults).toEqual([]);
   expect(back.state.items).toEqual(ITEMS);
   expect(back.state.d.left_text).toBe("1");
-  expect(appOf(back.definition).keep).toEqual(expect.arrayContaining(["extra"]));
+  expect(dataOf(back.definition).keep).toEqual(expect.arrayContaining(["extra"]));
 });
 
 test("change: back to an older plan with one need less keeps the field of that need", async () => {
@@ -187,7 +185,7 @@ test("change: back to an older plan with one need less keeps the field of that n
   expect(result.faults).toEqual([]);
   expect(result.state.extra).toBe(3);
   expect(result.definition.stateSchema.extra).toBe("number");
-  expect(appOf(result.definition).keep).toEqual(["extra"]);
+  expect(dataOf(result.definition).keep).toEqual(["extra"]);
 });
 
 test("change: back to an older plan with one column less in a list that has rows is a fault that names the column", async () => {
@@ -198,7 +196,7 @@ test("change: names stay when an earlier need with a name that Alphy does not ta
   // v and вода are names that Alphy does not take as a field: each one gets a name of its own that no other line changes.
   const first = lines('app("Names", lang="en")', 'need v = counter("V", 0)', 'need вода = counter("Вода", 0)');
   const previous = await stored(first, [action("v_plus")]);
-  const names = Object.fromEntries(appOf((await compileAppFile(first)).definition).fields);
+  const names = Object.fromEntries(dataOf((await compileAppFile(first)).definition).fields);
   expect(Object.values(names).every((name) => /^f[0-9a-z]{11}$/.test(name))).toBe(true);
   // The action id of the plus button of вода is a name of the screen, so the stored value of вода is set here.
   const start = { ...previous, state: { ...previous.state, [names["вода"]]: 7 } };
@@ -207,7 +205,7 @@ test("change: names stay when an earlier need with a name that Alphy does not ta
   const second = lines('app("Names", lang="en")', 'need d = counter("D", 0)', 'need v = counter("V", 0)', 'need вода = counter("Вода", 0)');
   const changed = await compileAppFile(second, start);
   expect(changed.faults).toEqual([]);
-  const now = Object.fromEntries(appOf(changed.definition).fields);
+  const now = Object.fromEntries(dataOf(changed.definition).fields);
   expect([now.v, now["вода"]]).toEqual([names.v, names["вода"]]);
   expect([changed.state[names.v], changed.state[names["вода"]], changed.state[now.d]]).toEqual([1, 7, 0]);
   // The next change reads the stored names of the second plan from its app file alone, so v keeps 1 and d keeps 0.
@@ -218,7 +216,7 @@ test("change: names stay when an earlier need with a name that Alphy does not ta
 
 test("change: a need that comes back gets only its own kept value, also when another name differs only in letters that Alphy does not take", async () => {
   const first = lines('app("Oil", lang="tr")', 'need other = counter("Other", 0)', 'need yaş = counter("Yaş", 0)');
-  const yas = Object.fromEntries(appOf((await compileAppFile(first)).definition).fields)["yaş"], start = await stored(first);
+  const yas = Object.fromEntries(dataOf((await compileAppFile(first)).definition).fields)["yaş"], start = await stored(first);
   start.state = { ...start.state, [yas]: 3 };
   const without = lines('app("Oil", lang="tr")', 'need other = counter("Other", 0)');
   const kept = await compileAppFile(without, start);
@@ -228,7 +226,7 @@ test("change: a need that comes back gets only its own kept value, also when ano
   for (const name of ["yağ", "ya_"]) {
     const result = await compileAppFile(without + `need ${name} = counter("${name}", 0)\n`, keptApp);
     expect(result.faults).toEqual([]);
-    expect([result.state[Object.fromEntries(appOf(result.definition).fields)[name]], result.state[yas]]).toEqual([0, 3]);
+    expect([result.state[Object.fromEntries(dataOf(result.definition).fields)[name]], result.state[yas]]).toEqual([0, 3]);
   }
   expect((await compileAppFile(first, keptApp)).state[yas]).toBe(3);
 });
@@ -258,13 +256,13 @@ test("change: inner values stay when the need line is the same, and start again 
 test("change: a timer that runs keeps its end when its need line is the same, so the next timer event gives the time of the unchanged app", async () => {
   const text = plan("timer-rounds"), bar = { type: "timer", timerId: "timer_bar" };
   const previous = await stored(text, [action("timer_start")]);
-  previous.state = event(previous.state, appOf((await compileAppFile(text)).definition), bar, T0 + 10000);
+  previous.state = event(previous.state, dataOf((await compileAppFile(text)).definition), bar, T0 + 10000);
   expect(previous.state.timer_s).toMatchObject({ on: true, end: T0 + 40000, spent: 10 });
-  const unchanged = event(previous.state, appOf((await compileAppFile(text)).definition), bar, T0 + 65000);
+  const unchanged = event(previous.state, dataOf((await compileAppFile(text)).definition), bar, T0 + 65000);
   const result = await compileAppFile(text + 'need note = card("Hinweis", "Trink Wasser")\n', previous);
   expect(result.faults).toEqual([]);
   expect(result.state.timer_s).toEqual(previous.state.timer_s);
-  const later = event(result.state, appOf(result.definition), bar, T0 + 65000);
+  const later = event(result.state, dataOf(result.definition), bar, T0 + 65000);
   // 40 s of work, then 20 s of rest, then 5 s of round 2: the same values as the app without the change.
   expect([later.timer, later.timer_s, later.d.timer_clock]).toEqual([unchanged.timer, unchanged.timer_s, unchanged.d.timer_clock]);
   expect([later.timer, later.timer_s.round, later.d.timer_clock]).toEqual([1, 2, "00:35"]);
@@ -468,7 +466,7 @@ const TIED = new Set(["round", "resting", "over"]);
  * button instead: its inner values follow the rules of its phases, which a change of one value would break.
  */
 async function used(text) {
-  const { definition } = await compileAppFile(text), app = appOf(definition), start = definition.initialState, timers = timersOf(text);
+  const { definition } = await compileAppFile(text), app = dataOf(definition), start = definition.initialState, timers = timersOf(text);
   let state = start, ui = definition.ui;
   for (const node of nodesOf(ui)) {
     if (!node.action || !["input", "slider", "numberInput", "segmented", "select", "tabs", "multiChoice", "toggle", "checkbox", "dateInput", "timeInput", "rangeSlider", "button"].includes(node.type)) continue;
@@ -548,7 +546,7 @@ for (const path of plansIn(models)) test(`change (rule 3b): ${basename(path)} wi
   if (more === null) { expect(text).not.toMatch(/rows=\[|= (input|counter)\(/); return; }
   const { definition } = await compileAppFile(text), changedStart = await compileAppFile(more);
   expect(changedStart.faults).toEqual([]);
-  const own = ownFields(appOf(changedStart.definition)), values = (state) => Object.fromEntries(own.map((field) => [field, state[field]]));
+  const own = ownFields(dataOf(changedStart.definition)), values = (state) => Object.fromEntries(own.map((field) => [field, state[field]]));
   // The change moves at least one start value of the person.
   expect(values(changedStart.definition.initialState)).not.toEqual(values(definition.initialState));
   const result = await compileAppFile(more, { appFile: text, stateSchema: definition.stateSchema, state: definition.initialState });

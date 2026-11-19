@@ -208,6 +208,14 @@ export function parseLine(raw) {
   throw new DslError(MESSAGES ? "line not understood" : "");
 }
 
+/**
+ * The head of each kind of line that parseLine reads, by its kind: the start of the line before its value. The head of a need holds its name.
+ * compile.js builds LINE (the lines that a repair reply keeps) and NEED_NAME from them, so a new kind of line needs its head here:
+ * a test ties the kinds of parseLine to these keys (compile.test.js).
+ */
+export const HEADS = { delete: /delete\s+\S/, need: /need\s+([\p{L}_][\p{L}\p{N}_]*)\s*=/u, formula: /\$\/[\p{L}\p{N}_/]+\s*:=/u, state: /\$\/[\p{L}\p{N}_/]+\s*=/u,
+  app: /app\s*\(/, check: /check\s*\(/, component: /[\p{L}_][\p{L}\p{N}_]*\s*=/u };
+
 /** The app as ordered entries by key. Feed lines one at a time: this is also how a stream and a patch arrive. */
 export class AppFile {
   constructor() {

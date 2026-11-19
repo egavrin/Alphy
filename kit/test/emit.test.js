@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { App, settings } from "../src/core.js";
 import { ACCENTS, LIMITS, STAGE, budgetOf, polygonsOf } from "../src/draw.js";
-import { emit } from "../src/emit.js";
+import { dataOf, emit, sourceOf } from "../src/emit.js";
 import { handle, kitOf, screen } from "../src/run.js";
 import { allPlans, every, faultsOf, fixture, plan, planned, press, valueAt } from "./helpers.js";
 import { compileAppFile } from "../src/compile.js";
@@ -937,4 +937,12 @@ test("emit: each other text, container, choice, and row that Alphy refuses is a 
     const faults = await faultsOf(...lines);
     expect({ lines, found: faults.some((fault) => fault.startsWith(part)) }, faults.join(" | ")).toEqual({ lines, found: true });
   }
+});
+
+test("emit: dataOf reads back the compiled data that sourceOf puts after the run-time", async () => {
+  // The JSON of the data holds no raw newline, so a head inside a text of the data is no end of the run-time.
+  const app = { fields: [["a", "a"]], text: "x\nreturn handle(input, y" };
+  expect(dataOf({ source: sourceOf(app) })).toEqual(app);
+  const { definition } = await compileAppFile(plan("calc"));
+  expect(sourceOf(dataOf(definition))).toBe(definition.source);
 });

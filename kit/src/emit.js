@@ -11,8 +11,12 @@ import { ALERT_CAPABILITIES, MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, l
 
 /** The text of the run-time. kit/build.js puts it into the bundle, and a test of the sources sets it from the sources. */
 export const runtime = { text: "" };
+/** The text between the run-time and the compiled data in the source of an app. */
+const HEAD = "\nreturn handle(input, ";
 /** The source of an app: the run-time and the compiled data. */
-export const sourceOf = (app) => `${runtime.text}\nreturn handle(input, ${JSON.stringify(app)});`;
+export const sourceOf = (app) => `${runtime.text}${HEAD}${JSON.stringify(app)});`;
+/** The compiled data of a definition: the JSON that sourceOf puts after the run-time, as the sandbox gives it to handle. */
+export const dataOf = (definition) => JSON.parse(definition.source.slice(definition.source.lastIndexOf(HEAD) + HEAD.length, -2));
 /**
  * The name that the field of the value $/root wishes, and the one of the object of the inner values of a need: stable names (rows.js).
  * A root that Alphy does not take as a name, such as yaş or pages:tab, gets the hash of its key, so two roots never wish one name.

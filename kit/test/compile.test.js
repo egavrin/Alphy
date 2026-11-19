@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext, runInContext } from "node:vm";
-import { compileAppFile, patchAppFile, readPlanReply } from "../src/compile.js";
-import { AppFile } from "../src/dsl.js";
+import { LINE, NEED_NAME, compileAppFile, needsIn, patchAppFile, readPlanReply } from "../src/compile.js";
+import { AppFile, HEADS, parseLine } from "../src/dsl.js";
 import { expand } from "../src/parts.js";
 import { bundle, iconModule, outputs, planCopies, plansIn, script, withoutMessages } from "../build.js";
 import { HOST_ICONS } from "../src/icons.js";
@@ -113,8 +113,18 @@ test("compileAppFile: a field of a list with the name of a line of the list part
 const REPLIES = JSON.parse(readFileSync(new URL("./fixtures/replies.json", import.meta.url), "utf8"));
 /** The plan of each step of a record: the first reply, then each repair reply patched into the plan before it, as the model check does. */
 const stepsOf = (replies) => replies.reduce((plans, reply) => [...plans, plans.length ? patchAppFile(plans.at(-1), reply) : reply], []);
-const NEED = /^need\s+([\p{L}_][\p{L}\p{N}_]*)\s*=/u;
-const needsIn = (text) => text.split("\n").map((line) => NEED.exec(line)?.[1]).filter(Boolean);
+
+test("LINE (U-K item 7): each kind of line that parseLine reads has a head in HEADS, and a line of each kind passes LINE", () => {
+  // The kinds come from the source of parseLine, so a new kind of line with no head fails here, not in a repair reply.
+  const kinds = [...new Set([...parseLine.toString().matchAll(/(?:kind: |entry\()"(\w+)"/g)].map(([, kind]) => kind))].sort();
+  const lines = { delete: "delete old", need: 'need tip = input("percent", "Tip", 10)', formula: "$/total := $/a + 1", state: "$/n = 0",
+    app: 'app("T", lang="en")', check: 'check("adds", [])', component: 'root = Column([Text("a")])' };
+  expect([Object.keys(HEADS).sort(), Object.keys(lines).sort()]).toEqual([kinds, kinds]);
+  for (const [kind, line] of Object.entries(lines)) expect([kind, parseLine(line).kind, LINE.test("  " + line)]).toEqual([kind, kind, true]);
+  expect(["Here is the fix:", "```"].filter((line) => LINE.test(line))).toEqual([]);
+  // The name of a need line, also of one that the kit cannot read.
+  expect(needsIn("need tip = figure(\n  need вода = counter(\nneedle = 1\n")).toEqual(["tip", "вода"]);
+});
 
 test("patchAppFile (A0-K1): a repair reply that deletes a name and writes it again gives the plan that a person gets by hand", async () => {
   const plan = 'app("T", lang="en")\n$/days = []\nneed note = content("a")\nneed old = content("b")\n';
@@ -164,7 +174,7 @@ test("patchAppFile (A0-K1): each of the 41 saved repairs that writes a need of i
       expand(file);
       for (const name of new Set(needsIn(replies[step]).filter((name) => before.includes(name)))) {
         hits++;
-        const lines = plans[step].split("\n").filter((line) => NEED.exec(line)?.[1] === name), written = replies[step].split("\n").findLast((line) => NEED.exec(line)?.[1] === name).trim();
+        const lines = plans[step].split("\n").filter((line) => NEED_NAME.exec(line)?.[1] === name), written = replies[step].split("\n").findLast((line) => NEED_NAME.exec(line)?.[1] === name).trim();
         expect({ key, step, name, lines, lost: (file.partLines.get(name) ?? []).filter((line) => !file.get(line)) }).toEqual({ key, step, name, lines: [written], lost: [] });
       }
     }

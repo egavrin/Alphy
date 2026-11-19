@@ -1,7 +1,7 @@
 // The sandbox entry of the kit: an app file in, the report of the host and the app definition out. kit/build.js makes compileAppFile,
 // patchAppFile, and readPlanReply the globals of the bundle.
 
-import { AppFile } from "./dsl.js";
+import { AppFile, HEADS } from "./dsl.js";
 import { expand } from "./parts.js";
 import { report } from "./check.js";
 import { emit } from "./emit.js";
@@ -58,8 +58,12 @@ export function readPlanReply(text) {
   return word ? { kind: "outside", word } : { kind: "plan", text: lines.join("\n") + "\n" };
 }
 
-/** A line of an app file: a need, a state or formula, the header, a check, a delete, or a component. A repair reply keeps only these, so its prose and fences go. */
-export const LINE = /^\s*(need\s+[\p{L}_][\p{L}\p{N}_]*\s*=|\$\/[\p{L}\p{N}_/]+\s*:?=|app\s*\(|check\s*\(|delete\s+\S|[\p{L}_][\p{L}\p{N}_]*\s*=)/u;
+/** A line of an app file: a line that starts with a head of a kind of parseLine (dsl.js HEADS). A repair reply keeps only these, so its prose and fences go. */
+export const LINE = new RegExp(`^\\s*(?:${Object.values(HEADS).map((head) => head.source).join("|")})`, "u");
+/** A need line with its name as group 1, also a need line that the kit cannot read. */
+export const NEED_NAME = new RegExp(`^\\s*${HEADS.need.source}`, "u");
+/** The name of each need line of a text, also of a need line that the kit cannot read. */
+export const needsIn = (text) => text.split("\n").map((line) => NEED_NAME.exec(line)?.[1]).filter(Boolean);
 
 /**
  * The plan after a repair reply, as a person applies the reply by hand (A0-K1): each delete removes its line, a line with the name of an
@@ -72,7 +76,7 @@ export const LINE = /^\s*(need\s+[\p{L}_][\p{L}\p{N}_]*\s*=|\$\/[\p{L}\p{N}_/]+\
 export function patchAppFile(plan, reply) {
   const file = new AppFile(), unread = [];
   const keep = (line) => {
-    const name = /^\s*need\s+([\p{L}_][\p{L}\p{N}_]*)\s*=/u.exec(line)?.[1];
+    const name = NEED_NAME.exec(line)?.[1];
     if (name) file.entries.set("need:" + name, { kind: "need", key: name, raw: line.trim() });
     return name;
   };

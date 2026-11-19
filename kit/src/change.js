@@ -17,7 +17,8 @@ export const MISMATCH = "the saved data does not match the app file";
 /** The word of each kind of a stored value in a fault of a change. */
 const WORDS = { number: "number", string: "text", boolean: "true or false value", time: "time", date: "date", list: "list of rows", record: "record",
   "array:number": "list of numbers", "array:string": "list of texts", "array:boolean": "list of true or false values" };
-const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+/** A record: an object that is not null and not an array. */
+export const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 /** A value as a text that does not depend on the order of the keys of its records. */
 const canonical = (value) => JSON.stringify(value, (key, inner) => (isRecord(inner) ? Object.fromEntries(Object.keys(inner).sort().map((name) => [name, inner[name]])) : inner));
 /** A schema as a text that does not depend on the order of its fields, or on maxItems, which the room of the screen sets. */
