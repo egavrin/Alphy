@@ -371,20 +371,16 @@ class OpenAiResponsesWorkflowTest {
 
     @Test fun cancelClosesResponsesStream() = assertCancelClosesStream(AiProvider.OPENAI, 5_000) { responsesStart("Hel") }
 
+    // Failure case: the change call reasoned at medium with no output limit, so a change took longer than a new plan.
     @Test fun appFileStageSendsTheInstructionsAloneAtEffortLow() {
-        val request = firstRequest(appFileRequest(CloudGenerationStage.APP_FILE))
-        assertEquals("PLAN SYSTEM", request.json.getString("instructions"))
-        assertEquals("low", request.json.getJSONObject("reasoning").getString("effort"))
-        assertEquals(4096, request.json.getInt("max_output_tokens"))
-        assertFalse(request.json.optJSONObject("text")?.has("format") == true)
-        assertTrue(request.input.none { it.optString("role") == "developer" })
-    }
-
-    @Test fun appFileChangeStageReasonsAtMedium() {
-        val json = firstRequest(appFileRequest(CloudGenerationStage.APP_FILE_CHANGE)).json
-        assertEquals("PLAN SYSTEM", json.getString("instructions"))
-        assertEquals("medium", json.getJSONObject("reasoning").getString("effort"))
-        assertFalse(json.has("max_output_tokens"))
+        for (stage in listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE)) {
+            val request = firstRequest(appFileRequest(stage))
+            assertEquals("PLAN SYSTEM", request.json.getString("instructions"))
+            assertEquals("$stage", "low", request.json.getJSONObject("reasoning").getString("effort"))
+            assertEquals("$stage", 4096, request.json.getInt("max_output_tokens"))
+            assertFalse(request.json.optJSONObject("text")?.has("format") == true)
+            assertTrue(request.input.none { it.optString("role") == "developer" })
+        }
     }
 
     @Test fun appFileStageMakesNoTransportRetry() {

@@ -43,14 +43,9 @@ class AppFileLoopWorkflowTest {
     /** The replies of the loop: one write of the fixture app and a finish. */
     private val loop = listOf(Scripted.Text(agentWrite(FIXTURE_APP)), Scripted.Text(agentFixtureFinish))
 
-    private class Generated(val script: AgentScriptProvider, val events: List<ToolGenerationTraceEvent>, val result: Result<ToolPreview>) {
-        val phases get() = events.filterIsInstance<ToolGenerationTraceEvent.Phase>()
-        val stages get() = script.calls.map { it.generationStage }
-        val outcome get() = phases.single { it.name == "plan_outcome" }.detail
+    private class Generated(val script: AgentScriptProvider, events: List<ToolGenerationTraceEvent>, val result: Result<ToolPreview>) :
+        TracedGeneration(script.calls, events) {
         val spec get() = result.getOrThrow().spec
-        val compiles get() = phases.filter { it.name == "compile" }.map { it.detail }
-        fun at(name: String) = phases.first { it.name == name }.atNanos
-        fun msBetween(from: String, to: String) = (at(to) - at(from)) / 1_000_000
     }
 
     /** One generation of [PROMPT] with the plan step at [planStep]. [provider] can wrap the script. */

@@ -41,5 +41,15 @@ internal class AgentScriptProvider(private val replies: List<Scripted>) : ChatPr
     fun feedback(call: Int) = calls[call].turns.last().text
 }
 
+/** The model calls and the trace of one generation, as the plan step and the change step mark them. */
+internal open class TracedGeneration(private val calls: List<CloudRequest>, val events: List<ToolGenerationTraceEvent>) {
+    val phases get() = events.filterIsInstance<ToolGenerationTraceEvent.Phase>()
+    val stages get() = calls.map { it.generationStage }
+    val outcome get() = phases.single { it.name == "plan_outcome" }.detail
+    val compiles get() = phases.filter { it.name == "compile" }.map { it.detail }
+    fun at(name: String) = phases.first { it.name == name }.atNanos
+    fun msBetween(from: String, to: String) = (at(to) - at(from)) / 1_000_000
+}
+
 /** The agent reply that writes [app]. */
 internal fun writeAppReply(app: JSONObject) = JSONObject().put("tool", "write_app").put("app", app).toString()

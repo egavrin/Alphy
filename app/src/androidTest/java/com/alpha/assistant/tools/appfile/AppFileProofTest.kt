@@ -44,6 +44,8 @@ internal fun controlEvent(root: JSONObject,actionId: String,value: Any?): JSONOb
     val live=ToolUiCatalog.actionTarget(root,actionId)?.node?.let(ToolUiCatalog::isLiveInput) == true
     return JSONObject().put("type",if(live) SandboxContract.LIVE_INPUT_EVENT else "action").put("actionId",actionId).put("value",value ?: JSONObject.NULL)
 }
+/** The value of a row control of a list: the id of the row, and the value of the control or null for a press. */
+internal fun row(key: String,value: Any?)=JSONObject().put("key",key).put("value",value ?: JSONObject.NULL)
 /**
  * The smoke step as AppAgent.validate builds it, from a state: the preview of the first screen.
  * checkUi gets the reply of each event before observeReplay gets the events of its branch.
@@ -227,7 +229,6 @@ class AppFileProofTest {
         }
     }
     private fun ids(rows: JSONArray)=List(rows.length()) {rows.getJSONObject(it).getString("id")}
-    private fun row(key: String,value: Any?)=JSONObject().put("key",key).put("value",value ?: JSONObject.NULL)
     @Test fun listPassesParseAndSmoke(): Unit=runBlocking {
         val sandbox=SandboxClient(instrumentation.targetContext)
         val app=Session(sandbox,parsedAndSmoked(sandbox,"list","it"),"appfile-list")

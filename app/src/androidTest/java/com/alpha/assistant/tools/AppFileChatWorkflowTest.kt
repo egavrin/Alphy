@@ -7,15 +7,19 @@ import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudGenerationStage.AGENT
 import com.alpha.assistant.cloud.CloudGenerationStage.APP_FILE
+import com.alpha.assistant.cloud.CloudGenerationStage.APP_FILE_CHANGE
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Draft
+import com.alpha.assistant.data.Message
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.agent.GenerationSettings
 import com.alpha.assistant.tools.appfile.checked
 import com.alpha.assistant.tools.appfile.plan
+import com.alpha.assistant.tools.appfile.row
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
+import com.alpha.assistant.ui.ShellViewModel
 import com.alpha.assistant.ui.chatDecision
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -56,16 +60,60 @@ class AppFileChatWorkflowTest {
         fixture.launch().use {
             val model = checkNotNull(fixture.model)
             robot.waitUntil { !model.loading }
-            robot.instrumentation.runOnMainSync { model.editDraft(Draft(request)); model.send(search = false) }
-            robot.waitUntil(60_000) { model.activeConversationId == null && !model.tools.busy &&
-                model.snapshot.selected?.messages?.lastOrNull()?.status in setOf("complete", "error") }
-            val card = checkNotNull(model.snapshot.selected).messages.last()
-            assertEquals(card.error, "complete", card.status)
-            // The chat card of the app shows its open button.
-            robot.waitFor(robot.text(R.string.tool_open))
-            var saved: ToolRecord? = null
-            robot.instrumentation.runOnMainSync { saved = model.tools.tools.single { it.id == card.toolId } }
-            test(checkNotNull(saved))
+            test(saved(model, send(model, request)))
+        }
+    }
+
+    /** Sends [request] in the open chat and gives the last message after the request ends. */
+    private fun send(model: ShellViewModel, request: String): Message {
+        val before = model.snapshot.selected?.messages?.size ?: 0
+        robot.instrumentation.runOnMainSync { model.editDraft(Draft(request)); model.send(search = false) }
+        robot.waitUntil(60_000) { model.activeConversationId == null && !model.tools.busy &&
+            model.snapshot.selected?.messages.orEmpty().let { it.size > before && it.last().status in setOf("complete", "error") } }
+        return checkNotNull(model.snapshot.selected).messages.last()
+    }
+
+    /** The saved app of [card]. */
+    private fun saved(model: ShellViewModel, card: Message): ToolRecord {
+        assertEquals(card.error, "complete", card.status)
+        // The chat card of the app shows its open button.
+        robot.waitFor(robot.text(R.string.tool_open))
+        var saved: ToolRecord? = null
+        robot.instrumentation.runOnMainSync { saved = model.tools.tools.single { it.id == card.toolId } }
+        return checkNotNull(saved)
+    }
+
+    // Failure case: a change that the saved data of the person blocks showed no reason in the chat, or it changed the app.
+    @Test fun aChangeThatTheSavedDataBlocksSaysWhyInTheChat() {
+        val shopping = plan("shopping")
+        // The saved rows hold a text in the column aisle, so the kit blocks a number there.
+        val aisleNumber = "need items = entries(\"Items\", fields={name: \"text\", aisle: \"number\", done: \"check\"}, sort=\$aisle, " +
+            "labels={name: \"Product\", aisle: \"Aisle\"}, rows=[{name: \"Milk\", aisle: 2, done: false}, {name: \"Bread\", aisle: 1, done: false}, " +
+            "{name: \"Apples\", aisle: 3, done: false}])"
+        val script = AgentScriptProvider(listOf(Scripted.Text(shopping), Scripted.Text(aisleNumber)))
+        val decisions = ArrayDeque(listOf(chatDecision("create", "Готово.", "A shopping list by aisle"),
+            chatDecision("refine", "Меняю.", "Make the aisle a number")))
+        fixture.install(chat = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
+                if (request.generationStage != null) script.respond(key, request, session, emit)
+                else emit(CloudEvent.RoundComplete(decisions.removeFirst(), false))
+        })
+        fixture.launch().use {
+            val model = checkNotNull(fixture.model)
+            robot.waitUntil { !model.loading }
+            val created = saved(model, send(model, "Список покупок по рядам магазина"))
+            // The person marks Milk as bought.
+            robot.instrumentation.runOnMainSync { model.tools.interact(created, "items_done", row("r1", true)) }
+            robot.waitUntil { model.tools.tools.single { it.id == created.id }.stateVersion > created.stateVersion }
+            var pressed: ToolRecord? = null
+            robot.instrumentation.runOnMainSync { pressed = model.tools.tools.single { it.id == created.id } }
+            val card = send(model, "Пусть ряд будет числом")
+            assertEquals(listOf(APP_FILE, APP_FILE_CHANGE), script.calls.map { it.generationStage })
+            assertEquals("error", card.status)
+            val why = fixture.context.getString(R.string.tool_generation_state)
+            assertEquals(why, card.error)
+            robot.waitFor(robot.text(R.string.tool_generation_state))
+            robot.instrumentation.runOnMainSync { assertEquals(pressed, model.tools.tools.single { it.id == created.id }) }
         }
     }
 

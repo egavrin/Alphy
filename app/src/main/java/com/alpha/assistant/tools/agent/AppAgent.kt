@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.agent
 
+import com.alpha.assistant.R
 import com.alpha.assistant.capabilities.CapabilityCatalog
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudGenerationStage
@@ -30,8 +31,10 @@ import com.alpha.assistant.tools.ToolUiDiagnostic
 import com.alpha.assistant.tools.ToolUiValidationStage
 import com.alpha.assistant.tools.ToolValidationFailure
 import com.alpha.assistant.tools.appfile.AppFileCompiler
+import com.alpha.assistant.tools.appfile.AppFilePrevious
 import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.imageSlots
+import com.alpha.assistant.tools.sameToolJson
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneFailure
 import com.alpha.assistant.tools.three.ThreeSceneProblem
@@ -117,8 +120,15 @@ internal class AppAgent(
     var reproduced = false
         private set
 
-    suspend fun run(request: AppAgentRequest, session: CloudSession): AppAgentResult {
-        val previous = request.base?.let { ToolSpec.parsePersisted(it.spec) }
+    suspend fun run(request: AppAgentRequest, session: CloudSession): AppAgentResult = run(request, session, rebuild = false)
+
+    /**
+     * [rebuild]: the kit could not serve a change of an app with an app file, and the app holds no data of the person.
+     * The loop then builds a new app in its place: it gets no plan step and nothing of the saved app.
+     */
+    private suspend fun run(request: AppAgentRequest, session: CloudSession, rebuild: Boolean): AppAgentResult {
+        val stored = request.base?.let { ToolSpec.parsePersisted(it.spec) }
+        val previous = stored.takeUnless { rebuild }
         // Device results, collections, and live state stay local. The model never sees their values or the saved layout.
         val privateApp = previous != null && (request.privateState || previous.capabilityResults || previous.collections.length() > 0)
         val lesson = request.lesson
@@ -141,8 +151,12 @@ internal class AppAgent(
 
         suspend fun checkActive() = session.checkActive(currentCoroutineContext())
 
-        /** [appFile]: the plan that the kit compiled into [next]. A model definition never sets it. */
-        suspend fun validate(next: JSONObject, appFile: String? = null, onReplay: ((List<String>) -> Unit)? = null): Candidate {
+        /**
+         * [appFile]: the plan that the kit compiled into [next]. A model definition never sets it.
+         * [migrated]: the next state that the kit computed from the saved state of a change.
+         */
+        suspend fun validate(next: JSONObject, appFile: String? = null, migrated: String? = null,
+            onReplay: ((List<String>) -> Unit)? = null): Candidate {
             val definition = JSONObject(next.toString())
             val tag = definition.remove("language")
             val language: AppLanguage? = when {
@@ -168,7 +182,7 @@ internal class AppAgent(
             moveToneIntoStyle(definition.opt("ui"))
             val parsed = try {
                 ToolSpec.parse(service.normalizeAgentDefinition(definition.toString()))
-                    .withAppLanguage(language?.tag).withIcon(previous?.iconId).withAppFile(appFile)
+                    .withAppLanguage(language?.tag).withIcon(stored?.iconId).withAppFile(appFile)
             } catch (failure: ToolValidationFailure) {
                 throw Feedback(listOfNotNull(failure.message, failure.uiDiagnostic?.correction,
                     failure.uiDiagnostic?.let { definitionHint(definition, it) }).joinToString(" "))
@@ -196,7 +210,7 @@ internal class AppAgent(
                 }
             }
             val state = if (previous == null || request.base == null) spec.initialState else try {
-                ToolSpec.stateForRevision(previous, spec, request.base.state)
+                ToolSpec.stateForRevision(previous, spec, request.base.state, migrated)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
@@ -368,38 +382,64 @@ internal class AppAgent(
             }
         }
 
+        fun appFileSteps(call: suspend (CloudGenerationStage, String, String, AppFileLimits) -> AppFileReply) =
+            AppFileSteps(AppFileCompiler(sandbox.context, sandbox), AppFilePrompt.load(sandbox.context), call, request::phase) {
+                request.progress?.invoke(it)
+            }
+
+        // The app of a clean plan of the kit when it passes the host checks. Null: a host check failed, or the check itself failed.
+        suspend fun kitApp(outcome: AppFileOutcome.Clean): AppAgentResult? = try {
+            val candidate = validate(outcome.definition, appFile = outcome.appFile, migrated = outcome.state)
+            val preview = candidate.preview
+            // The loop finds a raw float number on the screen in finish, which an accepted plan does not reach.
+            if (longDecimalOn(AppScreen.render(JSONObject(preview.ui), JSONObject(preview.state), preview.surfaces ?: JSONObject(),
+                    System.currentTimeMillis(), candidate.spec.surfaces)) != null) null
+            else {
+                edited = true
+                request.phase("plan_outcome", "accepted")
+                // A kit definition has an empty description, so the summary is its title.
+                AppAgentResult(preview, candidate.spec.description.ifBlank { candidate.spec.title }, outcome.calls, changed = true)
+            }
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Exception) {
+            if (failure is CloudFailure && failure.code == "cancelled") throw failure
+            null
+        }
+
         // The plan step of a new app. A clean plan that passes the host checks is the app.
         // Each other outcome goes on with the loop of today, and the loop gets nothing of the plan.
         val planStep = request.planStep
-        if (planStep != null && appFileCall != null && previous == null && lesson == null && request.images.isEmpty() &&
+        if (planStep != null && appFileCall != null && request.base == null && lesson == null && request.images.isEmpty() &&
             request.sceneAssets.isEmpty() && !request.testFix) {
-            val outcome = AppFileSteps(AppFileCompiler(sandbox.context, sandbox), AppFilePrompt.load(sandbox.context), appFileCall,
-                request::phase) { request.progress?.invoke(it) }.plan(request.prompt, planStep)
+            val outcome = appFileSteps(appFileCall).plan(request.prompt, planStep)
             checkActive()
             val detail = when (outcome) {
                 is AppFileOutcome.Outside -> "outside:${outcome.word}"
                 is AppFileOutcome.Fallback -> "fallback:${outcome.reason}"
-                is AppFileOutcome.Clean -> try {
-                    val candidate = validate(outcome.definition, appFile = outcome.appFile)
-                    val preview = candidate.preview
-                    // The loop finds a raw float number on the screen in finish, which an accepted plan does not reach.
-                    if (longDecimalOn(AppScreen.render(JSONObject(preview.ui), JSONObject(preview.state), preview.surfaces ?: JSONObject(),
-                            System.currentTimeMillis(), candidate.spec.surfaces)) != null) "fallback:host_check"
-                    else {
-                        edited = true
-                        request.phase("plan_outcome", "accepted")
-                        // A kit definition has an empty description, so the summary is its title.
-                        return AppAgentResult(preview, candidate.spec.description.ifBlank { candidate.spec.title }, outcome.calls, changed = true)
-                    }
-                } catch (failure: CancellationException) {
-                    throw failure
-                } catch (failure: Exception) {
-                    // A failed host check, or a failure of the check itself: the loop of today still serves the request.
-                    if (failure is CloudFailure && failure.code == "cancelled") throw failure
-                    "fallback:host_check"
-                }
+                is AppFileOutcome.Clean -> kitApp(outcome)?.let { return it } ?: "fallback:host_check"
             }
             request.phase("plan_outcome", detail)
+        }
+
+        // The change step of a saved app with an app file. The loop never gets such an app, so no write or edit can drop a saved value.
+        val base = request.base
+        if (previous?.appFile != null && base != null && !request.testFix) {
+            val call = checkNotNull(appFileCall) { "An app with an app file changes only through the kit." }
+            val outcome = appFileSteps(call).change(request.prompt, AppFilePrevious(previous.appFile, previous.schema.toString(), base.state),
+                AppFileLimits())
+            checkActive()
+            val reason = when (outcome) {
+                is AppFileOutcome.Clean -> kitApp(outcome)?.let { return it } ?: "host_check"
+                is AppFileOutcome.Outside -> "outside"
+                is AppFileOutcome.Fallback -> outcome.reason
+            }
+            request.phase("plan_outcome", "fallback:$reason")
+            if (reason == "empty") throw CloudFailure("widget_agent_incomplete", sandbox.context.getString(R.string.tool_generation_unchanged))
+            // A value that differs from the start state is data of the person: the app, its data, and its revision stay.
+            if (!sameToolJson(JSONObject(base.state), JSONObject(previous.initialState)))
+                throw CloudFailure("widget_state", sandbox.context.getString(R.string.tool_generation_state))
+            return run(request, session, rebuild = true)
         }
 
         val guidance = if (lesson != null) "" else {

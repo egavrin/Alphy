@@ -148,17 +148,17 @@ class OpenAiCompatibleProfileTest {
     @Test fun appFileStageTurnsThinkingOff() {
         fun body(provider: AiProvider, stage: CloudGenerationStage) =
             JSONObject(respond(provider, appFileRequest(stage)) { _, output -> json(output) }.single().body)
-        val deepSeek = body(AiProvider.DEEPSEEK, CloudGenerationStage.APP_FILE)
-        assertEquals("disabled", deepSeek.getJSONObject("thinking").getString("type"))
-        val openRouter = body(AiProvider.OPENROUTER, CloudGenerationStage.APP_FILE)
-        assertEquals("low", openRouter.getJSONObject("reasoning").getString("effort"))
-        for (sent in listOf(deepSeek, openRouter)) {
-            assertEquals("PLAN SYSTEM", sent.getJSONArray("messages").getJSONObject(0).getString("content"))
-            assertEquals(4096, sent.getInt("max_tokens"))
-            assertFalse(sent.has("response_format"))
+        // The change stage turns thinking off too: a change call is as short as a new plan.
+        for (stage in listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE)) {
+            val deepSeek = body(AiProvider.DEEPSEEK, stage)
+            assertEquals("$stage", "disabled", deepSeek.getJSONObject("thinking").getString("type"))
+            val openRouter = body(AiProvider.OPENROUTER, stage)
+            assertEquals("$stage", "low", openRouter.getJSONObject("reasoning").getString("effort"))
+            for (sent in listOf(deepSeek, openRouter)) {
+                assertEquals("PLAN SYSTEM", sent.getJSONArray("messages").getJSONObject(0).getString("content"))
+                assertEquals("$stage", 4096, sent.getInt("max_tokens"))
+                assertFalse(sent.has("response_format"))
+            }
         }
-        // The change stage reasons, as the agent stage does.
-        assertHas(DeepSeekProfile.reasoningOn, body(AiProvider.DEEPSEEK, CloudGenerationStage.APP_FILE_CHANGE))
-        assertHas(OpenRouterProfile.reasoningOn, body(AiProvider.OPENROUTER, CloudGenerationStage.APP_FILE_CHANGE))
     }
 }

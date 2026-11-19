@@ -351,10 +351,7 @@ internal sealed interface AppFileReply {
 }
 
 /** The time limits of one app-file call, from its start. */
-internal class AppFileLimits(val firstTextMs: Long = 20_000, val totalMs: Long = 45_000) {
-    // The model check of changes sets the final values of the change call.
-    companion object { val CHANGE = AppFileLimits(60_000, 120_000) }
-}
+internal class AppFileLimits(val firstTextMs: Long = 20_000, val totalMs: Long = 45_000)
 
 /**
  * Sends one app-file call with no JSON mode. A slow call ends at its limit and leaves [session] open for the loop.

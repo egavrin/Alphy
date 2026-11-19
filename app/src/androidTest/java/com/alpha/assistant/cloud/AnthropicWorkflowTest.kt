@@ -260,16 +260,15 @@ class AnthropicWorkflowTest {
         assertEquals(AGENT_SCREENSHOT.substringAfter(","), image.getJSONObject("source").getString("data"))
     }
 
+    // The change stage uses the effort of a new plan: a change call is as short as a new plan.
     @Test fun appFileStageUsesOutputEffortLow() {
-        val json = firstRequest(appFileRequest(CloudGenerationStage.APP_FILE)).json
-        assertEquals("PLAN SYSTEM", json.getString("system"))
-        assertEquals("low", json.getJSONObject("output_config").getString("effort"))
-        assertFalse(json.getJSONObject("output_config").has("format"))
-        assertEquals(4096, json.getInt("max_tokens"))
-        // The change stage reasons, as the agent stage does.
-        val change = firstRequest(appFileRequest(CloudGenerationStage.APP_FILE_CHANGE)).json
-        assertEquals("PLAN SYSTEM", change.getString("system"))
-        assertEquals("high", change.getJSONObject("output_config").getString("effort"))
+        for (stage in listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE)) {
+            val json = firstRequest(appFileRequest(stage)).json
+            assertEquals("PLAN SYSTEM", json.getString("system"))
+            assertEquals("$stage", "low", json.getJSONObject("output_config").getString("effort"))
+            assertFalse(json.getJSONObject("output_config").has("format"))
+            assertEquals("$stage", 4096, json.getInt("max_tokens"))
+        }
     }
 
     @Test fun imagesBecomeBase64Blocks() {

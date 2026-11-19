@@ -317,8 +317,8 @@ class CloudChatProvider internal constructor(
         val agentSources = mutableListOf<Source>()
         val callIds = mutableSetOf<String>()
         repeat(3) { round ->
-            // The model check of changes sets the final reasoning of APP_FILE_CHANGE.
-            val think = request.generationStage == CloudGenerationStage.AGENT || request.generationStage == CloudGenerationStage.APP_FILE_CHANGE
+            // A change call reasons as little as a plan call, so a change is as fast as a new plan.
+            val think = request.generationStage == CloudGenerationStage.AGENT
             val body = JSONObject().put("messages", messages).put("stream", true)
                 .put("thinking", JSONObject().put("type", if (think) "enabled" else "disabled"))
             if (request.expandedWriterOutput) body.put("max_tokens", 131_072)
