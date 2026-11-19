@@ -645,3 +645,151 @@ The budget was 134 calls. The task used 82: 81 first calls and 1 repair. `eviden
 - The times come from this computer, with 4 calls in parallel and a warm cache for 80 of 81 first calls. A cold call from the phone can differ.
 - The function check reads plans. No plan ran on a device. This task measured no look numbers.
 - The assumptions of A0 stay: the widget brief is empty, and the task text of a dialogue screen is the request line, the host line, and an empty brief.
+
+## Changes by lines
+
+Task 2b measured the change call of an app outside the app: the request and the app file go to the model, and the model replies with only the lines that change.
+The scope is `.superpowers/sdd/2026-11-19-app-file-loop/t2b-decisions.md`.
+The runs ran on `c855fda` with `gpt-6.1-terra`, the prompt hash `2fb332c18d90` (no prompt change), and 1 repair call at the effort low. The labels are `change-terra-low` and `change-terra-medium`.
+Raw replies and records are in `evidence/modelcheck/<label>/`, which Git does not keep. Each of the 34 calls completed.
+
+### What ran
+
+- `kit/modelcheck.js` has a change mode for set F (decision 1). For each case it compiles the model plan, runs the events of the person through the run-time (`handle`), and so makes the stored state.
+- The one call has the section "System" as its instructions and `changeText({request, plan})` as its input. The harness reads the reply with `readPlanReply`, merges it with `patchAppFile`, and compiles with `compileAppFile(merged, {appFile, stateSchema, state})`.
+- On faults, one repair call at the effort low gets `repairText` over the change input, the merged plan, and the faults.
+- Set F is `kit/test/fixtures/change-requests.json`: the 16 requests of decision 2 on 8 model plans, and the events of each plan.
+- The harness compares the stored state with the next state by the field names of the previous definition. It compares only the fields whose stored value differs from the start state (rule 3b of `kit/README.md`: a start value is no data of the person). A list compares each stored row by its id and each stored column by its name.
+- The comparison names two groups apart. A value of a line must stay (rule 3). An inner value of a need (`NAME_s`) starts again by design when its line changes (rule 7) or when its list takes new start rows (rule 3c).
+- The harness also records a field that only `app.keep` holds (kept, but no line shows it), and a final plan that equals the stored app file (outcome "unchanged").
+- The harness throws when an event changes nothing. The kit test runs the events of each plan with no call. It checks that the stored state differs from the start, and that the unchanged plan gives no fault, the same state, and no lost value.
+- `holdout-tip-ru-a` ran first and alone, to check the path. Its call had no cached input tokens (0 of 6261). Then `STOP_AT=502 REPAIRS=1 bun kit/modelcheck.js run change-terra-low F gpt-6.1-terra low` ran the other 15 cases, and the same command with `change-terra-medium` and `medium` ran all 16, with 4 calls in parallel.
+
+| Plan | Events of the person | Compared fields (stored value differs from the start) |
+| --- | --- | --- |
+| `holdout-tip-ru` | bill 2400, tip 12, people 3 | `bill`, `tip`, `people` |
+| `showcase-lang-shopping-it` | one row through the add form (Latte, Latticini), and its check mark | `prodotti` |
+| `showcase-lang-habits-uk` | three check marks in rows 1 and 2, and a new name for row 3 | `habits` |
+| `showcase-lang-tea-tr` | the choice Bitki çayı, then Yeşil çay | `tea` |
+| `showcase-lang-kanji-ja` | show, 覚えた, show, まだ | `cards_s` (inner values of the deck) |
+| `showcase-lang-budget-es` | the tab "Añadir gastos", and one row through the add form (Comida, 25.5) | `gastos`, `pestanas_s` (inner value: the open tab) |
+| `e-fuel-pl` | 420 km, 31 l, 6.5 zł | `dystans`, `litry`, `cena` |
+| `d-pythagoras` | scale 3, the next step of the lesson, the answer "10" | `scale`, `lesson`, `quiz_s` (inner value: the answer) |
+
+Implementation choice: a row through the add form counts as one event, as decision 2 lists it. The fixture holds its events of the run-time: the budget row takes five (the tab, the open form, the category, the amount, and the add button).
+
+### The worst outcome
+
+No clean plan lost or moved a stored value of the person. This holds for 28 of 28 clean plans (14 at each effort), by the comparison of each record.
+No clean plan kept a value only in `app.keep`, and no reply renamed a need or a field of a list.
+
+### Numbers
+
+| Measure | Effort low | Effort medium |
+| --- | --- | --- |
+| Clean at the first try | 14 of 16 | 14 of 16 |
+| Clean after the repair | 0 | 0 |
+| Unchanged: the final plan is the stored app file | 1: `showcase-lang-shopping-it-b` | 1: `showcase-lang-shopping-it-b` |
+| Not clean | 0 | 0 |
+| `outside(...)` | 1: `e-fuel-pl-b`, `outside("game")`, as expected | 1: the same |
+| Reply lines of the 15 replies of lines: median, maximum | 1, 3 (`showcase-lang-budget-es-a`) | 1, 3 (`showcase-lang-budget-es-a`) |
+| Lines of the plan of the same 15 cases: median, maximum | 3, 6 | 3, 6 |
+| First call: median, 90th percentile, maximum | 3.882 s, 7.414 s, 11.942 s (`d-pythagoras-b`) | 3.062 s, 7.4 s, 13.225 s (`d-pythagoras-b`) |
+| Time to the first text: median, 90th percentile, maximum | 1.678 s, 6.381 s, 7.919 s | 1.588 s, 4.941 s, 7.924 s |
+| Whole path (each call and each compile): median, 90th percentile, maximum | 4.615 s, 7.42 s, 11.98 s | 3.785 s, 7.42 s, 13.26 s |
+| Output tokens of the first call: median (reasoning) | 109.5 (0) | 125 (0) |
+| Reasoning tokens of all first calls | 263 of 2835 output tokens (9.3%), in 2 of 16 calls | 761 of 3326 output tokens (22.9%), in 7 of 16 calls |
+| Input tokens of the first call: median, and from the cache | 6330, 87.1% | 6330, 81.3% |
+
+- The source of each number is `bun kit/modelcheck.js table change-terra-low --detail` and the same for `change-terra-medium`. The input tokens, the cache, and the count of calls with reasoning come from a scratch count over the same records.
+- Each of the 16 cases has the same outcome at both efforts.
+- Three first calls had no cached input tokens: `holdout-tip-ru-a` at low (4.939 s), and `holdout-tip-ru-a` (2.677 s) and `showcase-lang-shopping-it-b` (2.4 s) at medium.
+- The slowest case at both efforts is `d-pythagoras-b`: the reply writes the drawing line again with three squares (692 and 809 output tokens, 238 and 355 of them reasoning).
+- The time after the first text was at most 4.218 s (low) and 5.301 s (medium). The rest of the time was the wait for the first text. A reply of 27 output tokens with no reasoning (`holdout-tip-ru-b` at low) got its first text at 6.381 s.
+- The one repair call took 3.337 s at low and 3.895 s at medium.
+
+### Each case
+
+"Values of lines" is the comparison of the values of lines. "Inner values" names the inner values that started again. "Serves the request" comes from a read of the final plan and its compiled screen. The low and medium plans were the same in kind for each case, so one verdict covers both, except where the line says so.
+
+| Case | Low | Medium | Values of lines stayed | Inner values | Serves the request |
+| --- | --- | --- | --- | --- | --- |
+| `holdout-tip-ru-a` | clean0 | clean0 | yes | none compared | yes: a percent input of the discount, and the amount for each person takes the discount before the tip |
+| `holdout-tip-ru-b` | clean0 | clean0 | yes: the tip stays at the 12 of the person (rule 3) | none compared | yes in the plan: the start value is 15. The person who set 12 sees no change (finding 2) |
+| `showcase-lang-shopping-it-a` | clean0 | clean0 | yes: the row keeps its values and gets a quantity of 0 | none compared | yes: a column `quantita` of kind count |
+| `showcase-lang-shopping-it-b` | unchanged | unchanged | yes | none compared | no: the repair restored the column, so nothing changed (finding 1) |
+| `showcase-lang-habits-uk-a` | clean0 | clean0 | yes | none compared | yes: a figure of the check marks of the week, which the kit shows as the main element at the top |
+| `showcase-lang-habits-uk-b` | clean0 | clean0 | yes: the marks and the new name stay | none compared | yes: the line without `add=false`, with `addText=` |
+| `showcase-lang-tea-tr-a` | clean0 | clean0 | yes | none compared | yes: the option "Oolong çayı" and 240 s in the timer formula |
+| `showcase-lang-tea-tr-b` | clean0 | clean0 | yes | none compared | partly: a figure of the temperature for each tea, but at the top, not under the timer (finding 3) |
+| `showcase-lang-kanji-ja-a` | clean0 | clean0 | no value of a line compared | the place and the counts of the deck (rule 3c) | yes: ten start rows, and the untouched list shows them |
+| `showcase-lang-kanji-ja-b` | clean0 | clean0 | no value of a line compared | the place and the counts of the deck (rule 3c) | yes: a column `example` with a sentence in each row, and the back of the card shows it |
+| `showcase-lang-budget-es-a` | clean0 | clean0 | yes | the open tab (rule 7) | yes: a budget input and the money left this month. The budget starts at 0, so the person sees -25,50 until a budget is set |
+| `showcase-lang-budget-es-b` | clean0 | clean0 | yes | the open tab (rule 7) | yes: `delete grafico` and the tabs without it |
+| `e-fuel-pl-a` | clean0 | clean0 | yes | none compared | yes: a count of people from 1 and the cost for each person |
+| `e-fuel-pl-b` | outside | outside | no compile | no compile | yes: `outside("game")`, as expected |
+| `d-pythagoras-a` | clean0 | clean0 | yes: also the answer "10" of the first question | none | yes: a second question (13 and 5, answer 12) |
+| `d-pythagoras-b` | clean0 | clean0 | yes | none | yes: three squares on the sides with their areas (9, 16, and 25 times the square of the scale). The labels of the side lengths are gone |
+
+Of the 32 records: 28 yes (with the two `outside("game")` replies), 2 partly (`showcase-lang-tea-tr-b` in each run), and 2 no (`showcase-lang-shopping-it-b` in each run).
+
+### `BLOCKS` and `MISMATCH` faults
+
+| Case | Run | Fault | What the repair did |
+| --- | --- | --- | --- |
+| `showcase-lang-shopping-it-b` | low | "need prodotti: the saved data blocks this change: the saved rows hold values in the column corsia, and the change removes it. Keep the column" | It wrote the line of the stored app file again. The final plan is the stored app file. |
+| `showcase-lang-shopping-it-b` | medium | the same | the same |
+
+No `MISMATCH` fault came. No other fault came.
+
+### Rewrites and renames
+
+- No reply wrote the whole plan again. No reply repeated a line of the plan that it did not change.
+- No reply renamed a need or a field of a list. `showcase-lang-budget-es-b` deleted the need `grafico`, which the request asks for.
+- A reply that changes an option of a list writes the whole line of that need again, because an option is inside the line. `showcase-lang-habits-uk-b` wrote 368 and 382 output tokens for that one line.
+
+### Findings about the kit and the prompt
+
+The task changed nothing in `kit/src` and nothing in the prompt.
+
+1. **A repair of a removed column only undoes the change.** In `showcase-lang-shopping-it-b` the first reply removed the column `corsia` in both runs. The kit refused it with `BLOCKS`, and the repair wrote the stored line again. So the change call ends clean with no change, and the person gets no word. The kit has no way to hide a field of a list, so no clean plan can keep the data and serve this request.
+   - Unresolved decision: the change call sends no repair for a `BLOCKS` fault and tells the person what blocks the change, or it treats a final plan that equals the stored app file as not done. This decision affects the repair step of the change call.
+   - Evidence: `evidence/modelcheck/change-terra-low/showcase-lang-shopping-it-b.0.txt` and `.1.txt`, and the same files of `change-terra-medium`.
+2. **A new default does not reach a person who changed the value.** In `holdout-tip-ru-b` the plan has the start value 15, and the stored 12 stays (rule 3). The result has no note, so the person sees the same tip after the change. Evidence: `evidence/modelcheck/change-terra-low/holdout-tip-ru-b.0.txt`.
+3. **A new figure becomes the main element at the top.** `showcase-lang-tea-tr-b` asks for the temperature under the timer. The reply adds a figure, the merge puts it at the end, and the kit makes the first figure of the app the hero card at the top. Both runs did it. Candidate sentence for the section "Change", which did not run: "A line that you add goes at the end of the app file, and the first figure of an app is its main element at the top: to show a new value under a thing, use content or card." Evidence: `evidence/modelcheck/change-terra-low/showcase-lang-tea-tr-b.0.txt`.
+4. **A new column of kind count starts at 0 in each stored row.** In `showcase-lang-shopping-it-a` the stored "Latte" gets the quantity 0, the value of the add form (rule 3). Evidence: the next state in `evidence/modelcheck/change-terra-low/showcase-lang-shopping-it-a.json`.
+
+Decision 5 permits one change of the section "Change". It did not apply:
+
+- The one failed case is `showcase-lang-shopping-it-b`. Its cause is the repair step and the kit (finding 1), not a reply that a sentence of the section "Change" removes.
+- Finding 3 is one case. One case is no class of bad replies.
+
+### Recommendation for the change call
+
+- The effort low. Each of the 16 cases had the same outcome and the same kind of plan at both efforts. Medium wrote 2.9 times the reasoning tokens (761 against 263) and had the slower maximum (13.225 s against 11.942 s). Its median first call was faster (3.062 s against 3.882 s). One run of each effort cannot separate this from the variation of the API.
+- The time limits:
+  - First text: 15 s. The maximum was 7.924 s.
+  - Total: 30 s. The maximum whole path was 13.26 s. The slowest first call and the slowest repair together take about 17.1 s.
+- One repair is sufficient for these 16 cases, because no plan had a fault after the repair. But the one repair that ran only undid the change (finding 1), so the decision on finding 1 matters more than the count of repairs.
+
+### What the numbers do not show
+
+- One run of each effort, on 16 cases. A result of 0 losses in 28 clean plans says nothing about a rare loss.
+- The kanji cases compared no value of a line. The list of the plan is hidden and the deck has no `mark=`, so the person cannot change the rows. The branch of decision 2 with "a stored mark of the person" cannot happen with this plan.
+- No reply renamed a need, so no model reply tested the path "kept, but not shown". Only the kit test covers it.
+- Each stored state comes from 2 to 5 events, and each list holds at most 3 rows. A state of months of use is larger.
+- The tea timer is the foreground timer of the host and keeps no state, so no stored state held a timer that runs.
+- The controller wrote the requests. Each one is short and asks for one change.
+- The times come from this computer, with 4 calls in parallel and a warm cache for 29 of 32 first calls. A cold call from the phone can differ.
+- Assumption: the change call of the app merges and compiles as the harness does (`patchAppFile`, then `compileAppFile` with the stored app). Test it: log the steps of the change call of the app for one case.
+- The verdicts read plans and compiled screens. No plan ran on a device.
+
+### Calls and tokens
+
+| Effort of each call | Calls | Input tokens | From the cache | Output tokens | Reasoning tokens |
+| --- | --- | --- | --- | --- | --- |
+| `gpt-6.1-terra` low | 18 | 114478 | 100891 | 3087 | 311 |
+| `gpt-6.1-terra` medium | 16 | 101682 | 82684 | 3326 | 761 |
+| All | 34 | 216160 | 183575 | 6413 | 1072 |
+
+The budget was 64 calls. The task used 34: 32 first calls and 2 repairs. `evidence/modelcheck/spend.json` went from 438 to 472, and its log has 34 entries of the two labels. `LIMIT` of `kit/modelcheck.js` is 502.
