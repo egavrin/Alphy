@@ -68,6 +68,15 @@ class AppFileLookTest {
         assertNull(spec.title,model.tools.error)
     }
     private fun state(store: ToolStore,id: String)=JSONObject(checkNotNull(store.tool(id)).state)
+    /**
+     * Waits until an action of the screen carries the state version of the last live value: the shell model publishes the stored version,
+     * and two frames compose it. The host refuses an action with an older version ("The mini-app data changed. Reopen it."), and its
+     * finish button goes before that publication (Task 11b-2b, second round).
+     */
+    private fun published(robot: ShellRobot,model: ShellViewModel,store: ToolStore,id: String) {
+        robot.waitUntil {model.tools.tools.find {it.id == id}?.stateVersion == checkNotNull(store.tool(id)).stateVersion}
+        robot.awaitFrames(2)
+    }
     /** A string of the host in the resources of a language. */
     private fun word(tag: String,resource: Int,vararg args: Any)=instrumentation.targetContext.let {context ->
         context.createConfigurationContext(Configuration(context.resources.configuration).apply {setLocale(Locale.forLanguageTag(tag))}).getString(resource,*args)}
@@ -95,7 +104,7 @@ class AppFileLookTest {
                         picture(robot,picture)
                         assertTrue("$picture ${picture.length()} bytes",picture.isFile && picture.length()>10_000)
                         // The shopping list starts empty: one more picture after a person adds two rows through the screen.
-                        if(name == "mock-shopping-it") added(robot,store,scenario,"appfile-$name",File(directory,"$name-added.png"))
+                        if(name == "mock-shopping-it") added(robot,model,store,scenario,"appfile-$name",File(directory,"$name-added.png"))
                         // The deck and the question change after their main action: one more picture of the back of the card and of the notice of the answer.
                         if(name == "look-deck-es") pressed(robot,"Ver traducción","the apple",File(directory,"$name-shown.png"))
                         if(name == "look-guide-es") pressed(robot,"92–96 °C","¡Correcto! Así el café no se quema.",File(directory,"$name-answered.png"))
@@ -109,8 +118,8 @@ class AppFileLookTest {
         }
     }
     /** Adds two products with the steps of the baseline list (addTwoRows), and takes the picture when the rows show. */
-    private fun added(robot: ShellRobot,store: ToolStore,scenario: ActivityScenario<CloudTestActivity>,id: String,picture: File) {
-        addTwoRows(robot,scenario,KIT_LIST) {state(store,id)}
+    private fun added(robot: ShellRobot,model: ShellViewModel,store: ToolStore,scenario: ActivityScenario<CloudTestActivity>,id: String,picture: File) {
+        addTwoRows(robot,model,store,id,scenario,KIT_LIST)
         picture(robot,picture)
     }
     /** Presses a control through the UI layer, and takes the picture when the text of its reply shows. */
@@ -130,12 +139,13 @@ class AppFileLookTest {
      * 1. Type "Latte" and press "Aggiungi" directly: no row, the host's notice to finish the edit, and the typed text as the stored draft.
      * 2. Finish the edit with the host's finish button and press "Aggiungi": one row, its check mark "Preso", and an empty field.
      * 3. Tap the field, type "Pane", press the action key of the keyboard, and press "Aggiungi": two rows in the state and on the screen.
-     * state reads the stored state of the app. step gets the label of each step when it is done.
+     * Each press after a finish waits for the condition of published. step gets the label of each step when it is done.
      */
-    private fun addTwoRows(robot: ShellRobot,scenario: ActivityScenario<CloudTestActivity>,list: ListFields,step: (String)->Unit={},state: ()->JSONObject) {
+    private fun addTwoRows(robot: ShellRobot,model: ShellViewModel,store: ToolStore,id: String,scenario: ActivityScenario<CloudTestActivity>,
+        list: ListFields,step: (String)->Unit={}) {
         val finish=word("it",R.string.tool_live_input_finish_en,"Prodotto")
-        fun rows()=list.rows(state())
-        fun draft()=list.draft(state())
+        fun rows()=list.rows(state(store,id))
+        fun draft()=list.draft(state(store,id))
         fun empty()=robot.field("Prodotto").text.isNullOrEmpty()
         robot.enter("Prodotto","Latte")
         robot.click("Aggiungi")
@@ -149,6 +159,7 @@ class AppFileLookTest {
         robot.click(finish)
         robot.waitGone(finish)
         step("2-finish-button")
+        published(robot,model,store,id)
         robot.click("Aggiungi")
         robot.waitUntil {rows() == 1}
         robot.waitUntil {empty()}
@@ -165,6 +176,7 @@ class AppFileLookTest {
         robot.waitGone(finish)
         if(robot.keyboardTop(scenario) != null) robot.back()
         step("4-keyboard-action")
+        published(robot,model,store,id)
         robot.click("Aggiungi")
         robot.waitUntil {rows() == 2}
         // With the field empty, each product name on the screen is a node of its row.
@@ -190,11 +202,11 @@ class AppFileLookTest {
         check(folder.mkdirs())
         inShell(folderName,mapOf(id to spec)) {robot,model,store,scenario ->
             open(robot,model,id,spec)
-            addTwoRows(robot,scenario,list,{label ->
+            addTwoRows(robot,model,store,id,scenario,list) {label ->
                 val now=state(store,id)
                 File(folder,"$label.txt").writeText("draft=${list.draft(now)} rows=${list.rows(now)}\n"+robot.texts().joinToString("\n"))
                 picture(robot,File(folder,"$label.png"))
-            }) {state(store,id)}
+            }
         }
     }
     /** Step zero of Task 11c: the baseline list app of the current agent loop needs a finish step between the typing of a product and its row. */
@@ -245,6 +257,7 @@ class AppFileLookTest {
             assertNotEquals(moved,total())
             shownWithNoStep()
             // The step buttons and the apply button of a number field send an ordinary action, which the host refuses while a live edit is open.
+            published(robot,model,store,id)
             robot.click(word("en",R.string.tool_number_increase_en,"People"))
             robot.click(word("en",R.string.tool_generated_apply_en,"People"))
             robot.waitUntil {state(store,id).getInt("people") == 5}
