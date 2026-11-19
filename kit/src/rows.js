@@ -16,6 +16,21 @@ export const MAX_ROWS = 100;
 /** The Alphy type of each kind of row field: a time is minutes, and a date is a "YYYY-MM-DD" text. */
 export const ALPHY = { time: "number", date: "string" };
 
+/** True for a name that Alphy takes as a field and that is not one of the objects of the shown values: d, v, d2, and so on. */
+const takes = (name) => SAFE.test(name) && !REFUSED.has(name) && !/^[dv]\d*$/.test(name);
+/**
+ * The wish of a key of a stored value: its own wish when Alphy takes it, else f and 11 letters or digits of a hash of the key (53 bits).
+ * So the name of a value of the person comes from its key alone, and a line before it cannot change it (loop plan, task 2).
+ */
+export function stable(key, wish) {
+  if (takes(wish)) return wish;
+  let a = 0xdeadbeef, b = 0x41c6ce57;
+  for (const sign of key) { const code = sign.codePointAt(0); a = Math.imul(a ^ code, 2654435761); b = Math.imul(b ^ code, 1597334677); }
+  a = Math.imul(a ^ (a >>> 16), 2246822507) ^ Math.imul(b ^ (b >>> 13), 3266489909);
+  b = Math.imul(b ^ (b >>> 16), 2246822507) ^ Math.imul(a ^ (a >>> 13), 3266489909);
+  return "f" + (4294967296 * (2097151 & b) + (a >>> 0)).toString(36).padStart(11, "0");
+}
+
 /**
  * The Alphy names of the kit's keys. A key gets the name that it wishes when Alphy takes that name and no other key has it, else
  * f<index>. differ keeps by key only the names that are not the wish, and taken holds the names that are given already. A walk of
@@ -27,8 +42,7 @@ export function namer(differ = {}, taken = new Set(Object.values(differ))) {
   return (key, wish = key) => {
     if (named.has(key)) return named.get(key);
     let name = Object.hasOwn(differ, key) ? differ[key] : wish;
-    // d, v, d2, and so on are the objects of the shown values.
-    if (!Object.hasOwn(differ, key) && (!SAFE.test(name) || REFUSED.has(name) || /^[dv]\d*$/.test(name) || taken.has(name))) {
+    if (!Object.hasOwn(differ, key) && (!takes(name) || taken.has(name))) {
       while (taken.has("f" + next)) next++;
       name = differ[key] = "f" + next;
     }

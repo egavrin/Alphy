@@ -12,12 +12,12 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/core.js` | The evaluator: the `App` that holds the state and builds the component tree. It reads no `process` and no file. |
 | `src/check.js` | The report of the host, the check lines, the smoke run that uses each control, and the check of each look option of a component. Only the compile step uses it. |
 | `src/icons.js` | Each icon name of Alphy. `build.js` writes it from `ToolUiCatalog.kt` (`shellIcons`) and `ToolIcons.kt` (the keys of `paths`). Only `parts.js` reads it, and `check.js` takes the icon names from `parts.js`. |
-| `src/rows.js` | The list mapping of the run-time: `rows` maps a List to Alphy's list, and the value forms that the screen and the state share (Alphy names, times, dates, shown values). |
+| `src/rows.js` | The list mapping of the run-time: `rows` maps a List to Alphy's list, and the value forms that the screen and the state share (Alphy names, times, dates, shown values). `stable(key, wish)` gives the name of a stored value: its wish when Alphy takes it, else `f` and 11 letters or digits of a hash of its key, so no other line changes it. |
 | `src/draw.js` | The drawing of a surface for the run-time: `commandsOf` gives the kit's shapes (circle, rect, line, text, polygon, and their outlines) as Alphy's drawing commands with Alphy's colors, `barOf` is the bar of a timer, `budgetOf` counts what commands cost, and `fit` keeps a reply inside `LIMITS` of one reply. |
 | `src/drag.js` | The drag of a 3D model for the run-time: `dragged` turns a model by 0.6 degrees for each pixel that a pointer moves along x, and `IDLE` is the drag when no drag runs, also after each open. |
-| `src/run.js` | The run-time of a compiled app: `handle` answers each event, and `screen` maps each component to its Alphy node. A timer with rounds, a rest, or no alert draws its bar on a surface and asks for a timer event each second while it runs. A timer with an alert and one phase is Alphy's foreground timer. A Drawing is a canvas with one surface that each reply draws again. A value that an `animate` moves keeps its change in the state field `anim` and asks for a timer event each 50 ms while it moves. |
+| `src/run.js` | The run-time of a compiled app: `handle` answers each event, and `screen` maps each component to its Alphy node. A timer with rounds, a rest, or no alert draws its bar on a surface and asks for a timer event each second while it runs. A timer with an alert and one phase is Alphy's foreground timer. A Drawing is a canvas with one surface that each reply draws again. A value that an `animate` moves keeps its change in the state field `anim` and asks for a timer event each 50 ms while it moves. `stateOf` copies each field of `app.keep` from the stored state, so a field that a change kept stays after each event. |
 | `src/emit.js` | The emitter: an expanded app file as Alphy's app definition, whose `source` is the run-time and the compiled data of the app. It gives a fault for each limit of Alphy that the kit's own mapping can pass: state fields, the fields of a need's object, source bytes, and the nodes and depth of the screen. It also keeps the lower limits: a container with no child is a fault of its line, and a plan with no state value keeps one hidden boolean field `d0`, because Alphy keeps 1 to 40 state fields. No line of a plan gets the name `d0`. Each need object has a namer of its own, so the names in it do not depend on the other needs. |
-| `src/compile.js` | The sandbox entry `compileAppFile`: an app file in; the faults and notes of the report, the definition, and `hole` out. `hole` is true when the file has a need of kind `hole`, also with faults, so the plan step of the app gives that plan to its loop. The merge `patchAppFile(plan, reply)`: the plan text after a repair reply (section "Repair replies"). The reader `readPlanReply(text)`: `{kind: "outside", word}` for a reply of the one line `outside("word")`, with a word of 1 to 16 small Latin letters or digits, such as `3d`. Each other reply is `{kind: "plan", text}`: its lines with no empty line and no markdown fence line, and a final newline. Prose stays, and the compile reports it. |
+| `src/compile.js` | The sandbox entry `compileAppFile(text, previous?)`: an app file in; the faults and notes of the report, the definition, `hole`, and `state` out. With `previous`, `state` is the next state of a change (section "Changes of an app"), else `null`. `hole` is true when the file has a need of kind `hole`, also with faults, so the plan step of the app gives that plan to its loop. The merge `patchAppFile(plan, reply)`: the plan text after a repair reply (section "Repair replies"). The reader `readPlanReply(text)`: `{kind: "outside", word}` for a reply of the one line `outside("word")`, with a word of 1 to 16 small Latin letters or digits, such as `3d`. Each other reply is `{kind: "plan", text}`: its lines with no empty line and no markdown fence line, and a final newline. Prose stays, and the compile reports it. |
 | `build.js` | The bundle of the modules as one plain script for the sandbox, with the globals `compileAppFile`, `patchAppFile`, and `readPlanReply`, the run-time text in it (minified by `Bun.build`), the prompt asset `app/src/main/assets/appfile/prompt.json` (`promptAsset`), and the copies of the plans for the device tests. |
 | `prompt.js` | The texts of the prompt for the model check and the app: `PROMPT` (the sections of `prompt.md` by heading), `PROMPT_HASH`, and the task texts `taskText`, `repairText`, and `changeText`. `prompt.json` holds the four sections as `system`, `repair`, `dialogue`, and `change`, and the templates `repairTask` and `changeTask`. The host puts the plan with no newline at its end in `{{plan}}`, the faults joined by `"\n- "` in `{{faults}}`, and the task text or the request in `{{task}}` or `{{request}}`. A filled template is then the text of `repairText` or `changeText`. |
 | `prompt.md` | The plan prompt: the section "System" is the instructions of each plan call and repair call, "Repair" is the rule of a repair call, "Dialogue" is the host line under the request of a screen of a voice dialogue, and "Change" is the rule of a change call of an app (after the request and the app file). No model check measured "Change" yet. `test/prompt.test.js` checks each kind, option, icon, and example of it against the kit. The section "System" names no `hole`: the kit keeps the kind and its tests. A request that no kind serves gets `outside(...)` with one of six words: `game`, `drawing`, `3d`, `picture`, `device`, or `other` for a main thing that no kind gives and that is none of the others. |
@@ -57,6 +57,34 @@ A repair reply writes again each wrong line of a plan (`prompt.md` section "Repa
   Each other plan line that the kit could not read goes. A reply line that the kit cannot read stays at the end, so the compile names its fault.
 
 `modelcheck.js` `merge` uses it, and the device bundle defines it, for the repair loop of the app.
+
+## Changes of an app
+
+`compileAppFile(text, previous)` compiles a changed app file and gives the next state of the stored app.
+`previous` is `{appFile, stateSchema, state}` as the host keeps it.
+The result is `{faults, notes, definition, language, hole, state}`. `state` is `null` with a fault, and with no `previous`.
+The rules keep each stored value of the person, and they never move a value to another line:
+
+1. The kit compiles `previous.appFile` again. A fault there is the one fault `kit: the saved data does not match the app file` (`MISMATCH`).
+   So are a field of the person that `previous.stateSchema` does not hold with the same schema, and a field of the schema that the state does not hold.
+2. The name of a stored value comes from its key alone (`rows.js` `stable`), so a line that a change adds before it cannot change its name.
+3. A root of a line that stays with the same kind keeps its value. A list keeps its rows by id.
+   A new column gets the value that the first `append` of the list gives a new row, such as the start value of the add form.
+4. These changes are faults that start with `need NAME: the saved data blocks this change: ` (`BLOCKS`), and the kit names what blocks it:
+   - A value of another kind, such as a number that becomes a text, or a time that becomes a number. An empty list can change its kind.
+   - A column that the change removes or retypes in a list with at least one row.
+   - A saved value that is no option or is outside the bounds of the change, which the screen would change.
+   - A new value with the name of a saved value of the person.
+   - More than 40 fields with the kept ones: `the app would keep more than 40 values`, with the first need that adds a field.
+   - A state of more than 49152 bytes, a list with more rows than the screen of the change has room for, and an app that stops on the saved data.
+5. A stored field that the change does not name stays with its schema and its value, and `app.keep` lists it.
+   A list or an array that the app computed, such as the view of a sorted list, stays empty. A root that comes back later gets its kept value again.
+6. The values that the app computes come from the changed app. A change of `animate` that runs goes on by its root, and a drag starts again.
+7. The inner values of a need (the object `NAME_s`) stay when the need line is the same text, else they start again.
+   So a timer that runs goes on to the same end of its phase when its line stays, and it stands at the start of round 1 when its line changes.
+   The count of the work phases that ended is a value of its own, so it stays.
+
+`test/change.test.js` holds a test for each rule, and a test of each plan of `test/fixtures/model/`: a stored state that differs from its start in each value comes back after the same plan, and after the plan with a need more at the first line or at the last line.
 
 The compile step and the run-time have budgets, so a plan cannot use all the memory or time of the sandbox:
 

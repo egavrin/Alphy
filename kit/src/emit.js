@@ -4,20 +4,27 @@
 import { App, foreground, given, own, shownFormulas } from "./core.js";
 import { show } from "./dsl.js";
 import { FIELD_KINDS, faultName, needsOf } from "./parts.js";
-import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer } from "./rows.js";
+import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, stable } from "./rows.js";
 import { LIMITS, budgetOf, utf8 } from "./draw.js";
 import { IDLE } from "./drag.js";
 import { ALERT_CAPABILITIES, MAX_ARRAY, MAX_POINTS, PER_OBJECT, TYPED, header, load, screen, stateOf } from "./run.js";
 
 /** The text of the run-time. kit/build.js puts it into the bundle, and a test of the sources sets it from the sources. */
 export const runtime = { text: "" };
+/** The source of an app: the run-time and the compiled data. */
+export const sourceOf = (app) => `${runtime.text}\nreturn handle(input, ${JSON.stringify(app)});`;
+/** The name that the field of the value $/root wishes, and the one of the object of the inner values of a need: stable names (rows.js). */
+export const rootWish = (root) => stable("$/" + root, root.replace(/\W/g, "_"));
+export const objectWish = (need) => stable("need:" + need, need + "_s");
 /**
  * The limits of Alphy that come from the kit's own mapping, so the author of a plan cannot see them: top-level state fields
  * (ToolValueSchema.validateSchemas), source bytes (SandboxContract.MAX_SOURCE_BYTES), and the nodes, depth, and children of a ui
  * (ToolUiCatalog), and the render work of a screen (ToolUiCatalog.MAX_RENDER_WORK). ToolSpec.parse stays the check of the ui bytes
  * and the state bytes. MIN_ROWS is the kit's own limit: a list with room for fewer rows is a fault.
  */
-const MAX_FIELDS = 40, MAX_SOURCE_BYTES = 65536, MAX_NODES = 512, MAX_DEPTH = 8, MAX_CHILDREN = 50, MAX_RENDER_WORK = 2048, MIN_ROWS = 20;
+export const MAX_FIELDS = 40;
+export const MAX_SOURCE_BYTES = 65536;
+const MAX_NODES = 512, MAX_DEPTH = 8, MAX_CHILDREN = 50, MAX_RENDER_WORK = 2048, MIN_ROWS = 20;
 /** The nodes whose options cost render work (ToolUiCatalog.choiceTypes). */
 const CHOICES = new Set(["select", "tabs", "singleChoice", "multiChoice", "segmented", "navigationBar", "navigationRail", "menu"]);
 const SCALARS = new Set(["number", "string", "boolean"]);
@@ -36,11 +43,12 @@ const UNITS = { commands: "commands", pairs: "coordinate pairs", chars: "text ch
  * formulas, the components, and the need line of each timer that it moves), the field of each state value, the kind of each time, date, list, and array, the fields of each
  * list, the count of rows of each shown list, each shown value that is a number, the names of the screen that differ from their wish,
  * the next row id, the values that an entries need shows for each row, and the field of the changes of animate with the key of each value (anim).
- * Faults give no definition.
+ * Faults give no definition. With a definition, owners gives the need or the line of each field in the order of the fields, and objects
+ * gives the need of each object of inner values: compile.js reads both for the next state of a change.
  */
 export function emit(file) {
   if (!runtime.text) throw new Error("emit.js has no run-time text: kit/build.js gives it");
-  const kit = new App(file), { title, lang } = header(kit), faults = [], stateSchema = {}, owners = [], needObjects = new Map();
+  const kit = new App(file), { title, lang } = header(kit), faults = [], stateSchema = {}, owners = new Map(), needObjects = new Map();
   // Each event starts its kit with no start values, so a new row gets an id after the ids that the start rows took.
   const app = { lines: "", fields: [], types: {}, names: {}, kinds: {}, lists: {}, caps: {}, next: kit.nextId };
   // The run-time gets the field of each state value from app.fields, so these names stay out of app.names.
@@ -86,7 +94,7 @@ export function emit(file) {
     if (value.length > MAX_ROWS) return fault(`$/${root} starts with ${value.length} rows, and a list of Alphy holds at most ${MAX_ROWS}`);
     const rowName = namer();
     rowName("$id", "id");
-    app.lists[root] = [...kinds].map(([field, kind]) => [field, rowName("$" + field, field), kind]);
+    app.lists[root] = [...kinds].map(([field, kind]) => [field, rowName("$" + field, stable("$" + field, field)), kind]);
     app.kinds[root] = "list";
     return { type: "list", maxItems: MAX_ROWS, fields: { id: "string", ...Object.fromEntries(app.lists[root].map(([, safe, kind]) => [safe, own(ALPHY, kind) ?? kind])) } };
   };
@@ -96,8 +104,8 @@ export function emit(file) {
    */
   const place = (root, need, owner, schema, wish = root.slice(need?.length + 1)) => {
     const inner = typeof schema === "string" && need !== undefined && root !== need && root.startsWith(need + "_");
-    const field = inner ? name("need:" + need, need + "_s") : name("$/" + root, root.replace(/\W/g, "_"));
-    if (!stateSchema[field]) owners.push(owner);
+    const field = inner ? name("need:" + need, objectWish(need)) : name("$/" + root, rootWish(root));
+    if (!stateSchema[field]) owners.set(field, owner);
     if (!inner) { stateSchema[field] = schema; app.fields.push([root, field]); return; }
     // Each object has a namer of its own, so the names in it do not depend on the other needs of the plan.
     if (!keyNames.has(field)) keyNames.set(field, namer());
@@ -148,7 +156,7 @@ export function emit(file) {
     const key = namer(), first = moved.values().next().value;
     app.anim = { field: name("anim", "anim"), keys: [...moved.keys()].map((root) => [root, key("$/" + root, root.replace(/\W/g, "_"))]) };
     stateSchema[app.anim.field] = { type: "object", fields: Object.fromEntries(app.anim.keys.map(([, inner]) => [inner, RUN])) };
-    owners.push(first);
+    owners.set(app.anim.field, first);
     if (moved.size > PER_OBJECT) faults.push(`${first}: animate moves ${moved.size} values of the app, and an object of Alphy holds at most ${PER_OBJECT} fields. Animate fewer values`);
   }
   // A model with a turn gets the pointer events of its surface: the drag that runs (drag.js IDLE) is one field of the state.
@@ -156,7 +164,7 @@ export function emit(file) {
   if (turned) {
     app.drag = name("drag", "drag");
     stateSchema[app.drag] = { type: "object", fields: Object.fromEntries(Object.entries(IDLE).map(([key, value]) => [key, typeof value])) };
-    owners.push(label(turned.key));
+    owners.set(app.drag, label(turned.key));
   }
   for (const [field, need] of needObjects) {
     const count = Object.keys(stateSchema[field].fields).length;
@@ -168,7 +176,7 @@ export function emit(file) {
   for (const [key, type] of Object.entries(app.types)) if (type === "string") delete app.types[key];
   for (const [line, text] of shown.faults) { const fault = `${label(line)}: ${text}`; if (!faults.includes(fault)) faults.push(fault); }
   Object.assign(stateSchema, shown.viewSchemas);
-  owners.push(...shown.viewOwners.map(label));
+  Object.keys(shown.viewSchemas).forEach((field, index) => owners.set(field, label(shown.viewOwners[index])));
   for (const [object, values] of Object.entries(shown.values)) {
     stateSchema[object] = { type: "object", fields: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, typeof value])) };
   }
@@ -180,7 +188,7 @@ export function emit(file) {
     stateSchema.d0 = "boolean";
   }
   // The objects of the shown values come first, so the fault names the need or the line whose field is the 41st.
-  const over = owners[MAX_FIELDS - Object.keys(shown.values).length];
+  const over = [...owners.values()][MAX_FIELDS - Object.keys(shown.values).length];
   if (over) faults.push(`${over}: the app needs more than ${MAX_FIELDS} state fields from here on, and Alphy keeps at most ${MAX_FIELDS}. Use fewer needs`);
   // The theme and the column of the app are depths 0 and 1. A node that the kit adds (the text of a banner) belongs to its line.
   // The template of a row is one level below its list, and it counts once.
@@ -265,11 +273,11 @@ export function emit(file) {
   const shows = shownFormulas(file);
   if (shows.length) app.shown = show({ k: "map", entries: shows });
   if (faults.length) return { definition: null, language, faults, app };
-  const source = `${runtime.text}\nreturn handle(input, ${JSON.stringify(app)});`, size = utf8(source);
+  const source = sourceOf(app), size = utf8(source);
   if (size > MAX_SOURCE_BYTES) return { definition: null, language, faults: [`app: the source is ${size} bytes, and Alphy keeps at most ${MAX_SOURCE_BYTES} bytes. Use shorter texts and fewer lines`], app };
   // The alert of the host's countdown asks for its capabilities, and Alphy refuses a timer whose app does not declare them.
   const capabilities = file.of("component").some((entry) => entry.tree.k === "call" && entry.tree.name === "Timer") ? [...ALERT_CAPABILITIES] : [];
   const definition = { formatVersion: 3, title, description: "", capabilities, ...(surfaces.length && { surfaces }), stateSchema, initialState: stateOf(kit, app, shown), ui: shown.ui, source };
-  return { definition, language, faults: [], app };
+  return { definition, language, faults: [], app, owners, objects: needObjects };
 }
 

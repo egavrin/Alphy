@@ -16,7 +16,7 @@ export const PER_OBJECT = 32;
 /** An array of Alphy holds at most 512 values (ToolValueSchema). */
 export const MAX_ARRAY = 512;
 /** Alphy keeps a state of at most 49152 bytes (ToolSpec). */
-const MAX_STATE_BYTES = 49152;
+export const MAX_STATE_BYTES = 49152;
 /** The fields that a person types into. An add form with more than two of them is a bottom sheet. A Dialog that holds any field is one too. */
 export const TYPED = new Set(["TextField", "NumberField", "DateField", "TimeField"]);
 /** A chart of Alphy draws at most 256 points (ToolUiCatalog), so the run-time writes the last 256. */
@@ -435,13 +435,17 @@ function alphyOf(app, root, value, day) {
   return kind === "time" || kind === "date" ? cast(kind, value, day) : typeof value === "number" || typeof value === "string" ? cast(typeof value, value) : value;
 }
 
-/** The Alphy state of the kit's state: each value of a state line in its field, the change of each value that an animate moves, then the views and the shown values. */
-export function stateOf(kit, app, shown) {
+/**
+ * The Alphy state of the kit's state: each value of a state line in its field, the change of each value that an animate moves, each
+ * kept field of a changed app (app.keep) as the stored state given has it, then the views and the shown values.
+ */
+export function stateOf(kit, app, shown, stored = {}) {
   const state = {}, day = today(kit);
   for (const [root, path] of app.fields) {
     const [field, inner] = path.split("."), value = alphyOf(app, root, kit.state[root], day);
     if (inner) (state[field] ??= {})[inner] = value; else state[field] = value;
   }
+  for (const field of app.keep ?? []) state[field] = stored[field];
   if (app.anim) state[app.anim.field] = Object.fromEntries(app.anim.keys.map(([root, key]) => {
     const run = kit.state._run?.find((each) => each.path === root);
     return [key, run ? { from: run.from, to: run.to, start: run.start, end: run.end, at: run.at } : STILL];
@@ -535,7 +539,7 @@ export function handle(input, app, now = Date.now()) {
       kit.recompute();
       after = screen(kit, app);
     }
-    const next = stateOf(kit, app, after), reply = JSON.stringify(after.ui) === JSON.stringify(before.ui) ? { state: next } : { state: next, ui: after.ui };
+    const next = stateOf(kit, app, after, state), reply = JSON.stringify(after.ui) === JSON.stringify(before.ui) ? { state: next } : { state: next, ui: after.ui };
     // Alphy keeps a state of at most 49152 bytes (ToolSpec): an event past it changes nothing, as an add to a full list does.
     // An event whose work passes the budget of the kit (core.js STEPS) changes nothing too.
     if (kit.tripped || hostBytes(next) > MAX_STATE_BYTES) return { state };
