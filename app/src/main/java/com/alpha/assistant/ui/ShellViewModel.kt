@@ -1907,7 +1907,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                                         TestFixStatus.PASSED -> R.string.chat_app_test_passed
                                         TestFixStatus.UNVERIFIED -> R.string.chat_app_test_unverified
                                         TestFixStatus.UNREPAIRED -> R.string.chat_app_test_unrepaired
-                                        TestFixStatus.VERIFIED -> R.string.chat_app_test_unsaved
+                                        // A fix by lines: no run checked it.
+                                        TestFixStatus.VERIFIED -> if (result.checkedByRun) R.string.chat_app_test_unsaved
+                                            else R.string.chat_app_test_unsaved_unchecked
                                     }, testTarget.revision)
                                     result.checkedByRun -> app.getString(R.string.chat_app_test_saved, testTarget.revision, saved.revision)
                                     // A fix by lines: no run checked it, so the person checks it.

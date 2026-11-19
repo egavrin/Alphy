@@ -44,6 +44,9 @@ class AppFileChatWorkflowTest {
     private val settings = GenerationSettings(fixture.context)
     private val switchBefore = settings.planStep(AiProvider.OPENAI)
 
+    /** Runs at the start of each generation call, inside it. */
+    @Volatile private var duringCall: (CloudRequest) -> Unit = {}
+
     @Before fun switchOn() = settings.setPlanStep(AiProvider.OPENAI, true)
 
     @After fun restore() {
@@ -56,7 +59,8 @@ class AppFileChatWorkflowTest {
         val next = ArrayDeque(decisions)
         fixture.install(chat = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
-                if (request.generationStage != null) script.respond(key, request, session, emit) else emit(next.removeFirst())
+                if (request.generationStage == null) emit(next.removeFirst())
+                else { duringCall(request); script.respond(key, request, session, emit) }
         })
         fixture.launch().use {
             val model = checkNotNull(fixture.model)
@@ -138,6 +142,24 @@ class AppFileChatWorkflowTest {
         val card = assertTestFixShows(model, script, robot.text(R.string.chat_app_test_saved_unchecked, 2) + "\nShopping list")
         assertEquals(2, card.toolRevision)
         assertEquals(2, record(model, created.id).revision)
+    }
+
+    // Failure case: a fix by lines that a different write stopped from its save said that the fix was checked, but no run checked it.
+    @Test fun anUnsavedTestFixByLinesDoesNotSayItWasChecked() = shopping(Scripted.Text(BOUGHT), TEST_FIX) { model, created, script ->
+        val tools = ToolStore(fixture.context, "${fixture.name}.db-tools.db")
+        // A writer other than the chat (an automation, for example) marks Milk as bought while the change call runs.
+        duringCall = {
+            if (it.generationStage == APP_FILE_CHANGE) {
+                val stored = checkNotNull(tools.tool(created.id))
+                val state = JSONObject(stored.state).apply { getJSONArray("items").getJSONObject(0).put("done", true) }
+                tools.saveTool(stored.copy(state = state.toString(), stateVersion = stored.stateVersion + 1), false)
+            }
+        }
+        tools.use {
+            assertTestFixShows(model, script, robot.text(R.string.chat_app_test_unsaved_unchecked, 1) +
+                "\nShopping list The saved app changed during testing.")
+            assertEquals(1, it.revisions(created.id).size)
+        }
     }
 
     // Failure case: a test and fix that changed no line said that the checks of the version passed, but no check ran.
