@@ -163,17 +163,30 @@ function changeOf(item, stored, reply, plan, definition) {
     same: plan === patchAppFile(item.plan, ""), gone: plan === null ? [] : [...needsIn(item.plan).filter((need) => !needs.has(need)), ...columns] };
 }
 
-/** One step of the app (compileStep of the kit): the merged plan, and the result with its time and the bytes of the start state of a clean plan. */
+/** The cap of the app on the reply, the plan, and the merged plan (AppFileCompiler.kt APP_FILE_MAX_CHARS). */
+const APP_CAP = 65536;
+/** The fault of the app for a text past its cap (AppFileCompiler.kt overCap). The app gives it no repair call (AppFileSteps.outcome, tooLong). */
+const overCap = (length) => ({ faults: [`the plan has ${length} characters, and Alphy reads at most ${APP_CAP}. Use shorter texts and fewer lines`], notes: [],
+  definition: null, tooLong: true });
+
+/**
+ * One step of the app (compileStep of the kit with the cap of the app): {outside} for an outside reply, else the merged plan, and the result with its
+ * time and the bytes of the start state of a clean plan. A reply or a plan past the cap gets the fault of the app with no compile, as in AppFileCompiler.kt.
+ */
 async function compile(input) {
-  const started = performance.now(), { text, result } = await compileStep(input), compileMs = Math.round((performance.now() - started) * 10) / 10;
+  const started = performance.now(), long = [input.plan, input.text].find((text) => text?.length > APP_CAP);
+  const step = long === undefined ? await compileStep({ ...input, cap: APP_CAP }) : { kind: "plan", text: input.plan ?? input.text, result: null };
+  if (step.kind === "outside") return { outside: step.word };
+  const result = step.result ?? overCap((long ?? step.text).length), compileMs = Math.round((performance.now() - started) * 10) / 10;
   const stateBytes = result.definition ? Buffer.byteLength(JSON.stringify(result.definition.initialState)) : null;
-  return { plan: text, result: { ...result, compileMs, stateBytes } };
+  return { plan: step.text, result: { ...result, compileMs, stateBytes } };
 }
 
 /**
  * One request: the plan call, the compile, and up to `repairs` repair calls at the effort low. ask(body) is the call of the API.
  * The record holds each call with its reply, each report of the kit, the outcome, and the final plan. clean is the step of the first clean report.
- * Each compile is compileStep of the kit, as the app runs it: the first reply as readPlanReply reads it, and a repair reply merged into the plan.
+ * Each compile is compileStep of the kit with the cap of the app, as the app runs it: each reply as readPlanReply reads it, and a repair reply merged
+ * into the plan. An outside repair reply ends the request (its call holds the word), and a text past the cap gets its fault and no repair call.
  * A change case (set F) sends the request and the app file of its stored app (changeText), merges the reply into the app file, compiles each plan
  * against the stored state, and gets one repair call, or none after a fault that the saved data blocks (blockedBySavedData) or the mismatch
  * fault (savedDataMismatch), as in the app. Its record also holds the stored state, the next state, and the comparison of the two (keptOf).
@@ -193,12 +206,10 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
   const done = () => finish(stored ? Object.assign(record, { fixture: item.fixture, request: item.request, events: item.events.length, stored: stored.previous.state,
     compared: stored.fields, inner: stored.inner }, changeOf(item, stored, first.text, record.plan, record.clean !== null && result.definition)) : record);
   if (!["plan", "other", "lines"].includes(kind.kind)) return done();
-  // The stored app as the app sends it: the state schema and the state as JSON text. Implementation choice: no cap, so the record keeps
-  // the compile of a plan of each length.
+  // The stored app as the app sends it: the state schema and the state as JSON text. Each reply is read as the app reads it (AppFileCompiler.kt patch).
   const previous = stored && { appFile: stored.previous.appFile, stateSchema: JSON.stringify(stored.previous.stateSchema), state: JSON.stringify(stored.previous.state) };
-  const stepOf = (text, plan, read) => compile({ text, plan, read, previous, cap: Infinity });
-  // A repair reply is merged with no read: an outside line in it is no line of an app file, so the merge drops it.
-  let next = await stepOf(first.text, stored ? item.plan : null, true), plan;
+  const stepOf = (text, plan) => compile({ text, plan, read: true, previous });
+  let next = await stepOf(first.text, stored ? item.plan : null), plan;
   for (let step = 0; ; step++) {
     ({ plan, result } = next);
     steps.push({ faults: result.faults, notes: result.notes, compileMs: result.compileMs, stateBytes: result.stateBytes, dropped: step ? calls.at(-1).dropped : 0,
@@ -212,13 +223,15 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
       if (stored) Object.assign(record, { state: result.state }, keptOf(stored, result.state, dataOf(result.definition)));
       break;
     }
-    // As in the app (AppFileSteps.outcome): a model cannot fix the saved data, so a fault that it blocks, or the mismatch, gets no repair call.
-    if (result.blockedBySavedData || result.savedDataMismatch) break;
+    // As in the app (AppFileSteps.outcome): a model cannot fix the saved data or shorten a text past the cap, so these faults get no repair call.
+    if (result.blockedBySavedData || result.savedDataMismatch || result.tooLong) break;
     if (step === limit) break;
     const call = await send(step + 1, "low", repairText({ task, plan, faults: result.faults }));
     if (call.status !== "completed") break;
     calls.at(-1).dropped = droppedOf(call.text);
-    next = await stepOf(call.text, plan, false);
+    next = await stepOf(call.text, plan);
+    // As in the app (AppFileSteps.steps): an outside repair reply ends the request with fallback:outside, and the plan stays as it was.
+    if (next.outside) { calls.at(-1).outside = next.outside; break; }
   }
   return done();
 }

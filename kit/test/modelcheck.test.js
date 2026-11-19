@@ -98,6 +98,16 @@ test("modelcheck: an outside reply and a cut reply get no compile", async () => 
   expect([cut.outcome, cut.steps.length]).toEqual(["incomplete", 0]);
 });
 
+test("modelcheck (U-K fix 1): a repair reply is read as the app reads it, so an outside line ends the request, and a plan past the cap of the app gets no repair call", async () => {
+  const faulty = PLAN.replace("max=500)", "max=500, bogus=1)");
+  const outside = await checkOne(item, { ...fake(faulty, '```\noutside("game")\n```', PLAN), model: "m", effort: "low" });
+  expect([outside.outcome, outside.calls.length, outside.calls[1].outside, outside.steps.length, outside.plan]).toEqual(["not", 2, "game", 1, faulty]);
+  // AppFileCompiler.kt: a text past APP_FILE_MAX_CHARS is the fault of the app with no compile, and the app gives it no repair call.
+  const long = PLAN + `need note = card("Note", "${"x".repeat(65536)}")\n`;
+  const over = await checkOne(item, { ...fake(long, PLAN), model: "m", effort: "low" });
+  expect([over.outcome, over.calls.length, over.steps[0].faults]).toEqual(["not", 1, [`the plan has ${long.length} characters, and Alphy reads at most 65536. Use shorter texts and fewer lines`]]);
+});
+
 test("modelcheck: the device bars and the host forms that the kit takes", () => {
   // The bar of the start state is the state limit of the kit (run.js), which is the limit of the host.
   expect(barFaults({ compileMs: 2400, stateBytes: MAX_STATE_BYTES + 1, plan: 'need a = figure("number", "", 1)' })).toEqual(["compile 2400 ms > 2300", `start state ${MAX_STATE_BYTES + 1} bytes > ${MAX_STATE_BYTES}`, "a figure with an empty label"]);

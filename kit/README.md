@@ -71,6 +71,7 @@ A repair reply writes again each wrong line of a plan (`prompt.md` section "Repa
 `previous` is `null`, or `{appFile, stateSchema, state}` with `stateSchema` and `state` as JSON text, as the host sends them. A text that is not JSON makes the step reject.
 Each other result is `{kind: "plan", text, result}`, where `text` is the merged text.
 `test/compile.test.js` tests each branch, and the bundle test runs the step in a fresh context.
+`modelcheck.js` runs each reply through this step as the app does: with `read` true and the cap of the app (65536 characters). An outside repair reply ends the request, and a text past the cap gets the fault of the app and no repair call.
 
 ## Changes of an app
 
@@ -105,9 +106,11 @@ The rules keep each stored value of the person, and they never move a value to a
    - A new value with the name of a saved value of the person.
    - More than 40 fields with the kept ones: `the app would keep more than 40 values`, with the first need that adds a field.
    - A state of more than 49152 bytes, a list with more rows than the screen of the change has room for, and an app that stops on the saved data.
-5. A stored field that the change does not name stays with its schema and its value, and `app.keep` lists it.
-   A list or an array that the app computed, such as the view of a sorted list, stays empty. A root that comes back later gets its kept value again.
-   The start state (`initialState`) gives a kept field the blank value of its schema (0, an empty text, false, an empty list, or a record of blanks), and only the state holds the kept value, so the host finds it as data of the person.
+5. A stored field that the change does not name stays with its schema, and `app.keep` lists it.
+   Its value stays only when it is data of the person: it differs from its start value of the previous app file, or a change before kept it.
+   A value that the app computed (such as `d` or the view of a sorted list) and a value at its start get the blank value of the schema (0, an empty text, false, an empty list, or a record of blanks).
+   The start state (`initialState`) gives each kept field that blank value, so the host finds a kept value of the person as a difference, and an untouched app has none.
+   A root that comes back later gets its kept value again, and with a blank value it takes the start value of the change (rule 3b).
 6. The values that the app computes come from the changed app. A change of `animate` that runs goes on by its root, and a drag starts again.
 7. The inner values of a need (the object `NAME_s`) stay when the need line is the same text and rule 3c does not apply, else they start again.
    So a timer that runs goes on to the same end of its phase when its line stays, and it stands at the start of round 1 when its line changes.

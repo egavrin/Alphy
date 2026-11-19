@@ -3583,8 +3583,10 @@ const blocked = (faults) => ({ faults, definition: null, state: null, blockedByS
  * 3c. When a list takes other start rows by 3b, the inner values of its need and of each need whose line reads it, also through a formula, start again.
  * 4. A value of another kind, a column that the change removes or retypes in a list with rows, a saved value that the screen would change, and a
  *    new value with the name of a saved one are faults with BLOCKS, as are more than 40 fields, a state of more than 49152 bytes, and a list past its room.
- * 5. Each stored field that the change does not name stays with its schema and its value (app.keep). A list or an array that the app computed stays empty.
- *    The start state of the definition gives such a field the blank value of its schema, so only the state holds the kept value.
+ * 5. Each stored field that the change does not name stays with its schema (app.keep). Its value stays when it is data of the person: it differs from
+ *    its start value of the previous app file, or a change before kept it. A value that the app computed, and a value at its start, is blank (rule 3b).
+ *    The start state of the definition gives each kept field the blank value of its schema, so only the state holds a kept value.
+ *    A kept root that comes back with its blank value takes the start value of the change (rule 3b).
  * 6. The values that the app computes come from the changed app. A run of animate goes on by its root, and a drag starts again.
  * 7. The inner values of a need (NAME_s) stay when the need line is the same text and 3c does not apply, else they start again.
  */
@@ -3625,8 +3627,8 @@ function nextState(file, { app, definition, owners, objects }, previous, build) 
     // A kept field has only its Alphy type: a time is a number there, and a date a text.
     const value = stored[from], was = back ? kindOf(undefined, schemas[from]) : kindOf(old.kinds[root], oldSchemas[from]), now = back ? own(ALPHY, kind) ?? kind : kind;
     // Rule 3b: a value that still equals its start value of the previous plan is no data of the person yet, so it takes the start value of the change,
-    // also of another kind. Rule 3c: a list that gets other start rows so moves the rows that inner values point into.
-    if (!back && canonical(value) === canonical(oldStart[from])) {
+    // also of another kind. For a kept root that start is its blank (rule 5). Rule 3c: a list that gets other start rows so moves the rows that inner values point into.
+    if (canonical(value) === canonical(back ? blankValue(schemas[from]) : oldStart[from])) {
       if (was === "list" && canonical(start[field]) !== canonical(value)) moved.add(root);
       continue;
     }
@@ -3688,8 +3690,10 @@ function nextState(file, { app, definition, owners, objects }, previous, build) 
     faults.push(`${[...owners].find(([field]) => !Object.hasOwn(schemas, field))?.[1] ?? "app"}: ${BLOCKS}: the app would keep more than ${MAX_FIELDS} values`);
   }
   if (faults.length) return blocked(faults);
-  // A list or an array that the app computed, such as the view of a sorted list, stays empty: the app computes it again when it comes back.
-  const kept = Object.fromEntries(keep.map((field) => [field, Array.isArray(stored[field]) && !person.has(field) ? [] : stored[field]]));
+  // Rule 3b for a kept field: a value that the app computed, such as d or the view of a sorted list, and a value that still equals its start
+  // of the previous app file, is no data of the person, so it is blank. A field that an earlier change kept stays as it is stored.
+  const kept = Object.fromEntries(keep.map((field) => [field, older.has(field) || (person.has(field) && canonical(stored[field]) !== canonical(oldStart[field]))
+    ? stored[field] : blankValue(schemas[field])]));
   const full = keep.length ? { ...app, keep } : app, source = keep.length ? sourceOf(full) : definition.source;
   // The budget of the kit can stop the work in a part with a catch of its own, so kit.tripped is the stop too, as in handle.
   let kit, shown, stop = null;

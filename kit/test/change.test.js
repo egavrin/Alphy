@@ -193,13 +193,19 @@ const BLANK_FORM = { new_name: "", new_aisle: "" }, TYPED_FORM = { ...BLANK_FORM
 /** The shopping app with Eggs typed in its add form, changed to the app with no list. */
 const withoutTyped = async () => compileAppFile(WITHOUT, await stored(SHOPPING, [...SHOPPING_EVENTS, { type: "liveInput", actionId: "items_new_name", value: "Eggs" }]));
 
-test("change (kept start): a removed list with two stored rows gives an empty list in the start state and the two rows in the state", async () => {
+/** Each field whose value in the state differs from its value in the start state: the host finds the data of the person so (AppAgent.kt). */
+const differing = ({ definition, state }) => Object.keys(definition.stateSchema).filter((field) => JSON.stringify(state[field]) !== JSON.stringify(definition.initialState[field]));
+
+test("change (kept start): a removed list with two stored rows gives an empty list in the start state and the two rows in the state, and an untouched list is blank in both", async () => {
   const result = await compileAppFile(WITHOUT, await stored(SHOPPING, SHOPPING_EVENTS));
   expect(result.faults).toEqual([]);
   expect([result.definition.initialState.items, result.state.items]).toEqual([[], ITEMS]);
   // A kept field whose stored value is blank, such as the empty view of the sorted list, makes no difference: it is no data of the person.
   expect([result.definition.initialState.items_list, result.state.items_list]).toEqual([[], []]);
   expect(bothFit(result)).toEqual([true, true]);
+  // An untouched app: the start rows of the list are no data of the person, so the state equals the start state in each field.
+  const untouched = await compileAppFile(WITHOUT, await stored(SHOPPING));
+  expect([untouched.faults, dataOf(untouched.definition).keep, differing(untouched), untouched.state.items]).toEqual([[], ["items", "items_s", "items_list"], [], []]);
 });
 
 test("change (kept start): a removed number input with the stored value 7 gives 0 in the start state and 7 in the state", async () => {
@@ -223,6 +229,56 @@ test("change (kept start): a second change keeps the kept values in the state an
   expect([second.definition.initialState.items, second.state.items]).toEqual([[], ITEMS]);
   expect([second.definition.initialState.items_s, second.state.items_s]).toEqual([BLANK_FORM, TYPED_FORM]);
   expect(bothFit(second)).toEqual([true, true]);
+});
+
+const GOAL = lines('app("Water", lang="en")', 'need goal = input("number", "Goal", 2000, min=0, max=5000)', 'need cups = counter("Cups", 0)');
+const TWICE_CUPS = lines('app("Water", lang="en")', 'need cups = counter("Cups", 0)', 'need twice = figure("count", "Twice", $/cups * 2, example=[{cups: 1}, 2])');
+const CUPS = lines('app("Water", lang="en")', 'need cups = counter("Cups", 0)');
+
+test("change (kept start): an untouched app whose input with the start value 2000 goes has a state equal to its start state in each field", async () => {
+  const result = await compileAppFile(CUPS, await stored(GOAL));
+  expect(result.faults).toEqual([]);
+  expect(dataOf(result.definition).keep).toEqual(["goal"]);
+  expect(differing(result)).toEqual([]);
+  expect(result.state.goal).toBe(0);
+});
+
+test("change (kept start): a kept object of shown values is blank in the state and in the start state, also when the person changed a value", async () => {
+  const untouched = await compileAppFile(CUPS, await stored(TWICE_CUPS));
+  expect(untouched.faults).toEqual([]);
+  expect(dataOf(untouched.definition).keep).toEqual(["d"]);
+  expect(differing(untouched)).toEqual([]);
+  // The app computed d: its text "2" is no value of the person, and the counter is.
+  const touched = await compileAppFile(CUPS, await stored(TWICE_CUPS, [action("cups_plus")]));
+  expect([touched.state.d, touched.definition.initialState.d, differing(touched)]).toEqual([{ twice_text: "" }, { twice_text: "" }, ["cups"]]);
+  expect(bothFit(touched)).toEqual([true, true]);
+});
+
+test("change (kept start): a list with one row that the person changed keeps all its rows in the state", async () => {
+  const rows = [{ id: "r1", name: "Milk", aisle: "Dairy", done: true }, { id: "r2", name: "Bread", aisle: "Bakery", done: false }, { id: "r3", name: "Apples", aisle: "Produce", done: false }];
+  const result = await compileAppFile(WITHOUT, await stored(SHOPPING, [action("items_done", { key: "r1", value: true })]));
+  expect(result.faults).toEqual([]);
+  expect([result.state.items, result.definition.initialState.items, differing(result)]).toEqual([rows, [], ["items"]]);
+});
+
+test("change (kept start): a field that an earlier change kept keeps its stored rows through a second change that removes another need", async () => {
+  const more = WITHOUT + 'need more = counter("More", 0)\n';
+  const first = await compileAppFile(more, await stored(SHOPPING, SHOPPING_EVENTS));
+  const second = await compileAppFile(WITHOUT, { appFile: more, stateSchema: first.definition.stateSchema, state: first.state });
+  expect(second.faults).toEqual([]);
+  expect(dataOf(second.definition).keep).toEqual(expect.arrayContaining(["items", "more"]));
+  // The counter more stands at its start: no data of the person, so it is blank.
+  expect([second.state.items, second.state.more, differing(second)]).toEqual([ITEMS, 0, ["items"]]);
+});
+
+test("change (kept start): an untouched need that a change removed comes back with the start values of the plan", async () => {
+  const removed = await compileAppFile(WITHOUT, await stored(SHOPPING));
+  const back = await compileAppFile(SHOPPING, { appFile: WITHOUT, stateSchema: removed.definition.stateSchema, state: removed.state });
+  expect(back.faults).toEqual([]);
+  expect(back.state.items).toEqual((await compileAppFile(SHOPPING)).definition.initialState.items);
+  const goal = await compileAppFile(CUPS, await stored(GOAL));
+  const goalBack = await compileAppFile(GOAL, { appFile: CUPS, stateSchema: goal.definition.stateSchema, state: goal.state });
+  expect([goalBack.faults, goalBack.state.goal]).toEqual([[], 2000]);
 });
 
 test("change: back to an older plan with one need less keeps the field of that need", async () => {
