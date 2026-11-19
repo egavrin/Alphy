@@ -805,3 +805,99 @@ Decision 5 permits one change of the section "Change". It did not apply:
 | All | 34 | 216160 | 183575 | 6413 | 1072 |
 
 The budget was 64 calls. The task used 34: 32 first calls and 2 repairs. `evidence/modelcheck/spend.json` went from 438 to 472, and its log has 34 entries of the two labels. `LIMIT` of `kit/modelcheck.js` is 502.
+
+## Prompt v4: two sentences from the first live run
+
+The first live run of the plan step in the app showed two defects that come from the plan of the model. Task P3 added one sentence to the prompt for each, and ran 15 requests one time.
+The scope is `.superpowers/sdd/2026-11-19-app-file-loop/p3-decisions.md`.
+The run ran on `046b09a` with `gpt-6.1-terra`, the effort low, and at most 1 repair call. The label is `v4-terra-low`.
+Each of the 15 records has the prompt hash `be5e56293490` and `repairs: 1`. Each call completed.
+Raw replies and records are in `evidence/modelcheck/v4-terra-low/`, which Git does not keep.
+
+### The two sentences
+
+1. The labels of many check marks. A new line in the paragraph of `entries`, after the field kinds:
+   "When a row has more than two check fields, each check mark shows its label over it: in labels=, give each of these fields at most three letters, such as the short name of a weekday."
+   - The kit puts the marks of a row with more than two check fields in a line of their own, as circles named by `labels=` or the field (`kit/src/parts.js` line 208, `kit/README.md` section "Parts", `entries`). With two check fields or fewer the marks stay in the row.
+2. The order of a list. Three sentences changed, as decision 2 permits:
+   - The list of what the lines cannot give: "no drag and no swipe (a list whose rows the person moves by hand is entries with reorder=true)". It was "(a list that the person puts in order is entries with reorder=true)".
+   - The paragraph of `entries`: "reorder=true: only for an order that the person sets by hand, row by row, such as a ranking, a queue, or priorities, with no sort= and no group=." It was "reorder=true: the person moves the rows into an order, with no sort= and no group=."
+   - A new sentence after `order=`: "An order by a field is sort= or group=, also when the request says "reorder by" that field, and a request to switch the order gets sort= with order=, or sort= that reads a choice, such as sort=$/by == "aisle" ? $aisle : $name."
+   - The kit reads `order=` only with `sort=` (`kit/src/parts.js` line 297). Without `sort=` it drops `order=` with no fault and no note, so the sentence ties `order=` to `sort=`.
+   - A scratch run of a list with `sort=$/by == "corsia" ? $corsia : $nome` showed the rows in the order of the aisles, and in the order of the names after the choice changed.
+
+- The new prompt test "prompt (P3)" checks that the paragraph names "more than two check fields", that 2 check fields give no circle and 3 give circles, and that the sort by a choice of the paragraph compiles with no fault. It failed before the change of the prompt.
+- The new hash is `be5e56293490` (it was `2fb332c18d90`). The section "System" is 21277 bytes (20798 bytes before).
+- Commit `046b09a` holds `kit/prompt.md`, `kit/test/prompt.test.js`, and `app/src/main/assets/appfile/prompt.json`. `bun test kit`: 601 pass, 0 fail. `bun kit/build.js --check`: exit 0.
+
+### What ran
+
+- Before the run, the 15 first replies of `v3-terra-low` compiled clean with the kit at `046b09a` (a scratch compile, no call). So a different outcome would come from the reply, not from the kit.
+- The section "System" of `v3-terra-low` (`c9100af`) differs from now in two places: the sentences of this task, and the timer paragraph of task K2 (`cycle=true`). Of the 15 requests, only `showcase-lang-tea-tr` has a timer.
+- `holdout-tip-ru` ran first and alone to check the path. Its call had no cached input tokens (0 of 6117).
+- Then `REPAIRS=1 STOP_AT=502 bun kit/modelcheck.js run v4-terra-low CDE gpt-6.1-terra low` with the other 14 ids ran them, with 4 calls in parallel.
+
+### Numbers
+
+| Measure | `v4-terra-low` (15) | The same 15 in `v3-terra-low` |
+| --- | --- | --- |
+| Clean at the first try | 15 | 15 |
+| Repair calls | 0 | 0 |
+| First call: median, maximum | 4.934 s, 9.116 s (`d-moon`) | 5.01 s, 10.11 s (`d-moon`) |
+| Output tokens of all first calls (reasoning) | 4041 (517) | not counted |
+
+The source is `bun kit/modelcheck.js table v4-terra-low` and a scratch count over the records of both labels.
+
+### Each request beside `v3-terra-low`
+
+Each of the 15 final plans got a full read beside its plan of `v3-terra-low`. Each one is clean at the first try.
+
+| Request | The plan beside `v3-terra-low` |
+| --- | --- |
+| `showcase-lang-habits-uk` | Same needs. The check fields have the labels "Пн", "Вт", "Ср", "Чт", "Пт", "Сб", and "Нд". In v3 they were the whole weekday names, such as "Понеділок". New: `icons={name: "Pencil"}`, a note because of `add=false`, and `addText=` and `emptyText=`. |
+| `showcase-lang-shopping-it` | `sort=$corsia` in place of `reorder=true`. The rest is the same, except the icon "Pin" in place of "Tag" on the aisle field of the add form. |
+| `showcase-ui-priorities` | Same needs: `reorder=true` with `edit=true` and a choice of the priority. |
+| `e-timetable-tr` | `group=$gun` as in v3, but no `sort=$saat`. The lessons of a day stand in the order in which the person added them, not by time. Worse than v3. |
+| `e-packing-de` | Same needs with `group=$kategorie`. The one check field keeps its whole label "Im Koffer". Two fields have other names. |
+| `e-gifts-uk` | Same needs. The one check field has the label "Куплено", a whole word (v3: "Вже куплено"). The header has no `kind=`. |
+| `showcase-ui-price-filter` | `sort=$price, order=$/order` with a choice "Low to high" or "High to low", as in v3. The type filter is now an input of kind `"choices"`: types that can be on together, and none on shows each bike. v3 had one choice with "All". The 12 bikes have other names and prices. |
+| `showcase-ui-alarm` | Same needs, plus a text field `dose` ("Morning dose") in each row, which the request does not ask for and v3 left out. By L1 item 1 (`kit/README.md`), that field has a line of its own on a phone, so it is not one letter wide as in M1 F1. |
+| `showcase-ui-steps-chart` | Same needs. New `icons=` for two fields, two notes because of `add=false`. |
+| `holdout-sleep-en` | Same needs and the same named value of `show=`. The date field is `day`, with the label "Wake date". |
+| `holdout-tip-ru` | Same needs. The tip input has no `max=`, and the run gave no note. |
+| `showcase-lang-kanji-ja` | Same shape: a hidden list of 5 kanji and a deck. One kanji differs (月 in place of 海). |
+| `d-moon` | Same needs: a drawing, the angle input, a card, a lesson of 3 steps, and a question. The Moon has no outline now. |
+| `e-bbq-pt` | Same needs. The value of `show=` still has the name "Acerto". |
+| `showcase-lang-tea-tr` | Same needs, and the same note about `start=`, `pause=`, `reset=`, and `done=` on a timer of one phase. |
+
+The order options of the five lists that the decision names:
+
+| Request | `sort=` | `group=` | `order=` | `reorder=` | Fits the request? |
+| --- | --- | --- | --- | --- | --- |
+| `showcase-lang-shopping-it` | `$corsia` | none | none | none | Yes, by decision 2: the rows stand in the order of the aisle. The aisle is a text field, so the rows follow the sorted aisle names, not the way through the shop. The plan has no switch. |
+| `showcase-ui-priorities` | none | none | none | `true` | Yes: the request asks to drag the tasks into an order. |
+| `e-timetable-tr` | none | `$gun` | none | none | Partly: the request asks for groups by day, and the plan has them. In each day the lessons are not in the order of time. |
+| `e-packing-de` | none | `$kategorie` | none | none | Yes: the request asks for categories. |
+| `showcase-ui-price-filter` | `$price` | none | `$/order` | none | Yes: the request asks for a sort by price, and the person switches the direction. |
+
+### Plans that got worse
+
+- `e-timetable-tr` lost `sort=$saat`. The earlier run `fresh-terra-low` (prompt v1) also had only `group=$gun`, and H1 named that as a gap. So the plan is back at its v1 form.
+  - Assumption: the words "sort= or group=" of the new sentence read as a choice of one of the two. Basis: the one change of the plan is the loss of `sort=` beside `group=`. The variation of the API can explain it too, because two of three runs had no `sort=`. Test: run the request several times with each prompt. That needs calls, so the controller decides.
+  - Candidate text, which did not run (decision 6): "An order by a field is sort= or group=, or both, such as group=$day, sort=$time, also when the request says "reorder by" that field, ...". The plan of v3 with `group=$gun, sort=$saat` compiles clean with the kit of now.
+- No other plan got worse. Two plans got notes that v3 did not have: `icons=` with `add=false` in `showcase-lang-habits-uk` and `showcase-ui-steps-chart`. The kit leaves each such icon out, and the screen does not change.
+
+### What the numbers do not show
+
+- One run of 15 requests. Each sentence reached its target in one reply. The same prompt on the same requests changed 2 results between two runs of A0.
+- No request of the 15 asks for a switch between two orders by a field, so no reply tested the sort by a choice.
+- The new labels of `showcase-lang-habits-uk` did not run on a device. In the picture of the live run, "Середа" (6 letters) fits over one mark of seven, and "Понеділок" shows as "Понеді" (`evidence/appfile-loop/smoke-1/on/showcase-lang-habits-uk/review.png`). So a label of two letters fits. This comes from the picture, not from a run.
+- The times come from this computer, with 4 calls in parallel and a warm cache for 14 of 15 first calls.
+
+### Calls and tokens
+
+| Model and effort of each call | Calls | Input tokens | From the cache | Output tokens | Reasoning tokens |
+| --- | --- | --- | --- | --- | --- |
+| `gpt-6.1-terra` low | 15 | 92012 | 84462 (91.8%) | 4041 | 517 |
+
+The budget was 30 calls. The task used 15: 15 first calls and no repair. `evidence/modelcheck/spend.json` went from 472 to 487, and its log has 15 entries of the label. `LIMIT` of `kit/modelcheck.js` stays at 502.
