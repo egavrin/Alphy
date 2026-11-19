@@ -291,18 +291,22 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   expect(definition.initialState.steps_list.map((row) => row.label)).toEqual(["Pack", "Drive", "Hike"]);
 });
 
-test("emit: an empty date start value becomes today", async () => {
-  // 2026-11-18 is a Wednesday, day 3 of the week. A time that is not a time is 00:00, as the run-time reads it.
-  const clock = settings.now, now = Date.UTC(2026, 10, 18, 12);
-  settings.now = () => now;
+test("emit: an empty date start value becomes today, the day of the clock of the kit", async () => {
+  // 2026-11-18 is a Wednesday, day 3 of the week, and 2026-11-22 a Sunday, day 7. Noon of a local day is that day in each time zone.
+  // A time that is not a time is 00:00, as the run-time reads it.
+  const clock = settings.now;
   try {
-    const { definition, faults, app } = emit(await planned([
-      'app("Dates", lang="en")', 'need day = input("date", "Day", "")', 'need wd = figure("number", "Weekday", weekday($/day))',
-      'need wake = input("time", "Wake", "")', 'need at = figure("text", "At", $/wake)',
-    ].join("\n")));
-    expect(faults).toEqual([]);
-    expect(definition.initialState).toMatchObject({ day: "2026-11-18", wake: 0, d: { wd_text: "3", at_text: "00:00" } });
-    expect(open(definition.initialState, app, now)).toEqual({ state: definition.initialState });
+    for (const [day, weekday] of [["2026-11-18", "3"], ["2026-11-22", "7"]]) {
+      const [year, month, date] = day.split("-").map(Number), now = new Date(year, month - 1, date, 12).getTime();
+      settings.now = () => now;
+      const { definition, faults, app } = emit(await planned([
+        'app("Dates", lang="en")', 'need day = input("date", "Day", "")', 'need wd = figure("number", "Weekday", weekday($/day))',
+        'need wake = input("time", "Wake", "")', 'need at = figure("text", "At", $/wake)',
+      ].join("\n")));
+      expect(faults).toEqual([]);
+      expect(definition.initialState).toMatchObject({ day, wake: 0, d: { wd_text: weekday, at_text: "00:00" } });
+      expect(open(definition.initialState, app, now)).toEqual({ state: definition.initialState });
+    }
   } finally { settings.now = clock; }
 });
 
