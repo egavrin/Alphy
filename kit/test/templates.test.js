@@ -1,7 +1,7 @@
 // The look of the part templates (Task 11b-2b, A): each part in the look vocabulary of the baseline apps.
 
 import { expect, test } from "bun:test";
-import { built, every } from "./helpers.js";
+import { built, every, press } from "./helpers.js";
 
 /** The node of a type whose text or name is the given one. */
 const named = (definition, type, text) => every(definition.ui).find((node) => node.type === type && (node.text === text || node.name === text));
@@ -32,4 +32,14 @@ test("template: the front of a card deck is a centered display text, the back a 
   // A deck with answer= shows its front in the same way. A deck of pages (no back=) keeps a heading, because a page can be a long text.
   const typed = await built('app("T", lang="en")', WORDS, 'need cards = deck("Words", $/words, front=$word, answer=$meaning)');
   expect(every(typed.definition.ui).find((node) => node.type === "text" && String(node.bind).includes("cards_front")).style).toEqual({ emphasis: "display", align: "center" });
+});
+
+test("template: the note at the end of steps is a success notice, and the notice of a question is success for a right answer and warning for a wrong one", async () => {
+  const { definition } = await built('app("T", lang="en")', 'need n = input("number", "N", 1)', 'need m = input("number", "M", 2)', 'need p = steps(["One", "Two"], [[n], [m]])');
+  expect(every(definition.ui).find((node) => node.type === "banner").style).toEqual({ tone: "success" });
+  const asked = await built('app("T", lang="en")', 'need ask = question("Is the Moon a star?", options=["Yes", "No"], right="No")');
+  const banner = (ui) => every(ui).find((node) => node.type === "banner").style;
+  // The notice shows after a choice: before it, its tone is the one of a wrong answer.
+  expect(banner(asked.definition.ui)).toEqual({ tone: "warning" });
+  expect(banner(press(asked.definition.initialState, asked.app, "ask_opt1").ui)).toEqual({ tone: "success" });
 });
