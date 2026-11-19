@@ -420,3 +420,194 @@ The budget was 70 calls. The task used 28: 28 first calls and no repair. `eviden
 - The times come from this computer, with 4 calls in parallel and a warm cache for 27 of 28 calls. A cold call from the phone can differ.
 - The look numbers come from the compiled definition, not from a screen. The function check reads plans. No plan ran on a device.
 - The assumptions of A0 stay: the widget brief is empty, and the task text of a dialogue screen is the request line, the host line, and an empty brief.
+
+## Prompt v3 after the kit changes
+
+Task P2 measured the plan prompt and the kit as the plan step of the app will use them.
+The scope is `.superpowers/sdd/2026-11-19-app-file-loop/p2-decisions.md`.
+The run ran on `c9100af` with `gpt-6.1-terra`, the effort low, and at most 1 repair call at the effort low, as the loop of the app does. The label is `v3-terra-low`.
+Each of the 81 records has the prompt hash `c8cf5cf8f837` and `repairs: 1`. Each call completed.
+Raw replies and records are in `evidence/modelcheck/v3-terra-low/`, which Git does not keep. Each reply of each call is kept whole as `<id>.<step>.txt`.
+
+### What changed and what ran
+
+- Since the final run of A0, task K1 changed the kit and the prompt (`665049851eca`): no `hole` in the prompt, a sixth word `outside("other")`, and fewer rules. A look option that cannot apply is a note, a repair may delete a name and write it again, and a round timer ends after its last work phase. Task L1 changed the look of the parts.
+- This task added two sentences to the prompt. The new hash is `c8cf5cf8f837`. The section "System" is 20586 bytes (21881 bytes in v1).
+  - The paragraph of `entries`: "labels= also names each value of show=, and the row shows the name with the value, such as "Total: 12"." The kit writes `"Name: " + amount(formula, 2)` when `labels=` names the value (`kit/src/parts.js` line 262, L1 item 2). A scratch compile with `labels={owes: "Owes"}` gave the row texts "Owes: 0" and "Owes: 40".
+  - The section "Dialogue": "When the person asks to learn a set of things with a check (to count to ten in a language, a multiplication table), the check is a deck with answer= or back= over entries with hidden=true and a row for each thing, not one question." A scratch compile of each of the two decks over hidden entries gave no fault and no note.
+- `kit/modelcheck.js` takes the setting `REPAIRS` (default 2), and the worst case of a run counts it. `LIMIT` is 490. The kit test "modelcheck (P2)" covers the setting, the worst case, and a record with 1 repair.
+- Sets C (45), D (8), and E (28) ran one time: 81 requests. `holdout-tip-ru` ran first and alone to check the path. Its call had no cached input tokens (0 of 5940).
+- Then `STOP_AT=490 REPAIRS=1 bun kit/modelcheck.js run v3-terra-low CDE gpt-6.1-terra low` ran the other 80 requests, with 4 calls in parallel. The run took 2 minutes (17:17:57 to 17:19:56 UTC).
+- The task text of each record is the same as the task text of its id in `final-terra-low` or `fresh-terra-low`. The one difference is the new line of the section "Dialogue" in the 14 dialogue requests (a scratch check).
+
+### Numbers: prompt v3, `gpt-6.1-terra`, effort low, at most 1 repair
+
+| Measure | Set C (25 servable) | Set D (8) | Set E apps (14) | Set E dialogue (6) |
+| --- | --- | --- | --- | --- |
+| Clean at the first try | 24 (96%) | 8 (100%) | 14 (100%) | 5 (83%) |
+| Clean after 1 repair | 0 | 0 | 0 | 1: `e-japanese-ru` |
+| Not clean | 1: `showcase-lang-pomodoro-zh`, which got `outside("other")` | 0 | 0 | 0 |
+| Clean under the device bars, with no form that the host refuses | 24 of 25 | 8 of 8 | 14 of 14 | 6 of 6 |
+| First call: median, 90th percentile, maximum | 5.135 s, 8.711 s, 10.442 s (`showcase-lang-units-pl`) | 9.913 s, 12.869 s, 12.869 s (`d-pythagoras`) | 4.463 s, 6.675 s, 7.104 s (`e-mood-ru`) | 11.076 s, 15.874 s, 15.874 s (`e-lever-ru`) |
+| Time to the first text: median | 2.773 s | 4.392 s | 1.975 s | 3.73 s |
+| Path to a clean plan: median, 90th percentile | 4.87 s, 8.74 s | 9.945 s, 12.89 s | 4.465 s, 6.68 s | 11.915 s, 15.89 s |
+| Output tokens of the first call: median (reasoning) | 223 (32) | 551.5 (119.5) | 237 (0) | 655.5 (68) |
+| Input tokens of the first call: median | 5948 | 6171 | 5916.5 | 6161 |
+| Input tokens from the cache | 94.5% | 95.0% | 99.0% | 95.0% of the first calls, 93.6% with the repair |
+
+- The source of each number is `bun kit/modelcheck.js table v3-terra-low --detail`, except the input tokens and the cache, which come from a scratch count over the same records.
+- Without the cold call of `holdout-tip-ru` (24 requests of set C): the first call median is 4.842 s, the first text median is 2.709 s, and 98.4% of the input tokens come from the cache. The 90th percentile and the maximum do not change.
+- The 90th percentile of 6 or 8 values is the maximum.
+- An `outside(...)` reply took a median of 2.566 s. The maximum, 7.809 s, is the wrong `outside("other")` of `showcase-lang-pomodoro-zh`.
+- The dialogue input has 220 to 250 tokens more than an app input: the line of the section "Dialogue" is in the task text, after the request, so the cache does not hold it.
+
+### Routing
+
+28 of 28 requests that expect `outside(...)` got it. Each got the same word as in its earlier run.
+
+| Word | Count | Requests |
+| --- | --- | --- |
+| `game` | 11 | `holdout-bricks-en`, `holdout-dodge-es`, `holdout-jump3d-de`, `holdout-moles-zh`, `showcase-3d-dice`, `showcase-game-2048`, `showcase-game-memory`, `showcase-game-snake`, `e-tictactoe-en`, `e-dice-ja`, `e-tetris-fr` |
+| `picture` | 6 | `showcase-image-flashcards`, `showcase-image-menu`, `showcase-image-plant`, `showcase-image-recipe`, `showcase-image-story`, `e-catphoto-ru` |
+| `3d` | 5 | `showcase-3d-dna`, `showcase-3d-globe`, `showcase-3d-maze`, `showcase-3d-molecule`, `showcase-3d-solar` |
+| `device` | 4 | `holdout-tilt-ru`, `e-whereami-de`, `e-compass-en`, `e-weather-en` |
+| `drawing` | 2 | `showcase-game-drawing`, `e-sketch-es` |
+| `other` | 0 | |
+
+1 of 53 requests that expect a plan got `outside(...)`: `showcase-lang-pomodoro-zh`, with `outside("other")`. No request with a device function got a plan.
+
+The word `other` came 1 time in 81 replies, and that reply is the miss:
+
+- The request asks for a timer of 25 minutes of focus and 5 minutes of rest, the count of the pomodoros of today, and a statistics page.
+- The section "System" says that `$/NAME` of a timer is the count of the finished work phases, and the code map lists the case as served.
+- A plan by hand compiles with no fault and no note: a timer with `rounds=4, rest=300`, two figures of `$/focus`, and tabs for the statistics (a scratch probe with no call). The count is the count since the app opened, not a record of each day.
+- Evidence: `evidence/modelcheck/v3-terra-low/showcase-lang-pomodoro-zh.0.txt` (the one line `outside("other")`). This is one reply of one run.
+
+### The three requests whose earlier plans used a hole
+
+| Request | Earlier plan | Plan now | Does it serve the request? |
+| --- | --- | --- | --- |
+| `showcase-ui-trip-dates` | A hole: a hand-written list of the activities between the two dates | Two date inputs (today and two days later), entries of activities with a date, a time, and a name in a sheet, and a drawing of a timeline: a dot, "day · time", and the name of each activity between the two dates, sorted by day and time | Partly, as before. The two dates are two inputs, not a date range, and an activity outside the dates is in the list but not on the timeline. The line name "timeline list" no longer shows (M1 F8), because the plan has no hole. |
+| `e-score-zh` | A hole: two cards with a score and two buttons each, and a reset button | A drawing of the two team names and their scores, a plus button and a minus button for each team, and a reset button | Yes. The drawing is now the main element. A score can go below 0, as before. |
+| `showcase-lang-pomodoro-zh` | A hole that recorded each finished phase by date, not clean after 2 repairs | `outside("other")` | No. The request goes to today's loop (see "Routing"). |
+
+### Holes
+
+No reply and no final plan of the run has a need of kind `hole` (a search of each reply and each plan).
+
+### Faults, repairs, and notes
+
+One fault came in the run. One repair call ran, and it made the plan clean.
+
+| Fault | Count | What the repair did |
+| --- | --- | --- |
+| "need visual: shapes: each needs a list or a count: each($/rows, shape) or each(5, shape)" | 1 (`e-japanese-ru`, step 0) | The drawing used `each($/number, ...)`, and `$/number` is a choice whose value is a text from "1" to "10". The repair wrote `each(number($/number), ...)` and nothing else. The plan was clean at step 1. The repair call took 2.7 s and 66 output tokens. |
+
+Each note is at step 0 of a plan that is clean:
+
+| Note (names removed) | Count | Plans |
+| --- | --- | --- |
+| "the host's countdown shows its own buttons and alert, so start=, pause=, reset=, done= do not show" | 3 | `showcase-lang-tea-tr`, `holdout-eggs-it`, `d-breathing` |
+| "the part draws a Slider, which shows no icon, so the kit left out icon="Percent"" | 2 | `holdout-tip-ru`, `e-loan-es` |
+
+### Outcomes that differ from the earlier final runs
+
+The earlier runs are `final-terra-low` (sets C and D) and `fresh-terra-low` (set E). Both used prompt v1, the kit of that time, and up to 2 repairs.
+
+| Request | Earlier | Now | Cause |
+| --- | --- | --- | --- |
+| `showcase-lang-workout-de` | Clean after 1 repair | Clean at the first try | The earlier fault (an emoji on a figure that is not the main one) is a note in the kit of K1. The earlier first reply compiles clean with the kit of now too. |
+| `showcase-lang-pomodoro-zh` | Not clean after 2 repairs | `outside("other")` | See "Routing". |
+| `e-japanese-ru` | Clean at the first try | Clean after 1 repair | The new sentence of the section "Dialogue" changed the plan: it now has hidden entries of the ten numbers and a deck. Its drawing read the text of a choice as a count (see "Faults, repairs, and notes"). |
+
+Each other record of the 81 has the same outcome as before. Each of the 28 `outside(...)` replies has the same word.
+
+### Function
+
+Each line compares the request with the final plan. Nobody ran them on a device.
+These 11 plans are new in kind: their need kinds differ from the fixture of their request (`kit/test/fixtures/model/<id>.plan`).
+
+1. `e-japanese-ru` (dialogue): yes. A choice from 1 to 10 draws that many circles, a card, a lesson of 3 steps with the ten readings and their variants, and a deck of cards over the ten numbers: the front is the digit, and the back is the reading. The check now covers each number, which was the target of the new sentence.
+2. `d-spanish` (dialogue): yes. A card, a lesson of the five greetings, and a deck over the five with a typed answer. The check needs the exact text with its accents, because the deck compares only after `lower` and `trim` (`kit/src/parts.js` line 348): "buenos dias" is wrong. The plan has no drawing. The new sentence reached this request too ("then give me a small test").
+3. `d-heart` (dialogue): yes. A button goes through four phases, the drawing marks the path of the phase, and a card explains it. A lesson of 2 steps and a question follow.
+4. `e-lever-ru` (dialogue): partly. The beam now tilts when the force goes above or below the load of 5. The two arms have a fixed length, so the drawing does not show the rule that the lesson and the question teach: a force farther from the support turns more.
+5. `d-breathing` (dialogue): partly. One timer of 10 s with an alert, and a text: inhale from 10 to 6, exhale from 6 to 0. The screen names no phase, and each breath needs a new start. See finding 4.
+6. `showcase-lang-units-pl`: yes. The ingredient, the amount, and the unit give grams, cups, spoons, and milliliters (1 cup is 240 ml, a cup of flour is 120 g, of sugar 200 g, of water 240 g). The example of each figure is right: 120 g of flour is 1 cup, 16 spoons, and 240 ml.
+7. `showcase-lang-workout-de`: yes. 8 rounds of 40 s with 20 s of rest, a ring of the finished rounds against 8, and a figure of the finished rounds.
+8. `showcase-ui-onboarding`: yes. Genres, pages per day, and a summary text in three steps, with the Start button.
+9. `showcase-ui-trip-dates`: partly (see the hole table).
+10. `e-cafe-ko`: yes. Drink, size, extra shots, and the price with `decimals=0` and the unit 원. The earlier text line of the prices is gone, so a person sees a price only for the chosen drink.
+11. `e-score-zh`: yes (see the hole table).
+
+The other 41 plans have the same need kinds as their fixtures. This task compared only their need kinds:
+
+- Set C (20): `holdout-power-de`, `showcase-lang-water-ko`, `showcase-ui-priorities`, `showcase-lang-kanji-ja`, `showcase-ui-pizza`, `showcase-lang-tea-tr`, `showcase-ui-alarm`, `holdout-tip-ru`, `showcase-lang-verbs-fr`, `showcase-ui-steps-chart`, `showcase-ui-price-filter`, `holdout-calories-fr`, `showcase-lang-shopping-it`, `holdout-reading-es`, `holdout-sleep-en`, `showcase-lang-budget-es`, `holdout-words-ko`, `holdout-study-ja`, `showcase-lang-habits-uk`, `holdout-eggs-it`.
+- Set D (5): `d-pythagoras`, `d-interest`, `d-moon`, `d-rainbow`, `d-fractions`.
+- Set E apps (12): `e-loan-es`, `e-packing-de`, `e-vacation-en`, `e-timetable-tr`, `e-fuel-pl`, `e-pages-ja`, `e-mood-ru`, `e-bbq-pt`, `e-plank-fr`, `e-capitals-it`, `e-bmi-en`, `e-gifts-uk`.
+- Set E dialogue (4): `e-times7-ru`, `e-percent-ru`, `e-seasons-ru`, `e-atom-ru`.
+
+Three of them had a known item, so this task read them in full:
+
+- `e-bbq-pt`: yes now. `labels=` names the value of `show=` ("Acerto"), which was the target of the other new sentence. With three people who paid 100, 20, and 0, the rows show "Acerto: Recebe 60,00", "Acerto: Deve pagar 20,00", and "Acerto: Deve pagar 40,00" (a scratch compile of the plan with three rows). The paid amount of each row still has no name, because `labels=` names a field only in the add form.
+- `e-plank-fr`: yes now. The plan is the same as before (`rounds=5, rest=15`). The kit of K1 ends the timer after the fifth round, at 285 s (H1 finding 3).
+- `e-times7-ru`: yes. A deck of ten tasks from 7 × 1 to 7 × 10 with a typed answer, as before.
+
+Of the 52 plans: 11 new in kind (8 yes, 3 partly), and 41 with the same need kinds. `showcase-lang-pomodoro-zh` has no plan.
+
+### Findings about the kit and the prompt
+
+The task changed nothing in `kit/src`. Each candidate sentence below did not run. The controller decides.
+
+1. **`outside("other")` for a request that the lines serve.** See "Routing". Candidate sentence for the section "System": "When the lines give the main thing of a request but not each detail, such as a record of each day, plan the main thing: outside("other") is only for a main thing that no kind gives." Evidence: `evidence/modelcheck/v3-terra-low/showcase-lang-pomodoro-zh.0.txt`. One reply of one run.
+2. **The value of a choice is text, and a drawing counted with it.** The fault and its repair are in "Faults, repairs, and notes". Candidate sentence: "The value of a choice is text: a formula that counts with it reads number($/NAME)." Evidence: `evidence/modelcheck/v3-terra-low/e-japanese-ru.0.txt` and `.1.txt`. One case, and one repair fixed it.
+3. **Button texts on a timer of one phase with an alert.** Three plans gave `start=`, `pause=`, `reset=`, and `done=` to a timer that the host draws with its own buttons. Each is a note, and each plan is clean. Candidate sentence: "start=, pause=, reset=, and done= are for a timer with rounds or rest: a timer with alert=true and one phase shows the buttons of the host." Evidence: `evidence/modelcheck/v3-terra-low/showcase-lang-tea-tr.0.txt`, `holdout-eggs-it.0.txt`, and `d-breathing.0.txt`.
+4. **A breathing timer and the end of a round timer.** The kit of K1 ends a timer with rounds after the work phase of its last round (`kit/README.md`, section "Parts", `timer`). So `rounds=5, rest=6` gives five inhales and four exhales, and no form of the kit ends on an exhale.
+   - The fixture `kit/test/fixtures/model/d-breathing.plan` (prompt v1) has `rounds=1, rest=6`. By that rule its timer now counts only the inhale of 4 s, with no rest phase: with one round, the first work phase is the last one (`kit/src/core.js` lines 596 to 600). This comes from a reading of the code, not from a run.
+   - The new plan avoids it with one timer of 10 s and a text, which names no phase on the screen (function line 5). Evidence: `evidence/modelcheck/v3-terra-low/d-breathing.0.txt`.
+5. **The paid amount of a row has no name.** In `e-bbq-pt`, `labels=` names `pago` only in the add form. The row shows the number with no word beside the named value of `show=`. Record C of L1 keeps such rows as they are. Evidence: `evidence/modelcheck/v3-terra-low/e-bbq-pt.0.txt`.
+
+### Prompt v1 runs beside this run
+
+| Measure | C earlier | C now | D earlier | D now | E apps earlier | E apps now | E dialogue earlier | E dialogue now |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Clean at the first try (recorded) | 23 | 24 | 8 | 8 | 14 | 14 | 6 | 5 |
+| Earlier first replies with the kit of now (recount, no call) | 24 | | 8 | | 14 | | 6 | |
+| Clean after at most 1 repair | 24 | 24 | 8 | 8 | 14 | 14 | 6 | 6 |
+| First call median | 3.974 s | 5.135 s | 8.794 s | 9.913 s | 4.528 s | 4.463 s | 8.659 s | 11.076 s |
+| Time to the first text: median | 1.678 s | 2.773 s | 3.301 s | 4.392 s | 2.347 s | 1.975 s | 3.457 s | 3.73 s |
+| Output tokens of the first call: median (reasoning) | 237 (32) | 223 (32) | 589 (107.5) | 551.5 (119.5) | 234 (9) | 237 (0) | 582.5 (100.5) | 655.5 (68) |
+| Input tokens of the first call: median | 6300 | 5948 | 6470 | 6171 | 6268.5 | 5916.5 | 6460 | 6161 |
+| `outside(...)` where expected | 20 of 20 | 20 of 20 | none expected | none expected | 8 of 8 | 8 of 8 | none expected | none expected |
+| A plan request that got `outside(...)` | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+- "Earlier" is `final-terra-low` for C and D and `fresh-terra-low` for E: prompt v1, the kit of that time, and up to 2 repairs. "Now" is `v3-terra-low`.
+- The recount compiles the first reply of each earlier record with the kit at `c9100af`. K1 found 32 of 33 for `final-terra-low` the same way.
+
+What the difference means, with the limit that each column is one run:
+
+- The clean rate at the first try is the rate of the recount: 24, 8, and 14. The kit, not the prompt, explains the gain of set C from 23 to 24 (`showcase-lang-workout-de`).
+- The dialogue sentence moved its two targets: `e-japanese-ru` and `d-spanish` now check each thing with a deck. It cost one fault and a larger plan: `e-japanese-ru` took 662 output tokens against 535, and its path took 14.34 s against 8.55 s.
+- The names on the values of `show=` reached their target. `e-bbq-pt` had three values with no name, and now has one text value with a name. The two other plans with `show=` (`holdout-sleep-en`, `showcase-lang-habits-uk`) name their value, as their fixtures did.
+- The routing has one new miss, and it uses the new word `other`.
+- The times of sets C and D and of the dialogue screens of set E are slower, and the apps of set E are not. Assumption: the API was slower at the time of the run, and the prompt does not cause it.
+  - Basis: the output tokens are about the same, and the input is 300 to 350 tokens shorter. An `outside(...)` reply has 8 or 9 output tokens and no reasoning. Its time to the first text was a median of 1.0 s slower in set C (19 of 20 pairs slower) and 0.68 s slower in set E (7 of 8 pairs).
+  - Test: run the same requests again at a different time. That needs calls, so the controller decides.
+- The dialogue screens of set E wrote 73 more output tokens (median), and the time after the first text grew from 5.0 s to 7.3 s (a scratch count). One run of 6 requests cannot separate the larger plans from the speed of the API.
+
+### Calls and tokens
+
+| Model and effort of each call | Calls | Input tokens | From the cache | Output tokens | Reasoning tokens |
+| --- | --- | --- | --- | --- | --- |
+| `gpt-6.1-terra` low | 82 | 490967 | 474336 (96.6%) | 18270 | 3142 |
+
+The budget was 134 calls. The task used 82: 81 first calls and 1 repair. `evidence/modelcheck/spend.json` went from 356 to 438, and its log has 82 entries of the label. `LIMIT` stays at 490. Over tasks A0, H1, and P2 the count is 438 calls.
+
+### What the numbers do not show
+
+- One run of 81 requests. The same prompt on the same 15 requests changed 2 results between two runs of A0.
+- The dialogue sentence names the requests of `e-japanese-ru` and `e-times7-ru` as its examples, and the run measures it on them. `d-spanish` is the one other request that the sentence changed. No new request tested either sentence.
+- Each difference from the earlier runs mixes three changes: the kit (K1 and L1), the prompt (K1 and this task), and the variation of the API. The recount separates the kit only for the clean rate at the first try.
+- Only one repair ran. So this run says little about the repair step with 1 repair.
+- The times come from this computer, with 4 calls in parallel and a warm cache for 80 of 81 first calls. A cold call from the phone can differ.
+- The function check reads plans. No plan ran on a device. This task measured no look numbers.
+- The assumptions of A0 stay: the widget brief is empty, and the task text of a dialogue screen is the request line, the host line, and an empty brief.
