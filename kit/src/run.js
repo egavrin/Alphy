@@ -76,6 +76,8 @@ const ranged = (type, low, high, pair) => (n, at) => {
   if (!pair) at.bounds(min, max);
   return { type, ...at.field(pair && ((x) => (fits(x) ? x : undefined))), min, max, ...defined(n.props, ["step"]), ...iconOf(n) };
 };
+/** The controls that the host gives a live input (inputMode "live"), each with the test of the value that the host sends for it (ToolUiCatalog). */
+const LIVE = { TextField: (value) => typeof value === "string" };
 
 /**
  * Each component of the kit as its Alphy node. at is the walk at the node: its children, its shown values, the field
@@ -111,7 +113,7 @@ const NODES = {
   // Alphy gives a slider without bounds 0 to 100.
   Slider: ranged("slider", 0, 100),
   RangeSlider: ranged("rangeSlider", 0, 100, 1),
-  TextField: (n, at) => ({ type: "input", ...at.field(), inputMode: "apply", ...iconOf(n) }),
+  TextField: (n, at) => ({ type: "input", ...at.field(), ...iconOf(n) }),
   Toggle: (n, at) => ({ type: "toggle", ...at.field() }),
   CheckBox: (n, at) => ({ type: "checkbox", ...at.field(), ...defined(n.props, ["variant"]) }),
   Segmented: choice,
@@ -171,7 +173,7 @@ export function screen(kit, app, first = false) {
   const fields = new Map(app.fields), kinds = app.kinds ?? {}, lists = app.lists ?? {}, day = today(kit);
   // The first walk (the emitter's) fixes the type of each shown value with its first value. The compiled data keeps the numbers, and each other shown value is a text.
   const typeOf = (key, value) => (first ? (app.types[key] ??= typeof value === "number" ? "number" : "string") : app.types[key] ?? "string");
-  const faults = [], controls = new Map(), rowControls = new Map(), owners = new Map(), listRoots = new Map(), bounds = [], views = {}, viewSchemas = {}, viewOwners = [];
+  const faults = [], controls = new Map(), liveIds = new Set(), rowControls = new Map(), owners = new Map(), listRoots = new Map(), bounds = [], views = {}, viewSchemas = {}, viewOwners = [];
   const slots = { d: new Map(), v: new Map() }, values = {};
   // The bar of each timer need that the run-time moves, by the name of its line, and each surface that the walk draws.
   const timed = new Map(kit.file.of("need").filter((entry) => entry.tree.name === "timer" && !foreground(entry.tree)).map((entry) => [`${entry.key}_bar`, entry.key]));
@@ -210,13 +212,15 @@ export function screen(kit, app, first = false) {
     if (!byRow) { rowControls.set(id, (byRow = new Map())); controls.set(id, (payload) => byRow.get(payload?.key)?.(payload.value) ?? false); }
     byRow.set(scope.id, run);
   };
-  /** ctx: scope is the row of a list (null at the top), sheet is the open flag of the add sheet, weighted is true in a column or a row. */
+  /** ctx: scope is the row of a list (null at the top), sheet is the open flag of the add sheet, weighted is true in a column or a row, off is true in a hidden or disabled node. */
   const walk = (node, key, line, ctx) => {
     line = node.name ?? line;
     const scope = ctx.scope, map = own(NODES, node.type), fault = (text) => faults.push([line, text]);
     if (!map) { fault(MESSAGES ? `${own(LATER, node.type) ?? node.type} is not built yet` : ""); return null; }
     if (scope && NOT_IN_ROW.has(node.type)) { fault(MESSAGES ? `a ${node.type} in a row of a list is not built yet` : ""); return null; }
     const expr = node.call ? given(node.call) : {};
+    // The host takes no live input for a control that is hidden or disabled, or in a node that is (ToolUiCatalog resolveAction).
+    const off = ctx.off || ["visible", "enabled"].some((flag) => expr[flag] && !node.props[flag]);
     // The arrows of a row, move(-1) and move(1), become the reorder of its list.
     if (scope && expr.action?.k === "call" && expr.action.name === "move" && expr.action.args.length === 1) { scope.flags.moves = true; return null; }
     // Alphy draws one row template for all rows, and a button, a field, or a choice binds no text or options (ToolUiCatalog).
@@ -225,10 +229,10 @@ export function screen(kit, app, first = false) {
       if (readsRow(expr[prop])) fault(`the ${prop} of a ${node.type} in a row ${prop === "options" ? "change" : "changes"} with the row, and Alphy draws one ${prop} for all rows. Show the value in a Text of the row`);
     }
     // A list in a Section announces the title of the Section: an entries need puts its list into a Section with the title of the need.
-    const within = node.type === "Section" ? { ...ctx, title: node.props.title } : ctx;
+    const within = { ...ctx, off, ...(node.type === "Section" && { title: node.props.title }) };
     const bound = (prop) => (expr[prop] && expr[prop].k !== "lit" ? slot("d", `${key}.${prop}`, expr[prop], node.props[prop], at) : null);
     const at = {
-      scope, fault,
+      scope, fault, off,
       blank: Boolean(scope && !scope.out),
       children: (weighted = false, inner = within) => node.children.map((child, index) => walk(child, child.name ?? `${key}:${index}`, line, { ...inner, weighted })).filter(Boolean),
       // The text of a control: its label, else the kit's name of its line, which a person can read. Never a safe name such as f3.
@@ -260,7 +264,13 @@ export function screen(kit, app, first = false) {
           if (MESSAGES && (!fields.has(root) || (kinds[root] === "time") !== (node.type === "TimeField"))) fault(`a binding to ${expr.bind ? show(expr.bind) : "nothing"} is not built yet: a field binds a value of a state line`);
           bind = fields.get(root);
         }
-        return { text: at.caption(node.props.label), bind, action: at.action((value) => { const next = convert(value); return next === undefined ? false : kit.change(node, next); }) };
+        const live = own(LIVE, node.type), action = at.action((value) => {
+          if (live && (off || !live(value))) return false;
+          const next = convert(value);
+          return next === undefined ? false : kit.change(node, next);
+        });
+        if (live) liveIds.add(action);
+        return { text: at.caption(node.props.label), bind, action, ...(live && { inputMode: "live" }) };
       },
       // An action returns "" or the kit's error text, or false for an event that changes nothing. A press of the add button of an add sheet that adds a row closes the sheet.
       action: (run = () => { const was = ctx.sheet?.add === node && JSON.stringify(kit.state), done = kit.fire(node); if (done === "" && was && was !== JSON.stringify(kit.state)) kit.state[ctx.sheet.flag] = false; return done; }, suffix = "") => {
@@ -275,7 +285,7 @@ export function screen(kit, app, first = false) {
         const add = node.children.find((child) => child.type === "Button" && appends(child.props.action)), text = at.caption(add?.props.label);
         const open = (to) => () => { kit.state[flag] = to; return ""; };
         return { type: "column", children: [{ type: "button", text, action: at.action(open(true), "_open"), variant: "filled", icon: "Plus" },
-          { type: "bottomSheet", text, visibleBind: fields.get(flag), dismissAction: at.action(open(false), "_dismiss"), children: at.children(false, { ...ctx, sheet: { flag, add } }) }] };
+          { type: "bottomSheet", text, visibleBind: fields.get(flag), dismissAction: at.action(open(false), "_dismiss"), children: at.children(false, { ...within, off: off || !kit.state[flag], sheet: { flag, add } }) }] };
       },
       modal: () => {
         if (MESSAGES && (!expr.visible || expr.visible.k === "lit")) fault("a Dialog shows while a test of the app is true, so it needs visible=test, such as visible=$/open");
@@ -328,7 +338,7 @@ export function screen(kit, app, first = false) {
         return { type: "column", children: [
           { type: "tabs", text: at.label(), bind: fields.get(root), action: at.action(select), options: shown.map((title) => ({ text: title, value: title })) },
           ...groups.map((group, index) => ({ type: "column", visibleBind: slot("v", `${key}.tab${index}`, null, shown[index] === open, at),
-            children: group.children.map((child, inner) => walk(child, child.name ?? `${key}:tab${index}:${inner}`, line, { ...ctx, weighted: true })).filter(Boolean) })),
+            children: group.children.map((child, inner) => walk(child, child.name ?? `${key}:tab${index}:${inner}`, line, { ...within, off: off || shown[index] !== open, weighted: true })).filter(Boolean) })),
         ] };
       },
     };
@@ -349,7 +359,7 @@ export function screen(kit, app, first = false) {
   const tree = kit.tree(), top = walk(tree, "root", "root", { scope: null, weighted: true });
   const children = [...(kind ? [{ type: "text", text: String(kind), style: STYLES.eyebrow }] : []), ...(tree.type === "Column" ? top?.children ?? [] : [top].filter(Boolean))];
   const ui = { type: "theme", preset: preset ?? "clean", ...(palette && { palette }), cornerRadius: 20, children: [{ type: "column", style: { gap: "medium", ...(tree.type === "Column" && top?.style), padding: "medium" }, children }] };
-  return { ui, values, views, viewSchemas, viewOwners, controls, bounds, faults, owners, listRoots, drawn };
+  return { ui, values, views, viewSchemas, viewOwners, controls, liveIds, bounds, faults, owners, listRoots, drawn };
 }
 
 /** The Alphy value of a stored value of the kit: a time as minutes, a date as a real date (today for a text that is not one), and each row cast. */
@@ -420,7 +430,8 @@ export function kitOf(app, state) {
  * number past its bounds comes back at its bound. The reply holds a new ui only when the screen differs from the screen of the state before the event.
  * An open and a timer event of a timer or a change that runs move each timer and each change to the clock of now. A pointer event
  * of the surface of a model turns the model (drag.js dragged), and an open ends a drag. A timer event of nothing that runs, also a late one after a pause or after
- * the end of a change, and each other event of a surface give the state back as it is.
+ * the end of a change, and each other event of a surface give the state back as it is. The host sends a liveInput, never an action, for a live
+ * control (a TextField), so a liveInput sets only a live control and an action for one changes nothing. The reply to a liveInput holds no timers.
  */
 export function handle(input, app, now = Date.now()) {
   const { state, event } = input;
@@ -433,7 +444,8 @@ export function handle(input, app, now = Date.now()) {
     if (app.drag && event.type === "open") kit.state._drag = IDLE;
     const timed = event.type === "open" || (event.type === "timer" && (event.timerId === app.anim?.field ? Boolean(kit.state._run)
       : before.drawn.some((surface) => surface.id === event.timerId && surface.running)));
-    const control = event.type === "action" ? before.controls.get(event.actionId) : timed ? () => kit.tick() : event.type === "pointer" ? () => dragged(kit, before.drawn, event) : undefined;
+    const pressed = event.type === (before.liveIds.has(event.actionId) ? "liveInput" : "action");
+    const control = pressed ? before.controls.get(event.actionId) : timed ? () => kit.tick() : event.type === "pointer" ? () => dragged(kit, before.drawn, event) : undefined;
     if (!control || control(event.value) === false) return { state };
     for (const [root, kind] of Object.entries(kinds)) {
       if ((kind === "list" && kit.state[root]?.length > (own(app.caps, root) ?? MAX_ROWS)) || (kind === "array" && kit.state[root]?.length > MAX_ARRAY)) return { state };
@@ -451,7 +463,8 @@ export function handle(input, app, now = Date.now()) {
     // the bar of a timer by the id of its surface, and the changes of animate by the field of their state. One list for all.
     if (after.drawn.length) {
       reply.surfaces = fit(after.drawn.map(({ id, commands }) => [id, commands]));
-      reply.timers = [...after.drawn.filter((surface) => surface.running).map(({ id }) => ({ id, intervalMs: TICK_MS })), ...(kit.state._run ? [{ id: app.anim.field, intervalMs: ANIM_MS }] : [])];
+      // The host takes no timers in the reply to a liveInput (SandboxContract), and it keeps the timers that run.
+      if (event.type !== "liveInput") reply.timers = [...after.drawn.filter((surface) => surface.running).map(({ id }) => ({ id, intervalMs: TICK_MS })), ...(kit.state._run ? [{ id: app.anim.field, intervalMs: ANIM_MS }] : [])];
     }
     return reply;
   } finally { settings.now = clock; }

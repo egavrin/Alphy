@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { AppFile } from "../src/dsl.js";
 import { report, smoke } from "../src/check.js";
 import { emit } from "../src/emit.js";
-import { built, every, planned, press } from "./helpers.js";
+import { built, every, live, planned, press } from "./helpers.js";
 
 
 test("entries: the fields of the add form stand one below the other, and the add button is on its own line, enabled, with a plus", async () => {
@@ -13,7 +13,7 @@ test("entries: the fields of the add form stand one below the other, and the add
   const [list, form] = definition.ui.children[0].children[1].children;
   expect(list.type).toBe("list");
   expect(form).toEqual({ type: "column", children: [
-    { type: "input", text: "Name", bind: "items_s.new_name", action: "items_new_name", inputMode: "apply" },
+    { type: "input", text: "Name", bind: "items_s.new_name", action: "items_new_name", inputMode: "live" },
     { type: "segmented", text: "Aisle", bind: "items_s.new_aisle", action: "items_new_aisle", options: [{ text: "Frutta", value: "Frutta" }, { text: "Forno", value: "Forno" }] },
     // No variant: the host makes the first button of a group filled. No enabledBind: the button is enabled at the start.
     { type: "button", text: "Aggiungi", action: "items_add", icon: "Plus" },
@@ -24,10 +24,10 @@ test("entries: a press of the add button with an empty first text field changes 
   const { definition, app } = await built('app("Spesa", lang="it")', 'need items = entries("Prodotti", fields={name: "text"}, rows=[])');
   const empty = press(definition.initialState, app, "items_add");
   expect(empty.state.items).toEqual([]);
-  const typed = press(definition.initialState, app, "items_new_name", "Latte");
+  const typed = live(definition.initialState, app, "items_new_name", "Latte");
   expect(press(typed.state, app, "items_add").state.items.map((row) => row.name)).toEqual(["Latte"]);
   // A name of spaces is empty too.
-  expect(press(press(definition.initialState, app, "items_new_name", "  ").state, app, "items_add").state.items).toEqual([]);
+  expect(press(live(definition.initialState, app, "items_new_name", "  ").state, app, "items_add").state.items).toEqual([]);
 });
 
 test("entries: an empty press in each add sheet leaves the sheet open and adds no row, and the button that opens a sheet has a plus", async () => {
@@ -38,14 +38,14 @@ test("entries: an empty press in each add sheet leaves the sheet open and adds n
   const opened = press(own.definition.initialState, own.app, "tasks_open");
   const pressed = press(opened.state, own.app, "tasks_add");
   expect([pressed.state.tasks, pressed.state.tasks_s.adding]).toEqual([[], true]);
-  const added = press(press(opened.state, own.app, "tasks_new_task", "Call").state, own.app, "tasks_add");
+  const added = press(live(opened.state, own.app, "tasks_new_task", "Call").state, own.app, "tasks_add");
   expect([added.state.tasks.map((row) => row.task), added.state.tasks_s.adding]).toEqual([["Call"], false]);
   // More than two typed fields: the run-time puts the form into a sheet.
   const many = await built('app("Tasks", lang="en")', 'need tasks = entries("Tasks", fields={task: "text", note: "text", due: "date"}, rows=[])');
   const shown = press(many.definition.initialState, many.app, "tasks_addRow_open");
   const kept = press(shown.state, many.app, "tasks_add");
   expect([kept.state.tasks, kept.state.tasks_s.adding]).toEqual([[], true]);
-  const done = press(press(shown.state, many.app, "tasks_new_task", "Call").state, many.app, "tasks_add");
+  const done = press(live(shown.state, many.app, "tasks_new_task", "Call").state, many.app, "tasks_add");
   expect([done.state.tasks.length, done.state.tasks_s.adding]).toEqual([1, false]);
 });
 
@@ -111,7 +111,7 @@ test("entries: icon= gives each row a leading emoji named by the title of the li
   expect([emoji.type, emoji.text, emoji.size, typeof emoji.bind, main.children.map((node) => node.bind)]).toEqual(["emoji", "Prodotti", "small", "string", ["name", "aisle"]]);
   expect(shown.definition.initialState.items_list[0][emoji.bind]).toBe("🥖");
   // The sign of a row that the add form makes: show= computes it from the new row.
-  const typed = press(shown.definition.initialState, shown.app, "items_new_name", "Mela");
+  const typed = live(shown.definition.initialState, shown.app, "items_new_name", "Mela");
   expect(press(typed.state, shown.app, "items_add").state.items_list.map((row) => row[emoji.bind])).toEqual(["🥖", "🍎"]);
   // A field that the row shows as its emoji is not a text of the row too.
   const field = await built('app("T", lang="en")', 'need items = entries("Items", fields={sign: "text", name: "text"}, icon=$sign)');

@@ -195,8 +195,8 @@ test("emit: list.plan gives a list with a row template and an add form", async (
       { type: "icon", name: "Trash", text: "Rimuovi", action: "prodotti_remove" },
     ] } },
     { type: "column", children: [
-      { type: "input", text: "Prodotto", bind: "prodotti_s.new_nome", action: "prodotti_new_nome", inputMode: "apply" },
-      { type: "input", text: "Corsia", bind: "prodotti_s.new_corsia", action: "prodotti_new_corsia", inputMode: "apply" },
+      { type: "input", text: "Prodotto", bind: "prodotti_s.new_nome", action: "prodotti_new_nome", inputMode: "live" },
+      { type: "input", text: "Corsia", bind: "prodotti_s.new_corsia", action: "prodotti_new_corsia", inputMode: "live" },
       { type: "button", text: "Aggiungi", action: "prodotti_add", icon: "Plus" },
     ] },
   ] });
@@ -205,8 +205,8 @@ test("emit: list.plan gives a list with a row template and an add form", async (
 test("emit: an add form with more than two typed fields is a bottom sheet", async () => {
   const need = 'need tasks = entries("Tasks", fields={task: "text", note: "text", due: "date"}, rows=[{task: "Call", note: "Bank", due: "2026-11-20"}]';
   const fields = [
-    { type: "input", text: "Task", bind: "tasks_s.new_task", action: "tasks_new_task", inputMode: "apply" },
-    { type: "input", text: "Note", bind: "tasks_s.new_note", action: "tasks_new_note", inputMode: "apply" },
+    { type: "input", text: "Task", bind: "tasks_s.new_task", action: "tasks_new_task", inputMode: "live" },
+    { type: "input", text: "Note", bind: "tasks_s.new_note", action: "tasks_new_note", inputMode: "live" },
     { type: "dateInput", text: "Due", bind: "tasks_s.new_due", action: "tasks_new_due" },
   ];
   const add = { type: "button", text: "Add", action: "tasks_add", icon: "Plus" };
@@ -487,7 +487,7 @@ test("emit: each component of the node table becomes its Alphy node", async () =
     { type: "emoji", text: "🍵", value: "🍵" },
     { type: "divider" },
     { type: "banner", children: [{ type: "text", text: "Saved" }] },
-    { type: "input", text: "Name", bind: "name", action: "nameField", inputMode: "apply" },
+    { type: "input", text: "Name", bind: "name", action: "nameField", inputMode: "live" },
     { type: "toggle", text: "On", bind: "on", action: "onToggle" },
     { type: "checkbox", text: "Box", bind: "on", action: "onBox" },
     { type: "segmented", text: "Size", bind: "size", action: "sizePick", options: ["S", "M", "L"].map((value) => ({ text: value, value })) },

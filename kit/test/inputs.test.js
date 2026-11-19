@@ -1,8 +1,72 @@
 // The input part in the look of the baseline apps (Task 11b-2a, D): options as a map, an icon of the field, and a range of two numbers.
+// A text field is a live input of the host (Task 11c): the host sends its text as a liveInput event while the person types.
 
 import { expect, test } from "bun:test";
 import { report, smoke } from "../src/check.js";
-import { built, every, planned, press } from "./helpers.js";
+import { handle } from "../src/run.js";
+import { T0, built, every, live, planned, press, valueAt } from "./helpers.js";
+
+test("live: each text field is a live input, at the top, in a row template, and in a bottom sheet", async () => {
+  const { definition } = await built('app("T", lang="en")', 'need name = input("text", "Name", "")', 'need tasks = entries("Tasks", fields={task: "text"}, sheet=true, rows=[])',
+    'need doses = entries("Doses", fields={dose: "text"}, edit=true, rows=[{dose: "A"}])');
+  const inputs = every(definition.ui).filter((node) => node.type === "input");
+  expect(inputs.map((node) => [node.action, node.inputMode])).toEqual([["name_field", "live"], ["tasks_new_task", "live"], ["doses_dose", "live"], ["doses_new_dose", "live"]]);
+});
+
+test("live: a liveInput sets the text with no ui when the screen does not change, and an action or a value of a wrong type changes nothing", async () => {
+  const { definition, app } = await built('app("T", lang="en")', 'need name = input("text", "Name", "")', 'need size = figure("count", "Letters", len($/name), example=[{name: "ab"}, 2])',
+    'need n = input("number", "N", 1, min=0, max=9)', 'need go = button("Go", inc($/n))');
+  const start = definition.initialState, shown = every(definition.ui).find((node) => node.type === "metric").bind;
+  const typed = live(start, app, "name_field", "Latte");
+  expect(Object.keys(typed)).toEqual(["state"]);
+  expect([typed.state.name, valueAt(typed.state, shown)]).toEqual(["Latte", "5"]);
+  // The host never sends an action for a live control, and a text field takes only a text.
+  for (const [type, value] of [["action", "Latte"], ["liveInput", 5], ["liveInput", null], ["liveInput", ["a"]]]) {
+    expect(handle({ artifactId: "kit-test", revision: 1, state: start, event: { type, actionId: "name_field", value } }, app)).toEqual({ state: start });
+  }
+  // A number field and a button have no live input.
+  expect(live(start, app, "n_field", 3)).toEqual({ state: start });
+  expect(live(start, app, "go")).toEqual({ state: start });
+  expect(press(start, app, "n_field", 3).state.n).toBe(3);
+});
+
+test("live: a text field of a row sets its row by the key, and a text field of an open add sheet leaves the sheet open", async () => {
+  const { definition, app } = await built('app("T", lang="en")', 'need doses = entries("Doses", fields={dose: "text"}, edit=true, rows=[{dose: "A"}, {dose: "B"}])',
+    'need tasks = entries("Tasks", fields={task: "text"}, sheet=true, rows=[])');
+  const start = definition.initialState, key = start.doses[1].id;
+  const renamed = live(start, app, "doses_dose", { key, value: "Bee" });
+  expect(renamed.state.doses.map((row) => row.dose)).toEqual(["A", "Bee"]);
+  expect(press(start, app, "doses_dose", { key, value: "Bee" })).toEqual({ state: start });
+  expect(live(start, app, "doses_dose", { key: "nothing", value: "Bee" })).toEqual({ state: start });
+  // The field of a closed sheet is hidden. In the open sheet the text goes in and the sheet stays open, and the add button closes it.
+  expect(live(start, app, "tasks_new_task", "Call")).toEqual({ state: start });
+  const opened = press(start, app, "tasks_open"), typed = live(opened.state, app, "tasks_new_task", "Call");
+  expect([typed.state.tasks_s.adding, typed.state.tasks_s.new_task]).toEqual([true, "Call"]);
+  const added = press(typed.state, app, "tasks_add");
+  expect([added.state.tasks.map((row) => row.task), added.state.tasks_s.adding]).toEqual([["Call"], false]);
+});
+
+test("live: a hidden or disabled text field changes nothing, and a typed text that shows a second text field lets it take a text", async () => {
+  const { definition, app } = await built('app("T", lang="en")', '$/a = ""', '$/b = ""', '$/c = ""', '$/e = ""', 'root = Column([aField, bField, cField, box])',
+    'aField = TextField("A", $/a)', 'bField = TextField("B", $/b, visible=len($/a) > 0)', 'cField = TextField("C", $/c, enabled=len($/a) > 0)', 'box = Card([TextField("E", $/e)], visible=len($/a) > 0)');
+  const start = definition.initialState;
+  for (const id of ["bField", "cField", "box_0"]) expect(live(start, app, id, "x")).toEqual({ state: start });
+  let state = live(start, app, "aField", "go").state;
+  for (const id of ["bField", "cField", "box_0"]) state = live(state, app, id, id).state;
+  expect([state.a, state.b, state.c, state.e]).toEqual(["go", "bField", "cField", "box_0"]);
+});
+
+test("live: a liveInput in an app with a surface timer draws the surfaces with no timers, and the timer goes on", async () => {
+  const { definition, app } = await built('app("T", lang="en")', 'need t = timer("Run", 60, rounds=2, rest=10)', 'need note = input("text", "Note", "")');
+  const send = (state, event, ms) => handle({ artifactId: "kit-test", revision: 1, state, event }, app, T0 + ms);
+  const started = send(definition.initialState, { type: "action", actionId: "t_start", value: null }, 0);
+  const typed = send(started.state, { type: "liveInput", actionId: "note_field", value: "Go" }, 5000);
+  expect(Object.keys(typed).sort()).toEqual(["state", "surfaces"]);
+  // The timer runs on to the same end, and its spent seconds follow the clock of the event, as they do for an action.
+  expect([typed.state.note, typed.state.t_s]).toEqual(["Go", { ...started.state.t_s, spent: 5 }]);
+  const ticked = send(typed.state, { type: "timer", timerId: "t_bar" }, 30000);
+  expect([ticked.state.note, ticked.state.t_s.on, ticked.timers]).toEqual(["Go", true, [{ id: "t_bar", intervalMs: 1000 }]]);
+});
 
 
 test("inputs: a choice takes options as a map of a value to its label, and the state keeps the value", async () => {

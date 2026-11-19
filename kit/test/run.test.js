@@ -9,7 +9,7 @@ import { ACCENTS, LIMITS, STAGE, budgetOf, commandsOf, polygonsOf } from "../src
 import { IDLE } from "../src/drag.js";
 import { emit, runtime } from "../src/emit.js";
 import { handle, kitOf } from "../src/run.js";
-import { T0, allPlans, clocked, gateEach, plan, planned } from "./helpers.js";
+import { T0, allPlans, clocked, gateEach, plan, planned, valueAt } from "./helpers.js";
 
 gateEach("smoke");
 
@@ -20,7 +20,7 @@ const nodes = (node) => [node, ...(node.children ?? []).flatMap(nodes)];
 /** The values of the objects d, d2, v, and so on: the values that the run-time computes. */
 const derived = (state) => Object.entries(state).filter(([key]) => /^[dv]\d*$/.test(key)).flatMap(([, values]) => Object.values(values));
 /** The stored values of a state of the run-time by the kit's name of each value (app.fields). */
-const storedOf = (app, state) => Object.fromEntries(app.fields.map(([root, path]) => [root, path.split(".").reduce((value, key) => value?.[key], state)]));
+const storedOf = (app, state) => Object.fromEntries(app.fields.map(([root, path]) => [root, valueAt(state, path)]));
 /** The same values in the kit's App. */
 const keptOf = (app, kit) => Object.fromEntries(app.fields.map(([root]) => [root, kit.state[root]]));
 
@@ -76,7 +76,8 @@ test("run: extreme inputs keep each derived value finite", async () => {
     : ["numberInput", "slider"].includes(node.type) ? [[node, node.min], [node, node.max]] : []);
   expect(samples.map(([node]) => node.type).sort()).toEqual(["input", "input", ...Array(6).fill("numberInput"), "slider", "slider"]);
   for (const [node, value] of samples) {
-    const { state } = handle(request(definition.initialState, { type: "action", actionId: node.action, value }), app);
+    // The host sends a liveInput for a live control (inputMode "live") and an action for each other control.
+    const { state } = handle(request(definition.initialState, { type: node.inputMode === "live" ? "liveInput" : "action", actionId: node.action, value }), app);
     expect(state[node.bind]).toBe(value);
     for (const shown of derived(state)) expect(typeof shown === "string" || Number.isFinite(shown)).toBe(true);
   }
@@ -125,33 +126,35 @@ const session = (definition, app) => {
   return {
     get state() { return state; },
     act: (actionId, value = null) => send({ type: "action", actionId, value }),
+    live: (actionId, value) => send({ type: "liveInput", actionId, value }),
     timer: (timerId) => send({ type: "timer", timerId }),
   };
 };
 /**
  * The compiled app and the kit's App of one plan, and act, which sends each event to both: a field value, or a press when the
- * value is null. A row control names its row by the key for the run-time, and by the row's place in the List line for the kit.
+ * value is null. live sends the value of a live control (a TextField) as the host does, in a liveInput event. A row control
+ * names its row by the key for the run-time, and by the row's place in the List line for the kit.
  */
 const twins = async (text) => {
   const { file, definition, app } = await compiled(text);
   const run = session(definition, app), prototype = new App(file);
-  const act = (name, value = null, list, key) => {
-    run.act(name, key === undefined ? value : { key, value });
+  const both = (send) => (name, value = null, list, key) => {
+    send(name, key === undefined ? value : { key, value });
     const index = key === undefined ? undefined : shownIds(prototype, list).indexOf(key);
     if (value === null) prototype.press(name, index); else prototype.input(name, value, index);
   };
-  return { run, prototype, act, app };
+  return { run, prototype, act: both(run.act), live: both(run.live), app };
 };
 
 test("run: add, check, and delete a row", async () => {
-  const { run, prototype, act } = await twins(plan("list"));
+  const { run, prototype, act, live } = await twins(plan("list"));
   const same = () => {
     expect(run.state.prodotti).toEqual(prototype.state.prodotti);
     expect(run.state.d.daComprare_text).toBe(prototype.state.daComprare_text);
     expect(run.state.prodotti_s).toEqual({ new_nome: prototype.state.prodotti_new_nome, new_corsia: prototype.state.prodotti_new_corsia });
   };
-  act("prodotti_new_nome", "Burro");
-  act("prodotti_new_corsia", "Latticini");
+  live("prodotti_new_nome", "Burro");
+  live("prodotti_new_corsia", "Latticini");
   act("prodotti_add");
   same();
   expect(run.state.prodotti).toHaveLength(4);
@@ -171,12 +174,12 @@ test("run: a list at its limits", async () => {
   const { definition, app } = await compiled(['app("Items", lang="en")', `need items = entries("Items", fields={name: "text"}, rows=[${rows}])`].join("\n"));
   const run = session(definition, app);
   // Two rows in two events: each event starts a new kit, and each new row still gets an id of its own.
-  for (const name of ["A", "B"]) { run.act("items_new_name", name); run.act("items_add"); }
+  for (const name of ["A", "B"]) { run.live("items_new_name", name); run.act("items_add"); }
   const ids = run.state.items.map((row) => row.id);
   expect(ids).toHaveLength(100);
   expect(new Set(ids).size).toBe(100);
   expect(run.state.items.at(-1).name).toBe("B");
-  run.act("items_new_name", "C");
+  run.live("items_new_name", "C");
   const full = run.state;
   // The 101st row: Alphy keeps at most 100 rows, so the event changes nothing.
   expect(handle(request(full, { type: "action", actionId: "items_add", value: null }), app)).toEqual({ state: full });
@@ -187,12 +190,12 @@ test("run: a list at its limits", async () => {
   expect(count).toBeLessThan(100);
   const wardrobe = session(rich.definition, rich.app);
   wardrobe.act("shirts_remove", { key: "r1", value: null });
-  wardrobe.act("shirts_new_name", "Scarf");
+  wardrobe.live("shirts_new_name", "Scarf");
   wardrobe.act("shirts_add");
   expect(wardrobe.state.shirts).toHaveLength(count);
   expect(wardrobe.state.shirts.at(-1).name).toBe("Scarf");
   // The add form is ready, so only the count refuses the next row.
-  wardrobe.act("shirts_new_name", "Tie");
+  wardrobe.live("shirts_new_name", "Tie");
   const fullRich = wardrobe.state;
   expect(handle(request(fullRich, { type: "action", actionId: "shirts_add", value: null }), rich.app)).toEqual({ state: fullRich });
   // The delete of the last row gives an empty list, a second delete of the same key changes nothing, and the next add gets a new id.
@@ -202,7 +205,7 @@ test("run: a list at its limits", async () => {
   expect(single.state.items).toEqual([]);
   const empty = single.state;
   expect(handle(request(empty, { type: "action", actionId: "items_remove", value: { key: "r1", value: null } }), one.app)).toEqual({ state: empty });
-  single.act("items_new_name", "Next");
+  single.live("items_new_name", "Next");
   single.act("items_add");
   expect(single.state.items).toEqual([{ id: "r2", name: "Next" }]);
 });
@@ -260,6 +263,7 @@ test("run: each action kind of the kit changes the state as the prototype's App 
 });
 
 const press = (actionId, value = null) => ({ type: "action", actionId, value });
+const live = (actionId, value) => ({ type: "liveInput", actionId, value });
 const timer = (timerId) => ({ type: "timer", timerId });
 /** The stored values of the run-time and of the kit of a clocked plan are equal. */
 const sameStored = (twin) => expect(storedOf(twin.app, twin.state)).toEqual(keptOf(twin.app, twin.kit));
@@ -401,7 +405,7 @@ test("run: a reply never goes over the command limit", async () => {
   // 600 rows drawn with each: the reply keeps the first 512 commands, so Alphy takes it.
   const { definition, app } = await compiled(['app("Dots", lang="en")', 'need csv = input("text", "Values", "1")', '$/rows := split($/csv, ",")',
     'need dots = drawing("Dots", 320, 64, [each($/rows, circle($index % 300, 1, 1, "ink"))])'].join("\n"));
-  const reply = handle(request(definition.initialState, press("csv_field", Array(600).fill("1").join(","))), app);
+  const reply = handle(request(definition.initialState, live("csv_field", Array(600).fill("1").join(","))), app);
   expect(reply.surfaces.dots_view.commands).toHaveLength(LIMITS.commands);
   expect(reply.surfaces.dots_view.commands.at(-1)).toEqual({ type: "circle", x: 211, y: 1, radius: 1, color: "default" });
 });
@@ -410,7 +414,7 @@ test("run: a reply of exactly 32768 bytes keeps each command, and one byte more 
   // bytes.plan is kit/test/bytes.plan. The device test aReplyAtTheByteLimitPassesTheHostPath sends the same values, and Alphy counts the same bytes.
   const { definition, app } = await compiled(testPlan("bytes"));
   const lines = handle(request(definition.initialState, press("n_field", 350)), app).state;
-  const drawn = (pad) => handle(request(lines, press("pad_field", pad)), app).surfaces;
+  const drawn = (pad) => handle(request(lines, live("pad_field", pad)), app).surfaces;
   const exact = drawn("x".repeat(773)), cut = drawn("x".repeat(774));
   expect([exact.lines_view.commands.length, budgetOf([["lines_view", exact.lines_view.commands]]).bytes]).toEqual([351, LIMITS.bytes]);
   // The text of 774 characters would pass the limit by 1 byte, so the reply keeps the 350 lines before it.
@@ -540,15 +544,15 @@ test("run: a reorder event moves the row", async () => {
 });
 
 test("run: a sorted view follows the stored list", async () => {
-  const { run, prototype, act } = await twins(plan("list"));
+  const { run, prototype, act, live } = await twins(plan("list"));
   const follows = () => {
     expect(run.state.prodotti_list.map((row) => row.id)).toEqual(shownIds(prototype, "prodotti_list"));
     // Each row of the view is its row of the stored list.
     for (const row of run.state.prodotti_list) expect(row).toEqual(run.state.prodotti.find((stored) => stored.id === row.id));
   };
   follows();
-  act("prodotti_new_nome", "Acqua");
-  act("prodotti_new_corsia", "Bevande");
+  live("prodotti_new_nome", "Acqua");
+  live("prodotti_new_corsia", "Bevande");
   act("prodotti_add");
   follows();
   expect(run.state.prodotti_list[0].nome).toBe("Acqua");
@@ -600,7 +604,7 @@ test("run: the add sheet opens, adds a row, and closes", async () => {
   run.act("tasks_addRow_dismiss");
   expect(run.state.tasks_s.adding).toBe(false);
   run.act("tasks_addRow_open");
-  run.act("tasks_new_task", "Call");
+  run.live("tasks_new_task", "Call");
   run.act("tasks_new_due", "2026-12-01");
   // An add that the kit takes closes the sheet.
   run.act("tasks_add");
@@ -613,10 +617,10 @@ test("run: the add sheet opens, adds a row, and closes", async () => {
   expect(nodes(custom.definition.ui).find((node) => node.action === "tasks_addRow_open").text).toBe("Add");
   const cleared = session(custom.definition, custom.app);
   cleared.act("tasks_addRow_open");
-  cleared.act("tasks_new_task", "Call");
+  cleared.live("tasks_new_task", "Call");
   cleared.act("tasks_clear");
   expect(cleared.state.tasks_s).toMatchObject({ adding: true, new_task: "" });
-  cleared.act("tasks_new_task", "Mail");
+  cleared.live("tasks_new_task", "Mail");
   cleared.act("tasks_add");
   expect(cleared.state.tasks.map((row) => row.task)).toEqual(["Mail"]);
   expect(cleared.state.tasks_s.adding).toBe(false);
@@ -659,20 +663,22 @@ test("run: a quiz answer counts a point", async () => {
   expect([run.state.learned, run.state.index, run.state.shown, run.state.d.card_kanji]).toEqual([prototype.state.learned, prototype.state.index, prototype.state.shown, prototype.state.card.kanji]);
   expect([run.state.learned, run.state.d.card_kanji]).toEqual([1, "火"]);
   const deck = await twins(testPlan("cards"));
-  deck.act("words_field", "Sol ");
+  deck.live("words_field", "Sol ");
   deck.act("words_check");
   expect([deck.run.state.words_s.points, deck.run.state.words_s.checked]).toEqual([deck.prototype.state.words_points, deck.prototype.state.words_checked]);
   expect(deck.run.state.words_s.points).toBe(1);
 });
 
 test("run: the chart arrays follow the list", async () => {
-  const { run, prototype, act } = await twins(plan("tabs-chart"));
+  const { run, prototype, act, live } = await twins(plan("tabs-chart"));
   const follows = () => {
     const points = prototype.find("grafico_chart").props.points;
     expect(run.state.grafico_chart_labels).toEqual(points.map((point) => point.label));
     expect(run.state.grafico_chart_values).toEqual(points.map((point) => point.value));
   };
-  const add = (concepto, categoria, importe) => { act("gastos_new_concepto", concepto); act("gastos_new_categoria", categoria); act("gastos_new_importe", importe); act("gastos_add"); };
+  // The form is in the tab "Añadir", and the host takes no live input for a field of a hidden tab. The kit's App has no hidden tab.
+  run.act("resumen_view", "Añadir");
+  const add = (concepto, categoria, importe) => { live("gastos_new_concepto", concepto); act("gastos_new_categoria", categoria); act("gastos_new_importe", importe); act("gastos_add"); };
   follows();
   add("Taxi", "Transporte", 300);
   follows();
@@ -698,8 +704,8 @@ test("run: a value that an entries need shows for each row reads in its sort and
     'need bars = chart("Twice", $/days, $day, $twice)'].join("\n");
   const { definition, app } = await compiled(text);
   expect(handle(request(definition.initialState, { type: "open" }), app)).toEqual({ state: definition.initialState });
-  const { run, prototype, act } = await twins(text);
-  act("days_new_day", "We");
+  const { run, prototype, act, live } = await twins(text);
+  live("days_new_day", "We");
   act("days_new_steps", 1);
   act("days_add");
   expect([run.state.bars_chart_labels, run.state.bars_chart_values]).toEqual([["Mo", "Tu", "We"], [6, 10, 2]]);
@@ -787,8 +793,9 @@ test("source: the source of list.plan is under 60000 bytes and answers an add as
   const { definition, app } = await compiled(plan("list"));
   expect(measured("list.plan", definition, app)).toBeLessThan(60000);
   const run = sandboxed(definition.source, createContext());
-  const typed = handle(request(definition.initialState, { type: "action", actionId: "prodotti_new_nome", value: "Burro" }), app).state;
-  const add = request(typed, { type: "action", actionId: "prodotti_add", value: null });
+  const type = request(definition.initialState, { type: "liveInput", actionId: "prodotti_new_nome", value: "Burro" });
+  expect(run(type)).toEqual(handle(type, app));
+  const add = request(handle(type, app).state, { type: "action", actionId: "prodotti_add", value: null });
   expect(run(add)).toEqual(handle(add, app));
   expect(run(add).state.prodotti).toHaveLength(4);
 });

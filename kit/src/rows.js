@@ -98,7 +98,7 @@ export function rows(screen, node, key, line, expr, at, title) {
   if (label) scope.computed.set(label, "string");
   const shown = node.children.filter((child) => child.row).map((child) => {
     const out = {};
-    walk(child, keyOf(child), line, { scope: { ...scope, out, id: String(child.row.id ?? "") }, weighted: false });
+    walk(child, keyOf(child), line, { scope: { ...scope, out, id: String(child.row.id ?? "") }, weighted: false, off: at.off });
     if (scope.computed.has(groupBy)) { try { out[groupBy] = shownAs("string", kit.value(group, { it: child.row })); } catch { out[groupBy] = ""; } }
     // Alphy reads the label of a row to a person who moves it, so it is never blank: the first text of the row, else its id.
     if (label) out[label] = (spec.filter(([, , kind]) => kind === "string").map(([field]) => cast("string", child.row[field]).trim()).find(Boolean) ?? String(child.row.id)).slice(0, 300);

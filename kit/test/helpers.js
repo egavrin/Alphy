@@ -27,8 +27,13 @@ export const fixture = (name) => readFileSync(new URL(`./fixtures/${name}.plan`,
 export const allPlans = () => ["plans", "test", "test/fixtures"].flatMap((dir) => plansIn(fileURLToPath(new URL(`../${dir}`, import.meta.url)))
   .map((path) => [`${dir}/${basename(path)}`, readFileSync(path, "utf8")]));
 
-/** One event of Alphy on a state: a field value, or a press when the value is null. */
-export const press = (state, app, actionId, value = null) => handle({ artifactId: "kit-test", revision: 1, state, event: { type: "action", actionId, value } }, app);
+const event = (type) => (state, app, actionId, value = null) => handle({ artifactId: "kit-test", revision: 1, state, event: { type, actionId, value } }, app);
+/** One action event of Alphy on a state: the value of a field with no live input (a choice, a number field), or a press when the value is null. */
+export const press = event("action");
+/** The value of a live control (a TextField or a Slider) while the person types or drags: the host sends it as a liveInput event. */
+export const live = event("liveInput");
+/** The value at a path of an Alphy state, such as "prodotti_s.new_nome" or "d.size_text". */
+export const valueAt = (state, path) => path.split(".").reduce((value, key) => value?.[key], state);
 export const planned = async (text) => { const file = new AppFile().feedText(text); await expand(file); return file; };
 /** The definition and the compiled app of the plan of these lines, which the emitter builds with no fault. */
 export const built = async (...lines) => {

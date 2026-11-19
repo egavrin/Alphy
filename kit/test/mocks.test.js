@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { report } from "../src/check.js";
 import { emit } from "../src/emit.js";
-import { fixture, planned, press } from "./helpers.js";
+import { fixture, live, planned, press } from "./helpers.js";
 
 /** The report and the compiled app of a mock plan. */
 const mock = async (name) => {
@@ -34,7 +34,7 @@ test("mocks: a change of the product and then of the quantity converts each unit
 
 test("mocks: an added product is in the list in the order of its aisle, and the hero counts it", async () => {
   const { app, state } = await mock("mock-shopping-it");
-  const add = (from, name, aisle) => press(press(press(from, app, "prodotti_new_nome", name).state, app, "prodotti_new_corsia", aisle).state, app, "prodotti_add").state;
+  const add = (from, name, aisle) => press(press(live(from, app, "prodotti_new_nome", name).state, app, "prodotti_new_corsia", aisle).state, app, "prodotti_add").state;
   const bread = add(state, "Pane", "Panetteria");
   expect([bread.prodotti_list.map((row) => row.nome), bread.d.left_text, bread.prodotti_s.new_nome]).toEqual([["Pane"], "1", ""]);
   const both = add(bread, "Latte", "Latticini");
