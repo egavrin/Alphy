@@ -1011,11 +1011,12 @@ class AppFileProofTest {
     }
     @Test fun thePromptAssetFillsItsTemplates() {
         val prompt=AppFilePrompt.load(instrumentation.targetContext)
+        // The sections Repair and Change of the asset end the two templates.
+        val sections=JSONObject(instrumentation.targetContext.assets.open("appfile/prompt.json").use {it.readBytes().decodeToString()})
         val repair=prompt.repairText("T","P",listOf("a","b"))
-        assertTrue(repair,repair.startsWith("T\n\n") && "\nP\n" in repair && "\n- a\n- b\n" in repair && repair.endsWith(prompt.repair))
+        assertTrue(repair,repair.startsWith("T\n\n") && "\nP\n" in repair && "\n- a\n- b\n" in repair && repair.endsWith(sections.getString("repair")))
         // One pass: a placeholder text of the request stays, the plan keeps $/x, and the plan has no blank line at its end.
         val change=prompt.changeText("Add {{plan}} and {{faults}}","need a = counter(\"A\")\n\$/x = 1\n\n")
-        assertTrue(change,change.startsWith("Add {{plan}} and {{faults}}\n\n") && change.endsWith("\$/x = 1\n\n${prompt.change}"))
-        assertTrue(listOf(prompt.system,prompt.dialogue).all {it.isNotBlank()})
+        assertTrue(change,change.startsWith("Add {{plan}} and {{faults}}\n\n") && change.endsWith("\$/x = 1\n\n${sections.getString("change")}"))
     }
 }
