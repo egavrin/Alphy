@@ -110,7 +110,7 @@ class AppFileChangeWorkflowTest {
         assertEquals(failure.toString(), code, (failure as? CloudFailure)?.code)
         assertEquals(text, failure.message)
         assertEquals(before, store.tool(before.id))
-        assertEquals(1, store.revisions(before.id).size)
+        assertEquals(before.revision, store.revisions(before.id).size)
         assertTrue(changed.stages.toString(), AGENT !in changed.stages)
         assertTrue(changed.events.none { it is ToolGenerationTraceEvent.AgentStep })
     }
@@ -179,12 +179,13 @@ class AppFileChangeWorkflowTest {
         assertRefused(changed, before)
     }
 
+    /** [record] saved with a plan that has a column which its schema and rows do not have, so its state does not fit its plan. */
+    private fun mismatched(record: ToolRecord) = record.copy(spec = ToolSpec.parsePersisted(record.spec)
+        .withAppFile(checkNotNull(appFile(record)).replace("done: \"check\"}", "done: \"check\", urgent: \"check\"}")).json)
+        .also { store.saveTool(it, false) }
+
     @Test fun aStoredStateThatDoesNotMatchItsAppFileChangesNothing() {
-        val pressed = shoppingWithData()
-        // The stored app file has a column that the stored schema and rows do not have.
-        val other = shopping.replace("done: \"check\"}", "done: \"check\", urgent: \"check\"}")
-        val before = pressed.copy(spec = ToolSpec.parsePersisted(pressed.spec).withAppFile(other).json)
-        store.saveTool(before, false)
+        val before = mismatched(shoppingWithData())
         val changed = change(before, listOf(Scripted.Text(BOUGHT)) + LOOP)
         assertEquals(listOf(APP_FILE_CHANGE), changed.stages)
         assertEquals("fallback:data_blocks", changed.outcome)
@@ -289,6 +290,15 @@ class AppFileChangeWorkflowTest {
         // One press of the person makes data that a change must keep.
         val used = created().also { runBlocking { engine.openArtifact(it) } }.let { pressed(it, "items_done", row("r1", true)) }
         assertRefused(change(used, replies), used)
+    }
+
+    // Failure case: a change that removed a list kept its rows only in the start state, so the app looked unused and a failed change wrote a new app.
+    @Test fun aFailedChangeKeepsTheRowsOfARemovedList() {
+        val before = change(shoppingWithData(), listOf(Scripted.Text(REMOVE_LIST))).saved
+        assertEquals(listOf("r1", "r3"), items(before).map { it.getString("id") })
+        val changed = change(before, listOf(Scripted.Text(BROKEN), Scripted.Text(BROKEN)) + LOOP)
+        assertEquals("fallback:faults", changed.outcome)
+        assertRefused(changed, before)
     }
 
     // Failure case: a press during the change call was lost, because the save wrote the state from before the press.
@@ -464,6 +474,81 @@ class AppFileChangeWorkflowTest {
         assertEquals(5, store.revisions(used.id).size)
     }
 
+    /**
+     * The shopping list built again in today's form (version 2), its plan restored with no value (version 3), Milk marked when [mark]
+     * is true, and a change by lines that removes the list (version 4). Gives versions 2 and 4.
+     */
+    private fun aListRemovedAfterTodaysForm(mark: Boolean): Pair<ToolRecord, ToolRecord> {
+        val today = change(created(), listOf(Scripted.Text("outside(\"game\")")) + LOOP).saved
+        val planned = restore(today, 1).getOrThrow().let { if (mark) pressed(it, "items_done", row("r1", true)) else it }
+        return today to change(planned, listOf(Scripted.Text(REMOVE_LIST))).saved
+    }
+
+    // Failure case: a change that removed a list kept its rows only in the start state, so the app looked unused and a restore to today's form dropped the rows.
+    @Test fun aRestoreToTodaysFormKeepsTheRowsOfARemovedList() {
+        val removed = aListRemovedAfterTodaysForm(mark = true).second
+        // The app keeps the rows with the mark of the person, and its start state has no row.
+        assertEquals(listOf(true, false, false), items(removed).map { it.getBoolean("done") })
+        assertEquals(0, JSONObject(ToolSpec.parsePersisted(removed.spec).initialState).getJSONArray("items").length())
+        assertRestoreRefused(removed, 2)
+    }
+
+    @Test fun aRestoreToTodaysFormTakesAnUntouchedAppWithARemovedList() {
+        val (today, removed) = aListRemovedAfterTodaysForm(mark = false)
+        val back = restore(removed, 2).getOrThrow()
+        assertNull(appFile(back))
+        assertTrue(back.state, sameToolJson(JSONObject(today.state), JSONObject(back.state)))
+    }
+
+    /** The list of versions gives the generic text of a failed check for [target], the restore fails with a text that the person does not see, and the store keeps [before]. */
+    private fun assertRestoreFailed(before: ToolRecord, target: Int) {
+        val revisions = store.revisions(before.id).size
+        assertEquals(ToolRestoreAvailability(CHECK_FAILED), runBlocking { engine.restoreAvailability(before, target) })
+        val failure = restore(before, target).exceptionOrNull()
+        // ToolController.run shows its generic text for a failure with no Russian message.
+        assertTrue(failure.toString(), failure is IllegalStateException && failure.message.orEmpty().startsWith("The kit did not compile"))
+        assertEquals(before, store.tool(before.id))
+        assertEquals(revisions, store.revisions(before.id).size)
+    }
+
+    // Failure case: a version whose plan the kit of today does not take came back with code that its plan does not make.
+    @Test fun aRestoreOfAPlanThatTheKitRefusesChangesNothing() {
+        val base = shoppingWithData()
+        // Versions 2 and 3 hold plans that an older kit could take: one with a fault and one with a part that the kit does not have.
+        for ((revision, text) in listOf(2 to shopping + BROKEN + "\n", 3 to shopping + HOLE + "\n"))
+            store.saveTool(base.copy(revision = revision, spec = ToolSpec.parsePersisted(base.spec).withAppFile(text).json), true)
+        val current = base.copy(revision = 4).also { store.saveTool(it, true) }
+        assertRestoreFailed(current, 2)
+        assertRestoreFailed(current, 3)
+    }
+
+    // Failure case: a stored state that its own plan does not give went to the kit, which could put a value on another line.
+    @Test fun aStoredStateThatDoesNotFitItsPlanBlocksARestoreAndAManualEdit() {
+        val changed = change(shoppingWithData(), listOf(Scripted.Text(BOUGHT))).saved
+        val before = mismatched(changed)
+        assertRestoreRefused(before, 1)
+        // The clean plan of the app: the kit checks the stored state only after the new plan compiles.
+        assertEditRefused(before, JSONObject(before.spec).put("appFile", appFile(changed)).toString(), refused, "widget_state")
+    }
+
+    // Failure case: a restore or a manual edit while an open app held the sandbox saved a plan that the kit did not check.
+    @Test fun aBusySandboxStopsARestoreAndAManualEdit() {
+        val before = change(shoppingWithData(), listOf(Scripted.Text(BOUGHT))).saved
+        val slot = AppFileLoopWorkflowTest.Slot(context)
+        try {
+            assertRestoreFailed(before, 1)
+            // The dialog shows its generic text for each failure that is not a refusal of the plan.
+            val failure = edited(before, JSONObject(before.spec).put("appFile", shopping).toString()).exceptionOrNull()
+            assertTrue(failure.toString(), failure is IllegalStateException)
+            assertEquals(before, store.tool(before.id))
+            assertEquals(2, store.revisions(before.id).size)
+        } finally {
+            runBlocking { slot.free() }
+        }
+        // With the sandbox free again, the same restore works.
+        assertEquals(3, restore(before, 1).getOrThrow().revision)
+    }
+
     /** The manual edit of [record] with the text [definition], as the dialog saves it. */
     private fun edited(record: ToolRecord, definition: String) =
         runCatching { runBlocking { engine.saveManualDefinition(record, definition) } }
@@ -519,7 +604,7 @@ class AppFileChangeWorkflowTest {
         val aisle = shopping.replace(shopping.lines()[2], AISLE_NUMBER)
         assertEditRefused(before, JSONObject(before.spec).put("appFile", aisle).toString(), refused, "widget_state")
         // A hole is a part that the kit does not have, so a plan with one saves nothing.
-        assertTrue(edited(before, JSONObject(before.spec).put("appFile", shopping + "need chart = hole(\"A chart\")\n").toString()).isFailure)
+        assertTrue(edited(before, JSONObject(before.spec).put("appFile", shopping + HOLE + "\n").toString()).isFailure)
         assertEquals(before, store.tool(before.id))
         assertEquals(1, store.revisions(before.id).size)
     }
@@ -533,6 +618,13 @@ class AppFileChangeWorkflowTest {
         const val URGENT = "need items = entries(\"Items\", fields={name: \"text\", aisle: \"text\", done: \"check\", urgent: \"check\"}, " +
             "sort=\$aisle, labels={name: \"Product\", aisle: \"Aisle\"}, rows=[{name: \"Milk\", aisle: \"Dairy\", done: false, urgent: false}, " +
             "{name: \"Bread\", aisle: \"Bakery\", done: false, urgent: false}, {name: \"Apples\", aisle: \"Produce\", done: false, urgent: false}])"
+        /** A change of the shopping list that removes the list, its count, and its check, and adds a count of people. */
+        const val REMOVE_LIST = "delete left\ndelete items\ndelete check(\"Sorted by aisle and counted\")\n" +
+            "need people = input(\"count\", \"People\", 4, min=1, max=20)"
+        /** A need of a part that the kit does not have. */
+        const val HOLE = "need chart = hole(\"A chart\")"
+        /** The text of the list of versions for a version that fails its check (ToolEngine.restoreAvailability). */
+        const val CHECK_FAILED = "Эта версия не прошла проверку на текущих данных."
         /** The replies of the loop: one write of the fixture app and a finish. */
         val LOOP = listOf(Scripted.Text(agentWrite(FIXTURE_APP)), Scripted.Text(agentFixtureFinish))
     }

@@ -180,7 +180,7 @@ class AppFileLoopWorkflowTest {
     }
 
     /** Holds the transient slot of the sandbox, as an open app that runs an event does, until [free]. */
-    private class Slot(context: Context) {
+    internal class Slot(context: Context) {
         private val release = CompletableDeferred<Unit>()
         private val held = CompletableDeferred<Unit>()
         private val job = CoroutineScope(Dispatchers.Default).launch {
