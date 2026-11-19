@@ -78,12 +78,24 @@ const optionsOf = (n, at, value) => {
   if (MESSAGES && !at.rowOptions && !given.length) at.fault(`a choice needs 1 to ${MAX_OPTIONS} options, and this one has none`);
   return out;
 };
+/**
+ * The width in dp that a segment needs for its label on one line (L1 item 4). The host gives the label the segment less 24 dp of padding, and
+ * the check of a selected option pushes the label 26 dp to the side, into that padding. So a segment needs the label and 29 dp. The width of
+ * a letter at labelLarge, fitted to the Roboto and Noto CJK fonts of the phone: 4 dp for a narrow letter, 11 dp for a wide one, 13 dp for a
+ * letter of a wide script, and 8 dp for another letter.
+ */
+const span = (text) => [...text].reduce((sum, char) => sum + ("fijlrtI .,'-".includes(char) ? 4 : char > "⺀" ? 13 : "mwMWшжщюыЖШЩЮМм".includes(char) ? 11 : 8), 29);
 // A choice of six options or fewer is a segmented control, which takes no icon (ToolUiCatalog). A choice with no option that Alphy takes is not on the screen.
+// A segmented control shares 345 dp of a phone screen, or 300 dp in a row of a list. When the widest label does not fit its share, the choice is a group of
+// cells that wraps (singleChoice, variant scene). The host draws no title over that group, so a label text stands over it, but not in a row of a list:
+// there, two more nodes in each row would leave room for fewer rows, and the host names the group to a screen reader.
 const choice = (n, at) => {
   const options = optionsOf(n, at, n.props.value), select = options.length > 6;
   if (!options.length) return null;
   at.inside(options);
-  return { type: select ? "select" : "segmented", ...at.field(), ...(select && iconOf(n)), options };
+  const fits = select || options.length * Math.max(...options.map((option) => span(option.text))) <= (at.scope ? 300 : 345);
+  const node = { type: select ? "select" : fits ? "segmented" : "singleChoice", ...at.field(), ...(select && iconOf(n)), ...(!fits && { variant: "scene" }), options };
+  return fits || at.scope ? node : { type: "column", style: { gap: "small" }, children: [{ type: "text", text: node.text, style: { emphasis: "label" } }, node] };
 };
 /**
  * A number field or a slider. Alphy wants min below max, the value from min to max, and a step above 0 that fits the range (ToolUiCatalog).
