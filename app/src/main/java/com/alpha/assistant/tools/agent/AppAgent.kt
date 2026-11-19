@@ -2,6 +2,7 @@ package com.alpha.assistant.tools.agent
 
 import com.alpha.assistant.capabilities.CapabilityCatalog
 import com.alpha.assistant.cloud.CloudFailure
+import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.CloudTurn
 import com.alpha.assistant.images.GeneratedImage
@@ -11,6 +12,8 @@ import com.alpha.assistant.images.ImageIntent
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.semantic.SemanticRuntime
 import com.alpha.assistant.semantic.SemanticUnavailable
+import com.alpha.assistant.tools.AppFileLimits
+import com.alpha.assistant.tools.AppFileReply
 import com.alpha.assistant.tools.AppLanguage
 import com.alpha.assistant.tools.GenerationLanguage
 import com.alpha.assistant.tools.ToolGenerationProgress
@@ -26,6 +29,8 @@ import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.ToolUiDiagnostic
 import com.alpha.assistant.tools.ToolUiValidationStage
 import com.alpha.assistant.tools.ToolValidationFailure
+import com.alpha.assistant.tools.appfile.AppFileCompiler
+import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.imageSlots
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneFailure
@@ -67,6 +72,8 @@ internal class AppAgentRequest(
     val lessonIllustration: Boolean = false,
     /** Marks a named phase in the generation trace (ToolGenerationTrace.Run.phase). Null when no trace observer is set. */
     val onPhase: ((name: String, detail: String?, ms: Long?) -> Unit)? = null,
+    /** The limits of the plan call before the loop. Null when the plan step is off for this request. */
+    val planStep: AppFileLimits? = null,
 ) {
     fun phase(name: String, detail: String? = null, ms: Long? = null) {
         onPhase?.let { runCatching { it(name, detail, ms) } }
@@ -88,6 +95,8 @@ internal class AppAgentResult(val preview: ToolPreview, val summary: String, val
 internal class AppAgent(
     private val service: ToolGenerationService,
     private val sandbox: SandboxClient,
+    /** The plan call of the plan step. Null: no plan step. */
+    private val appFileCall: (suspend (stage: CloudGenerationStage, instructions: String, input: String, limits: AppFileLimits) -> AppFileReply)? = null,
     private val complete: suspend (turns: List<CloudTurn>, instructions: String) -> String,
 ) {
     private class Feedback(message: String) : Exception(message)
@@ -113,20 +122,8 @@ internal class AppAgent(
         // Device results, collections, and live state stay local. The model never sees their values or the saved layout.
         val privateApp = previous != null && (request.privateState || previous.capabilityResults || previous.collections.length() > 0)
         val lesson = request.lesson
-        // The course player has no 3D renderer, and course slides have no capabilities.
-        val threeD = lesson == null && ThreeSceneWebView.available()
-        val guidance = if (lesson != null) "" else {
-            request.phase("capability_guidance_start")
-            capabilityGuidance(request.prompt).also { request.phase("capability_guidance_end") }
-        }
-        val instructions = AppAgentGuide.system(guidance,
-            listOfNotNull(request.extraInstructions.ifBlank { null }, lesson?.let { lessonGuide(it, request.lessonIllustration) })
-                .joinToString("\n\n"),
-            pictures = request.imageMaker != null, threeD = threeD)
-        // shortcut: reads the "User request: ...\nWidget brief:" format of ChatToolReply.generationPrompt; a direct prompt is used whole.
-        val requestLanguage = if (previous != null || lesson != null) null else
-            GenerationLanguage.identifyText(request.prompt.substringAfter("User request: ").substringBefore("\nWidget brief:"))
-        var task = taskMessage(request, previous, privateApp, requestLanguage)
+        // The course player has no 3D renderer, and course slides have no capabilities. Lazy: an accepted plan does not pay the WebView check.
+        val threeD by lazy { lesson == null && ThreeSceneWebView.available() }
         val history = mutableListOf<CloudTurn>()
         var draft: JSONObject? = previous?.let { JSONObject(it.providerDefinition()).apply { remove("formatVersion") } }
         var current: Candidate? = null
@@ -138,16 +135,14 @@ internal class AppAgent(
         // Saved scene assets hold the user's models and the textures. Textures follow the pictures that the source binds.
         val models = (previous?.sceneAssets.orEmpty().filter { asset -> savedImages.none { it.asset.id == asset.id } } +
             request.sceneAssets).distinctBy { it.id }
-        if (models.isNotEmpty() && threeD) task += "\n\nAttached 3D models: " +
-            JSONArray(models.map { JSONObject().put("id", it.id).put("name", it.name).put("mime", it.mime) }) +
-            ". Load one in createScene with (await new context.addons.GLTFLoader().parseAsync(await context.readAsset(id), \"\")).scene."
         val madeImages = mutableListOf<GeneratedImage>()
         var submittedImages = 0
         var reviewed = false
 
         suspend fun checkActive() = session.checkActive(currentCoroutineContext())
 
-        suspend fun validate(next: JSONObject, onReplay: ((List<String>) -> Unit)? = null): Candidate {
+        /** [appFile]: the plan that the kit compiled into [next]. A model definition never sets it. */
+        suspend fun validate(next: JSONObject, appFile: String? = null, onReplay: ((List<String>) -> Unit)? = null): Candidate {
             val definition = JSONObject(next.toString())
             val tag = definition.remove("language")
             val language: AppLanguage? = when {
@@ -173,7 +168,7 @@ internal class AppAgent(
             moveToneIntoStyle(definition.opt("ui"))
             val parsed = try {
                 ToolSpec.parse(service.normalizeAgentDefinition(definition.toString()))
-                    .withAppLanguage(language?.tag).withIcon(previous?.iconId)
+                    .withAppLanguage(language?.tag).withIcon(previous?.iconId).withAppFile(appFile)
             } catch (failure: ToolValidationFailure) {
                 throw Feedback(listOfNotNull(failure.message, failure.uiDiagnostic?.correction,
                     failure.uiDiagnostic?.let { definitionHint(definition, it) }).joinToString(" "))
@@ -373,6 +368,56 @@ internal class AppAgent(
             }
         }
 
+        // The plan step of a new app. A clean plan that passes the host checks is the app.
+        // Each other outcome goes on with the loop of today, and the loop gets nothing of the plan.
+        val planStep = request.planStep
+        if (planStep != null && appFileCall != null && previous == null && lesson == null && request.images.isEmpty() &&
+            request.sceneAssets.isEmpty() && !request.testFix) {
+            val outcome = AppFileSteps(AppFileCompiler(sandbox.context, sandbox), AppFilePrompt.load(sandbox.context), appFileCall,
+                request::phase) { request.progress?.invoke(it) }.plan(request.prompt, planStep)
+            checkActive()
+            val detail = when (outcome) {
+                is AppFileOutcome.Outside -> "outside:${outcome.word}"
+                is AppFileOutcome.Fallback -> "fallback:${outcome.reason}"
+                is AppFileOutcome.Clean -> try {
+                    val candidate = validate(outcome.definition, appFile = outcome.appFile)
+                    val preview = candidate.preview
+                    // The loop finds a raw float number on the screen in finish, which an accepted plan does not reach.
+                    if (longDecimalOn(AppScreen.render(JSONObject(preview.ui), JSONObject(preview.state), preview.surfaces ?: JSONObject(),
+                            System.currentTimeMillis(), candidate.spec.surfaces)) != null) "fallback:host_check"
+                    else {
+                        edited = true
+                        request.phase("plan_outcome", "accepted")
+                        // A kit definition has an empty description, so the summary is its title.
+                        return AppAgentResult(preview, candidate.spec.description.ifBlank { candidate.spec.title }, outcome.calls, changed = true)
+                    }
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (failure: Exception) {
+                    // A failed host check, or a failure of the check itself: the loop of today still serves the request.
+                    if (failure is CloudFailure && failure.code == "cancelled") throw failure
+                    "fallback:host_check"
+                }
+            }
+            request.phase("plan_outcome", detail)
+        }
+
+        val guidance = if (lesson != null) "" else {
+            request.phase("capability_guidance_start")
+            capabilityGuidance(request.prompt).also { request.phase("capability_guidance_end") }
+        }
+        val instructions = AppAgentGuide.system(guidance,
+            listOfNotNull(request.extraInstructions.ifBlank { null }, lesson?.let { lessonGuide(it, request.lessonIllustration) })
+                .joinToString("\n\n"),
+            pictures = request.imageMaker != null, threeD = threeD)
+        // shortcut: reads the "User request: ...\nWidget brief:" format of ChatToolReply.generationPrompt; a direct prompt is used whole.
+        val requestLanguage = if (previous != null || lesson != null) null else
+            GenerationLanguage.identifyText(request.prompt.substringAfter("User request: ").substringBefore("\nWidget brief:"))
+        var task = taskMessage(request, previous, privateApp, requestLanguage)
+        if (models.isNotEmpty() && threeD) task += "\n\nAttached 3D models: " +
+            JSONArray(models.map { JSONObject().put("id", it.id).put("name", it.name).put("mime", it.mime) }) +
+            ". Load one in createScene with (await new context.addons.GLTFLoader().parseAsync(await context.readAsset(id), \"\")).scene."
+
         draft?.let { saved ->
             var smokeEvents = emptyList<String>()
             try {
@@ -457,7 +502,7 @@ internal class AppAgent(
                     (outcome.final?.takeUnless { privateApp }?.let { "\nScreen at the failure:\n${it.text}" } ?: "") +
                     "\nFix the app if it is wrong. Fix the check only if the expected value does not follow from the request."
             }
-            outcome.final?.visibleText?.firstNotNullOfOrNull { longDecimal.find(it)?.value }?.let { value ->
+            outcome.final?.let(::longDecimalOn)?.let { value ->
                 if (privateApp) return "finish: FAILED. check \"$name\": the screen shows a long decimal number. Round displayed numbers in the source."
                 return "finish: FAILED. check \"$name\": the screen shows $value. Round displayed numbers in the source." +
                     "\nScreen:\n${outcome.final.text}"
@@ -822,6 +867,9 @@ internal class AppAgent(
         val scalarTypes = setOf("number", "string", "boolean")
         val placeholderValues = setOf("None", "null", "undefined", "NaN", "[object Object]")
         val longDecimal = Regex("\\d+\\.\\d{7,}")
+
+        /** The first raw float number that [screen] shows, such as 28.333333333333332, or null. */
+        fun longDecimalOn(screen: AppScreen): String? = screen.visibleText.firstNotNullOfOrNull { longDecimal.find(it)?.value }
 
         /**
          * Moves a tone that the model put beside style into style, when the node's type accepts a style tone.

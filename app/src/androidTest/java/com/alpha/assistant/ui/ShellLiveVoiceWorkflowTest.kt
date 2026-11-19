@@ -17,16 +17,21 @@ import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
+import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.memory.MemoryStore
+import com.alpha.assistant.tools.AgentScriptProvider
+import com.alpha.assistant.tools.Scripted
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.tools.agent.GenerationSettings
 import com.alpha.assistant.tools.agentReply
+import com.alpha.assistant.tools.appfile.plan as appFilePlan
 import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.FakeSpeechInput
@@ -113,6 +118,35 @@ class ShellLiveVoiceWorkflowTest {
             assertEquals(listOf("d1" to "Alphy готовит мини-приложение, оно появится на экране.",
                 "d1" to "Мини-приложение готово. Ответ Alphy: Fixture response."), commentary())
             assertNotNull(messages(model).last().toolId)
+        }
+    }
+
+    /** A hand-off of a create request takes the chat path, so with the switch on it gets one plan call and no agent call (loop plan, task 7). */
+    @Test fun miniAppHandOffGetsThePlanStep() {
+        val settings = GenerationSettings(fixture.context)
+        val before = settings.planStep(AiProvider.OPENAI)
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))))
+        settings.setPlanStep(AiProvider.OPENAI, true)
+        try {
+            install(chat = object : ChatProvider {
+                override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
+                    if (request.generationStage != null) script.respond(key, request, session, emit)
+                    else emit(CloudEvent.RoundComplete(chatDecision("create", "Готово.", "Make a tip calculator"), false))
+            })
+            live { _, model ->
+                socket.say("Сделай калькулятор чаевых", "d1", 100)
+                robot.waitUntil(60_000) { commentary().size == 2 }
+                assertEquals(listOf("d1" to "Alphy готовит мини-приложение, оно появится на экране.",
+                    "d1" to "Мини-приложение готово. Ответ Alphy: Готово."), commentary())
+                assertEquals(listOf(CloudGenerationStage.APP_FILE), script.calls.map { it.generationStage })
+                val card = checkNotNull(messages(model).last().toolId)
+                // The library list of the controller refreshes after the card.
+                var saved: ToolRecord? = null
+                robot.waitUntil { robot.instrumentation.runOnMainSync { saved = model.tools.tools.singleOrNull { it.id == card } }; saved != null }
+                assertEquals(appFilePlan("calc"), ToolSpec.parsePersisted(checkNotNull(saved).spec).appFile)
+            }
+        } finally {
+            settings.setPlanStep(AiProvider.OPENAI, before)
         }
     }
 

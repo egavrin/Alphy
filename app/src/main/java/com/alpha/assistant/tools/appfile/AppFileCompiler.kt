@@ -15,6 +15,8 @@ private const val KIT_ASSET="appfile/kit.js"
 /** The fault texts of a change (kit/src/compile.js BLOCKS and MISMATCH). */
 private const val BLOCKS="the saved data blocks this change"
 private const val MISMATCH="kit: the saved data does not match the app file"
+/** The start of the fault of a text past APP_FILE_MAX_CHARS. */
+private const val TOO_LONG="the plan has "
 /**
  * The script of each call: the reply as readPlanReply reads it (when read is true), merged into plan by patchAppFile (when plan is not null),
  * then compileAppFile of the text with the stored app. A text past cap is not compiled. All inputs come in as one JSON text, so they stay data.
@@ -37,6 +39,8 @@ internal data class AppFileCompilation(val status: String,val faults: List<Strin
     val blockedBySavedData get()=faults.any {BLOCKS in it}
     /** The stored state does not fit its stored app file. */
     val savedDataMismatch get()=MISMATCH in faults
+    /** The text is longer than the compile step reads. A repair call cannot shorten it in a useful way. */
+    val tooLong get()=faults.any {it.startsWith(TOO_LONG)}
 }
 
 /** The stored app of a change, as the host keeps it: its app file, and its state schema and state as JSON text. */
@@ -82,7 +86,7 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
 
     private fun failed(status: String)=AppFileCompilation(status,emptyList(),emptyList(),null,null)
     private fun overCap(length: Int)=AppFileCompilation("faults",
-        listOf("the plan has $length characters, and Alphy reads at most $APP_FILE_MAX_CHARS. Use shorter texts and fewer lines"),emptyList(),null,null)
+        listOf("$TOO_LONG$length characters, and Alphy reads at most $APP_FILE_MAX_CHARS. Use shorter texts and fewer lines"),emptyList(),null,null)
 
     private fun read(json: JSONObject): AppFileCompilation {
         fun texts(key: String)=json.getJSONArray(key).let {list -> List(list.length()) {list.getString(it)}}

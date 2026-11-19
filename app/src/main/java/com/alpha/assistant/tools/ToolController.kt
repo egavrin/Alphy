@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.activity.result.ActivityResult
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.*
+import com.alpha.assistant.tools.agent.GenerationSettings
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.network.ui.MiniAppNetworkAccessHost
@@ -48,8 +49,10 @@ import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 
-class ToolController(private val app: Application, private val scope: CoroutineScope, private val provider: ChatProvider,
+class ToolController internal constructor(private val app: Application, private val scope: CoroutineScope, private val provider: ChatProvider,
     private val keys: SecureKeyStore, private val store: ToolStore,
+    /** The chat model of the account for a provider. Null: no plan step. */
+    private val chatModel: ((AiProvider) -> String)? = null,
     private val readImage: (Attachment) -> String = { ImageInput.dataUrl(app.contentResolver,it) }) {
     private val librarySearch = com.alpha.assistant.semantic.SemanticIndex.get(app, "apps:${store.databaseName}")
 
@@ -423,6 +426,14 @@ class ToolController(private val app: Application, private val scope: CoroutineS
     /** Null when no observer is set, so the normal path builds no trace. */
     private fun traceFor(id: String) = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
 
+    /** The plan step needs the switch of the provider and the chat model that the model check measured: the first of the provider (ruling OD-3). */
+    private fun planStep(): AppFileLimits? {
+        val model = chatModel ?: return null
+        val provider = keys.provider() ?: return null
+        val on = GenerationSettings(app).planStep(provider) && model(provider) == provider.profile.chatModels.first()
+        return if (on) AppFileLimits() else null
+    }
+
     private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession,
         trace: ToolGenerationTrace? = traceFor(id),
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(), onPublicUpdate: (suspend (String) -> Unit)? = null,
@@ -433,7 +444,7 @@ class ToolController(private val app: Application, private val scope: CoroutineS
         try {
             val completed = engine.generate(id, key, images, call, previewObserver = observer,
                 trace = trace, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate,
-                checkOwner = checkOwner)
+                checkOwner = checkOwner, planStep = planStep())
             previews.complete(requestId,completed)
         } catch(failure: Throwable) {
             previews.clearRequest(requestId)

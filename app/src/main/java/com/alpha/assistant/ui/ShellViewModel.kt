@@ -306,7 +306,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         voice.finishRecording()
     }
     private val toolsDatabase = if(store.databaseName=="alpha.db") ToolLibraryStorage.DEFAULT else "${store.databaseName}-tools.db"
-    val tools = ToolController(getApplication(), viewModelScope, provider, keys, ToolStore(getApplication(), toolsDatabase))
+    val tools = ToolController(getApplication(), viewModelScope, provider, keys, ToolStore(getApplication(), toolsDatabase), models::chat)
     internal val courseStore = CourseStore(
         application,
         if (store.databaseName == "alpha.db") "alpha-courses.db" else "${store.databaseName}-courses.db",
