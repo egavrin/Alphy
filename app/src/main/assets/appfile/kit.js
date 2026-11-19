@@ -1010,7 +1010,7 @@ const PARTS = {
     const [kind, title, value] = need.args, extras = need.named;
     const k = kind?.v;
     // Each kind of input uses its own options, and any other one is a fault (G.4).
-    const uses = INPUT_USES[k] ?? ["min", "max", "step", "icon"], unused = Object.keys(extras).filter((key) => !uses.includes(key));
+    const uses = Object.hasOwn(INPUT_USES, k) ? INPUT_USES[k] : ["min", "max", "step", "icon"], unused = Object.keys(extras).filter((key) => !uses.includes(key));
     if (unused.length) throw new DslError(`an input of kind ${k} does not use ${unused.map((key) => key + "=").join(", ")}. ${uses.length ? `It uses ${uses.map((key) => key + "=").join(", ")}` : "It uses no option"}`);
     const named = Object.entries(extras).filter(([key]) => key !== "options").map(([key, tree]) => `, ${key}=${show(tree)}`).join("");
     // The options are a list of values or a map of a value to its label. The host draws a choice of six options or fewer as a segmented control, which shows no icon (run.js).
@@ -1472,8 +1472,9 @@ async function expand(file, choose = rules) {
   const grouped = needs.filter(holder).flatMap((entry) => (entry.tree.args[1]?.items ?? []).map((group) => (group.items ?? []).map(memberName)));
   const places = [needs.map((entry) => entry.key).filter((key) => !grouped.flat().includes(key)), ...grouped];
   // The figures that are not the main element are a set in each place (E.2, fix round 1): two that stand one after the other are one grid of two,
-  // three or more are rows of one size, and one stays a metric. A figure keeps its place.
-  const roles = new Map(), figure = (key) => key !== hero && needs.some((entry) => entry.key === key && entry.tree.name === "figure");
+  // three or more are rows of one size, and one stays a metric. A figure keeps its place, and a figure in two places is in no set.
+  const once = (key) => places.filter((keys) => keys.includes(key)).length === 1;
+  const roles = new Map(), figure = (key) => key !== hero && once(key) && needs.some((entry) => entry.key === key && entry.tree.name === "figure");
   for (const members of places.map((keys) => keys.filter((key) => key !== hero))) {
     const set = members.filter(figure);
     if (set.length > 2) set.forEach((key) => roles.set(key, "row"));

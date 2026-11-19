@@ -62,6 +62,9 @@ test("figures: the figures of one group of steps or tabs are a set of their own,
   // The reviewer's tabs plan: the main figure and a in one tab, b in the other. It has no fault.
   const tabbed = await planned([...head, 'need p = tabs(["X", "Y"], [[h, a], [b]])'].join("\n"));
   expect([report(tabbed).faults, tabbed.get("p_view").raw]).toEqual([[], 'p_view = Tabs(["X", "Y"], [[h_view, a_view], [b_view]], label=join(["X", "Y"]))']);
+  // A figure in two groups is in no set: it stays a metric in each group, and the second group keeps it.
+  const twice = await planned([...head, 'need p = tabs(["X", "Y"], [[a, b], [b]])'].join("\n"));
+  expect([report(twice).faults, twice.get("p_view").raw]).toEqual([[], 'p_view = Tabs(["X", "Y"], [[a_view, b_view], [b_view]], label=join(["X", "Y"]))']);
 });
 
 test("figures: one figure beside the main one, or two that do not stand one after the other, stay metrics", async () => {

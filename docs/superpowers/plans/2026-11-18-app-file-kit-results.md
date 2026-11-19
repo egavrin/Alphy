@@ -439,6 +439,7 @@ All times are on 2026-11-19. The runner installed the test APK at each "after" t
 The runs of the single items of the task (`appfile-numbers`, `appfile-entries`, `appfile-inputs`, `appfile-figures`, `appfile-counter`, and their red runs) passed or failed as expected before these runs.
 The pictures are in `evidence/alphy-ui/appfile-look-parts/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png`.
 The pair sheet `pairs-light.png` in the same folder shows each baseline app at the left and its plan at the right. Git does not keep these files.
+The pictures after fix round 1 of the task are in `evidence/alphy-ui/appfile-look-parts-fix2/`, with the same sheets. There `mock-units-pl` shows three rows of one size, and `units-pl` shows four.
 
 The first round of pictures changed the parts and the plans:
 
