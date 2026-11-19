@@ -1,0 +1,229 @@
+{
+ "title": "Przelicznik kuchenny",
+ "description": "Przelicza gramy, szklanki, łyżki i mililitry dla mąki, cukru i wody",
+ "capabilities": [],
+ "stateSchema": {
+  "ingredient": "string",
+  "amount": "number",
+  "unit": "string",
+  "picture": "string",
+  "name": "string",
+  "amountText": "string",
+  "assumptions": "string",
+  "conversions": {
+   "type": "list",
+   "maxItems": 4,
+   "fields": {
+    "id": "string",
+    "label": "string",
+    "value": "string"
+   }
+  }
+ },
+ "initialState": {
+  "ingredient": "mąka",
+  "amount": 1,
+  "unit": "szklanka",
+  "picture": "🌾",
+  "name": "Mąka",
+  "amountText": "1 szkl.",
+  "assumptions": "Gęstość mąki ok. 0,55 g/ml. 1 szklanka mąki ≈ 137,5 g, 1 łyżka ≈ 8,3 g.",
+  "conversions": [
+   {
+    "id": "u_0",
+    "label": "Gramy",
+    "value": "137,5"
+   },
+   {
+    "id": "u_2",
+    "label": "Łyżki",
+    "value": "16,7"
+   },
+   {
+    "id": "u_3",
+    "label": "Mililitry",
+    "value": "250"
+   }
+  ]
+ },
+ "ui": {
+  "type": "theme",
+  "preset": "clean",
+  "palette": "amber",
+  "cornerRadius": 20,
+  "children": [
+   {
+    "type": "column",
+    "style": {
+     "gap": "medium",
+     "padding": "medium"
+    },
+    "children": [
+     {
+      "type": "card",
+      "variant": "hero",
+      "children": [
+       {
+        "type": "emoji",
+        "text": "Składnik",
+        "bind": "picture",
+        "size": "large"
+       },
+       {
+        "type": "text",
+        "text": "",
+        "bind": "name",
+        "style": {
+         "emphasis": "title"
+        }
+       },
+       {
+        "type": "metric",
+        "text": "Ilość",
+        "bind": "amountText",
+        "style": {
+         "emphasis": "display"
+        }
+       }
+      ]
+     },
+     {
+      "type": "section",
+      "text": "Składnik",
+      "children": [
+       {
+        "type": "segmented",
+        "text": "Składnik",
+        "bind": "ingredient",
+        "action": "ingredient",
+        "options": [
+         {
+          "text": "Mąka",
+          "value": "mąka"
+         },
+         {
+          "text": "Cukier",
+          "value": "cukier"
+         },
+         {
+          "text": "Woda",
+          "value": "woda"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "form",
+      "text": "Ilość i jednostka",
+      "children": [
+       {
+        "type": "numberInput",
+        "text": "Ilość",
+        "bind": "amount",
+        "action": "amount",
+        "min": 0,
+        "max": 10000,
+        "step": 1
+       },
+       {
+        "type": "segmented",
+        "text": "Jednostka",
+        "bind": "unit",
+        "action": "unit",
+        "options": [
+         {
+          "text": "Gramy",
+          "value": "g"
+         },
+         {
+          "text": "Szklanki",
+          "value": "szklanka"
+         },
+         {
+          "text": "Łyżki",
+          "value": "łyżka"
+         },
+         {
+          "text": "Mililitry",
+          "value": "ml"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "section",
+      "text": "Przeliczenia",
+      "children": [
+       {
+        "type": "list",
+        "text": "Przeliczenia",
+        "bind": "conversions",
+        "emptyText": "Brak przeliczeń",
+        "rowTemplate": {
+         "type": "row",
+         "wrap": false,
+         "style": {
+          "gap": "medium",
+          "crossAlign": "center"
+         },
+         "children": [
+          {
+           "type": "text",
+           "text": "",
+           "bind": "label",
+           "layout": {
+            "weight": 1
+           }
+          },
+          {
+           "type": "text",
+           "text": "",
+           "bind": "value",
+           "style": {
+            "emphasis": "number"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "type": "section",
+      "text": "Orientacyjne przeliczenia",
+      "children": [
+       {
+        "type": "text",
+        "text": "1 szklanka = 250 ml"
+       },
+       {
+        "type": "text",
+        "text": "1 łyżka = 15 ml"
+       },
+       {
+        "type": "text",
+        "text": "",
+        "bind": "assumptions",
+        "style": {
+         "tone": "muted"
+        }
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "text": "Wyniki zaokrąglono do 1 miejsca po przecinku. Dla wody gramy i mililitry są równe.",
+      "style": {
+       "tone": "muted"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "source": "const s=input.state,e=input.event,v=e.value;\nif(e.type!=='action'&&e.type!=='liveInput')return {state:input.state};\nconst D={mąka:0.55,cukier:0.85,woda:1};\nconst NAME={mąka:'Mąka',cukier:'Cukier',woda:'Woda'};\nconst PIC={mąka:'🌾',cukier:'🍬',woda:'💧'};\nconst GEN={mąka:'mąki',cukier:'cukru',woda:'wody'};\nconst SHORT={g:'g',szklanka:'szkl.',łyżka:'łyż.',ml:'ml'};\nconst LONG={g:'Gramy',szklanka:'Szklanki',łyżka:'Łyżki',ml:'Mililitry'};\nconst nf=new Intl.NumberFormat('pl-PL',{maximumFractionDigits:1});\nconst f=function(x){return nf.format(x)};\nif(e.actionId==='ingredient')s.ingredient=v;\nif(e.actionId==='unit')s.unit=v;\nif(e.actionId==='amount')s.amount=Number(v);\nconst d=D[s.ingredient]||1;\nconst toMl={g:1/d,szklanka:250,'łyżka':15,ml:1};\nconst a=Math.max(0,Number(s.amount)||0);\nconst ml=a*(toMl[s.unit]||1);\nconst vals={g:ml*d,szklanka:ml/250,'łyżka':ml/15,ml:ml};\nconst order=['g','szklanka','łyżka','ml'];\ns.name=NAME[s.ingredient];\ns.picture=PIC[s.ingredient];\ns.amountText=f(a)+' '+SHORT[s.unit];\ns.conversions=order.filter(function(u){return u!==s.unit}).map(function(u){return {id:'u_'+order.indexOf(u),label:LONG[u],value:f(vals[u])}});\ns.assumptions='Gęstość '+GEN[s.ingredient]+' ok. '+f(d)+' g/ml. 1 szklanka '+GEN[s.ingredient]+' ≈ '+f(250*d)+' g, 1 łyżka ≈ '+f(15*d)+' g.';\nreturn {state:s};",
+ "formatVersion": 3,
+ "appLanguage": "pl"
+}

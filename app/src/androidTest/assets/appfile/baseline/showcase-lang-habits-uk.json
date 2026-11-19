@@ -1,0 +1,565 @@
+{
+ "title": "Тижневий трекер звичок",
+ "description": "Три звички з відмітками Пн–Нд, серією днів і скиданням тижня",
+ "capabilities": [],
+ "stateSchema": {
+  "h1name": "string",
+  "h2name": "string",
+  "h3name": "string",
+  "s1": "string",
+  "s2": "string",
+  "s3": "string",
+  "d1": "string",
+  "d2": "string",
+  "d3": "string",
+  "total": "number",
+  "totalText": "string",
+  "editOpen": "boolean",
+  "h1d0": "boolean",
+  "h1d1": "boolean",
+  "h1d2": "boolean",
+  "h1d3": "boolean",
+  "h1d4": "boolean",
+  "h1d5": "boolean",
+  "h1d6": "boolean",
+  "h2d0": "boolean",
+  "h2d1": "boolean",
+  "h2d2": "boolean",
+  "h2d3": "boolean",
+  "h2d4": "boolean",
+  "h2d5": "boolean",
+  "h2d6": "boolean",
+  "h3d0": "boolean",
+  "h3d1": "boolean",
+  "h3d2": "boolean",
+  "h3d3": "boolean",
+  "h3d4": "boolean",
+  "h3d5": "boolean",
+  "h3d6": "boolean"
+ },
+ "initialState": {
+  "h1name": "Пити воду",
+  "h2name": "Читати 20 сторінок",
+  "h3name": "Прогулянка 30 хв",
+  "s1": "🔥 2",
+  "s2": "🔥 1",
+  "s3": "🔥 0",
+  "d1": "2 з 7",
+  "d2": "1 з 7",
+  "d3": "0 з 7",
+  "total": 3,
+  "totalText": "3 з 21",
+  "editOpen": false,
+  "h1d0": true,
+  "h1d1": true,
+  "h1d2": false,
+  "h1d3": false,
+  "h1d4": false,
+  "h1d5": false,
+  "h1d6": false,
+  "h2d0": true,
+  "h2d1": false,
+  "h2d2": false,
+  "h2d3": false,
+  "h2d4": false,
+  "h2d5": false,
+  "h2d6": false,
+  "h3d0": false,
+  "h3d1": false,
+  "h3d2": false,
+  "h3d3": false,
+  "h3d4": false,
+  "h3d5": false,
+  "h3d6": false
+ },
+ "ui": {
+  "type": "theme",
+  "preset": "soft",
+  "palette": "green",
+  "cornerRadius": 22,
+  "children": [
+   {
+    "type": "column",
+    "style": {
+     "gap": "medium",
+     "padding": "medium"
+    },
+    "children": [
+     {
+      "type": "progressRing",
+      "text": "Виконано за тиждень",
+      "bind": "total",
+      "min": 0,
+      "max": 21,
+      "size": "large",
+      "children": [
+       {
+        "type": "text",
+        "text": "",
+        "bind": "totalText",
+        "style": {
+         "emphasis": "display"
+        }
+       }
+      ]
+     },
+     {
+      "type": "card",
+      "children": [
+       {
+        "type": "column",
+        "style": {
+         "gap": "small"
+        },
+        "children": [
+         {
+          "type": "row",
+          "wrap": false,
+          "style": {
+           "gap": "small",
+           "crossAlign": "center"
+          },
+          "children": [
+           {
+            "type": "emoji",
+            "text": "Звичка",
+            "value": "💧",
+            "size": "small"
+           },
+           {
+            "type": "text",
+            "text": "",
+            "bind": "h1name",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "text",
+            "text": "",
+            "bind": "d1",
+            "style": {
+             "tone": "muted"
+            }
+           },
+           {
+            "type": "badge",
+            "text": "",
+            "bind": "s1",
+            "style": {
+             "tone": "accent"
+            }
+           }
+          ]
+         },
+         {
+          "type": "row",
+          "wrap": false,
+          "style": {
+           "gap": "none"
+          },
+          "children": [
+           {
+            "type": "checkbox",
+            "text": "Пн",
+            "bind": "h1d0",
+            "action": "h1d0",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Вт",
+            "bind": "h1d1",
+            "action": "h1d1",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Ср",
+            "bind": "h1d2",
+            "action": "h1d2",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Чт",
+            "bind": "h1d3",
+            "action": "h1d3",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Пт",
+            "bind": "h1d4",
+            "action": "h1d4",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Сб",
+            "bind": "h1d5",
+            "action": "h1d5",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Нд",
+            "bind": "h1d6",
+            "action": "h1d6",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "card",
+      "children": [
+       {
+        "type": "column",
+        "style": {
+         "gap": "small"
+        },
+        "children": [
+         {
+          "type": "row",
+          "wrap": false,
+          "style": {
+           "gap": "small",
+           "crossAlign": "center"
+          },
+          "children": [
+           {
+            "type": "emoji",
+            "text": "Звичка",
+            "value": "📖",
+            "size": "small"
+           },
+           {
+            "type": "text",
+            "text": "",
+            "bind": "h2name",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "text",
+            "text": "",
+            "bind": "d2",
+            "style": {
+             "tone": "muted"
+            }
+           },
+           {
+            "type": "badge",
+            "text": "",
+            "bind": "s2",
+            "style": {
+             "tone": "accent"
+            }
+           }
+          ]
+         },
+         {
+          "type": "row",
+          "wrap": false,
+          "style": {
+           "gap": "none"
+          },
+          "children": [
+           {
+            "type": "checkbox",
+            "text": "Пн",
+            "bind": "h2d0",
+            "action": "h2d0",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Вт",
+            "bind": "h2d1",
+            "action": "h2d1",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Ср",
+            "bind": "h2d2",
+            "action": "h2d2",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Чт",
+            "bind": "h2d3",
+            "action": "h2d3",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Пт",
+            "bind": "h2d4",
+            "action": "h2d4",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Сб",
+            "bind": "h2d5",
+            "action": "h2d5",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Нд",
+            "bind": "h2d6",
+            "action": "h2d6",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "card",
+      "children": [
+       {
+        "type": "column",
+        "style": {
+         "gap": "small"
+        },
+        "children": [
+         {
+          "type": "row",
+          "wrap": false,
+          "style": {
+           "gap": "small",
+           "crossAlign": "center"
+          },
+          "children": [
+           {
+            "type": "emoji",
+            "text": "Звичка",
+            "value": "🚶",
+            "size": "small"
+           },
+           {
+            "type": "text",
+            "text": "",
+            "bind": "h3name",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "text",
+            "text": "",
+            "bind": "d3",
+            "style": {
+             "tone": "muted"
+            }
+           },
+           {
+            "type": "badge",
+            "text": "",
+            "bind": "s3",
+            "style": {
+             "tone": "accent"
+            }
+           }
+          ]
+         },
+         {
+          "type": "row",
+          "wrap": false,
+          "style": {
+           "gap": "none"
+          },
+          "children": [
+           {
+            "type": "checkbox",
+            "text": "Пн",
+            "bind": "h3d0",
+            "action": "h3d0",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Вт",
+            "bind": "h3d1",
+            "action": "h3d1",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Ср",
+            "bind": "h3d2",
+            "action": "h3d2",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Чт",
+            "bind": "h3d3",
+            "action": "h3d3",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Пт",
+            "bind": "h3d4",
+            "action": "h3d4",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Сб",
+            "bind": "h3d5",
+            "action": "h3d5",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           },
+           {
+            "type": "checkbox",
+            "text": "Нд",
+            "bind": "h3d6",
+            "action": "h3d6",
+            "variant": "circle",
+            "layout": {
+             "weight": 1
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "button",
+      "text": "Редагувати назви",
+      "action": "openEdit",
+      "variant": "outlined",
+      "icon": "Pencil"
+     },
+     {
+      "type": "button",
+      "text": "Скинути тиждень",
+      "action": "reset",
+      "variant": "text",
+      "icon": "Refresh"
+     }
+    ]
+   },
+   {
+    "type": "bottomSheet",
+    "text": "Назви звичок",
+    "visibleBind": "editOpen",
+    "dismissAction": "closeEdit",
+    "children": [
+     {
+      "type": "input",
+      "text": "Звичка 1",
+      "bind": "h1name",
+      "action": "n1",
+      "inputMode": "live",
+      "maxLength": 40,
+      "icon": "Leaf"
+     },
+     {
+      "type": "input",
+      "text": "Звичка 2",
+      "bind": "h2name",
+      "action": "n2",
+      "inputMode": "live",
+      "maxLength": 40,
+      "icon": "Leaf"
+     },
+     {
+      "type": "input",
+      "text": "Звичка 3",
+      "bind": "h3name",
+      "action": "n3",
+      "inputMode": "live",
+      "maxLength": 40,
+      "icon": "Leaf"
+     },
+     {
+      "type": "button",
+      "text": "Готово",
+      "action": "closeEdit2",
+      "variant": "filled",
+      "icon": "Check"
+     }
+    ]
+   }
+  ]
+ },
+ "source": "const s=input.state,e=input.event,a=e.actionId||'';\nconst D={1:['h1d0','h1d1','h1d2','h1d3','h1d4','h1d5','h1d6'],2:['h2d0','h2d1','h2d2','h2d3','h2d4','h2d5','h2d6'],3:['h3d0','h3d1','h3d2','h3d3','h3d4','h3d5','h3d6']};\nconst N={n1:'h1name',n2:'h2name',n3:'h3name'};\nif(e.type==='action'||e.type==='liveInput'){\n if(/^h[123]d[0-6]$/.test(a)){s[a]=!!e.value;}\n if(N[a])s[N[a]]=String(e.value||'');\n if(a==='openEdit')s.editOpen=true;\n if(a==='closeEdit'||a==='closeEdit2')s.editOpen=false;\n if(a==='reset'){Object.keys(D).forEach(k=>D[k].forEach(d=>{s[d]=false;}));}\n}\nif(e.type!=='preview'&&e.type!=='render'){\n const today=(new Date(Date.now()).getDay()+6)%7;\n let total=0;\n [1,2,3].forEach(k=>{\n  const ds=D[k];let done=0;\n  ds.forEach(d=>{if(s[d])done++;});\n  total+=done;\n  s['d'+k]=done+' з 7';\n  let i=s[ds[today]]?today:today-1,st=0;\n  while(i>=0&&s[ds[i]]){st++;i--;}\n  s['s'+k]='🔥 '+st;\n });\n s.total=total;\n s.totalText=total+' з 21';\n}\nreturn {state:s};",
+ "formatVersion": 3,
+ "appLanguage": "uk"
+}

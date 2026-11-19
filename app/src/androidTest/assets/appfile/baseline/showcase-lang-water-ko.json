@@ -1,0 +1,175 @@
+{
+ "title": "하루 물 마시기",
+ "description": "컵 버튼으로 250ml씩 기록하고 하루 목표 2L 대비 진행률을 확인하세요.",
+ "capabilities": [],
+ "stateSchema": {
+  "intake": "number",
+  "goal": "number",
+  "progress": "number",
+  "amountText": "string",
+  "remainText": "string",
+  "goalText": "string",
+  "done": "boolean",
+  "showSheet": "boolean",
+  "draftTotal": "number"
+ },
+ "initialState": {
+  "intake": 0,
+  "goal": 2000,
+  "progress": 0,
+  "amountText": "0 ml",
+  "remainText": "2,000 ml",
+  "goalText": "2,000 ml",
+  "done": false,
+  "showSheet": false,
+  "draftTotal": 0
+ },
+ "ui": {
+  "type": "theme",
+  "preset": "clean",
+  "palette": "blue",
+  "cornerRadius": 20,
+  "children": [
+   {
+    "type": "column",
+    "style": {
+     "gap": "medium",
+     "padding": "medium"
+    },
+    "children": [
+     {
+      "type": "card",
+      "variant": "hero",
+      "children": [
+       {
+        "type": "emoji",
+        "text": "물방울",
+        "value": "💧",
+        "size": "large"
+       },
+       {
+        "type": "metric",
+        "text": "오늘 마신 양",
+        "bind": "amountText",
+        "style": {
+         "emphasis": "display"
+        }
+       },
+       {
+        "type": "progress",
+        "text": "달성률",
+        "bind": "progress",
+        "min": 0,
+        "max": 100
+       }
+      ]
+     },
+     {
+      "type": "button",
+      "text": "컵 추가 (250 ml)",
+      "action": "addCup",
+      "variant": "filled",
+      "icon": "Cup"
+     },
+     {
+      "type": "text",
+      "text": "컵 한 번에 250 ml가 더해져요.",
+      "style": {
+       "tone": "muted"
+      }
+     },
+     {
+      "type": "grid",
+      "columns": 2,
+      "children": [
+       {
+        "type": "metric",
+        "text": "남은 양",
+        "bind": "remainText",
+        "icon": "Drop"
+       },
+       {
+        "type": "metric",
+        "text": "하루 목표",
+        "bind": "goalText",
+        "icon": "Target"
+       }
+      ]
+     },
+     {
+      "type": "banner",
+      "text": "목표 달성",
+      "icon": "Trophy",
+      "visibleBind": "done",
+      "style": {
+       "tone": "success"
+      },
+      "children": [
+       {
+        "type": "text",
+        "text": "오늘 목표 2 L를 달성했어요 🎉"
+       }
+      ]
+     },
+     {
+      "type": "section",
+      "text": "기록 관리",
+      "children": [
+       {
+        "type": "row",
+        "wrap": false,
+        "style": {
+         "gap": "small"
+        },
+        "children": [
+         {
+          "type": "button",
+          "text": "직접 입력",
+          "action": "openSheet",
+          "variant": "outlined",
+          "icon": "Pencil"
+         },
+         {
+          "type": "button",
+          "text": "하루 리셋",
+          "action": "reset",
+          "variant": "text",
+          "icon": "Refresh"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "bottomSheet",
+      "text": "섭취량 직접 입력",
+      "visibleBind": "showSheet",
+      "dismissAction": "closeSheet",
+      "children": [
+       {
+        "type": "text",
+        "text": "오늘 마신 총량을 직접 고칠 수 있어요.",
+        "style": {
+         "tone": "muted"
+        }
+       },
+       {
+        "type": "numberInput",
+        "text": "총 섭취량 (ml)",
+        "bind": "draftTotal",
+        "action": "setTotal",
+        "min": 0,
+        "max": 20000,
+        "step": 250,
+        "icon": "Drop"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "source": "const s=input.state,e=input.event;\nconst nf=new Intl.NumberFormat('ko-KR');\nconst GOAL=2000;\nfunction recalc(){\n if(typeof s.intake!=='number'||!isFinite(s.intake))s.intake=0;\n s.intake=Math.max(0,Math.min(20000,Math.round(s.intake)));\n s.goal=GOAL;\n s.progress=Math.min(100,Math.round(s.intake*100/GOAL));\n s.amountText=nf.format(s.intake)+' ml';\n s.remainText=nf.format(Math.max(0,GOAL-s.intake))+' ml';\n s.goalText=nf.format(GOAL)+' ml';\n s.done=s.intake>=GOAL;\n}\nif(e.type==='action'||e.type==='liveInput'){\n const v=e.value;\n if(e.actionId==='addCup'){s.intake=Number(s.intake)+250;}\n if(e.actionId==='setTotal'){const n=Number(v);s.intake=isFinite(n)?n:0;s.showSheet=false;}\n if(e.actionId==='openSheet'){s.draftTotal=Number(s.intake)||0;s.showSheet=true;}\n if(e.actionId==='closeSheet'){s.showSheet=false;}\n if(e.actionId==='reset'){s.intake=0;}\n}\nrecalc();\nreturn {state:s};",
+ "formatVersion": 3,
+ "appLanguage": "ko"
+}

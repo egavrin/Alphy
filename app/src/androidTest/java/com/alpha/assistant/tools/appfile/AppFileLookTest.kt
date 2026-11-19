@@ -27,9 +27,12 @@ import java.util.Locale
 
 /** The fixtures of kit/build.js LOOK_FIXTURES with the language of each app. */
 private val LOOK_FIXTURES=mapOf("water-ko" to "ko","units-pl" to "pl","shopping" to "en","habits" to "en","price-filter" to "en",
-    "look-water-ko" to "ko","look-shopping-it" to "it")
+    "look-water-ko" to "ko","look-shopping-it" to "it","mock-water-ko" to "ko","mock-units-pl" to "pl","mock-shopping-it" to "it","mock-habits-uk" to "uk",
+    "mock-price-filter" to "en")
+/** The apps that the model of the app wrote for the five requests of the mock plans (final-30d43aa): each spec, saved as an app of the same host, with no kit. */
+private val BASELINES=listOf("showcase-lang-water-ko","showcase-lang-units-pl","showcase-lang-shopping-it","showcase-lang-habits-uk","showcase-ui-price-filter")
 
-/** Each compiled plan as a saved app in the real shell: its pictures in the light and the dark theme, the host's words in the language of the app, a real tap on a row control, and the host's own timer loop of a drawn app. */
+/** Each compiled plan and each baseline app as a saved app in the real shell: its pictures in the light and the dark theme, the host's words in the language of the app, a real tap on a row control, and the host's own timer loop of a drawn app. */
 @RunWith(AndroidJUnit4::class)
 class AppFileLookTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -60,10 +63,16 @@ class AppFileLookTest {
         assertNull(spec.title,model.tools.error)
     }
     private fun state(store: ToolStore,id: String)=JSONObject(checkNotNull(store.tool(id)).state)
+    /** A string of the host in the resources of a language. */
+    private fun word(tag: String,resource: Int,vararg args: Any)=instrumentation.targetContext.let {context ->
+        context.createConfigurationContext(Configuration(context.resources.configuration).apply {setLocale(Locale.forLanguageTag(tag))}).getString(resource,*args)}
 
     @Test fun picturesOfEachPlan() {
         val sandbox=SandboxClient(instrumentation.targetContext)
-        val specs=runBlocking {(SAVED_PLANS+LOOK_FIXTURES).mapValues {(name,language) -> parsedAndSmoked(sandbox,name,language)}}
+        val compiled=runBlocking {(SAVED_PLANS+LOOK_FIXTURES).mapValues {(name,language) -> parsedAndSmoked(sandbox,name,language)}}
+        // A baseline is a saved app: its spec keeps the appLanguage field of the host.
+        val baselines=BASELINES.associateWith {ToolSpec.parsePersisted(instrumentation.context.assets.open("appfile/baseline/$it.json").use {stream -> stream.readBytes().decodeToString()})}
+        val specs=compiled+baselines
         val folder=File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)),"appfile-look")
         if(folder.exists()) check(folder.deleteRecursively())
         val shell=ShellRobot("appfile-look")
@@ -72,7 +81,7 @@ class AppFileLookTest {
             for(dark in listOf(false,true)) {
                 shell.shell("cmd uimode night ${if(dark) "yes" else "no"}")
                 val directory=File(folder,if(dark) "dark" else "light").apply {check(mkdirs())}
-                inShell("appfile-look",specs.mapKeys {"appfile-${it.key}"}) {robot,model,_,scenario ->
+                inShell("appfile-look",specs.mapKeys {"appfile-${it.key}"}) {robot,model,store,scenario ->
                     robot.waitUntil {nightOf(scenario) == dark}
                     for((name,spec) in specs) {
                         open(robot,model,"appfile-$name",spec)
@@ -83,6 +92,8 @@ class AppFileLookTest {
                         val screen=stillScreen(robot)
                         try {picture.outputStream().use {assertTrue(screen.compress(Bitmap.CompressFormat.PNG,100,it))}} finally {screen.recycle()}
                         assertTrue("$picture ${picture.length()} bytes",picture.isFile && picture.length()>10_000)
+                        // The shopping list starts empty: one more picture after a person adds a row through the screen.
+                        if(name == "mock-shopping-it") added(robot,store,"appfile-$name",File(directory,"$name-added.png"))
                         robot.back()
                         robot.waitGone(robot.text(R.string.tool_refine))
                     }
@@ -91,6 +102,18 @@ class AppFileLookTest {
         } finally {
             if(night in setOf("auto","yes","no","custom")) shell.shell("cmd uimode night $night")
         }
+    }
+    /** Types a product, presses the apply button of the host, presses the add button, and takes the picture when the row shows. */
+    private fun added(robot: ShellRobot,store: ToolStore,id: String,picture: File) {
+        robot.enter("Prodotto","Latte")
+        // The host keeps a typed text as a draft until its apply button sends it to the app.
+        robot.click(word("it",R.string.tool_generated_apply_en,"Prodotto"))
+        robot.waitUntil {state(store,id).getJSONObject("prodotti_s").getString("new_nome") == "Latte"}
+        robot.click("Aggiungi")
+        robot.waitUntil {state(store,id).getJSONArray("prodotti").length() == 1}
+        robot.waitFor("Latte")
+        val screen=stillScreen(robot)
+        try {picture.outputStream().use {assertTrue(screen.compress(Bitmap.CompressFormat.PNG,100,it))}} finally {screen.recycle()}
     }
     private fun nightOf(scenario: ActivityScenario<CloudTestActivity>): Boolean {
         var night=false
@@ -142,8 +165,6 @@ class AppFileLookTest {
 
     @Test fun theHostWordsOfAnAppAreInTheLanguageOfTheApp() {
         val spec=runBlocking {parsedAndSmoked(SandboxClient(instrumentation.targetContext),"tea","tr")}
-        val context=instrumentation.targetContext
-        fun word(tag: String,resource: Int)=context.createConfigurationContext(Configuration(context.resources.configuration).apply {setLocale(Locale.forLanguageTag(tag))}).getString(resource)
         // The host's own Russian word, and the word of the other language that miniAppString takes in Turkish.
         val russian=word("ru",R.string.foreground_timer_start)
         val turkish=word("tr",R.string.foreground_timer_start_en)
@@ -187,13 +208,15 @@ class AppFileLookTest {
         inShell("appfile-lap",mapOf(id to spec)) {robot,model,store,_ ->
             open(robot,model,id,spec)
             fun angle()=state(store,id).getDouble("angle")
-            fun end()=state(store,id).getJSONObject("anim").getJSONObject("angle").getLong("end")
-            assertEquals(40.0 to 0L,angle() to end())
+            // The end of each timed change of the app: each one must stop, not only the change of the angle.
+            fun ends()=state(store,id).getJSONObject("anim").let {anim -> anim.keys().asSequence().map {anim.getJSONObject(it).getLong("end")}.toList()}
+            assertEquals(40.0,angle(),0.0)
+            assertTrue(ends().toString(),ends().isNotEmpty() && ends().all {it == 0L})
             // lap_button sets the angle to 0 and animates it to 360 in 5 s. Alphy's own timer loop sends each anim event.
             robot.reveal("Один круг")
             robot.click("Один круг")
-            robot.waitUntil(10_000) {end()>0}
-            robot.waitUntil(10_000) {angle() == 360.0 && end() == 0L}
+            robot.waitUntil(10_000) {ends().any {it>0}}
+            robot.waitUntil(10_000) {angle() == 360.0 && ends().all {it == 0L}}
         }
     }
 }

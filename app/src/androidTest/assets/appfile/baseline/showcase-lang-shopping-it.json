@@ -1,0 +1,406 @@
+{
+ "title": "Lista della spesa",
+ "description": "Aggiungi i prodotti, spuntali quando li compri e riordinali per corsia del supermercato.",
+ "capabilities": [],
+ "stateSchema": {
+  "items": {
+   "type": "list",
+   "maxItems": 100,
+   "fields": {
+    "id": "string",
+    "name": "string",
+    "qty": "string",
+    "aisle": "string",
+    "done": "boolean",
+    "created": "number"
+   }
+  },
+  "view": {
+   "type": "list",
+   "maxItems": 100,
+   "fields": {
+    "id": "string",
+    "name": "string",
+    "detail": "string",
+    "emoji": "string",
+    "done": "boolean"
+   }
+  },
+  "draftName": "string",
+  "draftAisle": "string",
+  "filter": "string",
+  "sortMode": "string",
+  "dialogOpen": "boolean",
+  "editId": "string",
+  "editName": "string",
+  "editQty": "string",
+  "editAisle": "string",
+  "nextId": "number",
+  "remaining": "number",
+  "totalText": "string"
+ },
+ "initialState": {
+  "items": [],
+  "view": [],
+  "draftName": "",
+  "draftAisle": "frutta",
+  "filter": "tutte",
+  "sortMode": "corsia",
+  "dialogOpen": false,
+  "editId": "",
+  "editName": "",
+  "editQty": "",
+  "editAisle": "frutta",
+  "nextId": 1,
+  "remaining": 0,
+  "totalText": "Nessun prodotto"
+ },
+ "ui": {
+  "type": "theme",
+  "preset": "soft",
+  "palette": "green",
+  "cornerRadius": 20,
+  "children": [
+   {
+    "type": "column",
+    "style": {
+     "gap": "medium",
+     "padding": "medium"
+    },
+    "children": [
+     {
+      "type": "card",
+      "variant": "hero",
+      "children": [
+       {
+        "type": "row",
+        "wrap": false,
+        "style": {
+         "gap": "medium",
+         "crossAlign": "center"
+        },
+        "children": [
+         {
+          "type": "emoji",
+          "text": "Lista della spesa",
+          "value": "🛒",
+          "size": "large"
+         },
+         {
+          "type": "column",
+          "style": {
+           "gap": "none"
+          },
+          "children": [
+           {
+            "type": "metric",
+            "text": "Da comprare",
+            "bind": "remaining",
+            "style": {
+             "emphasis": "display"
+            }
+           },
+           {
+            "type": "text",
+            "text": "",
+            "bind": "totalText",
+            "style": {
+             "tone": "muted"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "section",
+      "text": "Aggiungi prodotto",
+      "children": [
+       {
+        "type": "input",
+        "text": "Prodotto",
+        "bind": "draftName",
+        "action": "draftName",
+        "inputMode": "live",
+        "maxLength": 60,
+        "icon": "Cart"
+       },
+       {
+        "type": "select",
+        "text": "Corsia",
+        "bind": "draftAisle",
+        "action": "draftAisle",
+        "icon": "Tag",
+        "options": [
+         {
+          "text": "Frutta e verdura",
+          "value": "frutta"
+         },
+         {
+          "text": "Panetteria",
+          "value": "panetteria"
+         },
+         {
+          "text": "Latticini",
+          "value": "latticini"
+         },
+         {
+          "text": "Carne e pesce",
+          "value": "carne"
+         },
+         {
+          "text": "Surgelati",
+          "value": "surgelati"
+         },
+         {
+          "text": "Dispensa",
+          "value": "dispensa"
+         },
+         {
+          "text": "Bevande",
+          "value": "bevande"
+         },
+         {
+          "text": "Igiene",
+          "value": "igiene"
+         },
+         {
+          "text": "Casa",
+          "value": "casa"
+         },
+         {
+          "text": "Altro",
+          "value": "altro"
+         }
+        ]
+       },
+       {
+        "type": "button",
+        "text": "Aggiungi",
+        "action": "add",
+        "variant": "filled",
+        "icon": "Plus"
+       }
+      ]
+     },
+     {
+      "type": "section",
+      "text": "La tua lista",
+      "children": [
+       {
+        "type": "segmented",
+        "text": "Mostra",
+        "bind": "filter",
+        "action": "filter",
+        "options": [
+         {
+          "text": "Tutte",
+          "value": "tutte"
+         },
+         {
+          "text": "Da comprare",
+          "value": "dacomprare"
+         },
+         {
+          "text": "Comprati",
+          "value": "comprati"
+         }
+        ]
+       },
+       {
+        "type": "segmented",
+        "text": "Ordina per",
+        "bind": "sortMode",
+        "action": "sortMode",
+        "options": [
+         {
+          "text": "Corsia",
+          "value": "corsia"
+         },
+         {
+          "text": "Inserimento",
+          "value": "inserimento"
+         }
+        ]
+       },
+       {
+        "type": "list",
+        "text": "Prodotti",
+        "bind": "view",
+        "emptyText": "La lista è vuota. Aggiungi il primo prodotto.",
+        "rowTemplate": {
+         "type": "row",
+         "wrap": false,
+         "style": {
+          "gap": "small",
+          "crossAlign": "center"
+         },
+         "children": [
+          {
+           "type": "emoji",
+           "text": "Corsia",
+           "bind": "emoji",
+           "size": "small"
+          },
+          {
+           "type": "column",
+           "style": {
+            "gap": "none"
+           },
+           "layout": {
+            "weight": 1
+           },
+           "children": [
+            {
+             "type": "text",
+             "text": "",
+             "bind": "name"
+            },
+            {
+             "type": "text",
+             "text": "",
+             "bind": "detail",
+             "style": {
+              "tone": "muted"
+             }
+            }
+           ]
+          },
+          {
+           "type": "checkbox",
+           "text": "Preso",
+           "bind": "done",
+           "action": "done"
+          },
+          {
+           "type": "icon",
+           "name": "Pencil",
+           "text": "Modifica",
+           "action": "edit"
+          }
+         ]
+        }
+       },
+       {
+        "type": "button",
+        "text": "Svuota comprati",
+        "action": "clearBought",
+        "variant": "text",
+        "icon": "Trash"
+       }
+      ]
+     },
+     {
+      "type": "bottomSheet",
+      "text": "Modifica prodotto",
+      "visibleBind": "dialogOpen",
+      "dismissAction": "closeDialog",
+      "children": [
+       {
+        "type": "input",
+        "text": "Prodotto",
+        "bind": "editName",
+        "action": "editName",
+        "inputMode": "live",
+        "maxLength": 60,
+        "icon": "Cart"
+       },
+       {
+        "type": "input",
+        "text": "Quantità",
+        "bind": "editQty",
+        "action": "editQty",
+        "inputMode": "live",
+        "maxLength": 20,
+        "icon": "Ruler"
+       },
+       {
+        "type": "select",
+        "text": "Corsia",
+        "bind": "editAisle",
+        "action": "editAisle",
+        "icon": "Tag",
+        "options": [
+         {
+          "text": "Frutta e verdura",
+          "value": "frutta"
+         },
+         {
+          "text": "Panetteria",
+          "value": "panetteria"
+         },
+         {
+          "text": "Latticini",
+          "value": "latticini"
+         },
+         {
+          "text": "Carne e pesce",
+          "value": "carne"
+         },
+         {
+          "text": "Surgelati",
+          "value": "surgelati"
+         },
+         {
+          "text": "Dispensa",
+          "value": "dispensa"
+         },
+         {
+          "text": "Bevande",
+          "value": "bevande"
+         },
+         {
+          "text": "Igiene",
+          "value": "igiene"
+         },
+         {
+          "text": "Casa",
+          "value": "casa"
+         },
+         {
+          "text": "Altro",
+          "value": "altro"
+         }
+        ]
+       },
+       {
+        "type": "row",
+        "wrap": false,
+        "style": {
+         "gap": "small"
+        },
+        "children": [
+         {
+          "type": "button",
+          "text": "Salva",
+          "action": "save",
+          "variant": "filled",
+          "icon": "Check",
+          "layout": {
+           "weight": 1
+          }
+         },
+         {
+          "type": "button",
+          "text": "Elimina",
+          "action": "remove",
+          "variant": "outlined",
+          "icon": "Trash",
+          "layout": {
+           "weight": 1
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "source": "const s=input.state,e=input.event;\nconst A={frutta:['Frutta e verdura','🥬'],panetteria:['Panetteria','🥖'],latticini:['Latticini','🧀'],carne:['Carne e pesce','🥩'],surgelati:['Surgelati','🧊'],dispensa:['Dispensa','🥫'],bevande:['Bevande','🧃'],igiene:['Igiene','🧴'],casa:['Casa','🧹'],altro:['Altro','🛒']};\nconst O=['frutta','panetteria','latticini','carne','surgelati','dispensa','bevande','igiene','casa','altro'];\nfunction info(id){const a=A[id]||A.altro;const i=O.indexOf(id);return {name:a[0],emoji:a[1],order:i<0?99:i};}\nfunction rebuild(){\n let rows=s.items.slice();\n if(s.filter==='dacomprare')rows=rows.filter(function(x){return !x.done;});\n if(s.filter==='comprati')rows=rows.filter(function(x){return x.done;});\n rows.sort(function(a,b){\n  if(a.done!==b.done)return a.done?1:-1;\n  if(s.sortMode==='corsia'){const d=info(a.aisle).order-info(b.aisle).order;if(d)return d;}\n  return a.created-b.created;\n });\n s.view=rows.map(function(x){const i=info(x.aisle);const q=(x.qty||'').trim();return {id:x.id,name:x.name,emoji:i.emoji,detail:q?q+' · '+i.name:i.name,done:x.done};});\n const done=s.items.filter(function(x){return x.done;}).length,total=s.items.length;\n s.remaining=total-done;\n s.totalText=total?(done+' di '+total+' presi'):'Nessun prodotto';\n}\nif(e.type==='action'||e.type==='liveInput'){\n const v=e.value,id=e.actionId;\n if(id==='draftName'||id==='editName'||id==='editQty')s[id]=String(v);\n if(id==='draftAisle'||id==='editAisle'||id==='filter'||id==='sortMode')s[id]=String(v);\n if(id==='add'){const n=(s.draftName||'').trim();if(n&&s.items.length<100){s.items.push({id:'p'+s.nextId,name:n,qty:'',aisle:A[s.draftAisle]?s.draftAisle:'altro',done:false,created:s.nextId});s.nextId=s.nextId+1;s.draftName='';}}\n if(id==='done'){const it=s.items.find(function(x){return x.id===v.key;});if(it)it.done=!!v.value;}\n if(id==='edit'){const it=s.items.find(function(x){return x.id===v.key;});if(it){s.editId=it.id;s.editName=it.name;s.editQty=it.qty;s.editAisle=it.aisle;s.dialogOpen=true;}}\n if(id==='save'){const it=s.items.find(function(x){return x.id===s.editId;});if(it){const n=(s.editName||'').trim();if(n)it.name=n;it.qty=(s.editQty||'').trim();if(A[s.editAisle])it.aisle=s.editAisle;}s.dialogOpen=false;s.editId='';}\n if(id==='remove'){s.items=s.items.filter(function(x){return x.id!==s.editId;});s.dialogOpen=false;s.editId='';}\n if(id==='closeDialog'){s.dialogOpen=false;s.editId='';}\n if(id==='clearBought'){s.items=s.items.filter(function(x){return !x.done;});}\n rebuild();\n}\nreturn {state:s};",
+ "formatVersion": 3,
+ "appLanguage": "it"
+}

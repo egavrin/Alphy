@@ -1,0 +1,306 @@
+{
+ "title": "Used bikes",
+ "description": "Browse 12 used bikes by price and type",
+ "stateSchema": {
+  "results": {
+   "type": "list",
+   "maxItems": 12,
+   "fields": {
+    "id": "string",
+    "picture": "string",
+    "name": "string",
+    "priceText": "string",
+    "detail": "string"
+   }
+  },
+  "priceRange": {
+   "type": "array",
+   "maxItems": 2,
+   "items": "number"
+  },
+  "sort": "string",
+  "fAll": "boolean",
+  "fRoad": "boolean",
+  "fMountain": "boolean",
+  "fCity": "boolean",
+  "countText": "string"
+ },
+ "initialState": {
+  "results": [
+   {
+    "id": "b12",
+    "picture": "🚲",
+    "name": "Retrospec Beaumont",
+    "priceText": "$260",
+    "detail": "2019 · S · Good"
+   },
+   {
+    "id": "b9",
+    "picture": "🚲",
+    "name": "Brooklyn Bedford 8",
+    "priceText": "$320",
+    "detail": "2017 · One size · Fair"
+   },
+   {
+    "id": "b3",
+    "picture": "🚴",
+    "name": "Giant Contend 3",
+    "priceText": "$480",
+    "detail": "2018 · 56 cm · Good"
+   },
+   {
+    "id": "b5",
+    "picture": "🚵",
+    "name": "Trek Marlin 6",
+    "priceText": "$540",
+    "detail": "2021 · M · Good"
+   },
+   {
+    "id": "b10",
+    "picture": "🚲",
+    "name": "Specialized Sirrus X 2",
+    "priceText": "$610",
+    "detail": "2021 · M · Good"
+   },
+   {
+    "id": "b2",
+    "picture": "🚴",
+    "name": "Specialized Allez",
+    "priceText": "$620",
+    "detail": "2019 · 52 cm · Good"
+   },
+   {
+    "id": "b6",
+    "picture": "🚵",
+    "name": "Giant Talon 2",
+    "priceText": "$690",
+    "detail": "2020 · L · Excellent"
+   },
+   {
+    "id": "b7",
+    "picture": "🚵",
+    "name": "Specialized Rockhopper",
+    "priceText": "$780",
+    "detail": "2022 · M · Like new"
+   },
+   {
+    "id": "b1",
+    "picture": "🚴",
+    "name": "Trek Domane AL 2",
+    "priceText": "$850",
+    "detail": "2021 · 54 cm · Excellent"
+   },
+   {
+    "id": "b11",
+    "picture": "🚲",
+    "name": "Priority Continuum",
+    "priceText": "$950",
+    "detail": "2020 · L · Excellent"
+   },
+   {
+    "id": "b4",
+    "picture": "🚴",
+    "name": "Cannondale Synapse",
+    "priceText": "$1,250",
+    "detail": "2022 · 54 cm · Like new"
+   },
+   {
+    "id": "b8",
+    "picture": "🚵",
+    "name": "Santa Cruz Chameleon",
+    "priceText": "$1,650",
+    "detail": "2021 · L · Excellent"
+   }
+  ],
+  "priceRange": [
+   0,
+   2000
+  ],
+  "sort": "asc",
+  "fAll": true,
+  "fRoad": false,
+  "fMountain": false,
+  "fCity": false,
+  "countText": "12 of 12"
+ },
+ "ui": {
+  "type": "theme",
+  "preset": "clean",
+  "palette": "blue",
+  "cornerRadius": 20,
+  "children": [
+   {
+    "type": "column",
+    "style": {
+     "gap": "medium",
+     "padding": "medium"
+    },
+    "children": [
+     {
+      "type": "card",
+      "variant": "hero",
+      "style": {
+       "align": "center",
+       "gap": "small"
+      },
+      "children": [
+       {
+        "type": "emoji",
+        "text": "Bicycle",
+        "value": "🚲",
+        "size": "large"
+       },
+       {
+        "type": "metric",
+        "text": "Bikes matching",
+        "bind": "countText",
+        "style": {
+         "emphasis": "display"
+        }
+       }
+      ]
+     },
+     {
+      "type": "section",
+      "text": "Filters",
+      "children": [
+       {
+        "type": "rangeSlider",
+        "text": "Price range (USD)",
+        "bind": "priceRange",
+        "action": "priceRange",
+        "min": 0,
+        "max": 2000,
+        "step": 20
+       },
+       {
+        "type": "text",
+        "text": "Bike type",
+        "style": {
+         "emphasis": "label"
+        }
+       },
+       {
+        "type": "flowRow",
+        "style": {
+         "gap": "small"
+        },
+        "children": [
+         {
+          "type": "chip",
+          "text": "All",
+          "bind": "fAll",
+          "action": "fAll",
+          "variant": "filter"
+         },
+         {
+          "type": "chip",
+          "text": "Road",
+          "bind": "fRoad",
+          "action": "fRoad",
+          "variant": "filter"
+         },
+         {
+          "type": "chip",
+          "text": "Mountain",
+          "bind": "fMountain",
+          "action": "fMountain",
+          "variant": "filter"
+         },
+         {
+          "type": "chip",
+          "text": "City",
+          "bind": "fCity",
+          "action": "fCity",
+          "variant": "filter"
+         }
+        ]
+       },
+       {
+        "type": "segmented",
+        "text": "Sort by price",
+        "bind": "sort",
+        "action": "sort",
+        "options": [
+         {
+          "text": "Low to high",
+          "value": "asc"
+         },
+         {
+          "text": "High to low",
+          "value": "desc"
+         }
+        ]
+       },
+       {
+        "type": "button",
+        "text": "Reset filters",
+        "action": "reset",
+        "variant": "text",
+        "icon": "Refresh"
+       }
+      ]
+     },
+     {
+      "type": "list",
+      "text": "Bikes",
+      "bind": "results",
+      "emptyText": "No bikes match. Try a wider price range or another type.",
+      "rowTemplate": {
+       "type": "row",
+       "wrap": false,
+       "style": {
+        "gap": "medium",
+        "crossAlign": "center"
+       },
+       "children": [
+        {
+         "type": "emoji",
+         "text": "Bike",
+         "bind": "picture",
+         "size": "small"
+        },
+        {
+         "type": "column",
+         "layout": {
+          "weight": 1
+         },
+         "style": {
+          "gap": "none"
+         },
+         "children": [
+          {
+           "type": "text",
+           "text": "",
+           "bind": "name"
+          },
+          {
+           "type": "text",
+           "text": "",
+           "bind": "detail",
+           "style": {
+            "tone": "muted"
+           }
+          }
+         ]
+        },
+        {
+         "type": "text",
+         "text": "",
+         "bind": "priceText",
+         "style": {
+          "emphasis": "number"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "source": "const CAT=[\n{id:'b1',type:'Road',name:'Trek Domane AL 2',price:850,picture:'🚴',detail:'2021 · 54 cm · Excellent'},\n{id:'b2',type:'Road',name:'Specialized Allez',price:620,picture:'🚴',detail:'2019 · 52 cm · Good'},\n{id:'b3',type:'Road',name:'Giant Contend 3',price:480,picture:'🚴',detail:'2018 · 56 cm · Good'},\n{id:'b4',type:'Road',name:'Cannondale Synapse',price:1250,picture:'🚴',detail:'2022 · 54 cm · Like new'},\n{id:'b5',type:'Mountain',name:'Trek Marlin 6',price:540,picture:'🚵',detail:'2021 · M · Good'},\n{id:'b6',type:'Mountain',name:'Giant Talon 2',price:690,picture:'🚵',detail:'2020 · L · Excellent'},\n{id:'b7',type:'Mountain',name:'Specialized Rockhopper',price:780,picture:'🚵',detail:'2022 · M · Like new'},\n{id:'b8',type:'Mountain',name:'Santa Cruz Chameleon',price:1650,picture:'🚵',detail:'2021 · L · Excellent'},\n{id:'b9',type:'City',name:'Brooklyn Bedford 8',price:320,picture:'🚲',detail:'2017 · One size · Fair'},\n{id:'b10',type:'City',name:'Specialized Sirrus X 2',price:610,picture:'🚲',detail:'2021 · M · Good'},\n{id:'b11',type:'City',name:'Priority Continuum',price:950,picture:'🚲',detail:'2020 · L · Excellent'},\n{id:'b12',type:'City',name:'Retrospec Beaumont',price:260,picture:'🚲',detail:'2019 · S · Good'}\n];\nconst money=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});\nfunction recalc(s){\n const types=[];\n if(s.fRoad)types.push('Road');\n if(s.fMountain)types.push('Mountain');\n if(s.fCity)types.push('City');\n let lo=Number(s.priceRange[0]),hi=Number(s.priceRange[1]);\n if(!isFinite(lo))lo=0;\n if(!isFinite(hi))hi=2000;\n if(lo>hi){const t=lo;lo=hi;hi=t;}\n let rows=CAT.filter(b=>b.price>=lo&&b.price<=hi&&(types.length===0||types.indexOf(b.type)>=0));\n rows.sort((a,b)=>s.sort==='desc'?b.price-a.price:a.price-b.price);\n s.results=rows.map(b=>({id:b.id,picture:b.picture,name:b.name,priceText:money.format(b.price),detail:b.detail}));\n s.countText=rows.length+' of 12';\n}\nconst s=input.state,e=input.event,v=e.value;\nif(e.type==='action'){\n if(e.actionId==='priceRange'&&Array.isArray(v)){\n  let a=Number(v[0]),b=Number(v[1]);\n  if(!isFinite(a))a=0;\n  if(!isFinite(b))b=2000;\n  s.priceRange=[Math.min(a,b),Math.max(a,b)];\n }\n if(e.actionId==='sort')s.sort=v==='desc'?'desc':'asc';\n if(e.actionId==='reset'){s.priceRange=[0,2000];s.sort='asc';s.fRoad=false;s.fMountain=false;s.fCity=false;s.fAll=true;}\n if(e.actionId==='fAll'){s.fAll=!!v;if(v){s.fRoad=false;s.fMountain=false;s.fCity=false;}}\n if(e.actionId==='fRoad'||e.actionId==='fMountain'||e.actionId==='fCity'){s[e.actionId]=!!v;s.fAll=!(s.fRoad||s.fMountain||s.fCity);}\n recalc(s);\n}\nreturn {state:s};",
+ "formatVersion": 3,
+ "capabilities": [],
+ "appLanguage": "en"
+}
