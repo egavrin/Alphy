@@ -131,6 +131,7 @@ Kit tests check the look rules over the nine saved plans and the look fixtures (
 4. A plan with only a list gets a hero card with its count: `entries: a list that a steps or tabs need groups gets no hero count at the root, and the first list that no holder groups gets it` (`test/entries.test.js`).
 5. The figures of one place (`test/figures.test.js`): `figures: two figures after the main one are a grid of two metrics with their icons, and three or more are rows of one size`, `figures: the figures of one group of steps or tabs are a set of their own, and a figure never leaves its group`, and `figures: one figure beside the main one, or two that do not stand one after the other, stay metrics`.
 6. `look: a group of buttons has one filled button, on the first screen and after the press of the main action` (`test/lookrules.test.js`): at most one, by the rule of the host (`NativeToolUi.kt` `secondaryButtons`). After Start of a timer, its group has no filled button.
+7. `look: no line of a saved plan has the muted role, because Alphy draws a muted shape at the alpha 64` (`test/lookrules.test.js`): a line or a stroked shape uses the role `ink` (`SurfaceDrawing.kt` `MUTED_SHAPE_ALPHA`). A filled shape, such as a stage or a track, can be muted.
 
 ## Commands
 

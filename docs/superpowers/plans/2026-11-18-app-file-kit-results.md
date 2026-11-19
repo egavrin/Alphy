@@ -567,15 +567,15 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
 
 Task 11b-2b gave the parts `timer`, `deck`, `steps`, `question`, `lesson`, `chart`, `card`, `drawing`, and `model3d` the look of the baseline apps.
 It also made the look rules kit tests (`kit/README.md`, sections "Parts" and "Look rules").
-The numbers come from `bun kit/look.js`, before at `c92230b` and after at `2705ed4`.
-The last column is what the pictures of the run `appfile-look-all` show in both themes, against the pictures of `appfile-live-final`.
+The numbers come from `bun kit/look.js`, before at `c92230b` and after at `6715b30`.
+The last column is what the pictures of the run `appfile-look-all-2` show in both themes, against the pictures of `appfile-live-final`.
 
 | Plan | Hero, before and after | Typed fields, first screen | Typed fields in rows | Seen in the pictures |
 | --- | --- | --- | --- | --- |
 | `calc` | 1, 1 | 2 | 0 | No change. |
-| `lesson` | 1, 1 | 1 | 0 | The orbit drawing is a hero card. The count shows one time, "Исследуем: 1 / 3" over the dots. Before, the eyebrow "Исследуем · 1 / 3" showed the count a second time. Dark: the thin orbit and the inactive dots have low contrast. |
+| `lesson` | 1, 1 | 1 | 0 | The orbit drawing is a hero card. The orbit line has the role `ink`: 13.3 to 1 (light) and 7.3 to 1 (dark). Before, it was muted: 1.5 to 1 and 1.6 to 1. The count shows one time, "Исследуем: 1 / 3" over the dots. Before, the eyebrow "Исследуем · 1 / 3" showed the count a second time. Dark: the inactive dots have low contrast. |
 | `list` | 1, 1 | 2 | 0 | No change. |
-| `model3d` | 1, 1 | 0 | 0 | The model card is a hero card, and its stage has the muted tone of the theme. The chips "Камера", "Панель", "Колёса" and the button "Разобрать" are outlined. Before, the stage was a bright panel in the dark theme, the chips were tonal, and "Разобрать" was filled. Dark: the outline of a chip has low contrast on the hero card, and its text reads well. |
+| `model3d` | 1, 1 | 0 | 0 | The model card is a hero card, and its stage has the muted tone of the theme. The chips "Камера", "Панель", "Колёса" and the button "Разобрать" are outlined. Before, the stage was a bright panel in the dark theme, the chips were tonal, and "Разобрать" was filled. Dark: the outline of a chip and of "Разобрать" is not visible on the hero card (1.0 to 1), and their texts read well. |
 | `quiz` | 1, 1 | 0 | 0 | No change. The plan writes its own component lines, so the template of `deck` does not apply. |
 | `section` | 0, 1 | 1 | 0 | A hero card "Звичок у трекері" with the count 3 is first. The three rows of habits follow, and the section of the streaks is under the first screen. |
 | `tabs-chart` | 1, 1 | 0 | 0 | The title "Gastos por categoría" shows one time, as the label of the chart. Before, it showed two times. The host text "Нет данных для графика" stays (section "Look"). |
@@ -610,14 +610,16 @@ These differences stay:
 Host limits that the pictures show (no change of the host in this task):
 
 - Dark: the inactive dots of a `progress` with `variant="dots"` have low contrast (`NativeToolUi.kt` 369 to 370, 1337).
-- A shape of the muted role has the alpha 64 (`SurfaceDrawing.kt`, `MUTED_SHAPE_ALPHA`), so a thin muted stroke, such as the orbit of `lesson`, is faint.
+- Dark: on a hero card, a button with no fill shows no container. The outline of an outlined button has the contrast 1.0 to 1 with the hero card, and a tonal button has the color of the hero card. The text of the button reads well.
+  The host gives a progress track on a hero card the surface color (`NativeToolUi.kt` 368 to 370), but it does not change the border of a button.
+- A shape of the muted role has the alpha 64 (`SurfaceDrawing.kt`, `MUTED_SHAPE_ALPHA`). The orbit of `lesson` was a muted line with the contrast 1.5 to 1 (light) and 1.6 to 1 (dark). It now has the role `ink`, and a look rule of the kit keeps lines out of the muted role.
 - The faces of a model keep their hex colors, because the shading of a face needs a hex color.
 
-| Measure | Before (`c92230b`) | After (`2705ed4`) |
+| Measure | Before (`c92230b`) | After (`6715b30`) |
 | --- | --- | --- |
 | Run-time text | 46580 bytes | 46662 bytes (bar 48500) |
 | Largest source | `test/cards.plan`, 53628 bytes | `test/cards.plan`, 53591 bytes (bar 60000) |
-| Kit tests | 289 pass | 314 pass |
+| Kit tests | 289 pass | 315 pass |
 
 ### Runs of Task 11b-2b
 
@@ -626,13 +628,14 @@ Host limits that the pictures show (no change of the host in this task):
 | `appfile-look-spike-a8` | `62ea185+dirty` (the changes of `79170cf` and of `3c1b757` before the stop dot) | failed: the inset of 16 dp in `AppFileLookTest.drawn` was larger than the timer canvas, and the bar at the share 0 had one color | `06:41:12`, `07:32:55` |
 | `appfile-look-spike-a8b` | `62ea185+dirty` | passed. The inset is now at most a third of the canvas height, and the stop dot gives the bar a second color | `07:32:55`, `07:35:30` |
 | `appfile-look-pre` | `2705ed4` | passed (`picturesOfEachPlan`), 66.1 s | `07:35:30`, `07:41:21` |
-| `appfile-look-all` | `2705ed4+dirty` (the two documents) | passed, 37 tests (`AppFileProofTest` and `AppFileLookTest`), 182.0 s. The pictures of this section. Under the status bar, each picture is the same as in `appfile-look-pre` | `07:41:21`, `07:44:37` |
+| `appfile-look-all` | `2705ed4+dirty` (the two documents) | passed, 37 tests (`AppFileProofTest` and `AppFileLookTest`), 182.0 s. Under the status bar, each picture is the same as in `appfile-look-pre` | `07:41:21`, `07:44:37` |
+| `appfile-look-all-2` | `6715b30` (the orbit in the role `ink`) | passed, 37 tests, 184.6 s. The final run and the pictures of this section. Against `appfile-look-all`, only the orbit of `lesson` changed | `07:44:37`, `07:56:12` |
 
 All times are on 2026-11-19. Each "before" time is the "after" time of the run before it, so no other session installed the test APK during these runs.
-The pictures are in `evidence/alphy-ui/appfile-look-all/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png` and the pair sheet `pairs-light.png`. Git does not keep these files.
+The pictures are in `evidence/alphy-ui/appfile-look-all-2/light/` and `dark/`, with the contact sheets `contact-light.png` and `contact-dark.png` and the pair sheet `pairs-light.png`. Git does not keep these files.
 
 Command:
 
 ```text
-JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-all com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3 tools/compose_acceptance/run.py suite --serial emulator-5592 --label appfile-look-all-2 com.alpha.assistant.tools.appfile.AppFileProofTest com.alpha.assistant.tools.appfile.AppFileLookTest
 ```
