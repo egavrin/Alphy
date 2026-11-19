@@ -771,8 +771,10 @@ test("emit: section.plan gives a valid definition", async () => {
   expect(faults).toEqual([]);
   expect(language).toBe("uk");
   valid(definition);
+  // The author's root has a hero card with the count of the habits first (Task 11b-2b, B.1: the plan had no main element).
+  expect(definition.ui.children[0].children[0]).toEqual({ type: "card", variant: "hero", children: [{ type: "metric", text: "Звичок у трекері", bind: expect.any(String), style: { emphasis: "display" } }] });
   // The free lines of the hole: a Section with a List of the habits, whose row of its own shows the name and a text that each row computes.
-  expect(definition.ui.children[0].children[1]).toEqual({ type: "section", text: "Серія днів поспіль", children: [
+  expect(definition.ui.children[0].children[2]).toEqual({ type: "section", text: "Серія днів поспіль", children: [
     { type: "list", text: "Серія днів поспіль", bind: "streak_list", emptyText: "Ще немає звичок", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
       { type: "text", text: "", bind: "name", layout: { weight: 1 } }, { type: "text", text: "", bind: "streak_text_text" }] } }] });
   expect(definition.initialState.streak_list.map((row) => [row.id, row.streak_text_text])).toEqual([["r1", "Серія: 0"], ["r2", "Серія: 0"], ["r3", "Серія: 0"]]);
