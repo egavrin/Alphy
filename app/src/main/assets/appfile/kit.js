@@ -1200,7 +1200,7 @@ const PARTS = {
     const now = (tree) => show(rebase(tree, `${name}_now`));
     // picture=$field: a picture on each card, from the description in that field of the row.
     const picture = opt.picture ? [`${name}_picture = Picture(text(${now(opt.picture)}))`] : [], inCard = opt.picture ? `${name}_picture, ` : "";
-    // The front of a card that the person must know is a large centered text, as in the baseline flashcards (Task 11b-2b, A.2).
+    // The front of a card that the person must know is a large centered text, as in the baseline flashcards (Task 11b-2b, A.2). The back is centered under it.
     const front = `${name}_front = Text(text(${now(opt.front)}), emphasis="display", align="center")`;
     // The hero card holds the card and at most its filled button. A field or an outlined button stands under it: on a hero card its outline shows no contrast in the dark theme.
     // With answer= the person types the answer. The check button says right or wrong, and a right answer counts one point. The check button goes away after its tap, so a point counts once.
@@ -1238,7 +1238,7 @@ const PARTS = {
     return {
       lines: [`$/${name}_i = 0`, `$/${name}_open = false`, `$/${name}_yes = 0`, `$/${name}_no = 0`,
         `$/${name}_now := at(${show(list)}, $/${name}_i)`, `$/${name}_end := $/${name}_i >= len(${show(list)})`,
-        ...picture, front, `${name}_back = Text(text(${now(opt.back)}), visible=$/${name}_open, emphasis="headline")`,
+        ...picture, front, `${name}_back = Text(text(${now(opt.back)}), visible=$/${name}_open, emphasis="headline", align="center")`,
         `${name}_show = Button(${text("show", "Show")}, action=set($/${name}_open, true), visible=!$/${name}_open)`,
         `${name}_yesButton = Button(${text("yes", "Yes")}, action=[inc($/${name}_yes), ${opt.mark ? `set(${now(opt.mark)}, true), ` : ""}${next}], visible=$/${name}_open, icon="Check", variant="filled")`,
         `${name}_noButton = Button(${text("no", "No")}, action=[inc($/${name}_no), ${next}], visible=$/${name}_open, variant="outlined")`,

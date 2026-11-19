@@ -111,7 +111,7 @@ A text that a format function printed is for a person: do not read it back as a 
   `lessText=` and `moreText=` with `addText=` are a fault, and so are `icon=` and `resetText=` without it.
 - `timer`: the card of a timer is a hero card, also the host's own countdown. A timer with rounds has a filled Start with a play icon, a filled Pause with a pause icon while it runs, a Reset text button, and a muted phase text.
   Its bar is a surface of 1024 x 64 that the bar fills: a track in the muted tone of the theme, a stop dot near its end, and the share of the phase that passed.
-- `deck`: the front of a card is a centered text with the display emphasis, and the back has the headline emphasis. Yes is filled with a check, No is outlined, and the two counts are a grid of two.
+- `deck`: the front of a card is a centered text with the display emphasis, and the back is a centered text with the headline emphasis. Yes is filled with a check, No is outlined, and the two counts are a grid of two.
   The hero card holds the card and its Show button. The row of Yes and No stands under the card.
   With `answer=`, the field, the check button, the notice, and the next button stand under the card.
   A deck of pages (no `back=`) keeps a heading for its front, because a page can be a long text. Its Back and Next row stands under the card.

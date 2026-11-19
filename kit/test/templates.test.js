@@ -26,10 +26,10 @@ test("template: a timer with rounds is a hero card, Start and Pause are filled w
 
 const WORDS = '$/words = [{word: "Haus", meaning: "house"}, {word: "Baum", meaning: "tree"}]';
 
-test("template: the front of a card deck is a centered display text, the back a headline, Yes is filled with Check, No is outlined, and the counts are a grid of two", async () => {
+test("template: the front of a card deck is a centered display text, the back a centered headline, Yes is filled with Check, No is outlined, and the counts are a grid of two", async () => {
   const { definition } = await built('app("T", lang="en")', WORDS, 'need cards = deck("Words", $/words, front=$word, back=$meaning)');
   const all = every(definition.ui), texts = all.filter((node) => node.type === "text" && String(node.bind).includes("cards_"));
-  expect(texts.map((node) => [definition.initialState.d[node.bind.slice(2)], node.style])).toEqual([["Haus", { emphasis: "display", align: "center" }], ["house", { emphasis: "headline" }]]);
+  expect(texts.map((node) => [definition.initialState.d[node.bind.slice(2)], node.style])).toEqual([["Haus", { emphasis: "display", align: "center" }], ["house", { emphasis: "headline", align: "center" }]]);
   expect(["Yes", "No"].map((text) => look(named(definition, "button", text)))).toEqual([["Yes", "filled", "Check"], ["No", "outlined", undefined]]);
   const grid = all.find((node) => node.type === "grid");
   expect([grid.columns, grid.children.map((node) => [node.type, node.text])]).toEqual([2, [["metric", "Yes"], ["metric", "No"]]]);
