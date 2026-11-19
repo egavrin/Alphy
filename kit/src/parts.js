@@ -193,7 +193,7 @@ const PARTS = {
     const lines = [`$/${name} = ${show(opt.rows ?? { k: "list", items: [] })}`];
     // The rows are data for a deck, a chart, or a figure, and the list is not on the screen.
     if (opt.hidden?.v === true) return { lines, top: [] };
-    const cells = [], marks = [], texts = [], tail = [], add = [], blank = [], reset = [], canAdd = opt.add?.v !== false, edit = opt.edit?.v === true;
+    const cells = [], marks = [], texts = [], typedTexts = [], counts = [], tail = [], add = [], blank = [], reset = [], canAdd = opt.add?.v !== false, edit = opt.edit?.v === true;
     // A look option that cannot apply goes, with a note (A0-K4).
     const notes = [], iconWord = opt.icon?.k === "lit" && /^[A-Za-z]+$/.test(opt.icon.v);
     if (iconWord) notes.push(`need ${name}: icon= of a list is an emoji, such as icon="🛒", and ${q(opt.icon.v)} is not one, so the kit left it out`);
@@ -224,18 +224,19 @@ const PARTS = {
       else if (kind === "count") {
         // A count in the row: a minus and a plus button around the number, and the person can also type it
         // (route steps-chart: seven day rows with a count of steps, and no way to give 8000 but by taps). Not below 0.
-        lines.push(`${name}_${field}_minus = IconButton("Minus", action=set($${field}, max(0, $${field} - 1)), label=${q(word("Less"))})`, `${name}_${field} = NumberField(${named}, $${field}, min=0, step=1)`,
+        // The three are one group on a line of their own. The field has no step: with one, the host drew its own stepper beside these buttons (L1 item 1).
+        lines.push(`${name}_${field}_minus = IconButton("Minus", action=set($${field}, max(0, $${field} - 1)), label=${q(word("Less"))})`, `${name}_${field} = NumberField(${named}, $${field}, min=0, weight=1)`,
           `${name}_${field}_plus = IconButton("Plus", action=inc($${field}), label=${q(word("More"))})`);
-        cells.push(`${name}_${field}_minus`);
+        counts.push(`Row([${name}_${field}_minus, ${name}_${field}, ${name}_${field}_plus])`);
       } else if (kind === "picture") lines.push(`${name}_${field} = Picture($${field})`);
       else if (kind === "choice" && edit) lines.push(`${name}_${field} = ${pick(named, "$" + field)}`);
-      else if (edit && kind !== "choice") lines.push(`${name}_${field} = ${widget}(${named}, $${field}${kind === "text" ? ", weight=1" : ""})`);
+      // A text field of an editable row is a line of its own. The first one shares it only with the emoji of the row, and takes the rest of it (L1 item 1).
+      else if (edit && kind !== "choice") lines.push(`${name}_${field} = ${widget}(${named}, $${field}${kind === "text" && icon && !typedTexts.length ? ", weight=1" : ""})`);
       // The host's number and display emphasis are too large for a row (Task 11b-1: "1 kg" in two lines).
       else if (kind !== "text") lines.push(`${name}_${field} = Text($${field}, emphasis="label")`);
       else texts.push(field);
       if (kind === "text" && field !== sign) firstText ??= field;
-      if (field !== sign && field !== under && !(kind === "text" && !edit)) (kind === "check" ? marks : cells).push(`${name}_${field}`);
-      if (kind === "count") cells.push(`${name}_${field}_plus`);
+      if (field !== sign && field !== under && kind !== "count" && !(kind === "text" && !edit)) (kind === "check" ? marks : kind === "text" ? typedTexts : cells).push(`${name}_${field}`);
       if (!canAdd) continue;
       // A new row starts with no check mark, with its switch on, and with no picture.
       if (["check", "switch", "picture"].includes(kind)) { blank.push(`${field}: ${{ check: "false", switch: "true", picture: '""' }[kind]}`); continue; }
@@ -271,9 +272,14 @@ const PARTS = {
     if (under) texts.push(under);
     lines.push(...texts.map((field, index) => `${name}_${field} = Text($${field}${texts.length === 1 ? ", weight=1" : index ? ', tone="muted"' : ""})`));
     if (texts.length > 1) lines.push(`${name}_main = Column([${texts.map((field) => `${name}_${field}`).join(", ")}], weight=1, gap="none")`);
-    const head = [...(icon ? [`${name}_emoji`] : []), ...(texts.length > 1 ? [`${name}_main`] : texts.map((field) => `${name}_${field}`)), ...cells];
-    // Many check marks get a row of their own under the other cells. The host draws each row of a list on its own card, so the template has no card.
-    lines.push(many ? `${name}_row = Column([Row([${[...head, ...tail].join(", ")}]), Row([${marks.join(", ")}], gap="none")])` : `${name}_row = Row([${[...head, ...marks, ...tail].join(", ")}])`);
+    const emoji = icon ? [`${name}_emoji`] : [], [first, ...more] = typedTexts, shut = many ? [] : marks, line = (items, look = "") => (items.length ? [`Row([${items.join(", ")}]${look})`] : []);
+    // An editable row (L1 item 1) is one line that wraps. The host gives a text field there up to 300 dp, so on a phone it has a line of its own,
+    // each other control keeps the width of its content, and a count group fills a line. The first text field shares its line only with the emoji.
+    const top = edit ? line([...(first && emoji.length ? [`Row([${name}_emoji, ${first}])`, ...more] : [...emoji, ...typedTexts]), ...cells, ...shut, ...tail, ...counts], ', align="center"')
+      : [...line([...emoji, ...(texts.length > 1 ? [`${name}_main`] : texts.map((field) => `${name}_${field}`)), ...cells, ...shut, ...tail]), ...counts];
+    // A count group, and many check marks, get lines of their own under the other cells. The host draws each row of a list on its own card, so the template has no card.
+    const rowLines = [...top, ...(many ? [`Row([${marks.join(", ")}], gap="none")`] : [])];
+    lines.push(`${name}_row = ${rowLines.length > 1 ? `Column([${rowLines.join(", ")}])` : rowLines[0]}`);
     let source = `$/${name}`;
     if (opt.filter) source = `filter(${source}, ${show(opt.filter)})`;
     if (opt.sort) source = `sort(${source}, ${show(opt.sort)}${opt.order ? ", " + show(opt.order) : ""})`;

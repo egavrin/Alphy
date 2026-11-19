@@ -145,6 +145,60 @@ test("entries: more than two check marks are circles of one weight in a second r
     { type: "checkbox", text, bind, action: `habits_${bind}`, variant: "circle", layout: { weight: 1 } })) });
 });
 
+// L1 item 1 (showcase-ui-alarm, showcase-ui-steps-chart): on the phone the text field of an editable row was one letter wide, and a
+// count showed a loose minus beside the host's own stepper of its number field.
+test("entries (L1 item 1): an editable row is one line that wraps: its text field is as wide as the host lets it be, and its other controls keep their own widths", async () => {
+  const { definition } = await built('app("T", lang="en")',
+    'need doses = entries("Doses", fields={name: "text", time: "time", on: "switch"}, labels={on: "On"}, edit=true, confirm="Delete?", icon="💊", rows=[{name: "Dose 1", time: "08:00", on: true}])');
+  const row = rowOf(definition), [first, ...controls] = row.children;
+  // The host gives a node of a row that wraps up to 300 dp: on a phone the text field has a line of its own, and the controls wrap under it.
+  expect([row.type, row.style]).toEqual(["flowRow", { crossAlign: "center" }]);
+  // The emoji, and the text field with the rest of their group.
+  expect([first.type, first.wrap, first.children.map((node) => [node.type, node.bind, node.layout])]).toEqual(["row", false, [["emoji", undefined, undefined], ["input", "name", { weight: 1 }]]]);
+  // The time, the switch, and the delete button have no weight, so each one keeps the width of its content.
+  expect([controls.map((node) => node.type), controls.filter((node) => node.layout)]).toEqual([["timeInput", "toggle", "icon"], []]);
+  // With no emoji, the text field is the first item of the row, with no weight.
+  const plain = rowOf((await built('app("T", lang="en")', 'need tasks = entries("Tasks", fields={task: "text", level: ["high", "low"]}, edit=true)')).definition);
+  expect([plain.type, plain.children.map((node) => node.type), plain.children[0]])
+    .toEqual(["flowRow", ["input", "segmented", "icon"], { type: "input", text: "Task", bind: "task", action: "tasks_task", inputMode: "live" }]);
+});
+
+test("entries (L1 item 1): a count in a row is one group of a minus, its number field, and a plus, with no second stepper of the host", async () => {
+  const steps = await built('app("T", lang="de")',
+    'need tage = entries("Woche", fields={tag: "text", schritte: "count"}, labels={schritte: "Schritte"}, edit=true, add=false, remove=false, icon="👟", rows=[{tag: "Montag", schritte: 0}])');
+  const [first, group] = rowOf(steps.definition).children;
+  expect([rowOf(steps.definition).type, first.children.map((node) => node.type)]).toEqual(["flowRow", ["emoji", "input"]]);
+  // The number field takes the width between its two buttons. It has no step, so the host draws no stepper of its own beside it.
+  expect([group.type, group.wrap, group.children.map((node) => [node.type, node.name ?? node.bind, node.layout?.weight, node.step])])
+    .toEqual(["row", false, [["icon", "Minus", undefined, undefined], ["numberInput", "schritte", 1, undefined], ["icon", "Plus", undefined, undefined]]]);
+  // A row that the person does not edit: the title and the other cells on the first line, and the count group on the line under it.
+  const menu = await built('app("T", lang="en")', 'need drinks = entries("Menu", fields={drink: "text", price: "money", qty: "count"}, add=false, remove=false, rows=[{drink: "Tea", price: 2.5, qty: 0}])');
+  const [top, counted] = rowOf(menu.definition).children;
+  expect([rowOf(menu.definition).type, top.children.map((node) => node.bind), counted.children.map((node) => node.type)]).toEqual(["column", ["drink", "price"], ["icon", "numberInput", "icon"]]);
+});
+
+test("entries (L1 item 1): in each model plan and saved plan, a text field of a row shares its line with no control, and no number field of a row has a stepper", async () => {
+  const { allPlans } = await import("./helpers.js");
+  const { plansIn } = await import("../build.js");
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const models = plansIn(fileURLToPath(new URL("./fixtures/model", import.meta.url))).map((path) => [path, readFileSync(path, "utf8")]);
+  const found = [];
+  for (const [path, text] of [...allPlans(), ...models]) {
+    const { definition } = await compileAppFile(text);
+    for (const node of definition ? every(definition.ui) : []) {
+      const template = node.rowTemplate;
+      if (!template) continue;
+      for (const inner of every(template)) {
+        if (inner.type === "numberInput" && inner.step !== undefined) found.push(`${path}: ${inner.bind} has a stepper`);
+        const crowd = (inner.children ?? []).filter((child) => !["emoji", "input"].includes(child.type));
+        if ((inner.children ?? []).some((child) => child.type === "input") && inner.wrap === false && crowd.length) found.push(`${path}: ${inner.children.map((child) => child.type)}`);
+      }
+    }
+  }
+  expect(found).toEqual([]);
+});
+
 test("entries: a plan whose only main element is a list starts with a hero card of the count of its shown rows", async () => {
   const { definition } = await built('app("Spesa", lang="it")', 'need n = input("number", "N", 1)',
     'need items = entries("Prodotti", fields={name: "text", done: "check"}, icon="🛒", countText="Da comprare", filter=!$done, rows=[{name: "Latte", done: false}, {name: "Pane", done: true}])');

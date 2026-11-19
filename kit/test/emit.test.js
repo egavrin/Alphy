@@ -294,10 +294,11 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   // Each kind of row field with a control of its own, bound to the stored list.
   const [list, confirm, form] = doses.children;
   expect(list).toMatchObject({ type: "list", text: "Doses", bind: "doses" });
+  // L1 item 1: an editable row wraps, and its count is one group of a minus, its number field, and a plus at the end.
   expect(list.rowTemplate.children.map((node) => [node.type, node.text, node.bind ?? node.name])).toEqual([
-    ["input", "Dose", "name"], ["toggle", "On", "on"], ["icon", "Less", "Minus"], ["numberInput", "Taken", "taken"],
-    ["icon", "More", "Plus"], ["dateInput", "Day", "day"], ["timeInput", "Time", "at"], ["segmented", "Kind", "kind"], ["icon", "Remove", "Trash"],
+    ["input", "Dose", "name"], ["toggle", "On", "on"], ["dateInput", "Day", "day"], ["timeInput", "Time", "at"], ["segmented", "Kind", "kind"], ["icon", "Remove", "Trash"], ["row", undefined, undefined],
   ]);
+  expect(list.rowTemplate.children.at(-1).children.map((node) => [node.type, node.text, node.bind ?? node.name])).toEqual([["icon", "Less", "Minus"], ["numberInput", "Taken", "taken"], ["icon", "More", "Plus"]]);
   expect(definition.initialState.doses.map((row) => row.at)).toEqual([480, 1200]);
   expect(confirm).toEqual({ type: "dialog", text: "Delete this dose?", visibleBind: "v.doses_confirm_visible", dismissAction: "doses_confirm_dismiss", children: [{ type: "flowRow", children: [
     { type: "button", text: "Delete", action: "doses_yes" }, { type: "button", text: "Keep", action: "doses_no" }] }] });
@@ -385,8 +386,8 @@ test("emit: each list holds the most rows that keep the full screen inside the r
     if (count < 100) expect(renderWork(definition.ui, filled(definition, app, count + 1))).toBeGreaterThan(2048);
     counts.push(count);
   }
-  // rich.plan starts with each list full to its count, and one start row more is a fault of its need.
-  expect(counts).toEqual([100, 83, 91, 100, 100]);
+  // rich.plan starts with each list full to its count, and one start row more is a fault of its need. The count group of a row of lists.plan is one node more (L1 item 1).
+  expect(counts).toEqual([100, 80, 91, 100, 100]);
   const over = emit(await planned(rich.replace("rows=[", 'rows=[{name: "Extra", size: "M", done: false}, ')));
   expect(over.definition).toBeNull();
   expect(over.faults).toEqual([expect.stringMatching(/^need shirts: \$\/shirts starts with 92 rows, .*91/)]);
