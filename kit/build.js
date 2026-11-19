@@ -102,12 +102,13 @@ export const LOOK_FIXTURES = ["water-ko", "units-pl", "shopping", "habits", "pri
 
 /**
  * Each file that the build writes, with its text. The device tests also read the test plans of the node table, the lists, the render work limit, the cards, the free forms, the shapes, the reply at the byte limit, and a model beside a drawing, and the look fixtures.
- * The plans that a model wrote (test/fixtures/model) go to a directory of their own, appfile/model.
+ * The plans that a model wrote (test/fixtures/model) go to a directory of their own, appfile/model, with their index: the device test reads the request of each plan.
  */
 const outputs = async () => [[at("src/icons.js"), iconModule()], [at("../app/src/main/assets/appfile/kit.js"), await bundle()],
   ...planCopies([...plansIn(at("plans")), ...["nodes", "looks", "lists", "rich", "cards", "free", "shapes", "bytes", "model"].map((name) => at(`test/${name}.plan`)), ...LOOK_FIXTURES],
     at("../app/src/androidTest/assets/appfile")),
-  ...planCopies(plansIn(at("test/fixtures/model")), at("../app/src/androidTest/assets/appfile/model"))];
+  ...planCopies(plansIn(at("test/fixtures/model")), at("../app/src/androidTest/assets/appfile/model")),
+  [at("../app/src/androidTest/assets/appfile/model/index.json"), readFileSync(at("test/fixtures/model/index.json"), "utf8")]];
 
 if (import.meta.main) {
   const check = process.argv.includes("--check");

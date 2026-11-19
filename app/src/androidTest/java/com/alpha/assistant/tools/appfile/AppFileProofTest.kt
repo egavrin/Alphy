@@ -16,6 +16,7 @@ import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.ToolSmokeFailure
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolUiCatalog
+import com.alpha.assistant.tools.agent.AppSteps
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -34,7 +35,7 @@ internal suspend fun parsedAndSmoked(sandbox: SandboxClient,name: String,languag
     assertEquals(result.faults.toString(),"ok",result.status)
     assertEquals(language,result.language)
     val spec=ToolSpec.parse(checkNotNull(result.definition)).withAppLanguage(result.language)
-    smoked(sandbox,spec,name,spec.initialState,observeReplay)
+    smoked(sandbox,spec,name,spec.initialState,observeReplay=observeReplay)
     return spec
 }
 /** The event that the host sends for the control of an action id of a ui, as ToolGenerationSmoke.control picks it: a liveInput for a live input, else an action. */
@@ -42,17 +43,25 @@ internal fun controlEvent(root: JSONObject,actionId: String,value: Any?): JSONOb
     val live=ToolUiCatalog.actionTarget(root,actionId)?.node?.let(ToolUiCatalog::isLiveInput) == true
     return JSONObject().put("type",if(live) SandboxContract.LIVE_INPUT_EVENT else "action").put("actionId",actionId).put("value",value ?: JSONObject.NULL)
 }
-/** The smoke step as AppAgent.validate builds it, from a state. */
-internal suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,state: String,observeReplay: ((List<String>)->Unit)?) {
+/**
+ * The smoke step as AppAgent.validate builds it, from a state: the preview of the first screen.
+ * checkUi gets the reply of each event before observeReplay gets the events of its branch.
+ */
+internal suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,state: String,checkUi: (suspend (ToolPreview)->Unit)?=null,
+    observeReplay: ((List<String>)->Unit)?): ToolPreview {
     // The script provider is never asked: the smoke run makes no model call.
     try {
-        ToolGenerationSmoke(sandbox,spec,"appfile-$name",1,state,checkActive={},
-            generation=ToolGenerationService(AgentScriptProvider(),sandbox),observeReplay=observeReplay).run()
+        return ToolGenerationSmoke(sandbox,spec,"appfile-$name",1,state,checkActive={},
+            generation=ToolGenerationService(AgentScriptProvider(),sandbox),checkUi=checkUi,observeReplay=observeReplay).run()
     } catch(failure: ToolSmokeFailure) {
         // The failure itself has no message: the validator's text is the detail of its cause.
         throw AssertionError("smoke ${failure.event} at ${failure.path}: ${(failure.cause as? GeneratedOutputDetail)?.detail ?: failure.cause} replay=${failure.replay}",failure)
     }
 }
+/** The steps of the agent step checker (AppSteps) on a disposable copy of a spec from its start state, as AppScenarioCheckTest runs them: the outcome and the state after the steps. */
+internal suspend fun checked(sandbox: SandboxClient,spec: ToolSpec,id: String,steps: JSONArray): Pair<AppSteps.Outcome,JSONObject> =
+    ToolGenerationSmoke(sandbox,spec,id,1,spec.initialState,checkActive={},generation=ToolGenerationService(AgentScriptProvider(),sandbox))
+        .probe {AppSteps.run(this,AppSteps.parse(steps),everyStep=false) to state}
 
 /** The plan of items 5 of the final review: a division, a doubling, and a text that grows. kit/test/run.test.js has the same plan. */
 internal val PLAIN_VALUES="app(\"Big\", lang=\"en\")\n\$/r = 0\n\$/n = 1\n\$/note = \"x\"\nneed a = input(\"number\", \"A\", 6, min=0, max=100)\n" +

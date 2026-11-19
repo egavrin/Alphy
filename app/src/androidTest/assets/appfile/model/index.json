@@ -1,0 +1,470 @@
+{
+  "d-breathing": {
+    "request": "Проведи меня через дыхательное упражнение с таймером: вдох четыре секунды, выдох шесть.",
+    "dialogue": true,
+    "set": "D",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "d-fractions": {
+    "request": "Хочу разобраться с дробями. Дай мне ползунок, чтобы я сам поэкспериментировал.",
+    "dialogue": true,
+    "set": "D",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "d-heart": {
+    "request": "Как сердце качает кровь по телу?",
+    "dialogue": true,
+    "set": "D",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "d-interest": {
+    "request": "Что такое сложный процент? Объясни на примере вклада.",
+    "dialogue": true,
+    "set": "D",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "d-moon": {
+    "request": "Почему Луна всегда повёрнута к Земле одной стороной? Покажи, как это работает.",
+    "dialogue": true,
+    "set": "D",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "d-pythagoras": {
+    "request": "Научи меня теореме Пифагора по шагам, а в конце проверь вопросом.",
+    "dialogue": true,
+    "set": "D",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "d-rainbow": {
+    "request": "Объясни, как получается радуга.",
+    "dialogue": true,
+    "set": "D",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "d-spanish": {
+    "request": "Давай выучим пять приветствий на испанском, а потом устрой мне маленький тест.",
+    "dialogue": true,
+    "set": "D",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "e-atom-ru": {
+    "request": "Объясни, как устроен атом.",
+    "dialogue": true,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-bbq-pt": {
+    "request": "Divisor de conta do churrasco: adiciono as pessoas e quanto cada uma pagou, e o app mostra quanto cada um deve pagar ou receber.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-bmi-en": {
+    "request": "A BMI calculator: height in cm and weight in kg, show the BMI and the range it falls in.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-cafe-ko": {
+    "request": "카페 주문 계산기: 음료 종류와 사이즈, 샷 추가를 고르면 가격이 나오게 해 줘.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-capitals-it": {
+    "request": "Flashcard per le capitali europee: dieci carte, tocco per vedere la risposta e segno se la sapevo.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-fuel-pl": {
+    "request": "Kalkulator zużycia paliwa: dystans, spalone litry i cena za litr. Pokaż spalanie na 100 km i koszt przejazdu.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-gifts-uk": {
+    "request": "Список подарунків на Новий рік: кому, що подарувати, ціна і чи вже куплено. Покажи, скільки ще треба витратити.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-japanese-ru": {
+    "request": "Научи меня считать до десяти по-японски, с проверкой.",
+    "dialogue": true,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-lever-ru": {
+    "request": "Как работает рычаг? Покажи наглядно.",
+    "dialogue": true,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-loan-es": {
+    "request": "Calculadora de préstamo: importe, interés anual y años. Muéstrame la cuota mensual y el total pagado.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-mood-ru": {
+    "request": "Дневник настроения: каждый день ставлю оценку от 1 до 5 и короткую заметку. Покажи график за неделю.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-packing-de": {
+    "request": "Eine Packliste für den Urlaub mit Kategorien, in der ich abhake, was schon im Koffer ist.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-pages-ja": {
+    "request": "読書の目標：今月読みたいページ数を決めて、毎日読んだページ数を足していき、進み具合を見たい。",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-percent-ru": {
+    "request": "Что такое проценты? Объясни на примере.",
+    "dialogue": true,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-plank-fr": {
+    "request": "Un minuteur pour la planche : 5 séries de 45 secondes avec 15 secondes de repos entre les séries.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-score-zh": {
+    "request": "记分牌：两支队伍，各有加分和减分按钮，还有一个重置按钮。",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-seasons-ru": {
+    "request": "Объясни, почему бывают времена года.",
+    "dialogue": true,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-times7-ru": {
+    "request": "Давай потренируем таблицу умножения на семь.",
+    "dialogue": true,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-timetable-tr": {
+    "request": "Haftalık ders programı: gün, saat ve ders adı ekleyeyim, dersler günlere göre gruplu görünsün.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "e-vacation-en": {
+    "request": "A countdown to my vacation: I pick the date and it shows how many days are left.",
+    "dialogue": false,
+    "set": "E",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "fresh-terra-low"
+  },
+  "holdout-calories-fr": {
+    "request": "Un compteur de calories pour la journée avec un objectif de 2000 kcal et la liste des repas.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "holdout-eggs-it": {
+    "request": "Un timer per le uova: alla coque, morbide e sode, con un avviso alla fine.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "holdout-power-de": {
+    "request": "Ein Stromkosten-Rechner: alter und neuer Zählerstand, Preis pro kWh und die Kosten.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "holdout-reading-es": {
+    "request": "Una lista de lectura: libros por leer, leyendo y terminados, con las páginas leídas de cada uno.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "holdout-sleep-en": {
+    "request": "A sleep log: when I went to bed and when I woke up, hours slept each night, and the weekly average.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "holdout-study-ja": {
+    "request": "勉強時間トラッカー：科目ごとに時間を記録して、今週の合計を見たい。",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "holdout-tip-ru": {
+    "request": "Калькулятор чаевых: сумма счёта, процент чаевых и на сколько человек делим.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "holdout-words-ko": {
+    "request": "단어장 앱: 영어 단어와 뜻을 추가하고 퀴즈로 외울 수 있게 해 줘.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-lang-budget-es": {
+    "request": "Un control de gastos del mes por categorías con un gráfico de barras, y una pestaña para ver el resumen y otra para añadir gastos.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-lang-habits-uk": {
+    "request": "Трекер звичок на тиждень: три звички, відмітки по днях і серія днів поспіль для кожної.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-lang-kanji-ja": {
+    "request": "漢字の練習カード：漢字を見せて、タップすると読み方と意味が出る。覚えた・まだのボタンで数を数えて。",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-lang-shopping-it": {
+    "request": "Una lista della spesa dove aggiungo prodotti, li spunto quando li compro e posso riordinarli per corsia del supermercato.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-lang-tea-tr": {
+    "request": "Çay demleme zamanlayıcısı: siyah, yeşil ve bitki çayı için farklı süreler, bitince titreşim olsun.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-lang-units-pl": {
+    "request": "Przelicznik jednostek kuchennych: gramy, szklanki, łyżki i mililitry dla mąki, cukru i wody.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-lang-verbs-fr": {
+    "request": "Un quiz de conjugaison : il me donne un verbe et un pronom au présent, je tape la réponse, il corrige et compte mes points.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-lang-water-ko": {
+    "request": "하루 물 마시기 기록 앱을 만들어 줘. 컵 버튼을 누르면 250ml씩 추가되고 목표 2리터 대비 진행률을 보여 줘.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-lang-workout-de": {
+    "request": "Ein Intervalltimer fürs Training: 8 Runden mit 40 Sekunden Belastung und 20 Sekunden Pause, mit Fortschrittsring und Rundenanzeige.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-ui-alarm": {
+    "request": "A medication schedule: three daily doses with times I can edit, a switch for each, and a confirmation dialog before deleting a dose.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-ui-onboarding": {
+    "request": "A three-step setup wizard for a reading goal: choose genres, set pages per day, then a summary screen with a Start button.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-ui-pizza": {
+    "request": "Configuratore di pizza: scelgo la base, la dimensione e fino a cinque ingredienti, e vedo il prezzo totale aggiornato.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-ui-price-filter": {
+    "request": "Browse a small list of 12 used bikes with a price range filter, type chips like road, mountain and city, and sorting by price.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-ui-priorities": {
+    "request": "Rank my top five tasks for today by dragging them into order, and mark each one as high, medium or low priority.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-ui-steps-chart": {
+    "request": "Schrittzähler-Tagebuch: ich trage die Schritte für jeden Tag der Woche ein und sehe ein Liniendiagramm und den Durchschnitt.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  },
+  "showcase-ui-trip-dates": {
+    "request": "Plan a weekend trip: pick the travel dates, add activities to each day, and see the whole itinerary as a timeline. Put the add form in a sheet.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "c3d65bf76c7b",
+    "label": "final-terra-low"
+  }
+}

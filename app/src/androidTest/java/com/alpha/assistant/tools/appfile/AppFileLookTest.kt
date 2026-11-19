@@ -5,21 +5,33 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
+import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.sandbox.SandboxContract
+import com.alpha.assistant.tools.AgentScriptProvider
+import com.alpha.assistant.tools.AppLanguage
+import com.alpha.assistant.tools.GenerationLanguage
+import com.alpha.assistant.tools.ToolGenerationService
+import com.alpha.assistant.tools.ToolPreview
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.tools.agent.AppAgent
+import com.alpha.assistant.tools.agent.AppAgentRequest
 import com.alpha.assistant.tools.removeWithModel
+import com.alpha.assistant.tools.writeAppReply
 import com.alpha.assistant.ui.ShellFixture
 import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.ShellViewModel
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -37,18 +49,25 @@ private val BASELINES=listOf("showcase-lang-water-ko","showcase-lang-units-pl","
 /**
  * Each compiled plan and each baseline app as a saved app in the real shell: its pictures in the light and the dark theme, the host's words in the language of the app,
  * a real tap on a row control, the host's own timer loop of a drawn app, the steps to add a row in the baseline list and in the kit list, a live slider, and a second live field.
+ * The plans that a model wrote go through the whole device path, with the checks of AppAgent.validate and a picture in each theme.
  */
 @RunWith(AndroidJUnit4::class)
 class AppFileLookTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
 
     /** The compiled apps saved in the tool store of a fresh shell, by their ids. The block runs while the shell is open, and the shell makes no model call. */
-    private fun inShell(prefix: String,apps: Map<String,ToolSpec>,block: (ShellRobot,ShellViewModel,ToolStore,ActivityScenario<CloudTestActivity>)->Unit) {
+    private fun inShell(prefix: String,apps: Map<String,ToolSpec>,block: (ShellRobot,ShellViewModel,ToolStore,ActivityScenario<CloudTestActivity>)->Unit)=
+        inShell(prefix,{store -> for((id,spec) in apps) save(store,id,spec)},block)
+    /** A compiled app saved as a saved app of the tool store with a state. */
+    private fun save(store: ToolStore,id: String,spec: ToolSpec,state: String=spec.initialState)=
+        store.saveTool(ToolRecord(id,1,1,spec.json,state,spec.ui.toString(),null,true),revision=true)
+    /** A fresh shell whose tool store holds what save wrote before the shell starts. */
+    private fun inShell(prefix: String,save: (ToolStore)->Unit,block: (ShellRobot,ShellViewModel,ToolStore,ActivityScenario<CloudTestActivity>)->Unit) {
         val fixture=ShellFixture(prefix)
         val robot=ShellRobot(fixture.name)
         try {
             ToolStore(fixture.context,"${fixture.name}.db-tools.db").use {store ->
-                for((id,spec) in apps) store.saveTool(ToolRecord(id,1,1,spec.json,spec.initialState,spec.ui.toString(),null,true),revision=true)
+                save(store)
                 fixture.install()
                 fixture.launch().use {scenario ->
                     val model=checkNotNull(fixture.model)
@@ -85,37 +104,190 @@ class AppFileLookTest {
         val sandbox=SandboxClient(instrumentation.targetContext)
         val compiled=runBlocking {(SAVED_PLANS+LOOK_FIXTURES).mapValues {(name,language) -> parsedAndSmoked(sandbox,name,language)}}
         val specs=compiled+BASELINES.associateWith(::baseline)
-        val folder=File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)),"appfile-look")
+        inEachTheme("appfile-look") {dark,directory ->
+            inShell("appfile-look",specs.mapKeys {"appfile-${it.key}"}) {robot,model,store,scenario ->
+                robot.waitUntil {nightOf(scenario) == dark}
+                for((name,spec) in specs) {
+                    open(robot,model,"appfile-$name",spec)
+                    // A plan with a surface shows its drawing: the host drew its first frame.
+                    assertEquals(name,spec.surfaces.isNotEmpty(),canvasTexts(spec.ui).isNotEmpty())
+                    canvasTexts(spec.ui).forEach {text -> robot.waitUntil {drawn(robot,text)}}
+                    val picture=File(directory,"$name.png")
+                    picture(robot,picture)
+                    assertTrue("$picture ${picture.length()} bytes",picture.isFile && picture.length()>10_000)
+                    // The shopping list starts empty: one more picture after a person adds two rows through the screen.
+                    if(name == "mock-shopping-it") added(robot,model,store,scenario,"appfile-$name",File(directory,"$name-added.png"))
+                    // The deck and the question change after their main action: one more picture of the back of the card and of the notice of the answer.
+                    if(name == "look-deck-es") pressed(robot,"Ver traducción","the apple",File(directory,"$name-shown.png"))
+                    if(name == "look-guide-es") pressed(robot,"92–96 °C","¡Correcto! Así el café no se quema.",File(directory,"$name-answered.png"))
+                    robot.back()
+                    robot.waitGone(robot.text(R.string.tool_refine))
+                }
+            }
+        }
+    }
+    /**
+     * The block in the light theme, then in the dark theme. Each theme gets a new directory light or dark in the new folder folderName of the
+     * external files. After the block, the night mode of the device is as before.
+     */
+    private fun inEachTheme(folderName: String,block: (dark: Boolean,directory: File)->Unit) {
+        val folder=File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)),folderName)
         if(folder.exists()) check(folder.deleteRecursively())
-        val shell=ShellRobot("appfile-look")
+        val shell=ShellRobot(folderName)
         val night=shell.shell("cmd uimode night").substringAfterLast(": ")
         try {
             for(dark in listOf(false,true)) {
                 shell.shell("cmd uimode night ${if(dark) "yes" else "no"}")
-                val directory=File(folder,if(dark) "dark" else "light").apply {check(mkdirs())}
-                inShell("appfile-look",specs.mapKeys {"appfile-${it.key}"}) {robot,model,store,scenario ->
-                    robot.waitUntil {nightOf(scenario) == dark}
-                    for((name,spec) in specs) {
-                        open(robot,model,"appfile-$name",spec)
-                        // A plan with a surface shows its drawing: the host drew its first frame.
-                        assertEquals(name,spec.surfaces.isNotEmpty(),canvasTexts(spec.ui).isNotEmpty())
-                        canvasTexts(spec.ui).forEach {text -> robot.waitUntil {drawn(robot,text)}}
-                        val picture=File(directory,"$name.png")
-                        picture(robot,picture)
-                        assertTrue("$picture ${picture.length()} bytes",picture.isFile && picture.length()>10_000)
-                        // The shopping list starts empty: one more picture after a person adds two rows through the screen.
-                        if(name == "mock-shopping-it") added(robot,model,store,scenario,"appfile-$name",File(directory,"$name-added.png"))
-                        // The deck and the question change after their main action: one more picture of the back of the card and of the notice of the answer.
-                        if(name == "look-deck-es") pressed(robot,"Ver traducción","the apple",File(directory,"$name-shown.png"))
-                        if(name == "look-guide-es") pressed(robot,"92–96 °C","¡Correcto! Así el café no se quema.",File(directory,"$name-answered.png"))
-                        robot.back()
-                        robot.waitGone(robot.text(R.string.tool_refine))
-                    }
-                }
+                block(dark,File(folder,if(dark) "dark" else "light").apply {check(mkdirs())})
             }
         } finally {
             if(night in setOf("auto","yes","no","custom")) shell.shell("cmd uimode night $night")
         }
+    }
+
+    /** The plans that a model wrote (kit/test/fixtures/model), as kit/build.js copies them to appfile/model, by their ids. */
+    private fun modelPlans()=checkNotNull(instrumentation.context.assets.list("appfile/model")).filter {it.endsWith(".plan")}.map {it.removeSuffix(".plan")}.sorted()
+    /** e-bbq-pt starts with no row: a copy of it with the rows of three people that the agent step checker adds through its add form. */
+    private val BBQ_ROWS=JSONArray(listOf("Ana" to 60,"Bruno" to 25,"Carla" to 0).flatMap {(name,paid) ->
+        listOf(JSONObject().put("set","pessoas_new_nome").put("value",name),JSONObject().put("set","pessoas_new_pago").put("value",paid),JSONObject().put("tap","pessoas_add"))})
+    /**
+     * The action ids of the smoke step whose events changed the state, those whose events never did, and the preview of the first screen.
+     * checkUi gets the reply of an event before observeReplay gets the events of its branch, and each branch starts from the start state of the spec.
+     */
+    private suspend fun smokedControls(sandbox: SandboxClient,spec: ToolSpec,name: String): Triple<Set<String>,Set<String>,ToolPreview> {
+        var before=spec.initialState
+        var after=spec.initialState
+        val changed=sortedSetOf<String>()
+        val all=sortedSetOf<String>()
+        val preview=smoked(sandbox,spec,name,spec.initialState,observeReplay={events ->
+            if(events.size == 1) before=spec.initialState
+            val event=JSONObject(events.last())
+            if(event.getString("type") in setOf("action",SandboxContract.LIVE_INPUT_EVENT)) {
+                all+=event.getString("actionId")
+                if(after != before) changed+=event.getString("actionId")
+            }
+            before=after
+        },checkUi={after=it.state})
+        return Triple(changed,all-changed,preview)
+    }
+    /**
+     * The host's reply to one write_app of a compiled definition in a new app of the agent loop: AppAgent.validate runs all its checks in its order.
+     * presentationProblem is private (AppAgent.kt line 767), so this is the only path to it from a test. A scripted model writes the definition,
+     * and its second call ends the run. language null writes the definition without a language, so validate skips its language check.
+     */
+    private suspend fun written(sandbox: SandboxClient,definition: String,language: String?,request: String,id: String): String {
+        class Stop: Exception()
+        var reply: String?=null
+        val app=JSONObject(definition).apply {if(language == null) remove("language") else put("language",language)}
+        val agent=AppAgent(ToolGenerationService(AgentScriptProvider(),sandbox),sandbox) {turns,_ ->
+            if(turns.size == 1) writeAppReply(app) else {reply=turns.last().text;throw Stop()}
+        }
+        try {agent.run(AppAgentRequest(request,null,emptyList(),id,privateState=false),CloudSession())} catch(_: Stop) {}
+        return checkNotNull(reply).substringBefore("\n")
+    }
+    /** A picture of the screen when it holds still, else a picture of the screen as it is. True when the screen held still. */
+    private fun snapshot(robot: ShellRobot,file: File): Boolean {
+        if(runCatching {picture(robot,file)}.isSuccess) return true
+        val screen=checkNotNull(robot.automation.takeScreenshot())
+        try {file.outputStream().use {assertTrue(screen.compress(Bitmap.CompressFormat.PNG,100,it))}} finally {screen.recycle()}
+        return false
+    }
+
+    /**
+     * The device path of each plan that a model wrote (appfile/model), as parsedAndSmoked and picturesOfEachPlan take a saved plan: the compile in
+     * the sandbox, ToolSpec.parse with the language of the compile, the smoke step of the host, the save in the tool store, and the open in the shell,
+     * with a picture in the light and in the dark theme. After the smoke step, the language check of AppAgent.validate runs on the first screen, and
+     * one write_app of the definition with the request of the index runs all the checks of validate (written). Each step of each plan is caught, so
+     * one bad plan hides no other plan.
+     * The folder appfile-model of the external files gets results.txt (one line for each plan), and the picture and the screen texts of each open.
+     * The test asserts after the last picture that no step failed.
+     */
+    @Test fun eachModelPlanPassesTheDevicePath() {
+        val sandbox=SandboxClient(instrumentation.targetContext)
+        val compiler=AppFileCompiler(instrumentation.targetContext,sandbox)
+        val ids=modelPlans()
+        assertEquals(52,ids.size)
+        // The index of the plans (kit/test/fixtures/model/index.json): the request of each plan is the request of its write.
+        val requests=JSONObject(instrumentation.context.assets.open("appfile/model/index.json").use {it.readBytes().decodeToString()})
+        val lines=ids.associateWith {mutableListOf<String>()}
+        val failures=mutableListOf<String>()
+        /** One step of a plan: its status in the line of the plan, and its message in the failures. */
+        fun <T> step(id: String,name: String,block: ()->T): T? =runCatching(block).onSuccess {lines.getValue(id)+="$name=ok"}.onFailure {
+            lines.getValue(id)+="$name=FAIL"
+            failures+="$id $name: ${it.message?.take(600)}"
+        }.getOrNull()
+        // The first compile loads the kit into the sandbox, so no plan pays it.
+        runBlocking {compiler.compile(plan("calc"))}
+        val specs=linkedMapOf<String,ToolSpec>()
+        for(id in ids) {
+            val started=SystemClock.elapsedRealtime()
+            val result=step(id,"compile") {runBlocking {compiler.compile(plan("model/$id"))}.also {check(it.status == "ok" && it.faults.isEmpty()) {"${it.status} ${it.faults}"}}}
+            lines.getValue(id)+="compileMs=${SystemClock.elapsedRealtime()-started}"
+            if(result == null) continue
+            val spec=step(id,"parse") {ToolSpec.parse(checkNotNull(result.definition)).withAppLanguage(result.language)} ?: continue
+            lines.getValue(id)+="lang=${result.language}"
+            val smokeStarted=SystemClock.elapsedRealtime()
+            val controls=step(id,"smoke") {runBlocking {smokedControls(sandbox,spec,"model-$id")}}
+            lines.getValue(id)+="smokeMs=${SystemClock.elapsedRealtime()-smokeStarted}"
+            if(controls == null) continue
+            val (changed,unchanged,preview)=controls
+            lines.getValue(id)+="changed=$changed unchanged=$unchanged"
+            specs[id]=spec
+            // The two last checks of AppAgent.validate for a new app, in its order: the language of the visible text, then presentationProblem.
+            result.language?.let {tag -> step(id,"language") {check(!runBlocking {GenerationLanguage.Check(AppLanguage(tag)).mismatches(JSONObject(preview.ui),spec.title,spec.description)}) {
+                "The visible text is not in ${GenerationLanguage.name(tag)}."}}}
+            val request=requests.getJSONObject(id).getString("request")
+            val reply=step(id,"write") {runBlocking {written(sandbox,checkNotNull(result.definition),result.language,request,"appfile-validate-$id")}} ?: continue
+            step(id,"validate") {check(reply.startsWith("write_app: OK")) {reply}}
+            // A stop at the language check hides presentationProblem: a second write without the language reaches it.
+            if("The visible text is not in" in reply) step(id,"presentation") {
+                runBlocking {written(sandbox,checkNotNull(result.definition),null,request,"appfile-validate-$id")}.also {check(it.startsWith("write_app: OK")) {it}}}
+            // A control of the two language paths: the Russian tip calculator as a Japanese app must stop at the language check, so a pass is not a dead check.
+            if(id == "holdout-tip-ru") step(id,"control") {
+                val direct=runBlocking {GenerationLanguage.Check(AppLanguage("ja")).mismatches(JSONObject(preview.ui),spec.title,spec.description)}
+                val japanese=runBlocking {written(sandbox,checkNotNull(result.definition),"ja",request,"appfile-validate-$id")}
+                check(direct && japanese.startsWith("write_app: REJECTED. The visible text is not in Japanese")) {"direct=$direct $japanese"}
+            }
+        }
+        val rows=specs["e-bbq-pt"]?.let {spec -> step("e-bbq-pt","rows") {runBlocking {checked(sandbox,spec,"appfile-model-e-bbq-pt",BBQ_ROWS)}.let {(outcome,state) ->
+            check(outcome.failure == null) {"${outcome.failure}"}
+            state.toString()
+        }}}
+        val folder=File(checkNotNull(instrumentation.targetContext.getExternalFilesDir(null)),"appfile-model")
+        val saved=mutableSetOf<String>()
+        try {
+            inEachTheme("appfile-model") {dark,directory ->
+                val theme=if(dark) "dark" else "light"
+                inShell("appfile-model",{store ->
+                    for((id,spec) in specs) if(dark) {if(id in saved) save(store,"appfile-model-$id",spec)} else if(step(id,"save") {save(store,"appfile-model-$id",spec)} != null) saved+=id
+                    rows?.let {save(store,"appfile-model-e-bbq-pt-rows",specs.getValue("e-bbq-pt"),it)}
+                }) {robot,model,_,scenario ->
+                    robot.waitUntil {nightOf(scenario) == dark}
+                    val refine=robot.text(R.string.tool_refine)
+                    val shown=specs.filterKeys {it in saved}.map {(id,spec) -> Triple(id,"appfile-model-$id",spec)}+
+                        listOfNotNull(rows?.let {Triple("e-bbq-pt","appfile-model-e-bbq-pt-rows",specs.getValue("e-bbq-pt"))})
+                    for((id,appId,spec) in shown) {
+                        val name=appId.removePrefix("appfile-model-")
+                        val opened=step(id,"open-$theme${if(name == id) "" else "-rows"}") {open(robot,model,appId,spec)} != null
+                        if(opened) {
+                            // A canvas that is not whole on the first screen is never drawn in this check: the line says so, and the picture shows it.
+                            val canvases=canvasTexts(spec.ui).map {text -> "$text:${if(runCatching {robot.waitUntil(5_000) {drawn(robot,text)}}.isSuccess) "drawn" else "not drawn"}"}
+                            val still=snapshot(robot,File(directory,"$name.png"))
+                            File(directory,"$name.txt").writeText(robot.texts().joinToString("\n"))
+                            lines.getValue(id)+="$theme${if(name == id) "" else "-rows"}=[still=$still canvas=$canvases]"
+                        } else instrumentation.runOnMainSync {model.tools.clearError()}
+                        // After a failed open the app can be shut: back only from an open app, so the loop stays in the shell.
+                        if(robot.find(refine) != null) runCatching {robot.back();robot.waitGone(refine)}.onFailure {failures+="$id back-$theme: ${it.message}"}
+                    }
+                }
+            }
+        } finally {
+            val report=lines.map {(id,parts) -> "$id ${parts.joinToString(" ")}"}
+            report.forEach {Log.i("AppFileLookTest","model $it")}
+            folder.mkdirs()
+            File(folder,"results.txt").writeText((report+"failures ${failures.size}"+failures).joinToString("\n")+"\n")
+        }
+        assertEquals(emptyList<String>(),failures)
     }
     /** Adds two products with the steps of the baseline list (addTwoRows), and takes the picture when the rows show. */
     private fun added(robot: ShellRobot,model: ShellViewModel,store: ToolStore,scenario: ActivityScenario<CloudTestActivity>,id: String,picture: File) {
