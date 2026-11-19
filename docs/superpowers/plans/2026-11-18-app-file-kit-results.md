@@ -244,7 +244,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
 The device class `AppFileLookTest` shows each compiled plan as a saved app in the real shell (`ShellFixture`, `ShellRobot`, `ToolStore.saveTool`).
 It compiles each plan with `parsedAndSmoked` of `AppFileProofTest`, which gives the spec the language of the compile result (`ToolSpec.withAppLanguage`). The shell makes no model call.
 
-- `picturesOfEachPlan` opens each of the nine saved plans and each look fixture of `kit/build.js` (`LOOK_FIXTURES`: five in Task 11a, seven since Task 11b-1).
+- `picturesOfEachPlan` opens each of the nine saved plans and each look fixture of `kit/build.js` (`LOOK_FIXTURES`: five in Task 11a, seven since Task 11b-1, twelve since Task 11b-2a). Since Task 11b-2a, it also opens the spec of each of the five baseline apps (section "Look with parts").
   For each app, it waits for the title, the refine action, and the reply to the open event. Then it takes a screenshot of the first screen.
   For a plan with a surface (`timer-rounds`, `lesson`, `model3d`), it waits until the inside of each canvas holds more than one color.
   It takes the pictures in the light theme and in the dark theme, and it sets the night mode of the emulator back in a `finally` block.
@@ -252,7 +252,7 @@ It compiles each plan with `parsedAndSmoked` of `AppFileProofTest`, which gives 
 - `aTapOnARowControlChangesTheRow` taps the checkbox of the first row of `list.plan` through the accessibility node.
   The stored state then has `preso` true only for the row `r2`, `daComprare_text` is "2", and the screen shows the first checkbox checked and "2".
 - `theLapButtonMovesTheHandInTheDrawnApp` presses "Один круг" (`lap_button`, the control with the `animate` action) of `lesson.plan`.
-  The stored `anim` change starts within 10 s. Within 10 s more, `angle` is 360 and `anim.angle.end` is 0. The test sends no timer event and calls no `execute`.
+  The stored `anim` change starts within 10 s. Within 10 s more, `angle` is 360 and each entry of `anim` has `end` 0 (since Task 11b-2a; before, only `anim.angle.end`). The test sends no timer event and calls no `execute`.
 
 The numbers of the table come from `score_app(definition, [])` of `tools/agent_corpus/visual_score.py` on the compiled definition:
 
@@ -457,7 +457,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home python3
 
 | Plan | Difference | Cause |
 | --- | --- | --- |
-| `mock-units-pl` | The baseline shows each conversion as a large value on a tinted row under the heading "Przeliczenia". The plan shows two plain metrics in a grid, with smaller values, and one row with a large value. | The layout rule of the figures (Task 11b-2a, E.2) and the size of a plain `Metric` of the host. The large value of a row is an implementation choice that follows the baseline rows. |
+| `mock-units-pl` | The baseline shows each conversion as a large value on a tinted row under the heading "Przeliczenia". The plan shows two plain metrics in a grid, with smaller values, and one row with a large value. | The layout rule of the figures (Task 11b-2a, E.2), and a host limit: a plain `Metric` value is `headlineSmall` (24 sp), and no `Text` emphasis has that size (`title` 22 sp, `headline` 28 sp, `number` 36 sp; `NativeToolUi.kt` `textStyle`). The row keeps `number`, the size of the baseline rows. |
 | `mock-shopping-it` | The fields of the add form have no icon, and the form has no heading "Aggiungi prodotto". | Missing option: the add form of `entries` gives its fields no icon. The heading: choice of the plan. |
 | `mock-shopping-it` | A typed product goes into the state only after the apply button of the field ("Applica: Prodotto"). The baseline field is a live input, so its add button works at once. | The design of the kit: a `TextField` is an apply input of the host (`docs/superpowers/plans/2026-11-18-app-file-kit.md`, the node table). |
 | `mock-shopping-it` | No filter "Mostra", no order "Ordina per", and no button "Svuota comprati". | Choice of the plan: the list sorts by aisle with `sort=$corsia`. |
