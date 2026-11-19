@@ -349,6 +349,68 @@ test("change (rule 3b): a list that still holds its start rows takes the start r
   expect(result.state.items).toEqual([{ id: "r1", name: "Milk", done: false }]);
 });
 
+test("change (rule 3b): an untouched value takes the start value of a change that retypes it, and a changed value blocks", async () => {
+  const text = SIZE.replace('input("number", "Size", 3, min=0, max=10)', 'input("text", "Size", "3")');
+  const untouched = await compileAppFile(text, await stored(SIZE));
+  expect(untouched.faults).toEqual([]);
+  expect(untouched.state.size).toBe("3");
+  const changed = await compileAppFile(text, await stored(SIZE, [action("size_field", 5)]));
+  expect(changed.faults).toEqual([`need size: ${BLOCKS}: it holds a saved number, and the change makes it a text. Keep its kind, or give the new need another name`]);
+});
+
+// ---- Rule 3c: when rule 3b gives a list other start rows, the inner values that point into its old rows start again. ----
+
+/** A plan with a list of words that the plan fills, and the lines after it. */
+const wordsPlan = (count, ...after) => lines('app("Words", lang="en")',
+  `need words = entries("Words", fields={word: "text", meaning: "text", known: "check"}, rows=[${Array.from({ length: count }, (_, index) => `{word: "w${index + 1}", meaning: "m${index + 1}", known: false}`).join(", ")}])`, ...after);
+const PAGES = ['need pages = deck("Pages", $/words, front=$word)', "$/due := filter($/words, !$known)", 'need later = deck("Later", $/due, front=$word)'];
+const times = (count, ...events) => Array.from({ length: count }, () => events).flat();
+/** The two decks at the places 7 and 3 after the events, and the change of their list from ten to five start rows. */
+async function pagesAfter(events) {
+  const previous = await stored(wordsPlan(10, ...PAGES), [...times(7, action("pages_next")), ...times(3, action("later_next")), ...events]);
+  expect([previous.state.pages_s.i, previous.state.later_s.i]).toEqual([7, 3]);
+  const result = await compileAppFile(wordsPlan(5, ...PAGES), previous);
+  expect(result.faults).toEqual([]);
+  return { previous, result, places: [result.state.pages_s, result.state.later_s] };
+}
+
+test("change (rule 3c): a pages deck at place 7 over a list that takes new start rows starts at its first card, as does a deck over a formula of the list", async () => {
+  const { result, places } = await pagesAfter([]);
+  expect(result.state.words).toEqual((await startOf(wordsPlan(5, ...PAGES))).words);
+  expect(places).toEqual([{ i: 0 }, { i: 0 }]);
+});
+
+test("change (rule 3c): a deck with counts over a list that takes new start rows starts with its counts at their start", async () => {
+  const flash = (count) => wordsPlan(count, 'need flash = deck("Flash", $/words, front=$word, back=$meaning)');
+  const previous = await stored(flash(10), times(3, action("flash_show"), action("flash_noButton")));
+  expect(previous.state.flash_s).toMatchObject({ i: 3, no: 3 });
+  const result = await compileAppFile(flash(5), previous);
+  expect(result.faults).toEqual([]);
+  expect(result.state.flash_s).toEqual((await startOf(flash(5))).flash_s);
+  expect(result.state.flash_s).toMatchObject({ i: 0, yes: 0, no: 0 });
+});
+
+test("change (rule 3c): a pages deck over a list with a saved mark keeps its place", async () => {
+  const { previous, result, places } = await pagesAfter([action("words_known", { key: "r1", value: true })]);
+  expect(previous.state.words[0].known).toBe(true);
+  expect(result.state.words).toEqual(previous.state.words);
+  expect(places).toEqual([{ i: 7 }, { i: 3 }]);
+});
+
+test("change (rule 3c): an open delete dialog of a list that takes new start rows is closed, also when only the ids of its rows move", async () => {
+  // The start rows of both lists take their ids from one count, so a new row in the first list moves the ids of the second one. Its need line stays the same text.
+  const two = (...first) => lines('app("Two", lang="en")', `need first = entries("First", fields={name: "text"}, rows=[${first.map((name) => `{name: "${name}"}`).join(", ")}])`,
+    'need second = entries("Second", fields={name: "text"}, confirm="Delete?", rows=[{name: "x"}, {name: "y"}])');
+  const previous = await stored(two("a", "b", "c"), [action("second_remove", { key: "r5", value: null })]);
+  expect(previous.state.second).toEqual([{ id: "r4", name: "x" }, { id: "r5", name: "y" }]);
+  expect(previous.state.second_s.drop).toBe("r5");
+  const result = await compileAppFile(two("a", "new", "b", "c"), previous);
+  expect(result.faults).toEqual([]);
+  // Without rule 3c the dialog stays open on r5, which is now the row x, so a yes removes x.
+  expect(result.state.second).toEqual([{ id: "r5", name: "x" }, { id: "r6", name: "y" }]);
+  expect(result.state.second_s.drop).toBe("");
+});
+
 // ---- Each model plan: a stored state that differs from the start in each value of the person comes back. ----
 
 const nodesOf = (node) => [node, ...(node.children ?? []).flatMap(nodesOf)];

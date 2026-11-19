@@ -74,12 +74,17 @@ The rules keep each stored value of the person, and they never move a value to a
    - 3b. A value that still equals its start value of the previous plan is no data of the person yet: it takes the start value of the change.
      For a list, this means the same rows with the same ids and the same values, and the kit checks it before the column rules.
      So a list that still holds its start rows takes the start rows of the change whole, also when the change removes or retypes a column.
+     The kit checks it before the kind too, so a value that still equals its start value can change its kind.
+   - 3c. When a list takes other start rows by rule 3b, each inner value that points into its old rows starts again.
+     These are the inner values of the need of the list, such as an open delete dialog, and of each need whose line reads the list, such as the place and the counts of a deck.
+     A formula that reads the list counts as the list, so a deck over `$/due := filter($/words, !$known)` starts again too.
+     A list that keeps its saved rows, or that gets the same start rows, changes no inner value: rule 7 applies.
    - A list with other rows keeps them. When the change has other start rows, the note `need NAME: the list keeps its N saved rows, and the start rows of the change are not used` comes with the result.
    - Start rows get the ids `r1`, `r2`, and so on by their place: one count over all lists in the order of their lines.
      So a start row that a change puts in the middle of a list moves the ids of the rows after it, and of the rows of each later list.
      Only a list that takes the start rows of the change gets the moved ids, and a list with saved rows keeps its ids.
 4. These changes are faults that start with `need NAME: the saved data blocks this change: ` (`BLOCKS`), and the kit names what blocks it:
-   - A value of another kind, such as a number that becomes a text, or a time that becomes a number. An empty list can change its kind.
+   - A value of another kind, such as a number that becomes a text, or a time that becomes a number. An empty list, and a value that still equals its start value (rule 3b), can change its kind.
    - A column that the change removes or retypes in a list with at least one row.
    - A saved value that is no option or is outside the bounds of the change, which the screen would change.
    - A new value with the name of a saved value of the person.
@@ -88,7 +93,7 @@ The rules keep each stored value of the person, and they never move a value to a
 5. A stored field that the change does not name stays with its schema and its value, and `app.keep` lists it.
    A list or an array that the app computed, such as the view of a sorted list, stays empty. A root that comes back later gets its kept value again.
 6. The values that the app computes come from the changed app. A change of `animate` that runs goes on by its root, and a drag starts again.
-7. The inner values of a need (the object `NAME_s`) stay when the need line is the same text, else they start again.
+7. The inner values of a need (the object `NAME_s`) stay when the need line is the same text and rule 3c does not apply, else they start again.
    So a timer that runs goes on to the same end of its phase when its line stays, and it stands at the start of round 1 when its line changes.
    The count of the work phases that ended is a value of its own, so it stays.
 

@@ -3595,13 +3595,14 @@ const lineOf = (file, need) => file.of("need").find((entry) => entry.key === nee
  * 2. The names of the values of the person are stable (rows.js stable), so a line before a value cannot change its name.
  * 3. A root of a line that stays with the same kind keeps its value. A list keeps its rows by id, and a new column gets the value that the
  *    first append of the list gives a new row, such as the start value of the add form. A root that a change before kept comes back by its name.
- * 3b. A root whose stored value still equals its start value of the previous plan takes the start value of the change, before the column rules.
+ * 3b. A root whose stored value still equals its start value of the previous plan takes the start value of the change, before the kind and column rules.
  *    A list with other rows keeps them, and a note says so when the change has other start rows.
+ * 3c. When a list takes other start rows by 3b, the inner values of its need and of each need whose line reads it, also through a formula, start again.
  * 4. A value of another kind, a column that the change removes or retypes in a list with rows, a saved value that the screen would change, and a
  *    new value with the name of a saved one are faults with BLOCKS, as are more than 40 fields, a state of more than 49152 bytes, and a list past its room.
  * 5. Each stored field that the change does not name stays with its schema and its value (app.keep). A list or an array that the app computed stays empty.
  * 6. The values that the app computes come from the changed app. A run of animate goes on by its root, and a drag starts again.
- * 7. The inner values of a need (NAME_s) stay when the need line is the same text, else they start again.
+ * 7. The inner values of a need (NAME_s) stay when the need line is the same text and 3c does not apply, else they start again.
  */
 function nextState(file, { app, definition, owners, objects }, previous) {
   const mismatch = { faults: [`kit: ${MISMATCH}`], definition: null, state: null };
@@ -3630,6 +3631,7 @@ function nextState(file, { app, definition, owners, objects }, previous) {
     fresh ??= new App(file);
     try { return fresh.value(appends.get(root) ?? { k: "map", entries: [] }, {}) ?? {}; } catch { return {}; }
   };
+  const moved = new Set();
   for (const [root, field] of newTops) {
     const schema = definition.stateSchema[field], owner = owners.get(field), kind = kindOf(app.kinds[root], schema);
     let from = oldTops.get(root), back = false;
@@ -3638,13 +3640,17 @@ function nextState(file, { app, definition, owners, objects }, previous) {
     used.add(from);
     // A kept field has only its Alphy type: a time is a number there, and a date a text.
     const value = stored[from], was = back ? kindOf(undefined, schemas[from]) : kindOf(old.kinds[root], oldSchemas[from]), now = back ? own(ALPHY, kind) ?? kind : kind;
+    // Rule 3b: a value that still equals its start value of the previous plan is no data of the person yet, so it takes the start value of the change,
+    // also of another kind. Rule 3c: a list that gets other start rows so moves the rows that inner values point into.
+    if (!back && canonical(value) === canonical(oldStart[from])) {
+      if (was === "list" && canonical(start[field]) !== canonical(value)) moved.add(root);
+      continue;
+    }
     if (Array.isArray(value) && !value.length && was !== now) continue;
     if (was !== now || (kind === "record" && shape(schemas[from]) !== shape(schema))) {
       faults.push(`${owner}: ${BLOCKS}: it holds a saved ${WORDS[was]}, and the change makes it a ${was === now ? "record of other fields" : WORDS[now]}. Keep its kind, or give the new need another name`);
       continue;
     }
-    // Rule 3b: a value that still equals its start value of the previous plan is no data of the person yet, so it takes the start value of the change.
-    if (!back && canonical(value) === canonical(oldStart[from])) continue;
     if (kind !== "list") { next[field] = value; continue; }
     if (!back && canonical(start[field]) !== canonical(oldStart[from])) notes.push(`${owner}: the list keeps its ${value.length} saved rows, and the start rows of the change are not used`);
     // The columns match by their key, and the columns of a kept list by their stored name and Alphy type.
@@ -3661,13 +3667,21 @@ function nextState(file, { app, definition, owners, objects }, previous) {
       return [safe, at && at[2] === type ? row[at[1]] : cast(kitKind, blank[key], today)];
     })) }));
   }
+  // Rule 3c: a formula that reads a moved list moves too. The need of a moved root and each need whose line reads one start their inner values again.
+  const reads = (tree) => !!tree && typeof tree === "object" && ((tree.k === "path" && tree.abs && moved.has(tree.segs[0])) || Object.values(tree).some(reads));
+  for (let more = moved.size > 0; more; ) {
+    more = false;
+    for (const entry of file.of("formula")) if (!moved.has(entry.key.slice(2)) && reads(entry.tree)) { moved.add(entry.key.slice(2)); more = true; }
+  }
+  const partOf = needsOf(file), restart = new Set([...moved].map((root) => partOf.get("$/" + root)));
+  file.of("need").forEach((entry) => reads(entry.tree) && restart.add(entry.key));
   const oldPaths = new Map(old.fields);
   for (const [field, need] of objects) {
     const from = oldObjects.get(need);
     if (from !== undefined) used.add(from);
     // A need that comes back after a change that kept its inner values starts them again: no stored line says that they stay.
     else if (older.has(field) && field === objectWish(need)) used.add(field);
-    if (from === undefined || lineOf(file, need) !== lineOf(was.file, need)) continue;
+    if (from === undefined || restart.has(need) || lineOf(file, need) !== lineOf(was.file, need)) continue;
     next[field] = { ...start[field] };
     for (const [root, path] of app.fields) {
       const [object, key] = path.split("."), [oldObject, oldKey] = oldPaths.get(root)?.split(".") ?? [];
