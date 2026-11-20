@@ -1,5 +1,6 @@
 // The model check of the plan prompt outside the app: a model writes a plan for each request, the kit compiles it, and a faulty plan
-// gets up to REPAIRS repair calls (default 2). Each call is a call of the OpenAI Responses API with the body that OpenAiResponsesWire.kt builds.
+// gets up to REPAIRS repair calls (default 2). A plan with a hole gets none and ends with the outcome hole, as in the app.
+// Each call is a call of the OpenAI Responses API with the body that OpenAiResponsesWire.kt builds.
 //   bun kit/modelcheck.js probe MODEL                          one call with a short request; the raw event stream goes to evidence/modelcheck/probe/
 //   bun kit/modelcheck.js run LABEL SET MODEL EFFORT [ID...]   SET is C (the 45 corpus cases), D (8 dialogue requests), E (28 fresh requests), F (16 change requests),
 //                                                              or a combination such as CD. STOP_AT (default 600) refuses a run whose worst case passes it.
@@ -190,6 +191,7 @@ async function compile(input) {
  * The record holds each call with its reply, each report of the kit, the outcome, and the final plan. clean is the step of the first clean report.
  * Each compile is compileStep of the kit with the cap of the app, as the app runs it: each reply as readPlanReply reads it, and a repair reply merged
  * into the plan. An outside repair reply ends the request (its call holds the word), and a text past the cap gets its fault and no repair call.
+ * A plan with a hole ends the request with the outcome hole and no repair call, also when it compiles clean (AppFileSteps.outcome, fallback:hole).
  * A change case (set F) sends the request and the app file of its stored app (changeText), merges the reply into the app file, compiles each plan
  * against the stored state, and gets one repair call, or none after a fault that the saved data blocks (blockedBySavedData) or the mismatch
  * fault (savedDataMismatch), as in the app. Its record also holds the stored state, the next state, and the comparison of the two (keptOf).
@@ -204,7 +206,7 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
     return call;
   };
   const first = await send(0, effort, task), kind = first.status !== "completed" ? { kind: first.status } : stored ? changeKindOf(first.text) : kindOf(first.text);
-  const record = { id: item.id, set: item.set, dialogue: Boolean(item.host), expect: item.expect, model, effort, repairs: limit, prompt: PROMPT_HASH, task, calls, steps, first: kind, clean: null, plan: null };
+  const record = { id: item.id, set: item.set, dialogue: Boolean(item.host), expect: item.expect, model, effort, repairs: limit, prompt: PROMPT_HASH, task, calls, steps, first: kind, clean: null, hole: false, plan: null };
   let result = null;
   const done = () => finish(stored ? Object.assign(record, { fixture: item.fixture, request: item.request, events: item.events.length, stored: stored.previous.state,
     compared: stored.fields, inner: stored.inner }, changeOf(item, stored, first.text, record.plan, record.clean !== null && result.definition)) : record);
@@ -218,6 +220,8 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
     steps.push({ faults: result.faults, notes: result.notes, compileMs: result.compileMs, stateBytes: result.stateBytes, dropped: step ? calls.at(-1).dropped : 0,
       ...(stored && { blocks: result.faults.filter((fault) => fault.includes(BLOCKS)).length, mismatch: result.faults.filter((fault) => fault.includes(MISMATCH)).length }) });
     record.plan = plan;
+    // As in the app (AppFileSteps.outcome): a plan with a hole ends with fallback:hole, before the clean check and with no repair call.
+    if (result.hole) { record.hole = true; break; }
     if (!result.faults.length) {
       record.clean = step;
       // The run-time text is the same for each plan, and the raw replies compile again to it, so the record keeps the rest of the definition.
@@ -249,10 +253,13 @@ export function repairsOf(text = "2") {
  */
 export const worstCase = (items, repairs) => items.length + items.filter((item) => item.expect === "plan").reduce((sum, item) => sum + (item.set === "F" ? CHANGE_REPAIRS : repairs), 0);
 
-/** The outcome of a record: cleanN, not, or the kind of a first reply that got no compile. A change whose final plan is the app file as it was is unchanged. */
+/**
+ * The outcome of a record: hole, cleanN, not, or the kind of a first reply that got no compile. A change whose final plan is the app file as it
+ * was is unchanged. hole comes first, as fallback:hole comes before the other outcomes in the app.
+ */
 function finish(record) {
   const plan = record.plan ?? "";
-  record.outcome = record.same ? "unchanged" : record.clean !== null ? `clean${record.clean}` : ["plan", "other", "lines"].includes(record.first.kind) ? "not" : record.first.kind;
+  record.outcome = record.hole ? "hole" : record.same ? "unchanged" : record.clean !== null ? `clean${record.clean}` : ["plan", "other", "lines"].includes(record.first.kind) ? "not" : record.first.kind;
   record.lines = plan ? linesOf(plan).length : 0;
   record.bytes = Buffer.byteLength(plan);
   record.pathS = Math.round((record.calls.reduce((sum, call) => sum + (call.wallS ?? 0), 0) + record.steps.reduce((sum, step) => sum + step.compileMs / 1000, 0)) * 100) / 100;
@@ -369,7 +376,9 @@ export function changeNumbers(records) {
   const output = first((usage) => usage.output_tokens), reasoning = first((usage) => usage.output_tokens_details?.reasoning_tokens);
   const steps = (count) => records.flatMap((record) => record.steps.map((step, index) => [record, step, index])).filter(([, step]) => step[count]).map(([record, step, index]) => `${record.id}.${index} (${step[count]})`);
   const listed = (field) => ids(clean.filter((record) => record[field].length), (record) => `${record.id} ${record[field].map((each) => each.at ?? each).join(" ")}`);
-  return [`clean at the first try ${share(of("clean0").length, all)}, after the repair ${share(of("clean1").length, all)}, not clean ${share(of("not").length, all)} (${ids(of("not"))}),`
+  // A change with a hole is not applied in the app (fallback:hole), so it is not clean.
+  const not = [...of("not"), ...of("hole")];
+  return [`clean at the first try ${share(of("clean0").length, all)}, after the repair ${share(of("clean1").length, all)}, not clean ${share(not.length, all)} (${ids(not)}),`
     + ` unchanged ${share(of("unchanged").length, all)} (${ids(of("unchanged"))}), outside ${share(of("outside").length, all)} (${ids(of("outside"), (record) => `${record.id} ${record.first.word}`)})`,
   `reply lines of the ${lines.length} replies of lines: ${spread(lines, (record) => record.replyLines)}; plan lines ${spread(lines, (record) => record.planLines)};`
     + ` replies that repeat a line of the plan: ${ids(lines.filter((record) => record.repeated), (record) => `${record.id} ${record.repeated} of ${record.replyLines}`)}`,

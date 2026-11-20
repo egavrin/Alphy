@@ -119,6 +119,20 @@ test("modelcheck (U2-K item 2): the cap of the harness and its fault are APP_FIL
   expect([APP_CAP, overCap(length).faults, sentence.includes("$")]).toEqual([Number(cap), [sentence], false]);
 });
 
+test("modelcheck (U2-K item 7): a plan with a hole ends with the outcome hole and no repair call, as in the app, also when it compiles clean", async () => {
+  // AppFileSteps.outcome gives fallback:hole before the clean check and before a repair call. A hole with no view of its own is a fault of the kit.
+  const open = PLAN + 'need chart = hole("A chart")\n', built = open + 'chart_view = Text("A chart")\n';
+  for (const [text, faulty] of [[open, true], [built, false]]) {
+    const { ask, bodies } = fake(text, PLAN);
+    const record = await checkOne(item, { ask, model: "m", effort: "low" });
+    expect([text, record.outcome, record.clean, bodies.length, record.steps.length, record.steps[0].faults.length > 0]).toEqual([text, "hole", null, 1, 1, faulty]);
+  }
+  // A change case with a hole is not clean in the numbers of the changes.
+  const change = await checkOne(caseOf("holdout-tip-ru-b"), { ...fake('need chart = hole("A chart")'), model: "m", effort: "low" });
+  expect([change.outcome, change.calls.length, changeNumbers([change])[0]]).toEqual(["hole", 1,
+    "clean at the first try 0/1, after the repair 0/1, not clean 1/1 (holdout-tip-ru-b), unchanged 0/1 (none), outside 0/1 (none)"]);
+});
+
 test("modelcheck: the device bars and the host forms that the kit takes", () => {
   // The bar of the start state is the state limit of the kit (run.js), which is the limit of the host.
   expect(barFaults({ compileMs: 2400, stateBytes: MAX_STATE_BYTES + 1, plan: 'need a = figure("number", "", 1)' })).toEqual(["compile 2400 ms > 2300", `start state ${MAX_STATE_BYTES + 1} bytes > ${MAX_STATE_BYTES}`, "a figure with an empty label"]);
