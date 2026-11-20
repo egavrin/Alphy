@@ -262,7 +262,9 @@ A text that a format function printed is for a person: do not read it back as a 
   It shows no end card, no score or counts, and no button. The deck is written again when the `emptyText=` of its list changes.
 - `steps`: the note at the end has the success tone. `question`: its notice has the success tone for a right answer and the warning tone for a wrong one.
 - `lesson`: a lesson of at most 12 steps shows its count only in its dots, where the host writes "Step: 1 / 3". A longer lesson has a bar and a count line over it.
-- `chart`: the title shows once, as the label of the chart, with no section around it.
+- `chart`: the kit writes the title once, as the label of the chart, with no section around it. The one series of the chart has the title as its text too.
+  Alphy draws the label as the heading of the chart (`NativeToolUi.kt`, `showsToolHeading`) and the text of each series as a caption under the chart in the color of the series.
+  Its catalog needs a series text of 1 to 100 characters (`ToolUiCatalog.kt`, `chart_series_entry`), so a person sees the title two times (L2 decision 3, a known limit of the host).
 - `card`: `icon=` is the icon of the card, and the body text is muted.
 - `drawing` and `model3d`: a plan with no figure or progress has its first drawing or model as the main element, unless the author wrote `root`. The main drawing is in a hero card, and the main model card is a hero card that holds only the model.
   The part chips, the turn buttons, and the explode button of the main model stand under its card, in this order.
