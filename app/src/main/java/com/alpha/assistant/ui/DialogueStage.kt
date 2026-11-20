@@ -42,6 +42,7 @@ import com.alpha.assistant.data.Message
 import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.tools.ArtifactSnapshot
 import com.alpha.assistant.tools.CoveredToolSurface
+import com.alpha.assistant.tools.DIALOGUE_WIDE_DP
 import com.alpha.assistant.tools.MiniAppActions
 import com.alpha.assistant.tools.MiniAppContent
 import com.alpha.assistant.tools.VoicePress
@@ -86,7 +87,7 @@ private val STAGE_TEXT_HEIGHT = 256.dp
     var shareText by rememberSaveable { mutableStateOf<String?>(null) }
     var linkError by remember { mutableStateOf(false) }
     val tool = model.stageToolId?.let { id -> model.tools.tools.find { it.id == id } }
-    val fold = LocalConfiguration.current.smallestScreenWidthDp >= 600
+    val fold = LocalConfiguration.current.smallestScreenWidthDp >= DIALOGUE_WIDE_DP
     BoxWithConstraints(modifier.fillMaxWidth().testTag("dialogue_stage")) {
         // The gutter of an open mini-app (FocusedToolPane).
         val gutter = if (maxWidth >= 600.dp) 28.dp else 20.dp

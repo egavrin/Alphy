@@ -4,6 +4,7 @@ import com.alpha.assistant.tools.ToolSurface
 import com.alpha.assistant.tools.GeneratedOutputDetail
 import com.alpha.assistant.tools.ToolSmokeFailure
 import com.alpha.assistant.tools.ToolUiCatalog
+import com.alpha.assistant.tools.sandboxCode
 import com.alpha.assistant.tools.three.ThreeSceneFailure
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.sandbox.RuntimeFailure
@@ -317,7 +318,7 @@ internal object AppSteps {
 
     /** A failure of the sandbox, not of the app. It stops the run, because the model cannot fix it. */
     fun sandboxFailure(failure: Throwable?): CloudFailure? = when (failure) {
-        is RuntimeFailure -> CloudFailure("javascript_${failure.status.lowercase(java.util.Locale.ROOT)}", SandboxResult(failure.status).message)
+        is RuntimeFailure -> CloudFailure(sandboxCode(failure.status), SandboxResult(failure.status).message)
         is CloudFailure -> failure
         else -> null
     }?.takeIf { it.code in sandboxCodes || it.code == "three_declined" }

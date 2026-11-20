@@ -329,7 +329,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         val input=JSONObject().put("artifactId",id).put("revision",revision).put("state",fullState).put("event",event)
         val result=execute(spec.source,input)
         currentCoroutineContext().ensureActive()
-        if(result.status != "OK") throw CloudFailure("javascript_${result.status.lowercase(java.util.Locale.ROOT)}",result.message)
+        if(result.status != "OK") throw CloudFailure(sandboxCode(result.status),result.message)
         val raw=checkNotNull(result.json)
         enforcePolicy(policy?.validateResult,raw,GenerationProblem.RESULT)
         return validateResult(spec,state,event,fallbackUi,raw)

@@ -17,6 +17,7 @@ import com.alpha.assistant.tools.AppFileLimits
 import com.alpha.assistant.tools.AppFileReply
 import com.alpha.assistant.tools.AppLanguage
 import com.alpha.assistant.tools.GenerationLanguage
+import com.alpha.assistant.tools.SANDBOX_CODES
 import com.alpha.assistant.tools.ToolGenerationProgress
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolGenerationSmoke
@@ -31,6 +32,7 @@ import com.alpha.assistant.tools.ToolUiDiagnostic
 import com.alpha.assistant.tools.ToolUiValidationStage
 import com.alpha.assistant.tools.ToolValidationFailure
 import com.alpha.assistant.tools.imageSlots
+import com.alpha.assistant.tools.sandboxCode
 import com.alpha.assistant.tools.agent.AppFileNames.Finding
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneFailure
@@ -113,11 +115,11 @@ internal class AppAgent(
     private fun hostCheckReason(failure: Throwable): String {
         for (cause in generateSequence(failure) { it.cause }) {
             val code = when (cause) {
-                is RuntimeFailure -> "javascript_" + cause.status.lowercase(Locale.ROOT)
+                is RuntimeFailure -> sandboxCode(cause.status)
                 is CloudFailure -> cause.code
                 else -> null
             }
-            if (code != null && code in AppFileNames.SANDBOX_STATUSES) return code
+            if (code != null && code in SANDBOX_CODES) return code
         }
         return (failure as? Feedback)?.finding?.reason ?: AppFileNames.HOST_ERROR
     }

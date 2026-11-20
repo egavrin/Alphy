@@ -72,6 +72,17 @@ class DialogueSplitTest {
         assertEquals(DialogueSplit(emptyList(), emptyList(), listOf(0)), dialogueSplit(JSONObject("""{"type":"column","children":[{"type":"text","text":"x"}]}""")))
     }
 
+    /** A column with a layout, an align or arrangement style, or a part with a layout places its parts itself, so it has no split. */
+    @Test fun aColumnThatPlacesItsPartsHasNoSplit() {
+        val canvas = """{"type":"card","children":[{"type":"canvas","id":"c"}]},{"type":"card","children":[]}"""
+        for (column in listOf("""{"type":"column","layout":"x","children":[$canvas]}""", """{"type":"column","style":{"align":"center"},"children":[$canvas]}""",
+            """{"type":"column","style":{"arrangement":"end"},"children":[$canvas]}""",
+            """{"type":"column","children":[$canvas,{"type":"text","text":"x","layout":"x"}]}""")) {
+            assertEquals(column, null, dialogueSplit(JSONObject(column)))
+        }
+        assertEquals(DialogueSplit(emptyList(), listOf(0), listOf(1)), dialogueSplit(JSONObject("""{"type":"column","children":[$canvas]}""")))
+    }
+
     private fun splitOrNull(text: String): Pair<JSONObject, DialogueSplit>? {
         val ui = runBlocking { compiler.compile(text) }.let { result ->
             assertEquals(result.faults.toString(), "ok", result.status)

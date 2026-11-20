@@ -433,7 +433,7 @@ class ToolController internal constructor(private val app: Application, private 
      * Null when no observer is set, so the normal path builds no trace.
      * The shell marks the end of an early plan (early_plan_used, early_plan_canceled) on it.
      */
-    internal fun traceFor(id: String) = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
+    private fun traceFor(id: String) = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
 
     /** The plan step needs the switch of the provider and the chat model that the model check measured: the first of the provider (ruling OD-3). */
     internal fun planStep(): AppFileLimits? {

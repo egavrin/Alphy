@@ -30,6 +30,8 @@ object ChatToolReply {
     private val ordinaryKinds = setOf("answer", "create", "refine", "clarify")
     /** The kinds that build an app. A screen is the app of a spoken request. */
     private val miniAppKinds = setOf("create", "refine", "screen")
+    /** The kinds whose decision has a brief: each kind that builds an app, and a press. */
+    internal fun hasBrief(kind: String?) = kind in miniAppKinds || kind == "press"
     private val searchPolicies = setOf("none", "optional", "required")
 
     internal fun decisionSchema(allowAutomation: Boolean, allowWeatherLocation: Boolean, allowImage: Boolean = false,
@@ -187,7 +189,7 @@ Choose screen for a new topic, which gets a new screen. Choose answer for a plai
             invalidDecision("decision.kind", "$.kind", "string")
         if (text.isBlank() || text.length > MAX_TEXT) invalidDecision("decision.text", "$.text", "string")
         // The brief of a press is the label of a control, which the host looks up in the shown screen.
-        if (if (kind in miniAppKinds || kind == "press") brief.isBlank() else brief.isNotEmpty())
+        if (if (hasBrief(kind)) brief.isBlank() else brief.isNotEmpty())
             invalidDecision("decision.brief", "$.brief", "string")
         if (kind == "clarify" && search != "none") invalidDecision("decision.clarify_search", "$.search", "string")
         if (kind == "press" && search != "none") invalidDecision("decision.press_search", "$.search", "string")

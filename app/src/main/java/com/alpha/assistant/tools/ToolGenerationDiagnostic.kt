@@ -145,6 +145,13 @@ internal fun safePhaseDetail(name: String, detail: String?): String? = when {
 /** Only known failure codes leave the device. Any other code becomes "unknown". */
 internal fun safeGenerationCode(code: String)=code.takeIf {it in safeGenerationCodes || it.matches(Regex("http_[0-9]{3}"))} ?: "unknown"
 
+/** The failure code of a sandbox status, as javascript_timeout for TIMEOUT. */
+internal fun sandboxCode(status: String) = "javascript_" + status.lowercase(java.util.Locale.ROOT)
+
+/** The failure code of each sandbox status. It stays above safeGenerationCodes, which reads it as the file loads. */
+internal val SANDBOX_CODES = setOf("javascript_unavailable","javascript_busy","javascript_sandbox_died","javascript_closed","javascript_memory_limit",
+    "javascript_script_error","javascript_timeout","javascript_invalid_request","javascript_invalid_result")
+
 private val safeGenerationCodes=setOf("none","unknown","auth","cancelled","empty_response","incomplete","provider","quota","rate_limit","refusal",
     "response_length","response_size","stream_invalid","stream_timeout","stream_io","pre_headers_io",
     "pre_headers_timeout","source_attribution","decision_language",
@@ -152,7 +159,5 @@ private val safeGenerationCodes=setOf("none","unknown","auth","cancelled","empty
     "widget_request","widget_plan","widget_owner","widget_selector","widget_questions","widget_incomplete",
     "three_behavior","three_declined","three_deadline","three_unavailable",
     "widget_spec","widget_state","widget_behavior","widget_patch","widget_preview","widget_preview_state","widget_preview_effects","widget_timer_host","drawing.command_fields",
-    "records_with_effects",
-    "javascript_unavailable","javascript_busy","javascript_sandbox_died","javascript_closed","javascript_memory_limit",
-    "javascript_script_error","javascript_timeout","javascript_invalid_request","javascript_invalid_result") +
+    "records_with_effects") + SANDBOX_CODES +
     ThreeSceneProblem.entries.map { it.code }

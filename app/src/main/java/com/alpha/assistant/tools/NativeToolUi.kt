@@ -771,6 +771,9 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
     }
     if(selectable) SelectionContainer(modifier=modifier) {content()} else content()
 }
+/** The smallest screen width in dp of a wide dialogue stage: the fold and the tablet (plan D, values table). */
+internal const val DIALOGUE_WIDE_DP = 600
+
 /** The parts of an app on the dialogue stage by their role (plan D, Da2): indices of the children of the column under the theme root. */
 internal data class DialogueSplit(val leading: List<Int>, val main: List<Int>, val side: List<Int>)
 
@@ -785,9 +788,8 @@ internal fun dialogueSplit(root: JSONObject): DialogueSplit? {
         "theme" -> root.optJSONArray("children")?.takeIf { it.length() == 1 }?.getJSONObject(0)?.takeIf { it.optString("type") == "column" }
         else -> null
     } ?: return null
-    if (column.has("layout") || column.optJSONObject("style")?.let { it.has("align") || it.has("arrangement") } == true) return null
     val items = column.optJSONArray("children")?.let { List(it.length(), it::getJSONObject) } ?: return null
-    if (items.any { it.has("layout") }) return null
+    if (placesItsOwnParts(column, items)) return null
     val label = items.firstOrNull()?.let { it.optString("type") == "text" && it.optJSONObject("style")?.optString("emphasis") == "label" } == true
     val leading = if (label) listOf(0) else emptyList()
     val main = (leading.size until items.size).firstOrNull { mainVisual(items[it]) }?.let { start ->
@@ -795,6 +797,10 @@ internal fun dialogueSplit(root: JSONObject): DialogueSplit? {
     }.orEmpty()
     return DialogueSplit(leading, main, (leading.size until items.size).filter { it !in main })
 }
+
+/** A column with a layout, an align or arrangement style, or a part with a layout places its parts itself, so no split moves them. */
+private fun placesItsOwnParts(column: JSONObject, items: List<JSONObject>) =
+    column.has("layout") || column.optJSONObject("style")?.let { it.has("align") || it.has("arrangement") } == true || items.any { it.has("layout") }
 
 /** A drawing or a 3D model is a card that holds only a canvas, so a timer card with its bar is not one. A deck is a section with a hero card. */
 private fun mainVisual(node: JSONObject): Boolean {
@@ -818,8 +824,8 @@ private fun mainVisual(node: JSONObject): Boolean {
 @Composable private fun DialogueColumns(modifier: Modifier, split: DialogueSplit, title: String?, gap: Dp,
     renderChild: @Composable (Int, Modifier) -> Unit) {
     BoxWithConstraints(modifier) {
-        val pair = split.main.isNotEmpty() && split.side.isNotEmpty() && maxWidth >= 600.dp &&
-            LocalConfiguration.current.smallestScreenWidthDp >= 600 && LocalDensity.current.fontScale <= 1.3f
+        val pair = split.main.isNotEmpty() && split.side.isNotEmpty() && maxWidth >= DIALOGUE_WIDE_DP.dp &&
+            LocalConfiguration.current.smallestScreenWidthDp >= DIALOGUE_WIDE_DP && LocalDensity.current.fontScale <= 1.3f
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
             split.leading.forEach { renderChild(it, Modifier) }
             title?.let { DialogueTitle(it) }
@@ -834,11 +840,10 @@ private fun mainVisual(node: JSONObject): Boolean {
 private val courseSceneControls = setOf("slider", "numberInput", "toggle", "checkbox", "button", "select", "segmented")
 
 private fun courseSceneSlot(root: JSONObject): Int? {
-    if (root.optString("type") != "column" || root.has("layout") ||
-        root.optJSONObject("style")?.keys()?.asSequence()?.any { it in setOf("align", "arrangement") } == true
-    ) return null
+    if (root.optString("type") != "column") return null
     val children = root.optJSONArray("children") ?: return null
     val items = List(children.length(), children::getJSONObject)
+    if (placesItsOwnParts(root, items)) return null
     val index = items.indices.singleOrNull { canvasSurfaceIds(items[it]).isNotEmpty() } ?: return null
 
     fun canvasOnly(node: JSONObject): Boolean {
@@ -852,7 +857,6 @@ private fun courseSceneSlot(root: JSONObject): Int? {
     val trailing = items.drop(index + 1)
     return index.takeIf {
         canvasOnly(items[index]) &&
-            items.none { it.has("layout") } &&
             items.take(index).none { it.getString("type") in courseSceneControls } &&
             trailing.isNotEmpty() && trailing.all { it.getString("type") in courseSceneControls }
     }

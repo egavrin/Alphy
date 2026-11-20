@@ -6,6 +6,7 @@ import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.AppFileLimits
 import com.alpha.assistant.tools.AppFileReply
+import com.alpha.assistant.tools.SANDBOX_CODES
 import com.alpha.assistant.tools.ToolGenerationProgress
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.holdsDataOfThePerson
@@ -42,9 +43,6 @@ internal object AppFileNames {
     // The reasons of a failed host check of a clean plan (KitCheck.Failed): the trace detail fallback:host_check:<reason>.
     /** The sandbox statuses that are a fault of the host, not of the plan. The host check runs once more after one of them. */
     val HOST_CHECK_RETRIES = setOf("javascript_timeout", "javascript_busy")
-    /** Each sandbox status of a host check, as ToolEngine.executeEvent names it. */
-    val SANDBOX_STATUSES = HOST_CHECK_RETRIES + setOf("javascript_unavailable", "javascript_sandbox_died", "javascript_closed",
-        "javascript_memory_limit", "javascript_script_error", "javascript_invalid_result", "javascript_invalid_request")
     /** The check of AppAgent.validate that refused the plan: a fault of the plan, which gets no second try. */
     enum class Finding { DEFINITION, PICTURE, THREE_D, STATE, LESSON, LANGUAGE, PRESENTATION, SMOKE;
         val reason get() = name.lowercase(Locale.ROOT)
@@ -53,7 +51,7 @@ internal object AppFileNames {
     const val LONG_DECIMAL = "long_decimal"
     /** Any other failure of a host check. */
     const val HOST_ERROR = "error"
-    val HOST_CHECKS = SANDBOX_STATUSES + Finding.entries.map { it.reason } + LONG_DECIMAL + HOST_ERROR
+    val HOST_CHECKS = SANDBOX_CODES + Finding.entries.map { it.reason } + LONG_DECIMAL + HOST_ERROR
 
     /** Each reason other than [COMPILE_STATUS] with its status. */
     val FALLBACKS = CALL_FAILURES + setOf(DATA_BLOCKS, HOLE, EMPTY, FAULTS, OUTSIDE) + HOST_CHECKS.map { "$HOST_CHECK:$it" }
@@ -244,19 +242,21 @@ internal suspend fun routeAppFile(
     // A new app with no plan step names the first condition that closed it.
     val planStep = request.planStep
     val screen = request.screen.takeIf { request.base == null }
-    val gate = planStep != null && appFileCall != null && request.base == null && request.lesson == null && request.images.isEmpty() &&
-        request.sceneAssets.isEmpty() && !request.testFix
-    if (!gate && request.base == null) request.phase(when {
+    val skip = when {
         planStep == null -> AppFileNames.PlanSkip.PLAN_STEP
         appFileCall == null -> AppFileNames.PlanSkip.PLAN_CALL
         request.lesson != null -> AppFileNames.PlanSkip.LESSON
         request.images.isNotEmpty() -> AppFileNames.PlanSkip.IMAGES
         request.sceneAssets.isNotEmpty() -> AppFileNames.PlanSkip.SCENE_ASSETS
-        else -> AppFileNames.PlanSkip.TEST_FIX
-    }.phase)
+        request.testFix -> AppFileNames.PlanSkip.TEST_FIX
+        else -> null
+    }
+    val gate = request.base == null && skip == null
+    if (request.base == null) skip?.let { request.phase(it.phase) }
     if (screen != null && !gate) throw ScreenFallback(AppFileNames.CLOSED)
     if (gate) {
-        val outcome = screen?.early?.let { earlyOutcome(it, checkActive) } ?: appFileSteps(appFileCall).plan(request.prompt, planStep)
+        val outcome = screen?.early?.let { earlyOutcome(it, checkActive) }
+            ?: appFileSteps(checkNotNull(appFileCall)).plan(request.prompt, checkNotNull(planStep))
         checkActive()
         val reason = when (outcome) {
             is AppFileOutcome.Outside -> AppFileNames.OUTSIDE

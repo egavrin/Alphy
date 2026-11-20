@@ -441,7 +441,7 @@ internal class ArtifactCoordinator private constructor() {
     private fun ensureRetained(active: GraphicsSession) {
         ensureAvailable()
         val status=active.failureStatus ?: return
-        throw CloudFailure("javascript_${status.lowercase(java.util.Locale.ROOT)}",SandboxResult(status).message)
+        throw CloudFailure(sandboxCode(status),SandboxResult(status).message)
     }
 
     private suspend fun ensureCurrentEvaluation(store: ToolStore,id: String,active: GraphicsSession) {
