@@ -65,7 +65,7 @@ internal fun showsOnTheStage(message: Message): Boolean = message.status !in unf
 
 /**
  * The stage height around the drawing of an app: the padding, the kind label, the title, the first control, and the gaps (Da2 ruling 1).
- * The label and the title take about 120 dp, and a slider with its label, the tallest first control, about 125 dp.
+ * The label and the title take about 120 dp, and a slider with its label, the tallest first control, about 105 dp.
  */
 private val STAGE_TEXT_HEIGHT = 256.dp
 

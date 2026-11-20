@@ -121,20 +121,26 @@ class NativeLookWorkflowTest {
         }
     }
 
-    @Test fun slidersShowValueLabelsAtTheThumbs() {
-        val ui = themedColumn(JSONObject("""{"type":"slider","text":"Volume","bind":"volume","min":0,"max":100,"action":"setVolume"}"""),
+    // Failure case: a slider said its number twice, in its label and in a pill over the thumb. The picture shows a slider at 0, 50, and 100.
+    @Test fun aSliderShowsItsValueOnceAndARangeSliderShowsValuesAtItsThumbs() {
+        val slider = { label: String -> JSONObject().put("type", "slider").put("text", label).put("bind", label.lowercase()).put("min", 0)
+            .put("max", 100).put("action", "set$label") }
+        val ui = themedColumn(slider("Low"), slider("Middle"), slider("High"),
             JSONObject("""{"type":"rangeSlider","text":"Price","bind":"price","min":0,"max":5000,"action":"setPrice"}"""),
             JSONObject("""{"type":"text","text":"End of sliders"}"""))
-        val state = """{"volume":30,"price":[400,3000]}"""
-        assertEquals(null, validateNativeUi(ui, JSONObject("""{"volume":"number","price":{"type":"array","maxItems":2,"items":"number"}}"""), JSONObject(state)))
+        val state = """{"low":0,"middle":50,"high":100,"price":[400,3000]}"""
+        assertEquals(null, validateNativeUi(ui, JSONObject("""{"low":"number","middle":"number","high":"number",""" +
+            """"price":{"type":"array","maxItems":2,"items":"number"}}"""), JSONObject(state)))
         render(ui, "End of sliders", state) {
+            val texts = robot.texts()
+            for (label in listOf("Low: 0", "Middle: 50", "High: 100")) assertTrue("$label in $texts", label in texts)
+            for (pill in listOf("0", "50", "100")) assertTrue("no pill $pill in $texts", pill !in texts)
             fun near(label: String, track: Rect, fraction: Double) {
                 val value = robot.bounds(label)
                 val thumb = track.left + dp(10) + ((track.width() - dp(20)) * fraction).toInt()
                 assertTrue("$label sits at its thumb: ${value.centerX()} near $thumb", abs(value.centerX() - thumb) <= dp(24))
                 assertTrue("$label sits above or on the track", value.bottom <= track.centerY())
             }
-            near("30", robot.bounds("Volume"), 0.3)
             near("400", robot.bounds("Price"), 0.08)
             near("3000", robot.bounds("Price"), 0.6)
         }

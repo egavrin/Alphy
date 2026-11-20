@@ -653,7 +653,7 @@ private fun heroEmojiSide(children: JSONArray): Int {
     if (icon.isNotEmpty()) { ToolGlyph(icon, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
 }
 
-/** Value pills above slider thumbs. The track insets its ends by about 10 dp. */
+/** Value pills above the thumbs of a range slider. The track insets its ends by about 10 dp. */
 @Composable private fun SliderValueLabels(values: List<Double>, low: Double, high: Double) {
     Layout(content = {
         values.forEach { value ->
@@ -1354,7 +1354,6 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             val value = (editor?.shown(original) as? Number)?.toDouble() ?: draft
             Column(modifier) {
                 Text("$text: ${BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()}")
-                SliderValueLabels(listOf(value), low, high)
                 Slider(value=((value-low)/(high-low)).toFloat().coerceIn(0f,1f),onValueChange={ fraction ->
                     val next = nativeSliderValue(node,fraction)
                     if (editor == null) draft = next else editor.change(next)
