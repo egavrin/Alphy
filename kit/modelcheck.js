@@ -21,8 +21,8 @@ import { PROMPT, PROMPT_HASH, changeText, repairText, taskText } from "./prompt.
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const EVIDENCE = ROOT + "evidence/modelcheck/";
-/** The calls that the owner approved for the model checks: 491 before task P4 (A0, H1, P2, task 2b, and P3), and P4 adds at most 32 (its decision 4). */
-const LIMIT = 523;
+/** The calls that the owner approved for the model checks: 491 before task P4 (A0, H1, P2, task 2b, and P3), P4 adds at most 32 (its decision 4), and task B1b adds at most 28. */
+const LIMIT = 539;
 /** The saved reports of today's agent loop: final-30d43aa, and for the 11 cases that it lacks, the first showcase run of 2026-11-16. */
 const REPORTS = ["/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-17/final-30d43aa/", "/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-16/showcase1/"];
 /** The output limit of the agent call of the app (ToolEngine.kt 131072, capped by OpenAiProfile.maxOutputTokens). */

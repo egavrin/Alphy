@@ -1082,3 +1082,104 @@ Each of the 4 plans is clean at the first try. A scratch compile on 2026-11-20 p
 
 The run used 4 calls of the budget of 8: 4 first calls and no repair. `evidence/modelcheck/spend.json` went from 507 to 511, and its log has 4 entries of the label.
 Input 25828 tokens (12742 from the cache), output 1204 (reasoning 166). The calls of `holdout-calories-fr` and `e-gifts-uk` had no cached tokens.
+
+## Slider
+
+Task B1 added the input kind `"slider"` and two sentences of the prompt (commit `d9b87c5`). A slider needs `min=` and `max=`, and a slider without them is a fault.
+Task B1b measured the 14 dialogue requests with this prompt. The scope is task B1b of `.superpowers/sdd/2026-11-19-app-file-loop/plan-b-draft.md`.
+The run ran on `fafc045` with `gpt-6.1-terra`, the effort low, and at most 1 repair call. The label is `slider-terra-low`.
+Each of the 14 records has the prompt hash `69759b168bc3` and `repairs: 1`. Each call completed.
+Raw replies and records are in `evidence/modelcheck/slider-terra-low/`, which Git does not keep.
+
+### What ran
+
+- The 14 requests are the 8 of set D and the 6 of set E with `"dialogue": true` in `kit/test/fixtures/fresh-requests.json`: `e-seasons-ru`, `e-lever-ru`, `e-percent-ru`, `e-japanese-ru`, `e-times7-ru`, and `e-atom-ru`. Each gets the host line of the section "Dialogue".
+- A scratch copy of the id filter of the phase `run` selected these 14 items with no call, with a worst case of 28 calls.
+- `kit/modelcheck.js` `LIMIT` is 539.
+- `STOP_AT=539 REPAIRS=1 bun kit/modelcheck.js run slider-terra-low DE gpt-6.1-terra low` with the 14 ids ran them one time, with 4 calls in parallel. The first call started at 10:00:43 UTC, and the run ended at 10:01:16 UTC.
+- "v3" below is `v3-terra-low` (prompt `c8cf5cf8f837`). Since v3 the prompt also got the sentences of v4, v5, and P4b, so a difference from v3 does not come from the slider sentences only.
+
+### Numbers
+
+| Measure | Set D (8) | v3, set D | Set E dialogue (6) | v3, set E dialogue |
+| --- | --- | --- | --- | --- |
+| Clean at the first try | 8 | 8 | 6 | 5 |
+| Clean after 1 repair | 0 | 0 | 0 | 1: `e-japanese-ru` |
+| Not clean | 0 | 0 | 0 | 0 |
+| Clean under the device bars, with no form that the host refuses | 8 of 8 | 8 of 8 | 6 of 6 | 6 of 6 |
+| First call: median, maximum | 8.539 s, 12.164 s (`d-heart`) | 9.913 s, 12.869 s (`d-pythagoras`) | 8.726 s, 9.951 s (`e-seasons-ru`) | 11.076 s, 15.874 s (`e-lever-ru`) |
+| Time to the first text: median | 3.258 s | 4.392 s | 3.393 s | 3.73 s |
+| Output tokens of the first call: median (reasoning) | 522.5 (65) | 551.5 (119.5) | 660 (116) | 655.5 (68) |
+| Input tokens of the first call: median | 6737 | 6171 | 6727 | 6161 |
+
+- The source is `bun kit/modelcheck.js table slider-terra-low --detail` and a scratch count over the records of the two labels.
+- The acceptance of the task is at least 13 of 14 clean after 1 repair, and no slider fault after the repair. 14 of 14 plans are clean at the first try, and no report of the kit has a fault, so the acceptance is met.
+- No plan has a fault or a note. The fault table of the run is empty.
+- The v3 records come from a run at a different time, so the times do not compare the prompts.
+
+### The inputs of each plan
+
+9 of 14 plans have an input of kind `"slider"`. Each has `min=` and `max=`, and each drives a drawing. No plan has an input of kind `"number"`, and no plan has a `"percent"` input.
+
+| Request | Input now | Input in v3 |
+| --- | --- | --- |
+| `d-moon` | slider `angle`, 0 to 360, step 5: the place of the Moon on its orbit | number `angle`, 0 to 360, step 15 |
+| `d-interest` | slider `years`, 1 to 5: the height of the bar of the deposit | number `years`, 0 to 5 |
+| `d-pythagoras` | slider `leg`, 3 to 10: the leg b of the triangle | number `a`, 1 to 5 |
+| `e-lever-ru` | slider `point`, 130 to 260, step 10: where the force acts on the lever | number `force`, 0 to 10 |
+| `e-percent-ru` | slider `share`, 0 to 100: the colored cells of 100 | number `amount`, 0 to 100 |
+| `d-fractions` | slider `parts`, 0 to 8: the colored parts of 8 | range `span`, [0, 4] of 0 to 8 |
+| `d-rainbow` | slider `height`, −10 to 10: the direction of the light ray into the drop | choice `stage` of 3 stages |
+| `e-atom-ru` | slider `protons`, 1 to 3: the protons, neutrons, and electrons of the atom | choice `part`: nucleus or electron |
+| `e-seasons-ru` | slider `position`, 0 to 360: the place of the Earth and its axis on the orbit | choice `season` of 4 seasons |
+| `d-heart` | choice `circle`: the pulmonary or the systemic circuit | none |
+| `d-breathing` | none: a timer | none: a timer |
+| `d-spanish`, `e-times7-ru` | none: a deck over hidden entries | none: a deck over hidden entries |
+| `e-japanese-ru` | none: a deck over hidden entries | choice `number` of "1" to "10", and a deck over hidden entries |
+
+- Requests whose number input drives a drawing and is still a `number`: none. In v3, 5 plans had such a number field (`d-moon`, `d-interest`, `d-pythagoras`, `e-lever-ru`, and `e-percent-ru`), and each of the 5 has a slider now.
+- 4 other plans changed their input to a slider. `d-fractions` asks for a slider in its request. In `d-rainbow`, `e-atom-ru`, and `e-seasons-ru` a choice of stages, parts, or seasons became a number that moves the drawing.
+- `d-heart` keeps a choice, because its value is one of two circuits and not a number.
+- In `e-seasons-ru` the slider moves the Earth and its tilted axis, but no text names the season at a place of the orbit. The v3 plan named the season in its choice.
+
+### Look
+
+The look numbers come from `score_app`, as in A0. No baseline exists for these requests.
+
+| Request | Hero, fields on the first screen, fields in rows | v3 | Compile | Start state |
+| --- | --- | --- | --- | --- |
+| `d-moon` | 1, 0, 0 | 1, 1, 0 | 40.1 ms | 367 bytes |
+| `d-rainbow` | 1, 0, 0 | 1, 0, 0 | 15.7 ms | 435 bytes |
+| `d-interest` | 1, 0, 0 | 1, 1, 0 | 17.9 ms | 410 bytes |
+| `d-heart` | 1, 0, 0 | 1, 0, 0 | 17.8 ms | 708 bytes |
+| `d-pythagoras` | 1, 0, 0 | 1, 1, 0 | 17 ms | 439 bytes |
+| `d-spanish` | 0, 0, 0 | 0, 0, 0 | 26 ms | 941 bytes |
+| `d-fractions` | 1, 0, 0 | 1, 0, 0 | 1.2 ms | 11 bytes |
+| `d-breathing` | 1, 0, 0 | 0, 0, 0 | 10.6 ms | 226 bytes |
+| `e-seasons-ru` | 1, 0, 0 | 1, 0, 0 | 13.3 ms | 466 bytes |
+| `e-lever-ru` | 1, 0, 0 | 1, 1, 0 | 15.5 ms | 413 bytes |
+| `e-percent-ru` | 1, 0, 0 | 1, 1, 0 | 42.8 ms | 350 bytes |
+| `e-japanese-ru` | 1, 0, 0 | 1, 0, 0 | 15.2 ms | 990 bytes |
+| `e-times7-ru` | 1, 0, 0 | 1, 0, 0 | 6.7 ms | 710 bytes |
+| `e-atom-ru` | 1, 0, 0 | 1, 0, 0 | 16.5 ms | 458 bytes |
+
+- Rule 1 (the main element in the first two nodes): 1 of 14 plans has none, `d-spanish`, as in v3. `d-breathing` has one now, and its v3 plan had none.
+- Rule 2 (at most two typed fields on the first screen): no plan breaks it. `score_app` counts the node types `input`, `numberInput`, `timeInput`, `dateInput`, and `dateRangeInput` (`tools/agent_corpus/visual_score.py`, `FIELD_TYPES`), and not a slider. So the 5 plans whose number field became a slider went from 1 field to 0.
+- Rule 3 (no typed field in a row template): no plan breaks it.
+- Rule 7 (no muted stroke): no plan has the word `muted`. This is a search of the plan text.
+- Rules 4, 5, 6, and 8 were not checked, as in A0.
+
+### What the numbers do not show
+
+- One run of 14 requests. The same prompt on the same requests changed 2 results between two runs of A0.
+- No plan ran on a device, and no slider was dragged. The device test of task B1 checks one slider in one drawing.
+- The look numbers do not judge whether a slider explains more than the choice that it replaced, as in `e-seasons-ru`.
+- The times come from this computer, with 4 calls in parallel. The calls of `d-moon` and `d-rainbow` had no cached input tokens.
+
+### Calls and tokens
+
+| Model and effort of each call | Calls | Input tokens | From the cache | Output tokens | Reasoning tokens |
+| --- | --- | --- | --- | --- | --- |
+| `gpt-6.1-terra` low | 14 | 94228 | 76884 (81.6%) | 7238 | 1052 |
+
+The budget was 28 calls. The task used 14: 14 first calls and no repair. `evidence/modelcheck/spend.json` went from 511 to 525, and its log has 14 entries of the label.
