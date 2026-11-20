@@ -156,8 +156,7 @@ private val EndInView = Alignment.Vertical { size, space -> minOf(0, space - siz
 @Composable internal fun DialogueStrip(model: ShellViewModel, compact: Boolean, onEnd: () -> Unit, openContext: () -> Unit,
     settings: () -> Unit, onContextAnchorChanged: (ContextMenuAnchor?) -> Unit) {
     val voice = model.liveVoice
-    // shortcut: the card id read stands in for the hand-offs of the bridge, which are not state, until LiveVoiceBridge.working is state.
-    val status = model.liveVoiceCardId.let { liveStatus(model) }
+    val status = liveStatus(model)
     Column(Modifier.fillMaxWidth().testTag("dialogue_strip")) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         // The row keeps the height of the small character, so the strip does not move when the first app comes.
