@@ -477,4 +477,6 @@
     <string name="image_resource_limit">В мини-приложении достигнут предел сохранённых ресурсов.</string>
     <string name="image_provider_error">Не удалось создать изображение.</string>
     <string name="image_export_unavailable">Формат экспорта не включает изображения этого мини-приложения.</string>
+    <string name="chat_internal_error">Внутренняя ошибка Alphy. Повторите запрос.</string>
+    <string name="chat_app_internal_error">Внутренняя ошибка Alphy: мини-приложение не готово. Сохранённые мини-приложения и данные не изменились. Повторите запрос.</string>
 </resources>

@@ -9,6 +9,7 @@ import com.alpha.assistant.tools.AppFileReply
 import com.alpha.assistant.tools.ToolGenerationProgress
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.holdsDataOfThePerson
+import com.alpha.assistant.tools.logFallback
 import com.alpha.assistant.tools.appfile.AppFileCompiler
 import com.alpha.assistant.tools.appfile.AppFilePrevious
 import com.alpha.assistant.tools.appfile.AppFilePrompt
@@ -116,8 +117,11 @@ internal sealed interface AppFileOutcome {
  */
 internal class ScreenRun(val early: Deferred<AppFileOutcome>? = null)
 
-/** A screen run that gave no app. [reason] is a name of [AppFileNames], such as faults. The caller leaves the stage as it was. */
-internal class ScreenFallback(val reason: String) : Exception(reason)
+/**
+ * A screen run that gave no app. [reason] is a name of [AppFileNames], such as faults. [inner]: the plan outcome behind
+ * [AppFileNames.CHANGE], for the release log. The caller leaves the stage as it was.
+ */
+internal class ScreenFallback(val reason: String, val inner: String? = null) : Exception(reason)
 
 /** The host checks of a clean plan (kitApp of [routeAppFile]): the app, or the check that failed. */
 internal sealed interface KitCheck {
@@ -270,6 +274,8 @@ internal suspend fun routeAppFile(
         }
         request.phase(AppFileNames.PLAN_OUTCOME, if (outcome is AppFileOutcome.Outside) "outside:${outcome.word}" else "fallback:$reason")
         if (screen != null) throw ScreenFallback(reason)
+        // The shell logs a screen run with its decision kind. Each other build logs here, where it goes on to the loop (ruling FX-9).
+        logFallback(request.artifactId, "plan", reason)
     }
 
     // The change step of a saved app with an app file, for a change and for test and fix. The report of test and fix is the request.
@@ -292,7 +298,8 @@ internal suspend fun routeAppFile(
             is AppFileOutcome.Fallback -> outcome.reason
         }
         request.phase(AppFileNames.PLAN_OUTCOME, "fallback:$reason")
-        if (request.screen != null) throw ScreenFallback(AppFileNames.CHANGE)
+        if (request.screen != null) throw ScreenFallback(AppFileNames.CHANGE, reason)
+        logFallback(request.artifactId, "change", AppFileNames.CHANGE, reason)
         val context = sandbox.context
         // A change that changes no line is not finished. Test and fix then found no line to repair.
         if (reason == AppFileNames.EMPTY) throw CloudFailure("widget_agent_incomplete",

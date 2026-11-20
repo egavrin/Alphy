@@ -59,10 +59,12 @@ internal class LiveVoiceBridge(
     private val tracked = mutableStateListOf<String>()
     private val progressed = HashSet<String>()
     private val done = HashSet<String>()
-    /** The assistant message id of each running screen of a hand-off to its show flag (plan D, Db2). */
-    private val screens = HashMap<String, Boolean>()
+    /** The assistant message id of each running screen of a hand-off (plan D, Db2). */
+    private val screens = HashSet<String>()
     /** The assistant message id of each running change of the stage app by a hand-off (plan D, Dc2). */
     private val changes = HashSet<String>()
+    /** The assistant message id of each hand-off whose screen or change goes on to the full generation (ruling FX-4). */
+    private val fulls = HashSet<String>()
     /** The assistant message of the latest hand-off or typed turn (spec 5.2.3). */
     var cardId by mutableStateOf<String?>(null); private set
     /** The app of the latest tracked message that made or changed one, for the stage (plan D, Da1). The end of the mode clears it. */
@@ -125,20 +127,32 @@ internal class LiveVoiceBridge(
     }
 
     /**
-     * The screen of the hand-off of [messageId] starts: the voice says [answer] now, and the screen run ends with no line, or with
-     * [SCREEN_FAILED] when it gives no app for a request that asked to see one ([show]). A message of no hand-off gets nothing.
+     * The screen of the hand-off of [messageId] starts: the voice says [answer] now, and nothing when the screen comes or when a screen
+     * that the person did not ask to see is dropped. A screen that the person asked to see goes on to the full generation
+     * ([fullStarted]) when the fast path gives no app. A message of no hand-off gets nothing.
      */
-    fun screenStarted(messageId: String, answer: String, show: Boolean) {
+    fun screenStarted(messageId: String, answer: String) {
         val delegation = handOffs.entries.firstOrNull { it.value == messageId }?.key ?: return
-        screens[messageId] = show
+        screens += messageId
         session.commentary(delegation, spoken(ANSWER, answer))
     }
 
     /**
-     * The change of the stage app by the hand-off of [messageId] starts: the voice says nothing while it runs, the answer when the changed
-     * or the new screen is there, and [CHANGE_FAILED] when neither came. A message of no hand-off gets nothing.
+     * The change of the stage app by the hand-off of [messageId] starts: the voice says nothing while it runs, and the answer when the
+     * changed or the new screen is there. A change that gives neither goes on to the full generation ([fullStarted]). A message of no
+     * hand-off gets nothing.
      */
     fun changeStarted(messageId: String) { if (messageId in handOffs.values) changes += messageId }
+
+    /**
+     * The full generation of the hand-off of [messageId] starts, because its screen or its change gave no app on the fast path (ruling FX-4).
+     * The voice says [FULL_WAIT] now, and at the end what its screen or its change says. A failure says its reason group and [FULL_HINT].
+     */
+    fun fullStarted(messageId: String) {
+        val delegation = handOffs.entries.firstOrNull { it.value == messageId }?.key ?: return
+        fulls += messageId
+        session.commentary(delegation, FULL_WAIT)
+    }
 
     /** The capture of the press for the first request, spoken or typed. Later requests get null (spec 5.11.4). */
     fun takeFirstCapture(): AssistCapture? = capture?.takeIf { it.id == assistantInvocation }.also { capture = null }
@@ -203,21 +217,19 @@ internal class LiveVoiceBridge(
         for ((delegation, id) in handOffs) {
             val message = changed(id) ?: continue
             if (message.status == "complete") message.toolId?.let { stageToolId = it }
+            val full = message.status !in unfinishedStatuses && fulls.remove(id)
             // The voice said the answer of a screen at its start. A stop or a failure still goes on to the failure text.
             if (id in screens) {
                 if (message.status == "generating") continue
-                val show = screens.remove(id) == true
-                if (message.status == "complete") {
-                    if (show && message.toolId == null) session.commentary(delegation, SCREEN_FAILED)
-                    continue
-                }
+                screens -= id
+                if (message.status == "complete") continue
             }
             // The words of a change never come before its screen. A stop or a failure still goes on to the failure text.
             if (id in changes) {
                 if (message.status == "generating") continue
                 changes -= id
                 if (message.status == "complete") {
-                    session.commentary(delegation, if (message.toolId != null) spoken(ANSWER, message.text) else CHANGE_FAILED)
+                    session.commentary(delegation, spoken(ANSWER, message.text))
                     continue
                 }
             }
@@ -228,6 +240,7 @@ internal class LiveVoiceBridge(
             }
             session.commentary(delegation, when {
                 message.status == "generating" -> MINI_APP_STARTED
+                full && message.status == "error" -> fullFailed(message.errorCode)
                 message.status != "complete" -> FAILED + message.error.take(MAX - FAILED.length)
                 message.refinementChoices.isNotEmpty() -> ON_SCREEN
                 message.toolId != null -> spoken(MINI_APP_READY, message.text)
@@ -284,6 +297,13 @@ internal class LiveVoiceBridge(
         return parts.joinToString(", ") { it.trimEnd('.') }
     }
 
+    /** The reason group of a failed full generation, by the code that its message keeps, and the hint (ruling FX-5). */
+    private fun fullFailed(code: String) = when {
+        code in NO_ANSWER_CODES || code.startsWith("http_") -> FULL_NO_ANSWER
+        code in TOO_BIG_CODES -> FULL_TOO_BIG
+        else -> FULL_NOT_BUILT
+    } + FULL_HINT
+
     /** The message when it enters `generating` or ends, once for each run. A deleted message ends without a result. */
     private fun changed(id: String): Message? {
         val message = message(id)
@@ -310,14 +330,24 @@ internal class LiveVoiceBridge(
         const val ANSWER = "Ответ Alphy: "
         const val MINI_APP_STARTED = "Alphy готовит мини-приложение, оно появится на экране."
         const val MINI_APP_READY = "Мини-приложение готово. Ответ Alphy: "
-        const val SCREEN_FAILED = "Картинку показать не получилось."
         /** A spoken press named no single control of the shown screen, so nothing ran. */
         const val PRESS_MISSING = "На экране нет такой кнопки."
         /** A spoken press named a control, but no stage ran its tap, so nothing changed. */
         const val PRESS_FAILED = "Нажать не получилось."
         /** The time for the stage to run or refuse a press. A loaded phone can need some frames, and the voice waits only on a failure. */
         const val PRESS_WAIT_MS = 2_000L
-        const val CHANGE_FAILED = "Изменить экран не получилось."
+        /** The full generation of a screen that the fast path did not give starts (ruling FX-4). */
+        const val FULL_WAIT = "Быстро не получилось. Alphy собирает экран заново, это займёт около минуты."
+        /** The reason groups of a failed full generation, each with [FULL_HINT] after it (ruling FX-5). */
+        const val FULL_NO_ANSWER = "Экран не собран: сервис ИИ не ответил."
+        const val FULL_TOO_BIG = "Экран не собран: запрос не помещается на один экран."
+        const val FULL_NOT_BUILT = "Экран не собран: Alphy не смог его построить."
+        const val FULL_HINT = " Скажите запрос полностью, одной фразой."
+        /** The failure codes of a provider that did not answer. An http_<status> code is a provider that refused the call. */
+        val NO_ANSWER_CODES = setOf("provider", "auth", "quota", "rate_limit", "unavailable", "network", "empty_response", "incomplete",
+            "pre_headers_io", "pre_headers_timeout", "stream_io", "stream_timeout", "stream_invalid", "widget_generation")
+        /** The failure codes of a request or a reply that does not fit a limit. */
+        val TOO_BIG_CODES = setOf("widget_size", "widget_response_size", "response_size", "response_length", "tool_limit")
         const val FAILED = "Alphy не смог выполнить запрос: "
         const val ON_SCREEN = "Нужно подтверждение на экране."
         const val PROPOSE = "Alphy предлагает: "

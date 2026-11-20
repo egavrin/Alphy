@@ -2012,12 +2012,15 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         ToolSpec.availablePersisted(changed)?.appFile != null
                     val bridge = liveBridge?.takeIf { liveVoice.active }
                     // The voice says the answer of a screen now: the screen comes later, or not at all (plan D, Db2).
-                    if (decoded.isScreen) bridge?.screenStarted(assistant.id, decoded.text, decoded.show)
+                    if (decoded.isScreen) bridge?.screenStarted(assistant.id, decoded.text)
                     if (screenChange) bridge?.changeStarted(assistant.id)
-                    fun prompt(host: String) = try {
-                        ChatToolReply.generationPrompt(user.text,decoded.brief,decoded.text,sources,selectedText,host)
+                    // The plan of the changed app goes after the brief as one untrusted line, so that a new screen keeps what the request does not change (ruling FX-3).
+                    val shown = changed?.takeIf { screenChange }?.let(ToolSpec::availablePersisted)?.appFile
+                        ?.let { "\n" + ShownScreen.PREFIX + JSONObject().put("appFile", it) }.orEmpty()
+                    fun prompt(host: String, brief: String = decoded.brief) = try {
+                        ChatToolReply.generationPrompt(user.text,brief,decoded.text,sources,selectedText,host)
                     } catch (failure: CloudFailure) {
-                        // The routing check of the brief does not count the dialogue text, so this is no error of the person.
+                        // The routing check of the brief does not count the dialogue text or the plan, so this is no error of the person.
                         throw if (host.isNotEmpty() && failure.code == "widget_size") ScreenFallback(AppFileNames.PROMPT_SIZE) else failure
                     }
                     suspend fun generate(prompt: String, base: ToolRecord?, screen: ScreenRun?) =
@@ -2030,17 +2033,38 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                                 it.copy(text = decoded.text,status = "complete",toolId = tool.id,toolRevision = tool.revision,
                                     provenance = replyProvenance)
                             } }, screen = screen)
+                    // One release log line for each build that falls back or fails (ruling FX-9). A stop is no failure.
+                    suspend fun <T> logged(step: String, build: suspend () -> T): T = try { build() } catch (failure: Exception) {
+                        if (isActive(request) && failure !is CancellationException && (failure as? CloudFailure)?.code != "cancelled")
+                            com.alpha.assistant.tools.logGeneration(operationId, decoded.kind, step, failure)
+                        throw failure
+                    }
                     try {
-                        val input = prompt(if (decoded.isScreen) dialogue() else "")
-                        // Only a screen with no search keeps it. It stays on the request, so a stop or the end can still cancel it.
-                        val early = request.earlyPlan?.use()
-                        generate(input, changed, if (decoded.isScreen) ScreenRun(early) else ScreenRun().takeIf { screenChange })
+                        logged(if (decoded.isScreen) "screen" else if (screenChange) "change" else "app") {
+                            val input = prompt(if (decoded.isScreen) dialogue() else "")
+                            // Only a screen with no search keeps it. It stays on the request, so a stop or the end can still cancel it.
+                            val early = request.earlyPlan?.use()
+                            generate(input, changed, if (decoded.isScreen) ScreenRun(early) else ScreenRun().takeIf { screenChange })
+                        }
                     } catch (_: ScreenFallback) {
                         // A change that the kit cannot make becomes a new screen with the plan prompt of a screen, and the old app stays (ruling OD-5).
-                        val built = screenChange && try { generate(prompt(dialogue()), null, ScreenRun()); true } catch (_: ScreenFallback) { false }
-                        // The answer is complete without its screen, so the stage stays as it was and no error shows.
-                        if (!built) updateMessage(request, assistant.id) {
-                            it.copy(text = if (screenChange) LiveVoiceBridge.CHANGE_FAILED else decoded.text, status = "complete", provenance = replyProvenance)
+                        val built = screenChange && try {
+                            logged("screen") { generate(prompt(dialogue(), decoded.brief + shown), null, ScreenRun()) }; true
+                        } catch (_: ScreenFallback) { false }
+                        // A screen that the person did not ask to see is complete without it, so the stage stays as it was and no error shows.
+                        if (!built && !screenChange && !decoded.show) updateMessage(request, assistant.id) {
+                            it.copy(text = decoded.text, status = "complete", provenance = replyProvenance)
+                        } else if (!built) {
+                            // Ruling FX-4 reverses OD-5: the full generation builds a new app, and the old app stays in the store.
+                            // The end of the mode ends the hand-off: no line goes to it or to a later session.
+                            liveBridge?.takeIf { it === bridge && liveVoice.active }?.fullStarted(assistant.id)
+                            logged("full") {
+                                val input = try { prompt("", decoded.brief + shown) } catch (failure: CloudFailure) {
+                                    if (shown.isEmpty() || failure.code != "widget_size") throw failure
+                                    prompt("")
+                                }
+                                generate(input, null, null)
+                            }
                         }
                     }
                 }
@@ -2059,8 +2083,10 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 if(!isActive(request)) return@launch
                 if (voiceBelongsTo(null)) voice.requestFailed()
                 val known = failure as? CloudFailure
+                // Only a transport failure is network. Any other exception is a fault of Alphy (ruling FX-10).
+                val transport = known == null && failure is IOException
                 updateMessage(request, user.id) { if (it.status == "pending") it.copy(status = "not_sent") else it }
-                updateMessage(request, assistant.id) { it.copy(status = "error", errorCode = known?.code ?: "network", error = known?.message ?: if(it.toolOperationId != null) "The widget could not be created safely. Existing tools and data are unchanged. Retry the request." else accountProvider?.let { provider -> text(R.string.chat_offline, provider.displayName) } ?: text(R.string.chat_offline_unknown), searchStatus = if (it.searchStatus == "searching") "error" else it.searchStatus) }
+                updateMessage(request, assistant.id) { it.copy(status = "error", errorCode = known?.code ?: if (transport) "network" else "internal", error = known?.message ?: if (!transport) text(if (it.toolOperationId != null) R.string.chat_app_internal_error else R.string.chat_internal_error) else accountProvider?.let { provider -> text(R.string.chat_offline, provider.displayName) } ?: text(R.string.chat_offline_unknown), searchStatus = if (it.searchStatus == "searching") "error" else it.searchStatus) }
             } finally {
                 stopEarlyPlan(request)
                 if (active === request) {

@@ -41,6 +41,9 @@ import com.alpha.assistant.tools.Scripted
 import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.ToolGenerationTraceEvent
 import com.alpha.assistant.tools.agent.AppFileNames
+import com.alpha.assistant.tools.agent.ScreenFallback
+import com.alpha.assistant.tools.agentFixtureFinish
+import com.alpha.assistant.tools.agentWrite
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
@@ -474,20 +477,52 @@ class ShellLiveVoiceWorkflowTest {
         assertEquals(listOf("d1" to SCREEN_ANSWER), commentary())
     }
 
-    /** Plan D, Db2: a screen with no app makes only the plan calls, keeps the stage, shows no error, and the voice says only the answer. */
-    @Test fun aFallbackScreenRunsNoLoopAndStaysSilent() = fallbackScreen(show = false, SCREEN_ANSWER)
+    /**
+     * Plan D, Db2, ruling FX-4: a screen that the person did not ask to see (show false) and whose plan and repair have faults makes only
+     * those plan calls, keeps the stage, shows no error, and the voice says only the answer. The release log has one line for it (ruling FX-9).
+     */
+    @Test fun aFallbackScreenRunsNoLoopAndStaysSilent() {
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc")), Scripted.Text(BROKEN_PLAN)))
+        onStage(script = script) { _, model, app ->
+            val before = messages(model).size
+            socket.say(SCREEN_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            assertSilentFallback(model)
+            assertEquals(List(3) { CloudGenerationStage.APP_FILE }, script.calls.map { it.generationStage })
+            robot.waitUntil { commentary().any { it.first == "d2" } }
+            robot.awaitFrames(5)
+            assertEquals(listOf("d2" to SCREEN_ANSWER), commentary().filter { it.first == "d2" })
+            assertEquals(app, model.stageToolId)
+            assertTrue(model.liveVoice.active)
+            assertBuilds(model, fallback("screen", "faults", kind = "screen"))
+        }
+    }
 
-    /** Plan D, Db2: a screen with no app that the person asked to see gets one line after the answer. */
-    @Test fun aFallbackOfAShowRequestSaysOneLine() = fallbackScreen(show = true, SCREEN_ANSWER, SCREEN_FAILED)
+    /**
+     * Ruling FX-4, which reverses OD-5: a screen that the person asked to see, whose plan and repair have faults, goes on to the full
+     * generation of a new app. The voice says the answer, then the waiting line, and the new app comes to the stage with no more line.
+     */
+    @Test fun aFallbackOfAShowRequestGetsTheFullGeneration() =
+        fullGeneration(SCREEN_REQUEST, List(2) { Scripted.Text(BROKEN_PLAN) }, SCREEN_ANSWER, FULL_WAIT, show = true) { model, _, script ->
+            assertEquals(List(4) { CloudGenerationStage.APP_FILE } + List(2) { CloudGenerationStage.AGENT }, script.calls.map { it.generationStage })
+            // The full generation of a new topic gets the request and the brief, with no dialogue text and no plan of the old screen.
+            assertTrue(script.calls[3].turns.single().text.startsWith("User request: $SCREEN_REQUEST\nWidget brief: $SCREEN_BRIEF\n"))
+            assertEquals(listOf("complete", SCREEN_TEXT), messages(model).last().let { listOf(it.status, it.text) })
+            assertBuilds(model, fallback("screen", "faults", kind = "screen"), PLAN_TO_LOOP)
+        }
 
     /**
      * A screen brief that fits the routing check, which does not count the dialogue text, but whose plan prompt with that text
-     * passes the generator limit. The screen falls back with no plan call and no error, as a screen with no app does.
+     * passes the generator limit. The screen falls back with no plan call and no error. The full generation then builds the app
+     * from the prompt with no dialogue text, which fits (ruling FX-4).
      */
     @Test fun aScreenPromptOverTheLimitFallsBack() {
         val dialogue = AppFilePrompt.load(fixture.context).dialogue
         val brief = "b".repeat(ChatToolReply.generationBriefAllowance(SCREEN_REQUEST, emptyList(), "") - dialogue.length / 2)
-        fallbackScreen(show = true, SCREEN_ANSWER, SCREEN_FAILED, brief = brief, planCalls = 0)
+        fullGeneration(SCREEN_REQUEST, emptyList(), SCREEN_ANSWER, FULL_WAIT, show = true, brief = brief) { model, _, script ->
+            assertEquals(List(2) { CloudGenerationStage.APP_FILE } + List(2) { CloudGenerationStage.AGENT }, script.calls.map { it.generationStage })
+            assertBuilds(model, fallback("screen", AppFileNames.PROMPT_SIZE, kind = "screen"), PLAN_TO_LOOP)
+        }
     }
 
     /** Plan D, Db2: a stop of a screen run stays a stop. The voice says the stop after the answer, and the mode goes on. */
@@ -700,16 +735,154 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
-    /** Plan D, Dc2: when the change and the new screen both give no app, the voice says so once, and the stage keeps the old app. */
-    @Test fun aChangeAndItsNewScreenBothFail() =
-        failedChange(Scripted.Text(appFilePlan("calc").replace("/ \$/people, example", "/ , example")), CHANGE_FAILED) { model, app, script ->
-            // The change, its repair, the plan of the new screen, and its repair.
-            assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE) + List(3) { CloudGenerationStage.APP_FILE },
-                script.calls.map { it.generationStage })
+    /**
+     * Rulings FX-4 and FX-5: the change, its new screen, and the full generation all give no app. The voice says the waiting line, then
+     * the reason group and the hint. The message keeps the reason code, and the stage and the store keep the old app.
+     */
+    @Test fun aChangeWhoseFullGenerationFailsSaysTheReason() {
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))) + List(2) { Scripted.Text(BROKEN_CHANGE) } +
+            List(2) { Scripted.Text(BROKEN_PLAN) } + Scripted.Text(OUTSIDE) + Scripted.Fails("provider"))
+        onStage(script = script) { _, model, app ->
+            val record = stored(model, app)
+            val before = messages(model).size
+            socket.say(CHANGE_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            robot.waitUntil { commentary().count { it.first == "d2" } == 2 }
+            // The change, its repair, the plan of the new screen, its repair, the plan step of the full generation, and its loop call.
+            assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE) + List(4) { CloudGenerationStage.APP_FILE } +
+                CloudGenerationStage.AGENT, script.calls.map { it.generationStage })
+            assertEquals(listOf("error", "provider", null), messages(model).last().let { listOf(it.status, it.errorCode, it.toolId) })
             assertEquals(listOf(app), model.tools.tools.map { it.id })
-            assertEquals(listOf("complete", CHANGE_FAILED, null), messages(model).last().let { listOf(it.status, it.text, it.toolId) })
+            assertEquals(listOf(record.revision, record.state), stored(model, app).let { listOf(it.revision, it.state) })
             assertEquals(app, model.stageToolId)
+            robot.awaitFrames(5)
+            assertEquals(listOf("d2" to FULL_WAIT, "d2" to FULL_NO_ANSWER), commentary().filter { it.first == "d2" })
+            assertBuilds(model, fallback("change", "change:faults"), fallback("screen", "faults"), PLAN_TO_LOOP,
+                "kind=refine step=full outcome=failed code=provider error=${CloudFailure::class.java.name}")
         }
+    }
+
+    /**
+     * The owner's T2 (ruling FX-4): motion by itself, which the kit cannot give. The change and its new screen both reply outside. The full
+     * generation gets the request, the brief, and the plan of the old screen, and builds a new app. Each fast build writes one line of the
+     * release log, and the line of the change names the reason behind it (ruling FX-9).
+     */
+    @Test fun theOwnersT2GoesOnToTheFullGeneration() =
+        fullGeneration(T2_REQUEST, List(2) { Scripted.Text(OUTSIDE) }, FULL_WAIT, CHANGED) { model, _, script ->
+            assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE) + List(2) { CloudGenerationStage.APP_FILE } +
+                List(2) { CloudGenerationStage.AGENT }, script.calls.map { it.generationStage })
+            assertTrue(script.calls[3].turns.single().text.startsWith("User request: $T2_REQUEST\nWidget brief: $HALF_BRIEF$SHOWN_CALC\n"))
+            assertBuilds(model, fallback("change", "change:outside"), fallback("screen", "outside"), PLAN_TO_LOOP)
+        }
+
+    /** The owner's T8 (ruling FX-4): a full replace. The change replies outside, and its new screen has faults after its repair. */
+    @Test fun theOwnersT8GoesOnToTheFullGeneration() =
+        fullGeneration(T8_REQUEST, listOf(Scripted.Text("outside(\"other\")")) + List(2) { Scripted.Text(BROKEN_PLAN) }, FULL_WAIT, CHANGED) { model, _, script ->
+            assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE) + List(3) { CloudGenerationStage.APP_FILE } +
+                List(2) { CloudGenerationStage.AGENT }, script.calls.map { it.generationStage })
+            assertBuilds(model, fallback("change", "change:outside"), fallback("screen", "faults"), PLAN_TO_LOOP)
+        }
+
+    /**
+     * The owner's T10 (ruling FX-4): a replace with all the found facts, after a web search. The change has faults after its repair, and its
+     * new screen replies outside. The full generation gets the sources and the plan of the old screen, and the message keeps its sources.
+     */
+    @Test fun theOwnersT10WithSourcesGoesOnToTheFullGeneration() =
+        fullGeneration(T10_REQUEST, List(2) { Scripted.Text(BROKEN_CHANGE) } + Scripted.Text(OUTSIDE), FULL_WAIT, CHANGED) { model, _, script ->
+            assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE) + List(3) { CloudGenerationStage.APP_FILE } +
+                List(2) { CloudGenerationStage.AGENT }, script.calls.map { it.generationStage })
+            val full = script.calls[4].turns.single().text
+            assertTrue(full.startsWith("User request: $T10_REQUEST\nWidget brief: $HALF_BRIEF$SHOWN_CALC\nSources "))
+            assertTrue("\nSource [1] excerpt: ${FRESH_SOURCE.title}\n${FRESH_SOURCE.summary}" in full)
+            assertEquals(listOf(FRESH_SOURCE.url), messages(model).last().sources.map { it.url })
+            assertBuilds(model, fallback("change", "change:faults"), fallback("screen", "outside"), PLAN_TO_LOOP)
+        }
+
+    /** Ruling FX-4: a stop during the full generation ends its hand-off. The voice says the stop after the waiting line, and nothing comes later. */
+    @Test fun aStopDuringTheFullGenerationEndsTheHandOff() {
+        val full = CompletableDeferred<Unit>()
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))) + List(3) { Scripted.Text(OUTSIDE) } + LOOP)
+        onStage(provider = StageProvider(script = script, hold = 3 to full)) { scenario, model, app ->
+            val before = messages(model).size
+            socket.say(T2_REQUEST, "d2", 2_000)
+            robot.waitUntil(60_000) { "d2" to FULL_WAIT in commentary() }
+            scenario.onActivity { model.cancelRequest() }
+            waitForTheAnswer(model, before)
+            assertEquals(listOf("cancelled", null), messages(model).last().let { listOf(it.status, it.toolId) })
+            robot.waitUntil { commentary().count { it.first == "d2" } == 2 }
+            full.complete(Unit)
+            robot.waitUntil { !model.tools.busy }
+            robot.awaitFrames(5)
+            assertEquals(listOf("d2" to FULL_WAIT, "d2" to STOPPED), commentary().filter { it.first == "d2" })
+            assertEquals(3, script.calls.size)
+            assertEquals(listOf(app), model.tools.tools.map { it.id })
+            assertEquals(app, model.stageToolId)
+            assertTrue(model.liveVoice.active)
+            // A stop is no failure, so the release log has only the lines of the two fast builds.
+            assertBuilds(model, fallback("change", "change:outside"), fallback("screen", "outside"))
+        }
+    }
+
+    /**
+     * Ruling FX-4: the end of the voice mode ends the hand-off of a full generation. The request runs to its end, as each hand-off does,
+     * and a later session gets no line of it and no stage.
+     */
+    @Test fun theEndOfTheModeEndsTheHandOffOfTheFullGeneration() {
+        val gate = CompletableDeferred<Unit>()
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))) + List(3) { Scripted.Text(OUTSIDE) } + LOOP)
+        // The new screen of the change waits, so that the mode ends and starts again before the full generation.
+        onStage(provider = StageProvider(script = script, hold = 2 to gate)) { scenario, model, app ->
+            val record = stored(model, app)
+            val before = messages(model).size
+            socket.say(T2_REQUEST, "d2", 2_000)
+            robot.waitUntil(60_000) { script.calls.size == 2 }
+            scenario.onActivity { model.endLiveVoice() }
+            robot.waitUntil { !model.liveVoice.active }
+            restart(scenario, model)
+            gate.complete(Unit)
+            waitForTheAnswer(model, before)
+            val fresh = checkNotNull(messages(model).last().toolId)
+            assertNotEquals(app, fresh)
+            robot.waitUntil { !model.tools.busy }
+            robot.awaitFrames(5)
+            assertEquals("complete", messages(model).last().status)
+            assertTrue(commentary().none { it.first == "d2" })
+            assertNull(model.stageToolId)
+            assertTrue(model.liveVoice.active)
+            assertEquals(listOf(record.revision, record.state), stored(model, app).let { listOf(it.revision, it.state) })
+            assertBuilds(model, fallback("change", "change:outside"), fallback("screen", "outside"), PLAN_TO_LOOP)
+        }
+    }
+
+    /**
+     * Ruling FX-10 (the owner's R1): an exception that is not a CloudFailure, here the base check of a change, shows a Russian text with
+     * the code internal, and the voice says it. The release log names its class and no message (ruling FX-9).
+     */
+    @Test fun anUnexpectedFailureIsInternal() =
+        onStage(provider = StageProvider(fault = IllegalStateException("The mini-app changed. Request the change again."))) { _, model, app ->
+            val before = messages(model).size
+            socket.say(CHANGE_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            assertEquals(listOf("error", "internal", APP_INTERNAL), messages(model).last().let { listOf(it.status, it.errorCode, it.error) })
+            robot.waitUntil { "d2" to "Alphy не смог выполнить запрос: $APP_INTERNAL" in commentary() }
+            assertEquals(app, model.stageToolId)
+            assertBuilds(model, "kind=refine step=change outcome=failed code=none error=${IllegalStateException::class.java.name}")
+        }
+
+    /**
+     * Ruling FX-9: a typed change that the kit cannot make writes one release log line where it leaves the change step, with the reason
+     * behind it. The route of the app file knows the app, not the decision kind.
+     */
+    @Test fun aTypedChangeLogsItsFallback() {
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))) + List(2) { Scripted.Text(BROKEN_CHANGE) } + LOOP)
+        onStage(script = script) { scenario, model, app ->
+            val before = messages(model).size
+            scenario.onActivity { model.submitDraft(Draft(CHANGE_REQUEST), search = false) }
+            waitForTheAnswer(model, before)
+            val line = "op=$app kind=none step=change outcome=fallback:change:faults code=none error=none"
+            robot.waitUntil { robot.shell("logcat -d -s AlphyGeneration").lines().any { it.trimEnd().endsWith(line) } }
+        }
+    }
 
     /** Plan D, Dc2, review focus 5: a change by lines keeps the value that the person set on the slider of the stage app. */
     @Test fun aChangeKeepsTheSliderValue() {
@@ -743,9 +916,11 @@ class ShellLiveVoiceWorkflowTest {
         robot.waitUntil { model.stageToolId == fresh }
         assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE, CloudGenerationStage.APP_FILE,
             CloudGenerationStage.APP_FILE), script.calls.map { it.generationStage })
-        // Ruling OD-5: the new screen gets the plan prompt of a screen, with the dialogue text.
+        // Ruling OD-5: the new screen gets the plan prompt of a screen, with the dialogue text. Ruling FX-3: it also gets the plan of the
+        // old screen as one untrusted line after the brief.
         val dialogue = AppFilePrompt.load(fixture.context).dialogue
-        assertTrue(script.calls.last().turns.single().text.startsWith("User request: $CHANGE_REQUEST\n$dialogue\nWidget brief: $HALF_BRIEF"))
+        assertTrue(script.calls.last().turns.single().text.startsWith("User request: $CHANGE_REQUEST\n$dialogue\nWidget brief: $HALF_BRIEF$SHOWN_CALC\n"))
+        assertBuilds(model, fallback("change", "change:faults"))
     }
 
     /**
@@ -1317,24 +1492,41 @@ class ShellLiveVoiceWorkflowTest {
     }
 
     /**
-     * The calc app is on the stage. Then [SCREEN_REQUEST] with [brief] gets no app: its [planCalls] plan calls (the plan and the repair)
-     * have faults. The voice says [lines] for it.
+     * The calc app is on the stage. The spoken [request] (a screen with [show] and [brief] for [SCREEN_REQUEST]) gets [fast] as the replies
+     * of its fast path, which gives no app. The full generation then builds a new app: its plan step replies [OUTSIDE], and the loop writes
+     * the fixture app. Its first call waits until the voice has the waiting line (ruling FX-4). The voice says [lines] for the request, the
+     * stage shows the new app, and the old app stays in the store as it was. [check] gets the model, the old app, and the script.
      */
-    private fun fallbackScreen(show: Boolean, vararg lines: String, brief: String = SCREEN_BRIEF, planCalls: Int = 2) {
-        val broken = appFilePlan("calc").replace("/ \$/people, example", "/ , example")
-        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc")), Scripted.Text(broken)))
-        onStage(show = show, brief = brief, script = script) { _, model, app ->
+    private fun fullGeneration(request: String, fast: List<Scripted>, vararg lines: String, show: Boolean = false,
+        brief: String = SCREEN_BRIEF, check: (ShellViewModel, String, AgentScriptProvider) -> Unit) {
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))) + fast + Scripted.Text(OUTSIDE) + LOOP)
+        val full = CompletableDeferred<Unit>()
+        onStage(provider = StageProvider(show = show, brief = brief, script = script, hold = 1 + fast.size to full)) { _, model, app ->
+            val record = stored(model, app)
             val before = messages(model).size
-            socket.say(SCREEN_REQUEST, "d2", 2_000)
+            socket.say(request, "d2", 2_000)
+            robot.waitUntil(60_000) { "d2" to FULL_WAIT in commentary() }
+            // The voice has the waiting line before the first call of the full generation.
+            assertEquals(1 + fast.size, script.calls.size)
+            full.complete(Unit)
             waitForTheAnswer(model, before)
-            assertSilentFallback(model)
-            assertEquals(List(1 + planCalls) { CloudGenerationStage.APP_FILE }, script.calls.map { it.generationStage })
+            val fresh = checkNotNull(messages(model).last().toolId)
+            assertNotEquals(app, fresh)
+            robot.waitUntil { model.stageToolId == fresh }
             robot.waitUntil { commentary().count { it.first == "d2" } == lines.size }
             robot.awaitFrames(5)
             assertEquals(lines.map { "d2" to it }, commentary().filter { it.first == "d2" })
-            assertEquals(app, model.stageToolId)
-            assertTrue(model.liveVoice.active)
+            assertEquals(listOf(record.revision, record.state), stored(model, app).let { listOf(it.revision, it.state) })
+            check(model, app, script)
         }
+    }
+
+    /** The release log lines of the builds of the latest request are [lines], after its operation id (ruling FX-9). */
+    private fun assertBuilds(model: ShellViewModel, vararg lines: String) {
+        val operation = "op=${messages(model).last().id} "
+        fun builds() = robot.shell("logcat -d -s AlphyGeneration").lines().filter { operation in it }.map { it.substringAfter(operation) }
+        robot.waitUntil { builds().size >= lines.size }
+        assertEquals(lines.toList(), builds())
     }
 
     /**
@@ -1442,16 +1634,18 @@ class ShellLiveVoiceWorkflowTest {
 
     /**
      * Each call goes to [calls] with its session. The routing call waits for [routing], then creates an app for [APP_REQUEST], changes it
-     * for [CHANGE_REQUEST], gives a screen with [show] and [brief] for [SCREEN_REQUEST], presses the control [press] for [PRESS_REQUEST],
-     * and answers each other request. A plan call waits for [plans] and a change call for [changes], and both answer from [script] (the
-     * app file [plan]). The early plan call of a request that gets no screen waits for its cancel, so it takes no reply of [script] and
-     * no test depends on when the cancel comes.
+     * for [CHANGE_REQUEST] and the owner's changes (with a found source for [T10_REQUEST]), gives a screen with [show] and [brief] for
+     * [SCREEN_REQUEST], presses the control [press] for [PRESS_REQUEST], and answers each other request. A plan call waits for [plans] and
+     * a change call for [changes], and both answer from [script] (the app file [plan]). A change call throws [fault] when it is set, and
+     * the call of [script] with the index of [hold] waits for its gate. The early plan call of a request that gets no screen waits for its
+     * cancel, so it takes no reply of [script] and no test depends on when the cancel comes.
      */
     private class StageProvider(plan: String = "calc", val plans: CompletableDeferred<Unit> = CompletableDeferred(Unit),
         private val show: Boolean = false, private val brief: String = SCREEN_BRIEF,
         val script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan)))),
         val routing: CompletableDeferred<Unit> = CompletableDeferred(Unit), private val press: String = NEXT,
-        private val changes: CompletableDeferred<Unit> = CompletableDeferred(Unit)) : ChatProvider {
+        private val changes: CompletableDeferred<Unit> = CompletableDeferred(Unit),
+        private val hold: Pair<Int, CompletableDeferred<Unit>>? = null, private val fault: Exception? = null) : ChatProvider {
         val calls = CopyOnWriteArrayList<Pair<CloudRequest, CloudSession>>()
         val planCalls get() = calls.filter { it.first.generationStage != null }
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -1460,13 +1654,17 @@ class ShellLiveVoiceWorkflowTest {
                 val input = request.turns.last().text
                 if (EARLY_BRIEF in input && SCREEN_REQUEST !in input) awaitCancellation()
                 plans.await()
-                if (request.generationStage == CloudGenerationStage.APP_FILE_CHANGE) changes.await()
+                if (request.generationStage == CloudGenerationStage.APP_FILE_CHANGE) { fault?.let { throw it }; changes.await() }
+                if (hold?.first == script.calls.size) hold.second.await()
                 return script.respond(key, request, session, emit)
             }
             routing.await()
-            emit(CloudEvent.RoundComplete(when (request.decisionContext?.originalUserTurn?.text) {
+            val text = request.decisionContext?.originalUserTurn?.text
+            if (text == T10_REQUEST) emit(CloudEvent.Search("found", listOf(FRESH_SOURCE)))
+            emit(CloudEvent.RoundComplete(when (text) {
                 APP_REQUEST -> chatDecision("create", "Готово.", "Make the app")
-                CHANGE_REQUEST -> chatDecision("refine", "Готово.", HALF_BRIEF)
+                CHANGE_REQUEST, T2_REQUEST, T8_REQUEST -> chatDecision("refine", "Готово.", HALF_BRIEF)
+                T10_REQUEST -> JSONObject(chatDecision("refine", "Готово.", HALF_BRIEF)).put("search", "required").toString()
                 SCREEN_REQUEST -> JSONObject(chatDecision("screen", SCREEN_TEXT, brief)).put("show", show).toString()
                 PRESS_REQUEST -> chatDecision("press", PRESS_TEXT, press)
                 else -> chatDecision("answer", "Fixture response")
@@ -1527,13 +1725,34 @@ class ShellLiveVoiceWorkflowTest {
         const val SCREEN_TEXT = "Сердце — насос."
         const val SCREEN_BRIEF = "A heart that pumps blood"
         const val SCREEN_ANSWER = "Ответ Alphy: $SCREEN_TEXT"
-        const val SCREEN_FAILED = "Картинку показать не получилось."
         const val TIMER_REQUEST = "Поставь таймер на 10 минут"
         const val CHANGE_REQUEST = "Покажи ещё половину счёта"
         const val HALF_BRIEF = "Add half of the bill"
-        /** The spoken line of a changed or new screen of [CHANGE_REQUEST], and of a change that gave no screen. */
+        /** The owner's spoken changes of 2026-11-20: T2 (motion by itself), T8 (a full replace), and T10 (a replace with found facts). */
+        const val T2_REQUEST = "А давай, пожалуйста, автоматическую анимацию"
+        const val T8_REQUEST = "Не, не надо добавлять, целиком замени картинку с рассказом про Энцелад"
+        const val T10_REQUEST = "Замени картинку и помести всю доступную информацию про Энцелад на экран"
+        /** The spoken line of a changed or new screen of a change request. */
         const val CHANGED = "Ответ Alphy: Готово."
-        const val CHANGE_FAILED = "Изменить экран не получилось."
+        /** The spoken lines of the full generation: the waiting line, and a provider that did not answer with the hint (rulings FX-4, FX-5). */
+        const val FULL_WAIT = "Быстро не получилось. Alphy собирает экран заново, это займёт около минуты."
+        const val FULL_NO_ANSWER = "Экран не собран: сервис ИИ не ответил. Скажите запрос полностью, одной фразой."
+        /** The chat text of an exception that is not a CloudFailure in an operation of the apps (ruling FX-10). */
+        const val APP_INTERNAL = "Внутренняя ошибка Alphy: мини-приложение не готово. Сохранённые мини-приложения и данные не изменились. Повторите запрос."
+        const val STOPPED = "Alphy не смог выполнить запрос: Запрос остановлен."
+        /** A plan reply for a thing that the kit cannot give. */
+        const val OUTSIDE = "outside(\"game\")"
+        /** The calc plan with a fault in the line of perPerson. */
+        val BROKEN_PLAN get() = appFilePlan("calc").replace("/ \$/people, example", "/ , example")
+        /** The plan of the calc app as a new screen and the full generation of a change get it: one untrusted line after the brief (ruling FX-3). */
+        val SHOWN_CALC get() = "\n" + ShownScreen.PREFIX + JSONObject().put("appFile", appFilePlan("calc"))
+        /** The replies of the loop: one write of the fixture app and a finish. */
+        val LOOP = listOf(Scripted.Text(agentWrite(FIXTURE_APP)), Scripted.Text(agentFixtureFinish))
+        /** One release log line of a build that fell back (ruling FX-9), after its operation id. */
+        /** The release log line of a plan step that replied outside and went on to the loop. The route does not know the decision kind. */
+        const val PLAN_TO_LOOP = "kind=none step=plan outcome=fallback:outside code=none error=none"
+        fun fallback(step: String, outcome: String, kind: String = "refine") =
+            "kind=$kind step=$step outcome=fallback:$outcome code=none error=${ScreenFallback::class.java.name}"
         /** A change line of the calc plan with a fault: the division has no right side. */
         const val BROKEN_CHANGE = "need half = figure(\"money\", \"Half bill\", \$/bill / , example=[{bill: 80}, 40])"
         /** A change line of the lesson plan: the lap button gets a new label and a slower lap. */

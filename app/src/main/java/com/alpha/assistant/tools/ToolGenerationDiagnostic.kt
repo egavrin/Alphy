@@ -3,9 +3,11 @@ package com.alpha.assistant.tools
 import com.alpha.assistant.tools.three.ThreeSceneProblem
 
 import android.os.SystemClock
+import android.util.Log
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.GenerationTransportFailure
 import com.alpha.assistant.tools.agent.AppFileNames
+import com.alpha.assistant.tools.agent.ScreenFallback
 import kotlinx.coroutines.CancellationException
 import java.util.UUID
 
@@ -144,6 +146,27 @@ internal fun safePhaseDetail(name: String, detail: String?): String? = when {
 
 /** Only known failure codes leave the device. Any other code becomes "unknown". */
 internal fun safeGenerationCode(code: String)=code.takeIf {it in safeGenerationCodes || it.matches(Regex("http_[0-9]{3}"))} ?: "unknown"
+
+/**
+ * One line of the release log for a build that fell back or failed (ruling FX-9): the operation, the decision kind, the step, the
+ * fallback reasons, the failure code, and the exception class. It holds names and codes only, never text of the person, a brief,
+ * a key, or the message of an exception, which can hold model text.
+ */
+internal fun logGeneration(operation: String, kind: String, step: String, failure: Throwable) = logGeneration(operation, kind, step,
+    (failure as? ScreenFallback)?.let { listOfNotNull(it.reason, it.inner) }, (failure as? CloudFailure)?.code, failure.javaClass.name)
+
+/** A build of the artifact [operation] that goes on to the loop after [reasons]. The route of the app file does not know the decision kind. */
+internal fun logFallback(operation: String, step: String, vararg reasons: String) =
+    logGeneration(operation, "none", step, reasons.toList(), null, "none")
+
+private fun logGeneration(operation: String, kind: String, step: String, reasons: List<String>?, code: String?, error: String) {
+    val outcome = reasons?.joinToString(":", "fallback:", transform = ::logName) ?: "failed"
+    Log.w("AlphyGeneration", "op=$operation kind=${logName(kind)} step=$step outcome=$outcome code=${code?.let(::logName) ?: "none"} error=$error")
+}
+
+/** A plain name passes to the log as it is. Any other value becomes "other". */
+private fun logName(value: String) = value.takeIf { it.matches(logNames) } ?: "other"
+private val logNames = Regex("[A-Za-z0-9_.:]{1,64}")
 
 /** The failure code of a sandbox status, as javascript_timeout for TIMEOUT. */
 internal fun sandboxCode(status: String) = "javascript_" + status.lowercase(java.util.Locale.ROOT)
