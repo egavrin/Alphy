@@ -88,12 +88,13 @@ test("prompt (P4): the section System says what a request implies, and each form
     return valueAt(result.definition.initialState, every(result.definition.ui).find((node) => node.bind?.includes(name) || node.text === name)?.bind);
   };
   // The total of a budget is the main figure, the sum of each group is one line of text in the form of the prompt, and the first tab holds the chart with the total.
-  const line = /content\(join\(map\(groups\(.*?\), ", "\)\)/.exec(SYSTEM)[0];
+  // The sums are joined by " · ", because ", " beside a decimal comma hides where a sum ends, as in "Comida: 19,75, Casa: 300,00" (task P4b).
+  const line = /content\(join\(map\(groups\(.*?\), " · "\)\)/.exec(SYSTEM)?.[0];
   const budget = await compileAppFile(['app("Costs", lang="en")', 'need total = figure("money", "This month", sum($/costs, $amount), example=[{costs: [{amount: 1}, {amount: 2}]}, 3])',
     'need chart = chart("By category", groups($/costs, $category, $amount), $key, $value)', `need byCategory = ${line}`,
     'need costs = entries("Costs", fields={category: ["Food", "Home"], amount: "money"}, rows=[{category: "Food", amount: 1.1}, {category: "Food", amount: 2.2}, {category: "Home", amount: 5}])',
     'need pages = tabs(["Summary", "Add"], [[total, chart, byCategory], [costs]])'].join("\n"));
-  expect(shown(budget, "byCategory")).toBe("Food: 3.3, Home: 5");
+  expect([typeof line, shown(budget, "byCategory")]).toEqual(["string", "Food: 3.3 · Home: 5"]);
   expect(every(budget.definition.ui).find((node) => node.children?.some((child) => child.type === "chart")).children.map((node) => [node.type, node.variant])).toEqual([["card", "hero"], ["chart", undefined], ["text", undefined]]);
   // A number that limits a list: the hero count shows the rows against max=.
   expect(shown(await compileAppFile('app("Top", lang="en")\nneed tasks = entries("Top five", fields={task: "text"}, reorder=true, max=5, countText="Ranked")'), "Ranked")).toBe("0 / 5");
