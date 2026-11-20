@@ -255,7 +255,8 @@ export const worstCase = (items, repairs) => items.length + items.filter((item) 
 
 /**
  * The outcome of a record: hole, cleanN, not, or the kind of a first reply that got no compile. A change whose final plan is the app file as it
- * was is unchanged. hole comes first, as fallback:hole comes before the other outcomes in the app.
+ * was is unchanged. hole comes before unchanged and the clean outcomes, as fallback:hole comes before fallback:empty and a clean plan in the app.
+ * The app tests the saved-data flags before the hole, so it gives fallback:data_blocks to a plan with a hole and such a fault.
  */
 function finish(record) {
   const plan = record.plan ?? "";
