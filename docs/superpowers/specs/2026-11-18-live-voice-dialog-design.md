@@ -243,7 +243,7 @@ The session omits `delegation`, so it runs in client mode (section 3). Alphy sen
 
 5.7.1 (Claude) Text and attachments from the voice screen composer go to Alphy's agent as normal messages through `submitDraft`. The card shows the reply.
 
-5.7.2 (Claude) When that reply is complete, Alphy sends `session.thinking.append` (quiet context, at most 1,200 characters) with «Пользователь написал: <text>. Ответ Alphy на экране: <speakable reply>.» GPT-Live does not read it aloud, but it can talk about it.
+5.7.2 (Claude) When that reply is complete, Alphy sends `session.thinking.append` (quiet context, at most 1,200 characters) with «Пользователь написал: <text> Ответ Alphy: <speakable reply>» When the typed turn made a mini-app, «Ответ Alphy:» becomes «Мини-приложение готово. Ответ Alphy:». The text and the reply each end with their own sentence end («.», «!», «?», or «…»), and the code adds «.» to a part that has none. GPT-Live does not read it aloud, but it can talk about it.
 
 - Assumption: GPT-Live accepts `session.thinking.append` without an open delegation. Test: the live check. If it does not, the typed turn has no context in the live session, and the card alone shows the reply.
 

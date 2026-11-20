@@ -328,7 +328,7 @@ Spec 5.5.1 to 5.5.9, 5.6, 5.7, and 5.1.6.
 | Mini-app complete | Мини-приложение готово. Ответ Alphy: <spoken reply> |
 | Failure | Alphy не смог выполнить запрос: <message error> |
 | Confirmation on screen | Нужно подтверждение на экране. |
-| Typed turn (thinking) | Пользователь написал: <text>. Ответ Alphy на экране: <spoken reply> |
+| Typed turn (thinking) | Пользователь написал: <spoken text> Ответ Alphy: <spoken reply> (with a mini-app: Пользователь написал: <spoken text> Мини-приложение готово. Ответ Alphy: <spoken reply>). Each spoken part ends with its own sentence end, or «.» |
 
 - [ ] **Step 1: Write the failing workflow tests** in `ShellLiveVoiceWorkflowTest`. Use `ShellFixture`, `FixtureProvider`, `FakeLiveTransport`, and `FakeLiveAudio`, and start the mode with `model.startLiveVoice()`:
   - `startPreloadsTheSelectedConversation`: with two saved `complete` messages in the selected chat, the `session.start` input holds both texts in order.
