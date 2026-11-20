@@ -464,7 +464,7 @@ class ToolController internal constructor(private val app: Application, private 
     /**
      * Starts the plan call of a spoken request beside its routing call, so that a screen does not wait for the routing.
      * Null when the plan step is off. It runs on the scope of the controller and marks its phases on the trace of [operationId].
-     * The caller passes [EarlyPlan.result] to a screen run (ScreenRun), or cancels [EarlyPlan.session] and the result.
+     * The caller passes [EarlyPlan.use] to a screen run (ScreenRun), and calls [EarlyPlan.stop] when its request ends.
      */
     internal fun startEarlyPlan(prompt: String, key: String, operationId: String): EarlyPlan? {
         val limits = planStep() ?: return null
@@ -1450,9 +1450,27 @@ private fun ToolDraftPreview.matchesDraft(draft: ToolDraft,allowPending: Boolean
 
 /**
  * The plan call of a spoken request that started beside its routing call (ToolController.startEarlyPlan). A cancel of [session] stops the call.
- * [phase] marks a phase of the call, such as its use or its cancel, on the trace of the request.
+ * [phase] marks a phase on the trace of the request. The trace gets one end mark: used when a screen run takes the call, else canceled.
  */
-internal class EarlyPlan(val result: Deferred<AppFileOutcome>, val session: CloudSession, val phase: (String) -> Unit)
+internal class EarlyPlan(val result: Deferred<AppFileOutcome>, val session: CloudSession, private val phase: (String) -> Unit) {
+    private var ended = false
+
+    /** The outcome of the call for a screen run, marked used. */
+    fun use(): Deferred<AppFileOutcome> = result.also { end(AppFileNames.EARLY_PLAN_USED) }
+
+    /** Stops the call. A plan that no screen run used is marked canceled, also when its call had ended. */
+    fun stop() {
+        end(AppFileNames.EARLY_PLAN_CANCELED)
+        session.cancel()
+        result.cancel()
+    }
+
+    private fun end(mark: String) {
+        if (ended) return
+        ended = true
+        phase(mark)
+    }
+}
 
 /** The request owns one candidate. Clearing its atomic state also fences callbacks already in transit to Main. */
 internal class ToolControllerDraftPreviews(

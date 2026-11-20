@@ -334,6 +334,51 @@ class ShellLiveVoiceWorkflowTest {
             assertEquals(2, provider.calls.size)
         }
 
+    /** Plan D, Db4: each early plan gets one end mark. A stop while the screen waits for the plan call that it used stops that call with no second mark. */
+    @Test fun aStopAfterTheUseKeepsOneEndMark() = early(StageProvider(plans = CompletableDeferred())) { scenario, model, provider, phases ->
+        socket.say(SCREEN_REQUEST, "d1", 100)
+        robot.waitUntil(60_000) { AppFileNames.EARLY_PLAN_USED in phases && messages(model).last().status == "generating" }
+        scenario.onActivity { model.cancelRequest() }
+        assertTrue(runCatching { provider.planCalls.single().second.check() }.isFailure)
+        provider.plans.complete(Unit)
+        robot.awaitFrames(5)
+        assertEquals(listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_USED), phases)
+        assertEquals("cancelled", messages(model).last().status)
+        assertNull(model.stageToolId)
+    }
+
+    /** Plan D, Db4: each early plan gets one end mark. A plan call that ended before the answer of its request is marked canceled. */
+    @Test fun anEndedEarlyPlanOfAnAnswerIsMarkedCanceled() {
+        val routing = CompletableDeferred<Unit>()
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))))
+        early(object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.generationStage != null) return script.respond(key, request, session, emit)
+                routing.await()
+                emit(CloudEvent.RoundComplete(chatDecision("answer", "Fixture response"), false))
+            }
+        }) { scenario, model, _, phases ->
+            val compiled = CompletableDeferred<Unit>()
+            scenario.onActivity {
+                val marks = model.tools.generationTraceObserver
+                model.tools.generationTraceObserver = { event ->
+                    marks?.invoke(event)
+                    if ((event as? ToolGenerationTraceEvent.Phase)?.name == AppFileNames.COMPILE) compiled.complete(Unit)
+                }
+            }
+            socket.say("Какая погода", "d1", 100)
+            robot.waitUntil(60_000) { compiled.isCompleted }
+            // The outcome follows the compile with no other step, so the plan call has ended before the routing call answers.
+            robot.awaitFrames(5)
+            routing.complete(Unit)
+            robot.waitUntil(60_000) { commentary().isNotEmpty() }
+            assertEquals(1, script.calls.size)
+            assertEquals(listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_CANCELED), phases)
+            assertNull(messages(model).last().toolId)
+            assertEquals(listOf("d1" to "Ответ Alphy: Fixture response."), commentary())
+        }
+    }
+
     /** Plan D, Db4, ruling OD-4: with a screen on the stage, a change request starts no early plan and makes only its change call. */
     @Test fun aRefineDoesNotUseTheEarlyPlan() = afterAScreen(CHANGE_REQUEST, Scripted.Text(CALC_CHANGE)) { _, provider, phases ->
         assertTrue(phases.isEmpty())
@@ -406,7 +451,10 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
-    /** Plan D, Db2: the voice says the answer of a screen when the routing call ends, before the plan call. The app goes to the stage with no line. */
+    /**
+     * Plan D, Db2: the voice says the answer of a screen when the routing call ends, before its plan call ends. The gate holds that plan call,
+     * which started beside the routing call. The app goes to the stage with no line.
+     */
     @Test fun aScreenSpeaksTheAnswerBeforeTheScreen() = gatedRequest { _, model, gate ->
         robot.awaitFrames(5)
         assertEquals(listOf("d1" to SCREEN_ANSWER), commentary())

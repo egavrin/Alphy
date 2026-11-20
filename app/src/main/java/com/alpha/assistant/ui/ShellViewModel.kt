@@ -1993,7 +1993,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                             throw if (decoded.isScreen && failure.code == "widget_size") ScreenFallback(AppFileNames.PROMPT_SIZE) else failure
                         }
                         // Only a screen with no search keeps it. It stays on the request, so a stop or the end can still cancel it.
-                        val early = request.earlyPlan?.also { it.phase(AppFileNames.EARLY_PLAN_USED) }
+                        val early = request.earlyPlan?.use()
                         tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
                             cancelRequest = ::cancelRequest, sceneAttachments = sceneAttachments,
                             prepared = { prepareToolOperation() },
@@ -2002,7 +2002,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                             committed = { tool -> updateMessage(request,assistant.id) {
                                 it.copy(text = decoded.text,status = "complete",toolId = tool.id,toolRevision = tool.revision,
                                     provenance = replyProvenance)
-                            } }, screen = ScreenRun(early?.result).takeIf { decoded.isScreen })
+                            } }, screen = ScreenRun(early).takeIf { decoded.isScreen })
                     } catch (_: ScreenFallback) {
                         // The answer is complete without its screen, so the stage stays as it was and no error shows.
                         updateMessage(request, assistant.id) { it.copy(text = decoded.text, status = "complete", provenance = replyProvenance) }
@@ -2034,13 +2034,10 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
             }
         }
     }
-    /** Stops the plan call beside the routing call of [request] once. Only a call that still runs gets the mark canceled. */
+    /** Stops the plan call beside the routing call of [request] once. */
     private fun stopEarlyPlan(request: Active) {
-        val early = request.earlyPlan ?: return
+        request.earlyPlan?.stop()
         request.earlyPlan = null
-        if (early.result.isActive) early.phase(AppFileNames.EARLY_PLAN_CANCELED)
-        early.session.cancel()
-        early.result.cancel()
     }
     private fun updateMessage(request: Active, messageId: String, persist: Boolean = true, assetLease: Closeable? = null,
         transform: (Message) -> Message): Boolean {
