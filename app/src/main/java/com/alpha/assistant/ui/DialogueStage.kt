@@ -136,6 +136,7 @@ private val STAGE_TEXT_HEIGHT = 256.dp
     }
     when {
         spec.threeScene -> ThreeScenePane(controller, tool, spec, canvasHeight, null, enabled)
+        // The drawing keeps its frames and timers while a change of its app runs: the save of the change takes the newest state (ToolEngine.acceptDraft).
         host != null -> CoveredToolSurface(tool, spec, true, canvasHeight, host, actions, content = content) { snapshot = it }
         else -> content()
     }

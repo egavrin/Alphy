@@ -426,7 +426,10 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
         ArtifactCoordinator.get(store,toolId ?: id).ordered {
             val base=toolId?.let {
                 val current=current(store,it)
-                if(expected!=null)check(current==expected) {"The mini-app changed. Request the change again."}
+                // A press or a tick after the request read the app is no change of the app: the draft starts from the newest state.
+                if(expected!=null)check(current.copy(stateVersion=expected.stateVersion,state=expected.state,ui=expected.ui)==expected) {
+                    "The mini-app changed. Request the change again."
+                }
                 ToolSpec.parsePersisted(current.spec)
                 flush(store)
                 checkNotNull(store.tool(it))
@@ -436,6 +439,8 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
                 conversationId).also(store::saveDraft)
         }
     }
+    /** The saved app of a draft at its base [revision], with its newest state. The accept takes a press or a tick after the draft. */
+    private fun draftBase(id: String, revision: Int) = current(id, revision, checkNotNull(store.tool(id)).stateVersion)
     suspend fun generate(draftId: String, key: String, images: List<String>, session: CloudSession,
         progress: ((ToolGenerationProgress) -> Unit)? = null): ToolDraft =
         generate(draftId,key,images,session,progress,previewObserver=null)
@@ -458,7 +463,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             else -> null
         }
         try {
-            val (draft, base) = mutex.withLock { val d = checkNotNull(store.draft(draftId)); check(d.acceptedRevision == null); d to d.toolId?.let { current(it,d.baseRevision,d.baseStateVersion) } }
+            val (draft, base) = mutex.withLock { val d = checkNotNull(store.draft(draftId)); check(d.acceptedRevision == null); d to d.toolId?.let { draftBase(it,d.baseRevision) } }
             val preview = generation.generate(key, draft.prompt, base, images, session, draft.toolId ?: draft.id,
                 privateState = base?.let { store.privateResults(it.id) } == true, progress = progress,
                 trace = trace?.takeIf { it.operationId.toString() == draftId }, onPublicUpdate = onPublicUpdate,
@@ -477,7 +482,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
                     previewSurfaces = preview.surfaces?.toString())
                 store.transaction {
                     check(store.draft(draftId) == draft) { "Черновик изменился" }
-                    draft.toolId?.let { current(it,draft.baseRevision,draft.baseStateVersion) }
+                    draft.toolId?.let { draftBase(it,draft.baseRevision) }
                     store.saveDraft(next)
                 }
                 if (approval != null) imageApprovals[draftId] = approval
@@ -509,19 +514,44 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
     suspend fun accept(draftId: String, retainReceipt: Boolean = false, canCommit: () -> Boolean = { true }): ToolRecord =
         acceptDraft(draftId, retainReceipt, canCommit)
 
+    /**
+     * The state and the UI of the change [candidate] on [saved], the newest state of its app, as the generation computed them on its base: the kit compiles
+     * the plan again with no model call, and a change of the loop keeps each saved value. A rebuild of a part-built app starts from its start state.
+     */
+    private suspend fun rebased(saved: ToolRecord, candidate: ToolSpec): Pair<String, String> {
+        val stored = ToolSpec.parsePersisted(saved.spec)
+        val appFile = candidate.appFile
+        // A busy or stopped sandbox made no change, so a retry can work, as at the change step (routeAppFile).
+        fun retry() = CloudFailure(AppFileNames.RETRY_FAILURE, store.context.getString(com.alpha.assistant.R.string.tool_generation_connection))
+        val state = when {
+            // No rule moves a state between the two forms: the rule of the change step (routeAppFile) stops a rebuild of an app with data of the person.
+            (stored.appFile == null) != (appFile == null) ->
+                if (stored.holdsDataOfThePerson(saved.state)) throw savedDataBlocks() else candidate.initialState
+            appFile == null -> ToolSpec.stateForRevision(stored, candidate, saved.state)
+            else -> kitCompile(saved, stored, appFile).let { if (it.status != "ok") throw retry() else kitRevision(it, saved, stored, appFile).second }
+        }
+        val ui = try { renderRestore(saved, candidate, state).ui } catch (failure: CloudFailure) {
+            throw if (failure.code.startsWith("javascript_")) retry() else failure
+        }
+        return state to ui
+    }
+
     private suspend fun acceptDraft(draftId: String, retainReceipt: Boolean, canCommit: () -> Boolean,
         verifiedRepair: ToolDraft? = null, expected: ToolRecord? = null): ToolRecord = mutex.withLock {
         val context=currentCoroutineContext()
         context.ensureActive()
-        val d = verifiedRepair ?: checkNotNull(store.draft(draftId))
+        var d = verifiedRepair ?: checkNotNull(store.draft(draftId))
         check(d.acceptedRevision == null) { "This operation is already complete." }
-        fun ArtifactCoordinator.commit(rules: AutomationStore?): ToolRecord {
+        suspend fun ArtifactCoordinator.commit(rules: AutomationStore?): ToolRecord {
             val old=d.toolId?.let {
                 if (expected != null && (store.tool(it) != expected || store.artifactWorkPending(it)))
                     throw TestFixNotSaved("The saved app changed during testing.")
-                val saved=current(it,d.baseRevision,d.baseStateVersion)
-                check(current(store,it)==saved) { "Инструмент изменился. Открой текущую версию." }
-                saved
+                // The live state of a drawing commits first, so the revision starts from the newest state. A verified repair keeps the state of its run.
+                draftBase(it,d.baseRevision)
+                val live=current(store,it)
+                if (expected != null) check(live==expected) { "Инструмент изменился. Открой текущую версию." }
+                flush(store)
+                checkNotNull(store.tool(it))
             }
             val spec=ToolSpec.parsePersisted(checkNotNull(d.candidate))
             val existingImages = old?.let { ToolSpec.parsePersisted(it.spec).generatedImages }.orEmpty()
@@ -534,6 +564,11 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
                         ?: throw CloudFailure("image_generation", "Generate the images with current consent before saving this draft.")
                     ensureImageApproval(selection)
                 }
+            }
+            // A press or a tick after the draft: the change takes the newest state, and the draft is its receipt (recoverAutomatic).
+            if (old != null && old.stateVersion != d.baseStateVersion) {
+                val (rebasedState, rebasedUi) = rebased(old, spec)
+                d = d.copy(previewState = rebasedState, previewUi = rebasedUi).also(store::saveDraft)
             }
             val state=spec.validateState(checkNotNull(d.previewState)).toString()
             val ui=spec.validateUi(JSONObject(checkNotNull(d.previewUi)),JSONObject(state)).toString()

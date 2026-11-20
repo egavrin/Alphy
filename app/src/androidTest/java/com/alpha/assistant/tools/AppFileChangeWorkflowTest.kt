@@ -22,6 +22,7 @@ import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.plan
 import com.alpha.assistant.tools.appfile.row
 import com.alpha.assistant.ui.FIXTURE_APP
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -34,6 +35,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+
+/** A change line of the lesson plan: the lap button gets a new label and a slower lap. */
+internal const val SLOW_LAP = """need lap = button("Медленный круг", [set(${'$'}/angle, 0), animate(${'$'}/angle, 360, 10000)])"""
 
 /**
  * The change and the test and fix of a saved app with an app file, through the real ToolEngine, the real AppAgent, the real kit, and the real sandbox,
@@ -91,9 +95,12 @@ class AppFileChangeWorkflowTest {
     /** The shopping list after the steps of the kit test: Bread (r2) is gone, and Milk (r1) is bought. */
     private fun shoppingWithData() = pressed(pressed(created(), "items_remove", row("r2", null)), "items_done", row("r1", true))
 
-    /** The change of [base] by [request] with [replies], as the chat sends it: a draft, its generation, and its save. [screen]: a spoken change of the shown screen. */
+    /**
+     * The change of [base] by [request] with [replies], as the chat sends it: a draft, its generation, and its save. [screen]: a spoken change of the shown screen.
+     * [beforeAccept] runs between the generation and the save.
+     */
     private fun change(base: ToolRecord, replies: List<Scripted>, request: String = CHANGE, session: CloudSession = CloudSession(),
-        screen: ScreenRun? = null): Changed {
+        screen: ScreenRun? = null, beforeAccept: suspend () -> Unit = {}): Changed {
         script = AgentScriptProvider(replies)
         calls.clear()
         val operation = UUID.randomUUID()
@@ -103,6 +110,7 @@ class AppFileChangeWorkflowTest {
                 engine.createDraft(request, base.id, operationId = operation.toString(), expected = base)
                 engine.generate(operation.toString(), "fixture", emptyList(), session, null, null, ToolGenerationTrace(operation, { events += it }),
                     screen = screen)
+                beforeAccept()
                 engine.accept(operation.toString())
             }
         }
@@ -304,7 +312,6 @@ class AppFileChangeWorkflowTest {
         assertRefused(changed, before)
     }
 
-    // Failure case: a press during the change call was lost, because the save wrote the state from before the press.
     /** The person marks Apples (r3) as bought while the change call of [before] runs. Gives the record after that press. */
     private fun pressDuringTheChangeCall(before: ToolRecord): () -> ToolRecord {
         var newer: ToolRecord? = null
@@ -314,17 +321,139 @@ class AppFileChangeWorkflowTest {
         return { checkNotNull(newer) }
     }
 
+    // Failure case (ruling FX-6): a press during the change call failed the change, or the save wrote the state from before the press.
     @Test fun aPressDuringTheChangeCallKeepsTheNewerState() {
         val before = shoppingWithData()
         val newer = pressDuringTheChangeCall(before)
         val changed = change(before, listOf(Scripted.Text(BOUGHT)))
+        val saved = changed.saved
         assertEquals("accepted", changed.outcome)
-        assertTrue(changed.failure.toString(), changed.failure is IllegalStateException)
-        assertEquals("Инструмент изменился. Открой текущую версию.", changed.failure.message)
-        // The store holds the press, and no revision of the change.
-        assertEquals(newer(), store.tool(before.id))
-        assertEquals(listOf(true, true), items(checkNotNull(store.tool(before.id))).map { it.getBoolean("done") })
+        assertEquals(2, saved.revision)
+        // The rows hold the press, and the new count counts it: Milk and Apples are bought, and nothing is left.
+        assertSameRows(items(newer()), items(saved))
+        assertEquals(listOf(true, true), items(saved).map { it.getBoolean("done") })
+        val d = JSONObject(saved.state).getJSONObject("d")
+        assertEquals(listOf("2", "0"), listOf(d.getString("bought_text"), d.getString("left_text")))
+        assertEquals(saved, store.tool(before.id))
+        assertEquals(2, store.revisions(before.id).size)
+    }
+
+    /** The angle of the Moon of the lesson app. */
+    private fun angle(record: ToolRecord) = JSONObject(record.state).getDouble("angle")
+
+    /**
+     * The lesson app after a press of its lap button, which starts an animate of the angle. With [open], the host of its drawing is open before the
+     * press, as the stage keeps it, and the second value is its session.
+     */
+    private fun lapRunning(open: Boolean): Pair<ToolRecord, Long?> {
+        val lesson = created(plan("lesson"), LESSON_REQUEST)
+        val session = if (open) runBlocking { engine.openArtifactHost(lesson.id, lesson.revision) }.sessionGeneration else null
+        return pressed(lesson, "lap_button", null) to session
+    }
+
+    /** A timer event of the running lap 100 ms later, as the host of the drawing sends it: the state commits at once. Gives the record after it. */
+    private suspend fun tick(record: ToolRecord, session: Long?): ToolRecord {
+        delay(100)
+        return engine.artifactEvent(record.id, record.revision, JSONObject().put("type", "timer").put("timerId", "anim"), session).tool
+    }
+
+    // Failure case (R1 of the owner's dialogue): a tick of a running animate after the request read its app failed the change at its draft.
+    @Test fun aTickBeforeTheDraftIsInTheChange() {
+        val (before, session) = lapRunning(open = true)
+        val ticked = runBlocking { tick(before, session) }
+        assertTrue(ticked.stateVersion > before.stateVersion)
+        val saved = change(before, listOf(Scripted.Text(SLOW_LAP))).saved
+        assertEquals(2, saved.revision)
+        assertEquals(angle(ticked), angle(saved), 0.0)
+        assertEquals(saved, store.tool(before.id))
+    }
+
+    // Failure case: a tick of a running animate between the change call and the save failed the change.
+    @Test fun aTickBeforeTheAcceptIsInTheChange() {
+        val (before, session) = lapRunning(open = true)
+        var ticked: ToolRecord? = null
+        val saved = change(before, listOf(Scripted.Text(SLOW_LAP)), beforeAccept = { ticked = tick(before, session) }).saved
+        assertEquals(2, saved.revision)
+        // The kit computed the state of the change again from the state of the tick, with no other model call.
+        assertEquals(angle(checkNotNull(ticked)), angle(saved), 0.0)
+        assertEquals(listOf(APP_FILE_CHANGE), calls.map { it.generationStage })
+        assertEquals(SLOW_LAP, appFile(saved)?.lines()?.find { it.startsWith("need lap") })
+        assertEquals(saved, store.tool(before.id))
+    }
+
+    // Failure case: the drawing opened while the lap ran, its live state was not saved yet at the save of the change, and the change failed.
+    @Test fun aLiveStateAtTheAcceptIsInTheChange() {
+        val (before, _) = lapRunning(open = false)
+        var live: ToolRecord? = null
+        val saved = change(before, listOf(Scripted.Text(SLOW_LAP)), beforeAccept = {
+            delay(100)
+            live = engine.openArtifactHost(before.id, before.revision).tool
+        }).saved
+        // The open moved the lap to its clock in the live state only.
+        assertEquals(before.stateVersion, checkNotNull(live).stateVersion)
+        assertTrue(angle(checkNotNull(live)) > angle(before))
+        assertEquals(angle(checkNotNull(live)), angle(saved), 0.0)
+        assertEquals(saved, store.tool(before.id))
+    }
+
+    // A new revision of another writer, before the draft, during the change call, or before the save, still stops the change, and the store keeps that revision.
+    @Test fun aRevisionOfAnotherWriterStopsTheChange() {
+        val before = shoppingWithData()
+        // The person saves the same plan by hand after the request read the app, which makes a new revision.
+        val first = edited(before, JSONObject(before.spec).toString(2)).getOrThrow()
+        assertEquals("The mini-app changed. Request the change again.", change(before, listOf(Scripted.Text(BOUGHT))).failure.message)
+        assertEquals(first, store.tool(before.id))
+        var second: ToolRecord? = null
+        duringCall = { if (it.generationStage == APP_FILE_CHANGE) second = engine.saveManualDefinition(first, JSONObject(first.spec).toString(2)) }
+        assertEquals("Инструмент изменился. Открой текущую версию.", change(first, listOf(Scripted.Text(BOUGHT))).failure.message)
+        assertEquals(checkNotNull(second), store.tool(before.id))
+        duringCall = {}
+        var third: ToolRecord? = null
+        val atSave = change(checkNotNull(second), listOf(Scripted.Text(BOUGHT)), beforeAccept = {
+            third = engine.saveManualDefinition(checkNotNull(second), JSONObject(checkNotNull(second).spec).toString(2))
+        })
+        assertEquals("Инструмент изменился. Открой текущую версию.", atSave.failure.message)
+        assertEquals(checkNotNull(third), store.tool(before.id))
+        assertEquals(4, store.revisions(before.id).size)
+    }
+
+    // Failure case: a value that the person set while the loop changed an app with no app file failed the change.
+    @Test fun aChangeOfAnAppWithNoAppFileKeepsAValueSetDuringIt() {
+        val before = change(created(), listOf(Scripted.Text("outside(\"game\")")) + LOOP).saved
+        assertNull(appFile(before))
+        var newer: ToolRecord? = null
+        duringCall = { if (it.generationStage == AGENT && newer == null) newer = written(checkNotNull(store.tool(before.id)), """{"count":5}""") }
+        val saved = change(before, LOOP).saved
+        assertEquals(3, saved.revision)
+        assertEquals(5, JSONObject(saved.state).getInt("count"))
+        assertEquals(saved, store.tool(before.id))
+    }
+
+    // Failure case: a press during the new app of a rebuild was lost under the start state of the new app.
+    @Test fun aPressDuringARebuildStopsIt() {
+        val before = created()
+        var newer: ToolRecord? = null
+        duringCall = {
+            if (it.generationStage == AGENT && newer == null) newer = engine.interact(before.id, before.revision, before.stateVersion, "items_done", row("r1", true))
+        }
+        val changed = change(before, listOf(Scripted.Text("outside(\"game\")")) + LOOP)
+        assertEquals(listOf(APP_FILE_CHANGE, AGENT, AGENT), changed.stages)
+        assertEquals(changed.failure.toString(), "widget_state", (changed.failure as? CloudFailure)?.code)
+        assertEquals(refused, changed.failure.message)
+        assertEquals(checkNotNull(newer), store.tool(before.id))
         assertEquals(1, store.revisions(before.id).size)
+    }
+
+    // A state commit during a rebuild that leaves the start state holds no data of the person, so the rebuild saves its new app.
+    @Test fun aStartStateCommitDuringARebuildKeepsIt() {
+        val before = created()
+        var newer: ToolRecord? = null
+        duringCall = { if (it.generationStage == AGENT && newer == null) newer = written(checkNotNull(store.tool(before.id)), before.state) }
+        val saved = change(before, listOf(Scripted.Text("outside(\"game\")")) + LOOP).saved
+        assertEquals(before.stateVersion + 1, checkNotNull(newer).stateVersion)
+        assertEquals(2, saved.revision)
+        assertNull(appFile(saved))
+        assertEquals(saved, store.tool(before.id))
     }
 
     // Failure case (task Dc2, review focus 5): a spoken change of the shown screen lost the value that the person set on its slider.
@@ -759,6 +888,7 @@ class AppFileChangeWorkflowTest {
         const val LEVEL = "app(\"Level\", lang=\"en\")\nneed level = input(\"slider\", \"Level\", 50, min=0, max=100)\n"
         const val LEVEL_REQUEST = "User request: Show a level slider\nWidget brief: A slider for a level"
         const val HALF = "need half = figure(\"count\", \"Half\", \$/level / 2, example=[{level: 60}, 30])"
+        const val LESSON_REQUEST = "User request: Explain why the Moon shows one side\nWidget brief: The Moon on its orbit with a lap button"
     }
 }
 
