@@ -968,8 +968,9 @@ class AppFileProofTest {
         assertEquals(mismatch.faults.toString(),listOf("faults",false,true),listOf(mismatch.status,mismatch.blockedBySavedData,mismatch.savedDataMismatch))
     }
     @Test fun aHostileTextStaysData(): Unit=runBlocking {
-        // Quotes, backslashes, a line separator, the end of a script tag, and a text that gives each compile an empty app if it runs as code.
-        val hostile="\" ' \\ \\\"   </script> \"))});globalThis.compileAppFile=async()=>({faults:[],notes:[],definition:{},language:\"en\",hole:false,state:null});//"
+        // Quotes, backslashes, a line separator, the end of a script tag, and a text that makes compileStep, the one global of the kit and the
+        // entry of the host script, give an empty app if it runs as code.
+        val hostile="\" ' \\ \\\"   </script> \"))});globalThis.compileStep=async()=>({kind:\"plan\",text:\"\",result:{faults:[],notes:[],definition:{},language:\"en\",hole:false,state:null,blockedBySavedData:false,savedDataMismatch:false}});//"
         val read=planOf(compiler.compileReply("```\n$hostile\n```"))
         // The reply comes back whole, and the kit reports its line: the text did not replace the compile.
         assertEquals("$hostile\n",read.text)
