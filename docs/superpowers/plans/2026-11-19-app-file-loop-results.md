@@ -924,3 +924,138 @@ The controller saw the cause of the `e-timetable-tr` plan in the words "sort= or
 The plan of `e-timetable-tr` still has no order by time. The new sentence did not move it in this one reply. As the controller decided, no further round follows.
 
 The round used 4 calls of its budget of 8: 4 first calls and no repair. `evidence/modelcheck/spend.json` went from 487 to 491.
+
+## Prompt v5: what a request implies
+
+The paired run on the emulator (`.superpowers/sdd/2026-11-19-app-file-loop/paired-report.md`) found 4 plan apps that do only a part of their request.
+Task P4 gave the list part a limit of rows and added four sentences to the prompt, and ran 16 requests one time.
+The scope is `.superpowers/sdd/2026-11-19-app-file-loop/p4-decisions.md`.
+The run ran on `c9eba10` with `gpt-6.1-terra`, the effort low, and at most 1 repair call. The label is `v5-terra-low`.
+Each of the 16 records has the prompt hash `83037bb270d9` and `repairs: 1`. Each call completed.
+Raw replies and records are in `evidence/modelcheck/v5-terra-low/`, which Git does not keep.
+
+### The limit of rows
+
+- Commit `eb83409` adds `max=` to the list part: `entries(..., max=5)` takes at most 5 rows (`kit/README.md`, section "Parts", `entries`).
+- At the limit the add form, or the button that opens its sheet, gives way to a muted text in the language of the app, such as "La lista è piena". The add action adds no row at the limit. A remove makes room again.
+- The hero count shows all rows against the limit, such as "2 / 5", with the caption of `countText=`. The decision said "n of N". The kit has no word for "of", and the decision permits one new word, so the count uses " / ", as a ring does. `total=` beside `max=` is a note.
+- `max=` is a whole number from 1 to 100 in the line, and the start rows fit in it. Each other value is a fault of the need. With `add=false` the limit shows only in the hero count.
+- Each saved plan, test plan, fixture, and model fixture (88 plans) compiles to the same definition, faults, and notes as before (a scratch compare). The run-time text stays 49202 bytes.
+
+### The sentences
+
+Three sentences follow the rule "Plan what the request asks for, and nothing more", which stays:
+
+1. "What a request implies is a part of what it asks for. A log, a tracker, or a budget of amounts, time, or counts shows its total as the main figure, unless the request names its own main value, such as an average, the progress to a goal, or what is left. When the request asks for these values by group, such as costs by category or hours by subject, it also shows the sum of each group in one line of text: need byGroup = content(join(map(groups($/costs, $category, $amount), $key + ": " + text(round($value, 2))), ", "))."
+2. "A number in the request that limits a list, such as "top five" or "up to three", is max= of the entries."
+3. "The first screen of an app must not be empty: when a tab or the screen holds only a chart or a list that starts empty, put the total figure with it."
+
+The fourth sentence is in the paragraph of the dates, after the rule that a date input starts at `today()`:
+
+4. "The end of a range of dates starts later than its start, such as addDays($/start, 1), and a weekend starts on the coming Saturday: addDays(today(), (13 - weekday(today())) % 7)."
+
+The line of `entries` names `max=`, and its paragraph says: "max=5: at most 5 rows, and at the limit a short text takes the place of the add form." and "With max= the count shows all rows against the limit, such as "2 / 5", and takes no total=."
+
+How each sentence differs from the words of the decision, and why:
+
+- Sentence 1: the kit has no sum in the heading of a group (`group=`). It gives a chart of `groups(...)` or a line of text. A chart of Alphy shows no value as text (`NativeToolUi.kt` `NativeChart`), so the sentence names the line. `text(round($value, 2))` prints 3.3, where `text($value)` printed 3.3000000000000003.
+- Sentence 3 names only the figure. A list that a second tab also holds is a fault ("it shows gastos_view a second time"), and the add form of a list is in the section of the list.
+- Sentence 4 is in the paragraph of the dates, beside the rule of the start date and the functions that it uses. The kit computes the coming Saturday, so the sentence names it.
+
+The new prompt test "prompt (P4)" compiles a plan by hand for each sentence. It failed before the change of the prompt.
+
+- A budget with the total, a chart, and the line of the prompt in the first tab: the line shows "Food: 3.3, Home: 5", and the first tab holds the hero card, the chart, and the line.
+- A list with `max=5` and `countText="Ranked"`: the count shows "0 / 5".
+- The start of a weekend and its end on four days: on 2026-11-16, 2026-11-20, and 2026-11-21 the dates are 2026-11-21 and 2026-11-22. On Sunday 2026-11-22 they are 2026-11-28 and 2026-11-29.
+
+The new hash is `83037bb270d9` (it was `5f4df1c30891`). The section "System" is 22580 bytes (21440 bytes before).
+`kit/modelcheck.js` `LIMIT` is 523.
+
+### What ran
+
+- The 16 earlier plans compile clean with the kit of now (a scratch compile, no call). So a different outcome comes from the reply, not from the kit.
+- `holdout-tip-ru` ran first and alone to check the path. Its call had no cached input tokens (0 of 6454).
+- Then `STOP_AT=523 REPAIRS=1 bun kit/modelcheck.js run v5-terra-low CDE gpt-6.1-terra low` with the other 15 ids ran them, with 4 calls in parallel.
+- "Before" is the plan of `v4-terra-low` where that run has the request, else of `v3-terra-low`, as the decision says.
+
+### Numbers
+
+| Measure | `v5-terra-low` (16) | The same 16 before |
+| --- | --- | --- |
+| Clean at the first try | 16 | 16 |
+| Repair calls | 0 | 0 |
+| First call: median, maximum | 4.214 s, 7.654 s (`showcase-lang-budget-es`) | 5.03 s, 9.685 s (`showcase-ui-trip-dates`) |
+| Output tokens of the first call: median (reasoning) | 250 (0) | 232.5 (28.5) |
+| Output tokens of all first calls | 3983 | 4264 |
+| Bytes of the plan: median | 695 | 699.5 |
+
+- The source is `bun kit/modelcheck.js table v5-terra-low` and a scratch count over the records of the three labels.
+- The median of the changes for each request is −5 output tokens. Six plans grew: `holdout-reading-es` +105, `e-pages-ja` +94, `showcase-lang-budget-es` +92, `e-mood-ru` +53, `holdout-tip-ru` +10, and `e-gifts-uk` +5. The plan of `showcase-ui-trip-dates` lost its drawing (−301).
+- The earlier records come from runs at other times, so the times do not compare the prompts.
+
+### Each request beside the earlier plan
+
+| Request | Clean at the first try | Needs before | Needs now | For a person |
+| --- | --- | --- | --- | --- |
+| `showcase-lang-budget-es` | Yes | total (figure), chart, list, tabs `[[total, chart], [list]]` | total, a line of the sum of each category, chart, list, tabs `[[total, line, chart], [total, list]]` | Better: the sum of each category shows as text. The total is also in the second tab, beside the list that starts empty, which is the case of sentence 3. |
+| `showcase-ui-priorities` | Yes | list with `reorder=true`, `edit=true` | list with `reorder=true`, `max=5` | Better: at most five tasks, and the count shows "0 / 5". The priority is now set in the add form only, because the request asks for no change after the add. |
+| `holdout-study-ja` | Yes | total of the week, list | total of the week, a line of the sum of each subject in the week, list | Better: each subject has its total. |
+| `showcase-ui-trip-dates` | Yes | two dates (today, today + 2), a drawing of a timeline, list sorted by day and time | two dates (the coming Saturday, one day later), list grouped by day and sorted by day and time, in a sheet | Better: the trip starts on the weekend. The timeline is now the list grouped by day, not a drawing. |
+| `showcase-lang-shopping-it` | Yes | list with `sort=$corsia` | the same | The same. |
+| `showcase-lang-habits-uk` | Yes | list of 3 habits that the person renames (`edit=true`, `add=false`), a streak for each | an empty list of at most 3 habits that the person adds (`max=3`), a streak for each | The same: the person names three habits either way. The first screen shows "0 / 3" and the add form until then. |
+| `holdout-sleep-en` | Yes | average, list | the same | The same. |
+| `holdout-calories-fr` | Yes | total with the goal, list | the same | The same. |
+| `holdout-reading-es` | Yes | list grouped by state | total of the pages read (figure), list grouped by state | The same, with one need that the request does not ask for: the total of pages. |
+| `e-mood-ru` | Yes | chart of the week, list with a rating of "1" to "5" (a choice) | count of the entries (figure), list, chart | Worse: a need that the request does not ask for, and the rating is now a number field with no limit, so a person can type 9. |
+| `e-gifts-uk` | Yes | what is left to spend, list | the same | The same. |
+| `e-pages-ja` | Yes | progress ring to the goal, goal input, list | the pages of the month as the main figure with a bar to the goal, goal input, list | The same thing in another form: the figure shows the number and the bar. |
+| `holdout-tip-ru` | Yes | figure, three inputs | the same | The same. The tip input has `max=100` now, so it is a slider. |
+| `showcase-lang-kanji-ja` | Yes | hidden list of 5 kanji, deck | the same | The same. |
+| `d-moon` | Yes | drawing, input, card, lesson, question | the same | The same. |
+| `showcase-lang-tea-tr` | Yes | choice, timer | the same | The same. |
+
+### The four requests of the paired run
+
+The paired plan is the plan of the on arm (`evidence/appfile-loop/paired-adb9cd8/on/<case>/artifact.json`, `spec.appFile`).
+
+| Request | What the loop app has | The paired plan | The plan now | Does it have it now? |
+| --- | --- | --- | --- | --- |
+| `showcase-lang-budget-es` | A month total, the chart, a table of the categories | The chart only on the first tab | The month total, a line of the sum of each category, and the chart on the first tab | Yes, with a line of text in place of a table. With sample rows the line shows "Comida: 19,75, Casa: 300,00" (a scratch compile). |
+| `showcase-ui-priorities` | "0 of 5", and no new task at five | No limit | `max=5` | Yes: "0 / 5", and at five rows the add form gives way to "The list is full". |
+| `holdout-study-ja` | A total for each subject | The total of the week only | The total of the week and "数学: 2.25時間、英語: 2時間" (a scratch compile with sample rows) | Yes. |
+| `showcase-ui-trip-dates` | A range that starts at the coming weekend | Two dates that both start at today | 2026-11-21 and 2026-11-22 on 2026-11-20 | Yes, as two date fields, not one range field. The date field of the add form still starts at today. |
+
+The earlier model runs differ from the paired plans on two of these. `v3-terra-low` and `v4b-terra-low` (which has the hash of the paired run) had a month total in the budget plan. `v3-terra-low` gave the trip an end two days after today. So one reply cannot separate the effect of a sentence from the variation of the model.
+
+### Needs that the request does not ask for
+
+Two of 16 plans got one each. Both come from sentence 1, "A log, a tracker, or a budget of amounts, time, or counts shows its total":
+
+- `holdout-reading-es`: a figure of the pages read of all books. It takes the place of the hero count of the list.
+- `e-mood-ru`: a figure of the count of entries.
+
+Candidate text, which did not run (decision 6): "A diary of ratings or notes and a list of things, such as books, are no log of amounts: they get a total only when the request asks for one."
+
+### Plans that got worse
+
+- `e-mood-ru`: the count figure above, and the rating of 1 to 5 is now a number field. `fresh-terra-low` and `v3-terra-low` both had a choice of "1" to "5". A row field of a list has no `min=` or `max=`, so only a choice keeps the rating in its range. One reply cannot tell whether the word "counts" of sentence 1 caused it.
+  - Candidate text, which did not run: "A rating in a row, such as 1 to 5, is a choice field: ["1", "2", "3", "4", "5"]."
+
+### Findings
+
+- The line of `showcase-lang-budget-es` uses `money($value)` and the separator ", ". In Spanish the decimal sign is a comma, so the line reads "Comida: 19,75, Casa: 300,00". Candidate: the example of sentence 1 joins with " · ".
+- The line is an empty text while no row exists (a scratch compile). The compile gives no fault. No device showed it.
+
+### What the numbers do not show
+
+- One run of 16 requests. Each sentence reached its target in one reply. The same prompt on the same requests changed 2 results between two runs of A0.
+- No plan ran on a device, and no look numbers were measured.
+- The times come from this computer, with 4 calls in parallel and a warm cache for 15 of 16 first calls. The earlier records ran at other times.
+
+### Calls and tokens
+
+| Model and effort of each call | Calls | Input tokens | From the cache | Output tokens | Reasoning tokens |
+| --- | --- | --- | --- | --- | --- |
+| `gpt-6.1-terra` low | 16 | 103581 | 95550 (92.2%) | 3983 | 389 |
+
+The budget was 32 calls. The task used 16: 16 first calls and no repair. `evidence/modelcheck/spend.json` went from 491 to 507, and its log has 16 entries of the label.
