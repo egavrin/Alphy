@@ -44,7 +44,7 @@ import com.alpha.assistant.tools.ArtifactSnapshot
 import com.alpha.assistant.tools.CoveredToolSurface
 import com.alpha.assistant.tools.MiniAppActions
 import com.alpha.assistant.tools.MiniAppContent
-import com.alpha.assistant.tools.ShownControl
+import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
@@ -53,7 +53,6 @@ import com.alpha.assistant.voice.LivePhase
 import com.alpha.assistant.voice.LiveVoiceSession
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.map
 
 /**
  * A card of the voice mode that the stage shows: a card that waits for a tap (an error or an unsent request with its retry, or the
@@ -120,9 +119,9 @@ private val STAGE_TEXT_HEIGHT = 256.dp
  * its title after its kind label. A 3D scene and a closed app draw no app, so the stage gives them the title.
  */
 @Composable private fun StageApp(controller: ToolController, tool: ToolRecord, actions: MiniAppActions, canvasHeight: Dp,
-    presses: Flow<Pair<String, ShownControl>>?) {
+    presses: Flow<VoicePress>?) {
     val spec = remember(tool.spec, tool.ui, tool.state) { ToolSpec.availablePersisted(tool) }
-    val voicePresses = remember(presses, tool.id) { presses?.filter { it.first == tool.id }?.map { it.second } }
+    val voicePresses = remember(presses, tool.id) { presses?.filter { it.toolId == tool.id } }
     if (spec == null || spec.threeScene) Text(spec?.title ?: ToolSpec.storedTitle(tool.spec), Modifier.fillMaxWidth().semantics { heading() },
         style = MaterialTheme.typography.headlineSmall)
     if (spec == null) { Text(stringResource(R.string.tool_closed_format)); return }

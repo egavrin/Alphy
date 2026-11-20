@@ -62,6 +62,19 @@ class ShownScreenTest {
         assertNull(ShownScreen.of(local.copy(spec = "{}")))
     }
 
+    /** The stage draws a 3D scene with its own controls, which send their events to the scene and take no spoken press. */
+    @Test fun aThreeSceneHasNoControls() {
+        val spec = ToolSpec.parse("""
+            {"formatVersion":3,"title":"Кубик","description":"","capabilities":[],"runtime":{"kind":"threejs-worker","version":1},
+            "stateSchema":{"speed":"number"},"initialState":{"speed":1},
+            "ui":{"type":"column","children":[{"type":"button","text":"Быстрее","action":"faster"}]},
+            "source":"export async function createScene(context){return {event(){},frame(){},snapshot(){return {state:context.state};},dispose(){}};}"}
+        """.trimIndent()).withThreeAssets(emptyList())
+        val scene = ToolRecord("shown", 1, 1, spec.json, spec.initialState, spec.ui.toString(), null, true)
+        assertTrue(ToolSpec.parsePersisted(scene.spec).threeScene)
+        assertEquals(ShownScreen("shown", "Кубик", null, emptyList()), ShownScreen.of(scene))
+    }
+
     /** The line is marked untrusted data and has at most 8000 characters: without the app file, then with fewer controls, when longer. */
     @Test fun lineIsMarkedAndBounded() {
         val controls = listOf(ShownControl("Дальше", "next", null), ShownControl("Режим: Без вращения", "mode", "Без вращения"))

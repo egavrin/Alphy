@@ -966,7 +966,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     enabled: Boolean, embedded: Boolean = false, routeSystemBackEnabled: Boolean = true,
     graphicsHost: ArtifactUiHost? = null, graphicsSnapshot: ArtifactSnapshot? = null, openNonGraphics: Boolean = false,
     liveAllowed: Boolean = true, allowVideo: Boolean = false, onLiveInputState: (Boolean, Boolean) -> Unit = { _, _ -> },
-    dialogueTitle: String? = null, voicePresses: kotlinx.coroutines.flow.Flow<ShownControl>? = null) {
+    dialogueTitle: String? = null, voicePresses: kotlinx.coroutines.flow.Flow<VoicePress>? = null) {
     val navigationContext = LocalContext.current
     val navigationLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     val navigationForeground = {
@@ -1057,7 +1057,13 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     }
     // A spoken press of the voice talk is a tap of its control, so it runs only when a tap could (plan D, Dc1).
     val pressTap by rememberUpdatedState(tap.takeIf { enabled && !controller.settlingPhoto })
-    if (voicePresses != null) LaunchedEffect(voicePresses) { voicePresses.collect { pressTap?.invoke(it.actionId, it.value) } }
+    if (voicePresses != null) LaunchedEffect(voicePresses) {
+        voicePresses.collect { press ->
+            val run = pressTap
+            // The press takes its result before the tap, so a press that its request already gave up never runs.
+            if (run != null && press.ran.complete(true)) run(press.control.actionId, press.control.value) else press.ran.complete(false)
+        }
+    }
     Box(Modifier.fillMaxWidth().onGloballyPositioned { inWindow = !it.boundsInWindow().isEmpty }) {
         ToolContent(current.ui,current.state,enabled && !controller.settlingPhoto,
             heading=heading,calendarHost=calendarHost,embedded=embedded,

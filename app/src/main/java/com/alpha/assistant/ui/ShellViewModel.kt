@@ -47,7 +47,7 @@ import com.alpha.assistant.memory.MemoryPageState
 import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.EarlyPlan
-import com.alpha.assistant.tools.ShownControl
+import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.TestFixStatus
 import com.alpha.assistant.tools.appfile.AppFilePrompt
@@ -180,7 +180,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     /** A hand-off or typed turn of the voice mode is queued or runs. */
     internal val liveVoiceWorking: Boolean get() = liveBridge?.working == true
     /** Each spoken press of a control of the stage app, with the app id (plan D, Dc1). */
-    internal val livePresses: Flow<Pair<String, ShownControl>>? get() = liveBridge?.presses
+    internal val livePresses: Flow<VoicePress>? get() = liveBridge?.presses
     /** The uptime until which a screen or an app that Alphy opens is expected in front (spec 5.8.1, [expectAlphyScreen]). */
     internal var alphyScreenUntil = 0L
     /** The activity class that started the voice mode. The shell and the assistant sheet share this model ([ownsLiveVoice]). */
@@ -1964,12 +1964,13 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     val record = tools.tools.find { it.id == stageToolId && it.id == stage?.id }
                     val control = record?.let(ShownScreen::of)?.controls?.singleOrNull { it.label == decoded.brief }
                     val bridge = liveBridge?.takeIf { liveVoice.active }
-                    if (record != null && control != null && bridge != null) bridge.press(record.id, control)
-                    // The voice speaks the text of the message when it completes, so after the press (ruling OD-D3).
-                    updateMessage(request, assistant.id) {
-                        it.copy(text = if (control != null && bridge != null) decoded.text else LiveVoiceBridge.PRESS_MISSING, status = "complete",
-                            provenance = replyProvenance)
+                    // The voice speaks the text when the message completes, after the press (ruling OD-D3): the routing text only after a tap that ran.
+                    val text = when {
+                        control == null || bridge == null -> LiveVoiceBridge.PRESS_MISSING
+                        bridge.press(checkNotNull(record).id, control) -> decoded.text
+                        else -> LiveVoiceBridge.PRESS_FAILED
                     }
+                    updateMessage(request, assistant.id) { it.copy(text = text, status = "complete", provenance = replyProvenance) }
                 } else if (!decoded.isMiniApp) {
                     val intent = decoded.image
                     if (intent == null || !decoded.imageRequired && chatImageSelection == null) {

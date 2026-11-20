@@ -17,6 +17,7 @@ import com.alpha.assistant.data.Message
 import com.alpha.assistant.surfaces.AssistCapture
 import com.alpha.assistant.surfaces.AssistantCapture
 import com.alpha.assistant.tools.ShownControl
+import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.voice.ApprovalWindow
 import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.LiveVoiceHost
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The chat side of the voice mode (spec 5.5 to 5.8). Each hand-off goes to the chat agent as a normal message, and its result goes
@@ -82,15 +84,24 @@ internal class LiveVoiceBridge(
         var window: ApprovalWindow? = null
     }
 
-    private val pressed = MutableSharedFlow<Pair<String, ShownControl>>(extraBufferCapacity = 8)
-    /** Each spoken press of a control of the stage app, with the app id (plan D, Dc1). The stage runs it as a tap of that control. */
-    val presses: SharedFlow<Pair<String, ShownControl>> = pressed.asSharedFlow()
+    private val pressed = MutableSharedFlow<VoicePress>(extraBufferCapacity = 8)
+    /** Each spoken press of a control of the stage app (plan D, Dc1). The stage runs it as a tap of that control. */
+    val presses: SharedFlow<VoicePress> = pressed.asSharedFlow()
 
     /** A hand-off or typed turn is queued or runs. A reader sees it change when one starts and when it ends. */
     val working: Boolean get() = tracked.any { message(it)?.status in unfinishedStatuses }
 
-    /** Runs [control] of the stage app [toolId] as a tap. */
-    fun press(toolId: String, control: ShownControl) { pressed.tryEmit(toolId to control) }
+    /** Runs [control] of the stage app [toolId] as a tap. False when no stage ran the tap within [PRESS_WAIT_MS]. */
+    suspend fun press(toolId: String, control: ShownControl): Boolean {
+        val press = VoicePress(toolId, control)
+        try {
+            if (pressed.subscriptionCount.value > 0 && pressed.tryEmit(press)) withTimeoutOrNull(PRESS_WAIT_MS) { press.ran.await() }
+        } finally {
+            // A stage that takes the press later finds it failed, so no tap runs after the voice said that it failed.
+            press.ran.complete(false)
+        }
+        return press.ran.await()
+    }
 
     fun start(firstSpeech: Boolean) {
         session.start(this, firstSpeech)
@@ -220,7 +231,7 @@ internal class LiveVoiceBridge(
                 message.status != "complete" -> FAILED + message.error.take(MAX - FAILED.length)
                 message.refinementChoices.isNotEmpty() -> ON_SCREEN
                 message.toolId != null -> spoken(MINI_APP_READY, message.text)
-                message.text == PRESS_MISSING -> PRESS_MISSING
+                message.text == PRESS_MISSING || message.text == PRESS_FAILED -> message.text
                 else -> spoken(ANSWER, message.text)
             })
         }
@@ -302,6 +313,10 @@ internal class LiveVoiceBridge(
         const val SCREEN_FAILED = "Картинку показать не получилось."
         /** A spoken press named no single control of the shown screen, so nothing ran. */
         const val PRESS_MISSING = "На экране нет такой кнопки."
+        /** A spoken press named a control, but no stage ran its tap, so nothing changed. */
+        const val PRESS_FAILED = "Нажать не получилось."
+        /** The time for the stage to run or refuse a press. A loaded phone can need some frames, and the voice waits only on a failure. */
+        const val PRESS_WAIT_MS = 2_000L
         const val CHANGE_FAILED = "Изменить экран не получилось."
         const val FAILED = "Alphy не смог выполнить запрос: "
         const val ON_SCREEN = "Нужно подтверждение на экране."

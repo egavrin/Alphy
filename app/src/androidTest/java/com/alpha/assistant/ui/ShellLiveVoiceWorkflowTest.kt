@@ -558,6 +558,32 @@ class ShellLiveVoiceWorkflowTest {
             assertEquals("Siyah çay", JSONObject(stored(model, app).state).getString("cay"))
         }
 
+    /** A spoken press that no stage runs, because this shell does not draw the voice talk, changes nothing, and the voice says so. */
+    @Test fun aPressWithNoStageDoesNotRun() =
+        pressRunsNothing(StageProvider(plan = "lesson"), PRESS_FAILED, owner = Unit::class.java) { model, app ->
+            assertEquals(1, JSONObject(stored(model, app).state).getInt("lesson"))
+        }
+
+    /** A spoken press while the stage app takes no tap, because another operation of the apps runs, changes nothing, and the voice says so. */
+    @Test fun aPressWhileTheTapIsDisabledDoesNotRun() {
+        // The second plan call is the generation that holds the controller busy until its cancel.
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("lesson")), Scripted.Waits(120_000, appFilePlan("lesson"))))
+        pressRunsNothing(StageProvider(script = script), PRESS_FAILED, before = { model ->
+            robot.waitUntil {
+                var started = false
+                // run() ignores a call while the controller is busy, so check and start in one main-thread step.
+                robot.instrumentation.runOnMainSync { if (!model.tools.busy) { model.tools.generate("Счётчик", null, null, emptyList()); started = true } }
+                started
+            }
+            robot.waitUntil { script.calls.size == 2 }
+        }) { model, app ->
+            assertEquals(1, JSONObject(stored(model, app).state).getInt("lesson"))
+            assertTrue(model.tools.busy)
+            robot.instrumentation.runOnMainSync { model.tools.cancel() }
+            robot.waitUntil { !model.tools.busy }
+        }
+    }
+
     /** Plan D, Dc1: with no app on the stage, the routing call gets no shown screen, so it cannot offer a press. */
     @Test fun noPressWithoutAShownScreen() = early(StageProvider()) { _, _, provider, _ ->
         socket.say("Какая погода", "d1", 100)
@@ -1194,15 +1220,15 @@ class ShellLiveVoiceWorkflowTest {
 
     /**
      * The voice mode with the plan step: the hand-off of [APP_REQUEST] puts the app of [plan] on the stage, and [test] gets its id.
-     * Each other request gets the answer «Fixture response».
+     * Each other request gets the answer «Fixture response». With an [owner] of another activity, the shell draws no stage.
      */
     private fun onStage(plan: String = "calc", show: Boolean = false, brief: String = SCREEN_BRIEF,
         script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan)))),
-        provider: StageProvider = StageProvider(show = show, brief = brief, script = script),
+        provider: StageProvider = StageProvider(show = show, brief = brief, script = script), owner: Class<*>? = null,
         test: (ActivityScenario<CloudTestActivity>, ShellViewModel, String) -> Unit) =
         withPlanStep(fixture.context, AiProvider.OPENAI, true) {
             install(chat = provider)
-            live { scenario, model ->
+            live(owner = owner) { scenario, model ->
                 socket.say(APP_REQUEST, "d1", 100)
                 robot.waitUntil(60_000) { model.stageToolId != null }
                 test(scenario, model, checkNotNull(model.stageToolId))
@@ -1274,20 +1300,22 @@ class ShellLiveVoiceWorkflowTest {
         provider.calls.map { it.first }.single { it.generationStage == null && it.decisionContext?.originalUserTurn?.text == request }
 
     /**
-     * The app of [provider] is on the stage, and [PRESS_REQUEST] presses a label that is no control of its shown screen. The stored app
-     * stays the same, the voice says [PRESS_MISSING], and [check] runs.
+     * The app of [provider] is on the stage (or on no stage, with an [owner] of another activity), [before] runs, and [PRESS_REQUEST]
+     * presses a control that does not run. The stored app stays the same, the message and the voice say [line], and [check] runs.
      */
-    private fun pressRunsNothing(provider: StageProvider, check: (ShellViewModel, String) -> Unit = { _, _ -> }) =
-        onStage(provider = provider) { _, model, app ->
+    private fun pressRunsNothing(provider: StageProvider, line: String = PRESS_MISSING, owner: Class<*>? = null,
+        before: (ShellViewModel) -> Unit = {}, check: (ShellViewModel, String) -> Unit = { _, _ -> }) =
+        onStage(provider = provider, owner = owner) { _, model, app ->
             val record = stored(model, app)
-            val before = messages(model).size
+            before(model)
+            val count = messages(model).size
             socket.say(PRESS_REQUEST, "d2", 2_000)
-            waitForTheAnswer(model, before)
-            robot.waitUntil { "d2" to PRESS_MISSING in commentary() }
+            waitForTheAnswer(model, count)
+            assertEquals(listOf("complete", line, null), messages(model).last().let { listOf(it.status, it.text, it.toolId) })
+            robot.waitUntil { "d2" to line in commentary() }
             assertNotNull(routingOf(provider, PRESS_REQUEST).shownScreen)
             robot.awaitFrames(5)
             assertEquals(listOf(record.revision, record.state), stored(model, app).let { listOf(it.revision, it.state) })
-            assertEquals(listOf("complete", PRESS_MISSING, null), messages(model).last().let { listOf(it.status, it.text, it.toolId) })
             assertEquals(app, model.stageToolId)
             check(model, app)
         }
@@ -1405,13 +1433,17 @@ class ShellLiveVoiceWorkflowTest {
     private fun install(chat: ChatProvider = fixture.provider, voice: VoiceFactory? = null) = fixture.install(chat = chat, voice = voice,
         liveVoice = fixture.liveVoice(socket, audio))
 
-    /** Launches the shell, starts the voice mode (for the assistant [press] when not null), and answers `session.started`. */
-    private fun live(voiceApproval: Boolean = false, press: String? = null, test: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit) = fixture.launch().use { scenario ->
+    /**
+     * Launches the shell, starts the voice mode (for the assistant [press] when not null), and answers `session.started`. With an
+     * [owner] of another activity, the shell shows no stage.
+     */
+    private fun live(voiceApproval: Boolean = false, press: String? = null, owner: Class<*>? = null,
+        test: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit) = fixture.launch().use { scenario ->
         val model = checkNotNull(fixture.model)
         robot.waitUntil { !model.loading }
         scenario.onActivity {
             press?.let(model::bindAssistantCapture)
-            model.startLiveVoice(press, AssistantCapture.current?.takeIf { it.id == press }, voiceApproval = voiceApproval)
+            model.startLiveVoice(press, AssistantCapture.current?.takeIf { it.id == press }, voiceApproval = voiceApproval, owner = owner)
         }
         robot.waitUntil { socket.connected }
         socket.emit(LIVE_STARTED)
@@ -1451,6 +1483,7 @@ class ShellLiveVoiceWorkflowTest {
         const val PRESS_TEXT = "Метка всё время смотрит на Землю."
         const val NEXT = "Дальше"
         const val PRESS_MISSING = "На экране нет такой кнопки."
+        const val PRESS_FAILED = "Нажать не получилось."
         /** A screen with a choice and a button that declares the capabilities of an alerting countdown (ShownScreenTest). */
         val TEA = """
             app("Çay", lang="tr")

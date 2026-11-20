@@ -1,10 +1,16 @@
 package com.alpha.assistant.tools
 
+import kotlinx.coroutines.CompletableDeferred
 import org.json.JSONArray
 import org.json.JSONObject
 
 /** One control of the screen on the stage that a spoken press runs as a tap does: the [value] of a choice option, or null for a button. */
 internal data class ShownControl(val label: String, val actionId: String, val value: Any?)
+
+/** A spoken press of [control] of the stage app [toolId]. [ran] is true when the stage ran it as a tap, and false when it did not. */
+internal class VoicePress(val toolId: String, val control: ShownControl) {
+    val ran = CompletableDeferred<Boolean>()
+}
 
 /** The screen on the stage of the voice talk, as the routing call gets it: untrusted data, with the controls that a press can run. */
 internal data class ShownScreen(val toolId: String, val title: String, val appFile: String?, val controls: List<ShownControl>) {
@@ -43,7 +49,8 @@ internal data class ShownScreen(val toolId: String, val title: String, val appFi
                 node.optJSONArray("children")?.let { children -> repeat(children.length()) { walk(children.getJSONObject(it)) } }
             }
             // Only an app that declares no capability proves that a press can request no device action (review focus 2).
-            if (spec.capabilities.isEmpty()) walk(ui)
+            // A 3D scene sends its controls to the scene, not through a tap of the stage, so a press has no path to them.
+            if (spec.capabilities.isEmpty() && !spec.threeScene) walk(ui)
             return ShownScreen(tool.id, spec.title, spec.appFile, controls.filter { control ->
                 control.label.isNotBlank() && control.actionId.isNotEmpty() &&
                     runCatching { ToolUiCatalog.validateAction(ui, control.actionId, control.value, state) }.isSuccess
