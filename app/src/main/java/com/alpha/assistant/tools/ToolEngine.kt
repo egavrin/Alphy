@@ -911,20 +911,19 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             activeSpec.appFile == null && appFile == null -> ToolSpec.forRestore(activeSpec, targetSpec) to current.state
             // The plan of the version is the source: the kit moves each value of the person by its rules, or it refuses the restore.
             activeSpec.appFile != null && appFile != null -> kitRevision(kitCompile(current, activeSpec, appFile), current, activeSpec, appFile)
-            // No rule moves a state between the two forms, so only an app with no value of the person takes the version with its start state.
-            // A collection keeps records of the person outside the state, so a version with one in either form counts as data.
-            activeSpec.collections.length() > 0 || targetSpec.collections.length() > 0 ||
-                !sameToolJson(JSONObject(current.state), JSONObject(activeSpec.initialState)) -> throw savedDataBlocks()
+            // No rule moves a state between the two forms, so only an app with no data of the person takes the version with its start state.
+            // A collection keeps records of the person outside the state, so a target version with one also counts as data.
+            targetSpec.collections.length() > 0 || activeSpec.holdsDataOfThePerson(current.state) -> throw savedDataBlocks()
             else -> targetSpec.withIcon(activeSpec.iconId) to targetSpec.initialState
         }
     }
 
-    private fun savedDataBlocks() = CloudFailure("widget_state", store.context.getString(com.alpha.assistant.R.string.tool_generation_state))
+    private fun savedDataBlocks() = CloudFailure(AppFileNames.STATE_FAILURE, store.context.getString(com.alpha.assistant.R.string.tool_generation_state))
 
     /** The compile of [appFile] with the stored app [old] of [stored] as previous. A saved value of the person that blocks it is widget_state. */
     private suspend fun kitCompile(old: ToolRecord, stored: ToolSpec, appFile: String): AppFileCompilation =
         generation.compileAppFile(appFile, AppFilePrevious(checkNotNull(stored.appFile), stored.schema.toString(), old.state)).also {
-            if (it.blockedBySavedData || it.savedDataMismatch) throw savedDataBlocks()
+            if (it.savedDataFault) throw savedDataBlocks()
         }
 
     /** The spec of the clean plan [appFile] and the next state that the kit computed. Each other compile is a failure with no change. */

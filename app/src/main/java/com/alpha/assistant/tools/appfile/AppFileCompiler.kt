@@ -24,6 +24,8 @@ internal data class AppFileCompilation(val status: String,val faults: List<Strin
     val hole: Boolean=false,val state: String?=null,val blockedBySavedData: Boolean=false,val savedDataMismatch: Boolean=false) {
     /** The text is longer than the compile step reads. A repair call cannot shorten it in a useful way. */
     val tooLong get()=faults.any {it.startsWith(TOO_LONG)}
+    /** The saved data of the person stops the compile: one of the two flags of the kit. No reader tells the two apart. */
+    val savedDataFault get()=blockedBySavedData || savedDataMismatch
 }
 
 /** The stored app of a change, as the host keeps it: its app file, and its state schema and state as JSON text. */

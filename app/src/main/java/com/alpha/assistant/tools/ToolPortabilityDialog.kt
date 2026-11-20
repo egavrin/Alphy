@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.CloudFailure
+import com.alpha.assistant.tools.agent.AppFileNames
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -100,7 +101,7 @@ internal fun ToolPortabilityDialog(controller: ToolController, tool: ToolRecord,
                         throw cancel
                     } catch (problem: Exception) {
                         // A refused plan edit says which field or line to change. Each other failure keeps the generic text.
-                        refusal = (problem as? CloudFailure)?.takeIf { it.code == APP_FILE_EDIT || it.code == "widget_state" }?.message
+                        refusal = (problem as? CloudFailure)?.takeIf { it.code == APP_FILE_EDIT || it.code == AppFileNames.STATE_FAILURE }?.message
                         failed = true
                     } finally {
                         busy = false

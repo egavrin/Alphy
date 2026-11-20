@@ -329,6 +329,13 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     }
 }
 
+/**
+ * The app holds data of the person: a collection, which keeps records outside the state, or a [state] that differs from the start state.
+ * The change step of a part-built app (routeAppFile) and the restore between the two forms (ToolEngine.restoreSpec) both read this one rule.
+ */
+internal fun ToolSpec.holdsDataOfThePerson(state: String): Boolean =
+    collections.length() > 0 || !sameToolJson(JSONObject(state), JSONObject(initialState))
+
 internal fun canvasSurfaceIds(node: JSONObject, state: JSONObject? = null): List<String> = buildList {
     if (state != null && !ToolUiCatalog.visible(node, state)) return@buildList
     val type = node.optString("type")

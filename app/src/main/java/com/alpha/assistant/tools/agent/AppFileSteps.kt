@@ -8,7 +8,7 @@ import com.alpha.assistant.tools.AppFileLimits
 import com.alpha.assistant.tools.AppFileReply
 import com.alpha.assistant.tools.ToolGenerationProgress
 import com.alpha.assistant.tools.ToolSpec
-import com.alpha.assistant.tools.sameToolJson
+import com.alpha.assistant.tools.holdsDataOfThePerson
 import com.alpha.assistant.tools.appfile.AppFileCompiler
 import com.alpha.assistant.tools.appfile.AppFilePrevious
 import com.alpha.assistant.tools.appfile.AppFilePrompt
@@ -124,7 +124,7 @@ internal class AppFileSteps(
     private fun outcome(plan: AppFileRead.Plan, calls: Int, stored: AppFilePrevious?): AppFileOutcome? {
         val compilation = plan.compilation
         return when {
-            compilation.blockedBySavedData || compilation.savedDataMismatch -> AppFileOutcome.Fallback(AppFileNames.DATA_BLOCKS)
+            compilation.savedDataFault -> AppFileOutcome.Fallback(AppFileNames.DATA_BLOCKS)
             compilation.hole -> AppFileOutcome.Fallback(AppFileNames.HOLE)
             compilation.status == "ok" && plan.text == stored?.appFile -> AppFileOutcome.Fallback(AppFileNames.EMPTY)
             compilation.status == "ok" -> AppFileOutcome.Clean(plan.text, JSONObject(checkNotNull(compilation.definition))
@@ -214,8 +214,8 @@ internal suspend fun routeAppFile(
             CloudFailure(AppFileNames.RETRY_FAILURE, context.getString(R.string.tool_generation_connection))
         else CloudFailure(AppFileNames.STATE_FAILURE, context.getString(R.string.tool_generation_state))
         // Test and fix by lines never goes to the loop, which has no app to run here.
-        // A value that differs from the start state is data of the person: the app, its data, and its revision stay.
-        if (request.testFix || !sameToolJson(JSONObject(base.state), JSONObject(previous.initialState))) throw failure
+        // An app that holds data of the person keeps the app, its data, and its revision.
+        if (request.testFix || previous.holdsDataOfThePerson(base.state)) throw failure
         return rebuild()
     }
     return null
