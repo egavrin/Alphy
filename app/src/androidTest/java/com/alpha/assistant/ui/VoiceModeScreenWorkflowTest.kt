@@ -21,6 +21,7 @@ import com.alpha.assistant.agent.AgentPhase
 import com.alpha.assistant.agent.PhoneActionEvidence
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.providerFailure
+import com.alpha.assistant.tools.withPlanStep
 import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.LIVE_STARTED
@@ -36,6 +37,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeFalse
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
 
 /** The voice mode screen over the full chat (spec 5.1.2, 5.2, 5.7, 5.8, 5.8.1): the real shell with a scripted GPT-Live socket and audio. */
 class VoiceModeScreenWorkflowTest {
@@ -85,12 +87,14 @@ class VoiceModeScreenWorkflowTest {
             socket.say("Какая погода", "d1", 100)
             robot.waitFor(robot.text(R.string.live_voice_working))
             checkNotNull(fixture.provider.gate).complete(Unit)
-            robot.waitUntil { inLayer(scenario, "Fixture response") }
+            // Plan D: the voice retells a text answer, and the stage shows no card for it.
+            robot.waitUntil { "d1" to "Ответ Alphy: Fixture response." in socket.commentary() }
+            assertFalse(inStage(scenario, "Fixture response"))
             assertNotNull(model.snapshot.selectedId)
             robot.waitFor(robot.text(R.string.live_voice_listening))
             robot.waitFor(robot.text(R.string.live_voice_end))
             robot.click(robot.text(R.string.live_voice_mute))
-            robot.waitFor(robot.text(R.string.live_voice_muted))
+            robot.waitFor(robot.text(R.string.live_voice_mic_off))
             robot.waitFor(robot.text(R.string.live_voice_unmute))
             assertTrue(audio.captureMuted)
         }
@@ -156,12 +160,90 @@ class VoiceModeScreenWorkflowTest {
         }
     }
 
+    /** Plan D, Da1: before the first hand-off, the stage holds the character and the status, and no app. */
+    @Test fun stageShowsTheCharacterBeforeTheFirstScreen() {
+        install()
+        voiceMode { scenario, model ->
+            robot.waitUntil { inStage(scenario, robot.text(R.string.live_voice_listening)) }
+            assertTrue(robot.composedIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.TestTag) == CHARACTER })
+            assertNull(model.stageToolId)
+        }
+    }
+
+    /** Review focus 1: the phone plan of a later hand-off shows its card on the stage above the app, and nothing runs without a tap. */
+    @Test fun aPlanCardShowsAboveTheScreen() = withPlanStep(fixture.context, AiProvider.OPENAI, false) {
+        fixture.provider.createApp = true
+        install()
+        voiceMode { scenario, model ->
+            socket.say("Сделай счётчик", "d1", 100)
+            robot.waitUntil(60_000) { model.stageToolId != null }
+            val app = model.stageToolId
+            robot.waitUntil { inStage(scenario, "Fixture") }
+            fixture.provider.createApp = false
+            fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence(PLAN_REQUEST, PLAN_REQUEST))
+            fixture.provider.agentProposal = ADD
+            socket.say(PLAN_REQUEST, "d2", 2_000)
+            robot.waitUntil(60_000) { model.agent.plan?.phase == AgentPhase.REVIEW }
+            robot.waitUntil { inStage(scenario, robot.text(R.string.agent_plan_title)) && inStage(scenario, robot.text(R.string.agent_execute)) }
+            assertTrue(robot.bounds(robot.text(R.string.agent_plan_title)).top < robot.bounds("Fixture").top)
+            robot.awaitFrames(5)
+            assertEquals(AgentPhase.REVIEW, model.agent.plan?.phase)
+            assertEquals(app, model.stageToolId)
+        }
+    }
+
+    /** Plan D, Da1: the first line of the strip holds the status and the microphone state, and the strip holds mute and end. */
+    @Test fun stripShowsStatusMicStateAndButtons() {
+        install()
+        voiceMode { scenario, _ ->
+            robot.waitUntil { inStrip(scenario, robot.text(R.string.live_voice_listening)) && inStrip(scenario, robot.text(R.string.live_voice_mic_on)) }
+            assertTrue(stripButton(scenario, robot.text(R.string.live_voice_mute)))
+            assertTrue(stripButton(scenario, robot.text(R.string.live_voice_end)))
+            robot.click(robot.text(R.string.live_voice_mute))
+            robot.waitUntil { inStrip(scenario, robot.text(R.string.live_voice_mic_off)) }
+            assertTrue(audio.captureMuted)
+            assertTrue(stripButton(scenario, robot.text(R.string.live_voice_unmute)))
+        }
+    }
+
+    /** Plan D, Da1: a mute before `session.started` turns the microphone off, so the strip says so while the mode connects. */
+    @Test fun muteWhileConnectingShowsTheMicrophoneOff() {
+        install()
+        fixture.launch().use { scenario ->
+            val model = ready(scenario)
+            robot.click(voiceButton)
+            robot.waitUntil { "session.start" in socket.types() }
+            assertEquals(LivePhase.CONNECTING, model.liveVoice.phase)
+            robot.click(robot.text(R.string.live_voice_mute))
+            robot.waitUntil { inStrip(scenario, robot.text(R.string.live_voice_mic_off)) }
+            assertTrue(audio.captureMuted)
+            socket.emit(LIVE_STARTED)
+            robot.waitUntil { model.liveVoice.phase == LivePhase.MUTED }
+            assertTrue(inStrip(scenario, robot.text(R.string.live_voice_mic_off)))
+        }
+    }
+
+    /** Plan D, Da1: the stage takes the whole width of the layer and all the height above the strip. */
+    @Test fun stageFillsTheSpaceAboveTheStrip() {
+        install()
+        voiceMode { scenario, _ ->
+            robot.waitUntil { robot.composed(scenario, STAGE) && robot.composed(scenario, STRIP) }
+            val stage = robot.composedBounds(scenario, STAGE).first
+            val strip = robot.composedBounds(scenario, STRIP).first
+            val layer = robot.composedBounds(scenario, LAYER).first
+            val dp = fixture.context.resources.displayMetrics.density
+            assertTrue("$stage ends at the strip $strip", abs(stage.bottom - strip.top) <= dp)
+            assertTrue("$stage spans the layer $layer", abs(stage.width() - layer.width()) <= dp)
+            if (layer.width() > 668 * dp) assertTrue("$stage is wider than 620 dp", stage.width() > 620 * dp)
+        }
+    }
+
     /** Spec 5.2.1 and the 5.8 table: ✕ and Back end the mode without a status, and the chat under the layer shows the saved turns. */
     @Test fun endClosesTheLayer() {
         install()
         voiceMode { scenario, model ->
             socket.say("Какая погода", "d1", 100)
-            robot.waitUntil { inLayer(scenario, "Fixture response") }
+            robot.waitUntil { socket.commentary().isNotEmpty() }
             val chat = checkNotNull(model.snapshot.selectedId)
             robot.click(robot.text(R.string.live_voice_end))
             robot.waitUntil { !model.liveVoice.active }
@@ -399,6 +481,12 @@ class VoiceModeScreenWorkflowTest {
     private fun inLayer(scenario: ActivityScenario<CloudTestActivity>, text: String) =
         robot.composedTextFit(scenario, LAYER).any { it.first.trimEnd() == text }
 
+    private fun inStage(scenario: ActivityScenario<CloudTestActivity>, text: String) = robot.composedTextIn(scenario, STAGE, text)
+    private fun inStrip(scenario: ActivityScenario<CloudTestActivity>, text: String) = robot.composedTextIn(scenario, STRIP, text)
+    private fun stripButton(scenario: ActivityScenario<CloudTestActivity>, label: String) =
+        robot.composedIn(scenario, STRIP) { it.getOrNull(SemanticsProperties.ContentDescription)?.contains(label) == true }
+
+
     private fun keepScreenOn(scenario: ActivityScenario<CloudTestActivity>): Boolean {
         fun any(view: View): Boolean = view.keepScreenOn || (view as? ViewGroup)?.let { group ->
             (0 until group.childCount).any { any(group.getChildAt(it)) } } == true
@@ -409,6 +497,9 @@ class VoiceModeScreenWorkflowTest {
 
     private companion object {
         const val LAYER = "live_voice_layer"
+        const val STAGE = "dialogue_stage"
+        const val STRIP = "dialogue_strip"
+        const val CHARACTER = "live_voice_character"
         const val PLAN_REQUEST = "Change my memory of my favorite color to green"
         const val ADD = """{"steps":[{"function":"memory.write","args":{"text":"Favorite color is green"}}]}"""
         const val TIMER_REQUEST = "Set a five-minute timer"

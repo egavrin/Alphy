@@ -167,6 +167,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     private var liveBridge by mutableStateOf<LiveVoiceBridge?>(null)
     /** The assistant message of the latest hand-off or typed turn of the voice mode (spec 5.2.3). */
     internal val liveVoiceCardId: String? get() = liveBridge?.cardId
+    /** The app on the stage of the voice mode (plan D, Da1). A deleted or archived app is no screen. */
+    internal val stageToolId: String? get() = liveBridge?.stageToolId?.takeIf { id -> tools.tools.any { it.id == id && !it.archived } }
     /** A hand-off or typed turn of the voice mode is queued or runs. */
     internal val liveVoiceWorking: Boolean get() = liveBridge?.working == true
     /** The uptime until which a screen or an app that Alphy opens is expected in front (spec 5.8.1, [expectAlphyScreen]). */

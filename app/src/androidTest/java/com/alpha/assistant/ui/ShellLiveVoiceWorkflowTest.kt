@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.provider.AlarmClock
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
@@ -142,6 +144,69 @@ class ShellLiveVoiceWorkflowTest {
                 var saved: ToolRecord? = null
                 robot.waitUntil { robot.instrumentation.runOnMainSync { saved = model.tools.tools.singleOrNull { it.id == card } }; saved != null }
                 assertEquals(appFilePlan("calc"), ToolSpec.parsePersisted(checkNotNull(saved).spec).appFile)
+            }
+        }
+    }
+
+    /** Plan D, Da1: the app of a hand-off fills the stage, with no card around it. */
+    @Test fun stageShowsTheMiniAppOfAHandOff() = onStage { scenario, model, app ->
+        assertEquals(messages(model).last().toolId, app)
+        robot.waitUntil { inStage(scenario, CALC_LABEL) }
+        assertFalse(inStage(scenario, robot.text(R.string.tool_open)))
+    }
+
+    /** Plan D, Da1: the stage draws the drawing of an app with its canvas host, not as a plain text. */
+    @Test fun stageDrawsTheDrawingOfAHandOff() = onStage(plan = "lesson") { scenario, _, _ ->
+        robot.waitUntil(30_000) { robot.composedIn(scenario, STAGE) {
+            it.getOrNull(SemanticsProperties.ContentDescription)?.any { text -> text.startsWith("$ORBIT.") } == true
+        } }
+    }
+
+    /** Plan D, Da1: an answer with no app leaves the app on the stage, and the voice retells the answer. */
+    @Test fun aLaterAnswerKeepsTheScreen() = onStage { scenario, model, app ->
+        robot.waitUntil { inStage(scenario, CALC_LABEL) }
+        socket.say("Какая погода", "d2", 2_000)
+        robot.waitUntil { "d2" to "Ответ Alphy: Fixture response." in commentary() }
+        assertEquals(app, model.stageToolId)
+        assertTrue(inStage(scenario, CALC_LABEL))
+        assertFalse(inStage(scenario, "Fixture response"))
+    }
+
+    /** Plan D, Da1: the app of the stage is a stored app of the chat, so the chat shows it after the end. */
+    @Test fun theStageScreenIsInTheChatAfterTheEnd() = onStage { scenario, model, app ->
+        scenario.onActivity { model.endLiveVoice() }
+        assertNull(model.stageToolId)
+        robot.waitUntil { !robot.composed(scenario, "live_voice_layer") }
+        assertTrue(messages(model).any { it.toolId == app })
+        robot.waitFor(robot.text(R.string.tool_open))
+    }
+
+    /** Plan D, Da1: each start of the mode begins with an empty stage. */
+    @Test fun aNewSessionStartsWithAnEmptyStage() = onStage { scenario, model, _ ->
+        scenario.onActivity { model.endLiveVoice() }
+        restart(scenario, model)
+        assertNull(model.stageToolId)
+        robot.waitUntil { robot.composedIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.TestTag) == CHARACTER } }
+    }
+
+    /** Plan D, Da1: an app that a request makes after the end of the mode does not go to the stage of a later session. */
+    @Test fun aRequestThatEndsAfterTheModeSetsNoStage() {
+        val gate = CompletableDeferred<Unit>()
+        withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+            install(chat = stageProvider("calc", gate))
+            live { scenario, model ->
+                socket.say(APP_REQUEST, "d1", 100)
+                robot.waitUntil(60_000) { messages(model).lastOrNull()?.status == "generating" }
+                scenario.onActivity { model.endLiveVoice() }
+                gate.complete(Unit)
+                robot.waitUntil(60_000) { messages(model).last().toolId != null }
+                val app = messages(model).last().toolId
+                // The stage reads only an app of the library list, so the test waits for it there.
+                robot.waitUntil { model.tools.tools.any { it.id == app } }
+                assertNull(model.stageToolId)
+                restart(scenario, model)
+                robot.awaitFrames(5)
+                assertNull(model.stageToolId)
             }
         }
     }
@@ -562,6 +627,44 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
+    /**
+     * The voice mode with the plan step: the hand-off of [APP_REQUEST] puts the app of [plan] on the stage, and [test] gets its id.
+     * Each other request gets the answer «Fixture response».
+     */
+    private fun onStage(plan: String = "calc", test: (ActivityScenario<CloudTestActivity>, ShellViewModel, String) -> Unit) =
+        withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+            install(chat = stageProvider(plan))
+            live { scenario, model ->
+                socket.say(APP_REQUEST, "d1", 100)
+                robot.waitUntil(60_000) { model.stageToolId != null }
+                test(scenario, model, checkNotNull(model.stageToolId))
+            }
+        }
+
+    /** The plan call answers with the app file [plan] after [gate]. The routing call creates an app for [APP_REQUEST] only. */
+    private fun stageProvider(plan: String, gate: CompletableDeferred<Unit>? = null): ChatProvider {
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan))))
+        return object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) = when {
+                request.generationStage != null -> { gate?.await(); script.respond(key, request, session, emit) }
+                request.decisionContext?.originalUserTurn?.text == APP_REQUEST ->
+                    emit(CloudEvent.RoundComplete(chatDecision("create", "Готово.", "Make the app"), false))
+                else -> emit(CloudEvent.RoundComplete(chatDecision("answer", "Fixture response"), false))
+            }
+        }
+    }
+
+    /** Starts the voice mode again and answers `session.started`. */
+    private fun restart(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel) {
+        val starts = socket.types().count { it == "session.start" }
+        scenario.onActivity { model.startLiveVoice() }
+        robot.waitUntil { socket.types().count { it == "session.start" } == starts + 1 }
+        socket.emit(LIVE_STARTED)
+        robot.waitUntil { model.liveVoice.phase == LivePhase.LISTENING }
+    }
+
+    private fun inStage(scenario: ActivityScenario<CloudTestActivity>, text: String) = robot.composedTextIn(scenario, STAGE, text)
+
     private fun install(chat: ChatProvider = fixture.provider, voice: VoiceFactory? = null) = fixture.install(chat = chat, voice = voice,
         liveVoice = fixture.liveVoice(socket, audio))
 
@@ -576,13 +679,18 @@ class ShellLiveVoiceWorkflowTest {
         test(scenario, model)
     }
 
-    /** The sent commentary appends as (delegation id, text), in order. */
-    private fun commentary() = socket.sent.map(::JSONObject).filter { it.getString("type") == "session.commentary.append" }
-        .map { it.getString("delegation_id") to it.getString("content") }
+    private fun commentary() = socket.commentary()
 
     private fun messages(model: ShellViewModel) = model.snapshot.selected?.messages.orEmpty()
 
     private companion object {
+        const val STAGE = "dialogue_stage"
+        const val CHARACTER = "live_voice_character"
+        const val APP_REQUEST = "Сделай калькулятор чаевых"
+        /** A figure label of the calc app. */
+        const val CALC_LABEL = "Per person"
+        /** The text of the drawing of the lesson app. */
+        const val ORBIT = "Земля в центре, Луна на орбите и метка её стороны"
         const val PLAN_REQUEST = "Change my memory of my favorite color to green"
         const val ADD = """{"steps":[{"function":"memory.write","args":{"text":"Favorite color is green"}}]}"""
         const val EDIT = """{"steps":[{"function":"memory.write","args":{"match":"Favorite color","text":"Favorite color is green"}}]}"""

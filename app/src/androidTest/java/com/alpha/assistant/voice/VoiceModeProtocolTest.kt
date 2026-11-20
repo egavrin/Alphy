@@ -38,6 +38,12 @@ class VoiceModeProtocolTest {
         assertTrue("The on-screen rule follows the spoken proposal rule", rule > 0 && lines[rule - 1].startsWith("Когда Alphy предлагает действие"))
     }
 
+    /** Plan D, Da1: the stage shows no text answer, so the voice retells it and does not send the person to the screen. */
+    @Test fun instructionsDoNotSayTheFullAnswerIsOnTheScreen() {
+        assertFalse("Полный ответ пользователь видит на экране." in LiveProtocol.INSTRUCTIONS)
+        assertTrue("Ответ Alphy перескажи своими словами." in LiveProtocol.INSTRUCTIONS.lines())
+    }
+
     @Test fun historyKeepsNewestCompleteTextWithinLimits() {
         val items = LiveProtocol.history((0 until 200).map { message(it) })
         assertTrue(items.length() <= 128)

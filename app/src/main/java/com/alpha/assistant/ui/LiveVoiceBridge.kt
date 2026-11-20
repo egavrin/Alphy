@@ -52,6 +52,8 @@ internal class LiveVoiceBridge(
     private val done = HashSet<String>()
     /** The assistant message of the latest hand-off or typed turn (spec 5.2.3). */
     var cardId by mutableStateOf<String?>(null); private set
+    /** The app of the latest tracked message that made or changed one, for the stage (plan D, Da1). The end of the mode clears it. */
+    var stageToolId by mutableStateOf<String?>(null); private set
     private var watch: Job? = null
     /** The delegation id of the hand-off that proposed the phone plan, and the plan id (spec 5.5.8). */
     private var planHandOff: Pair<String, String>? = null
@@ -145,13 +147,14 @@ internal class LiveVoiceBridge(
         approval?.takeIf { it.acknowledged && it.window == null }?.let { it.window = ApprovalWindow(it.plan.id, it.plan.revision, endMs) }
     }
 
-    override fun ended(status: String, settingsRequired: Boolean) { watch?.cancel(); watch = null; capture = null }
+    override fun ended(status: String, settingsRequired: Boolean) { watch?.cancel(); watch = null; capture = null; stageToolId = null }
 
     /** Sends the mini-app progress and the result of each tracked message once (spec 5.5.5 to 5.5.8, 5.7.2). */
     private fun report() {
         val planReady = string(R.string.agent_plan_ready)
         for ((delegation, id) in handOffs) {
             val message = changed(id) ?: continue
+            if (message.status == "complete") message.toolId?.let { stageToolId = it }
             // The chat agent sets the plan in the same main-thread pass as this notice, so the plan is the one of this hand-off.
             if (message.status == "complete" && message.text == planReady) {
                 planHandOff = model.agent.plan?.let { delegation to it.id }
@@ -167,6 +170,7 @@ internal class LiveVoiceBridge(
         }
         for ((id, text) in typed) {
             val message = changed(id)?.takeIf { it.status == "complete" } ?: continue
+            message.toolId?.let { stageToolId = it }
             // A typed plan has no hand-off, so GPT-Live neither reads nor approves it.
             if (message.text == planReady) planHandOff = null
             session.thinking(spoken("Пользователь написал: ${LiveProtocol.spoken(text, TYPED_MAX)} Ответ Alphy на экране: ", message.text))

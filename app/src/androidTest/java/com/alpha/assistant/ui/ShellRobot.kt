@@ -503,8 +503,7 @@ internal class ShellRobot(fixture: String) {
     }
     /** [composed] and [composedText] read the composed nodes, also the nodes that a covering NavDisplay entry hides from accessibility. */
     fun composed(scenario: ActivityScenario<*>, tag: String): Boolean = composedNode(scenario) { it.getOrNull(SemanticsProperties.TestTag) == tag }
-    fun composedText(scenario: ActivityScenario<*>, text: String): Boolean =
-        composedNode(scenario) { config -> config.getOrNull(SemanticsProperties.Text)?.any { it.text.trimEnd() == text } == true }
+    fun composedText(scenario: ActivityScenario<*>, text: String): Boolean = composedNode(scenario, hasText(text))
     fun composedLink(scenario: ActivityScenario<*>, label: String, url: String): Boolean =
         composedNode(scenario) { config -> config.getOrNull(SemanticsProperties.Text)?.any { text ->
             text.getLinkAnnotations(0, text.length).any {
@@ -527,6 +526,19 @@ internal class ShellRobot(fixture: String) {
         }
         return result
     }
+    /** True when a composed node inside the node with [tag], or that node itself, matches. */
+    fun composedIn(scenario: ActivityScenario<*>, tag: String, match: (SemanticsConfiguration) -> Boolean): Boolean {
+        var found = false
+        scenario.onActivity { activity ->
+            fun visit(node: SemanticsNode): Boolean = match(node.config) || node.children.any(::visit)
+            found = nodes(activity).filter { it.config.getOrNull(SemanticsProperties.TestTag) == tag }.any(::visit)
+        }
+        return found
+    }
+    /** True when a composed text inside the node with [tag] is [text]. */
+    fun composedTextIn(scenario: ActivityScenario<*>, tag: String, text: String): Boolean = composedIn(scenario, tag, hasText(text))
+    private fun hasText(text: String): (SemanticsConfiguration) -> Boolean =
+        { config -> config.getOrNull(SemanticsProperties.Text)?.any { it.text.trimEnd() == text } == true }
     /** The window bounds of the composed node with [tag] and the width of its Compose root, in pixels. */
     fun composedBounds(scenario: ActivityScenario<*>, tag: String): Pair<Rect, Int> =
         checkNotNull(composedBoundsOrNull(scenario, tag)) { "Expected one composed node with tag $tag" }

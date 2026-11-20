@@ -35,6 +35,9 @@ internal class FakeLiveTransport : LiveTransport {
     val connected get() = listener != null
     /** The `type` of each sent text, in order. */
     fun types() = sent.map { JSONObject(it).getString("type") }
+    /** The sent commentary appends as (delegation id, text), in order. */
+    fun commentary() = sent.map(::JSONObject).filter { it.getString("type") == "session.commentary.append" }
+        .map { it.getString("delegation_id") to it.getString("content") }
 
     override fun connect(url: String, key: String, listener: LiveListener): LiveConnection {
         this.url = url; this.key = key; this.listener = listener
