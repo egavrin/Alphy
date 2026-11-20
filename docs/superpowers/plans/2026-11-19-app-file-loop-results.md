@@ -1059,3 +1059,26 @@ Candidate text, which did not run (decision 6): "A diary of ratings or notes and
 | `gpt-6.1-terra` low | 16 | 103581 | 95550 (92.2%) | 3983 | 389 |
 
 The budget was 32 calls. The task used 16: 16 first calls and no repair. `evidence/modelcheck/spend.json` went from 491 to 507, and its log has 16 entries of the label.
+
+### The separator of the group line (task P4b)
+
+Task U2-K changed the separator of the example of sentence 1 from `", "` to `" · "` (commit `69f3d19`), because ", " beside a decimal comma hides where a sum ends. Nothing else of the prompt changed.
+The new hash is `b16985b0dd19`, and the section "System" is 22582 bytes. The test "prompt (P4)" now shows "Food: 3.3 · Home: 5".
+`STOP_AT=515 REPAIRS=1 bun kit/modelcheck.js run v5b-terra-low CE gpt-6.1-terra low` with the 4 ids ran them one time on `69f3d19`, with 4 calls in parallel.
+Each record has the prompt hash `b16985b0dd19`. Raw replies and records are in `evidence/modelcheck/v5b-terra-low/`.
+
+Each of the 4 plans is clean at the first try. A scratch compile on 2026-11-20 put two sample rows into each plan with a group line:
+
+- `showcase-lang-budget-es`: `need desglose = content(join(map(groups(filter($/gastos, month($fecha) == month(today()) && year($fecha) == year(today())), $categoria, $importe), $key + ": " + money($value)), " · "))`.
+  - With Comida 19.75 and Vivienda 300 in this month, it shows "Comida: 19,75 · Vivienda: 300,00". The v5 plan showed "Comida: 19,75, Vivienda: 300,00".
+  - The needs are those of v5: the total, the line, the chart, the list, and the tabs `[[total, line, chart], [total, list]]`. The category is now a choice of 6 values, not a text.
+- `holdout-study-ja`: `need bySubject = content(join(map(groups(filter($/study, days(addDays(today(), 1 - weekday(today())), $day) >= 0 && days(addDays(today(), 1 - weekday(today())), $day) < 7), $subject, $hours), $key + ": " + text(round($value, 2)) + "時間"), " · "))`.
+  - With 数学 2.25 hours and 英語 2 hours in this week, it shows "数学: 2.25時間 · 英語: 2時間". The v5 plan used its own separator "、" and showed "数学: 2.25時間、英語: 2時間".
+  - The needs are those of v5: the total of the week, the line, and the list.
+- `holdout-calories-fr`: no group line. It has the two needs of v5, the total with the goal of 2000 kcal and the list of meals.
+  - The total now sums all meals, and a meal has no date. The v5 plan limited both to today, and the request asks for "la journée".
+  - `final-terra-low`, `v3-terra-low`, and `v5-terra-low` had that limit, and the four `r0` records did not. The changed example is not in this plan, and one reply cannot show a cause. As the decision says, nothing more changed.
+- `e-gifts-uk`: no group line. It has the needs of v5: what is left to spend, and the list.
+
+The run used 4 calls of the budget of 8: 4 first calls and no repair. `evidence/modelcheck/spend.json` went from 507 to 511, and its log has 4 entries of the label.
+Input 25828 tokens (12742 from the cache), output 1204 (reasoning 166). The calls of `holdout-calories-fr` and `e-gifts-uk` had no cached tokens.
