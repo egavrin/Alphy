@@ -199,6 +199,9 @@ A text that a format function printed is for a person: do not read it back as a 
 - `entries`:
   - The row is the emoji, the first text field as the title with each further text field as a muted line under it, the value cells as small labels, the check marks, and the remove button.
   - In a row with one text field, a choice that the row does not change is the muted line under the title.
+  - In a row that the person does not edit, a `number`, `money`, or `percent` cell prints with `amount(x, 2)` (L3 decision 2): the typed value with the decimal sign and the digit groups of the language, at most 2 decimals, and no forced decimals or percent sign.
+    So a money value of 7.5 is "7,5" in `es` and "7.5" in `en`, 180 is "180", and a percent value of 12.5 is "12,5" in `es`. A date, a time, a count, and a choice stay as they are.
+    Each printed cell is one more field of the row, which the run-time computes, so the list binds a view. A row that its printed cells would take past the 12 fields of a row of Alphy keeps the raw numbers.
   - With `group=$field`, Alphy shows the value of the field as the heading of each group, so a row that cannot change the field leaves it out (L2 decision 2).
     A check mark, a switch, a count, and a picture stay, and so does each control of an editable row (`edit=true`). The add form and the data keep the field.
     A row with no other field than the field of its group (and the field of its emoji) keeps it, so the row is not empty.

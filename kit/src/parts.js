@@ -61,6 +61,8 @@ export const FIELD_KINDS = { number: "number", money: "number", percent: "number
 const WORD = /^[\p{L}_][\p{L}\p{N}_]*$/u;
 /** The most rows of a list of Alphy: rows.js MAX_ROWS, which comes after this module in the bundle (build.js MODULES). A test of max= ties the two. */
 const MAX_ROWS = 100;
+/** The most fields of a row of Alphy with the id: rows.js MAX_ROW_FIELDS. The test of L3 decision 2 ties the two. */
+const MAX_ROW_FIELDS = 12;
 /** The lines NAME_X of an entries part that are not a field: the rows, the list, the add form, the remove dialog, the arrows, the emoji, and the hero. */
 const ENTRIES_LINES = new Set(["row", "list", "view", "main", "add", "addRow", "open", "remove", "confirm", "yes", "no", "up", "down", "emoji", "hero"]);
 
@@ -220,6 +222,12 @@ const PARTS = {
     const others = fields.filter(([field]) => field !== sign && field !== heading);
     // In a row with one text, a choice that the row does not change is the muted line under the title: as a label beside it, "Frutta e verdura" broke into two lines.
     const under = !edit && others.filter(([, kindTree]) => kindOf(kindTree) === "text").length === 1 ? others.find(([, kindTree]) => kindOf(kindTree) === "choice")?.[0] : undefined;
+    // Each printed number is one more field of the row, which the run-time computes, so a row that they would take past the limit of Alphy keeps raw numbers.
+    // The count takes each field, value of show=, and time, an icon= formula, a group, and the label of a reorder, so it is never below the count of rows.js.
+    const printed = others.filter(([, kindTree]) => kindOf(kindTree) === "number").length;
+    const used = 1 + new Set([...fields.map(([field]) => field), ...keysOf(opt.rows)]).size + shown.length + fields.filter(([, kindTree]) => kindTree.v === "time").length
+      + (icon && icon.k !== "lit" && !sign ? 1 : 0) + (opt.group ? 1 : 0) + (opt.reorder?.v === true ? 1 : 0);
+    const prints = used + printed <= MAX_ROW_FIELDS;
     let firstText = null;
     for (const [field, kindTree] of fields) {
       const choice = kindTree.k === "list" ? show(kindTree) : null, kind = kindOf(kindTree);
@@ -244,7 +252,9 @@ const PARTS = {
       // A text field of an editable row is a line of its own. The first one shares it only with the emoji of the row, and takes the rest of it (L1 item 1).
       else if (edit && kind !== "choice") lines.push(`${name}_${field} = ${widget}(${named}, $${field}${kind === "text" && icon && !typedTexts.length ? ", weight=1" : ""})`);
       // The host's number and display emphasis are too large for a row (Task 11b-1: "1 kg" in two lines).
-      else if (kind !== "text") lines.push(`${name}_${field} = Text($${field}, emphasis="label")`);
+      // A typed number, money, or percent prints in the language of the app, as the total over the list does: "7.5" beside "23,50" in an es app
+      // (L3 decision 2). amount(x, 2) keeps the typed value: the forms of a figure put "180.00" beside a range "0 – 1000" and "13%" for a typed 12.5.
+      else if (kind !== "text") lines.push(`${name}_${field} = Text(${prints && kind === "number" ? `amount($${field}, 2)` : `$${field}`}, emphasis="label")`);
       else texts.push(field);
       if (kind === "text" && field !== sign) firstText ??= field;
       if (field !== sign && field !== under && field !== heading && kind !== "count" && !(kind === "text" && !edit)) (kind === "check" ? marks : kind === "text" ? typedTexts : cells).push(`${name}_${field}`);

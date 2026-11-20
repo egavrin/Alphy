@@ -128,10 +128,10 @@ test("entries (L2 decision 1): the value cells of a row are one group with no we
   const study = rowOf((await built('app("T", lang="ja")', 'need study = entries("勉強", fields={subject: "text", day: "date", hours: "number"}, icon="📖")')).definition);
   // At most 120 dp: a date and a time fit on one line, and more cells wrap inside the group, so the title keeps room on a phone.
   expect(study.children.map((node) => [node.type, node.layout])).toEqual([["emoji", undefined], ["text", { weight: 1 }], ["flowRow", { maxWidth: 120 }], ["icon", undefined]]);
-  expect(study.children[2].children).toEqual([{ type: "text", text: "", bind: "day", style: cell }, { type: "text", text: "", bind: "hours", style: cell }]);
+  expect(study.children[2].children).toEqual([{ type: "text", text: "", bind: "day", style: cell }, { type: "text", text: "", bind: "study_hours_text", style: cell }]);
   // A title of two lines and a single cell: the column takes the rest of the line, and the cell stands at its end.
   const one = rowOf((await built('app("T", lang="en")', 'need gifts = entries("Gifts", fields={person: "text", gift: "text", price: "money", bought: "check"})')).definition);
-  expect(one.children.map((node) => [node.type, node.layout?.weight, node.children?.map((child) => child.bind)])).toEqual([["column", 1, ["person", "gift"]], ["flowRow", undefined, ["price"]], ["checkbox", undefined, undefined], ["icon", undefined, undefined]]);
+  expect(one.children.map((node) => [node.type, node.layout?.weight, node.children?.map((child) => child.bind)])).toEqual([["column", 1, ["person", "gift"]], ["flowRow", undefined, ["gifts_price_text"]], ["checkbox", undefined, undefined], ["icon", undefined, undefined]]);
   // With no title the row is one line that wraps, and each cell already keeps the width of its content.
   expect(rowOf((await built('app("T", lang="es")', 'need costs = entries("Gastos", fields={kind: ["Comida", "Otros"], cost: "money", day: "date"})')).definition).children.map((node) => node.type))
     .toEqual(["text", "text", "text", "icon"]);
@@ -193,13 +193,51 @@ test("entries (L2 decision 2): a row of a list with group=$field leaves that fie
   expect(shown).toEqual(["test/fixtures/model/holdout-reading-es.plan: estado"]);
 });
 
+/** The texts that each row of the first list shows after the open event, by the binds of its row template. */
+const rowTexts = (result) => {
+  const list = every(result.definition.ui).find((node) => node.rowTemplate), binds = every(list.rowTemplate).map((node) => node.bind).filter(Boolean);
+  const { state } = handle({ artifactId: "t", revision: 1, state: result.definition.initialState, event: { type: "open" } }, result.app);
+  return state[list.bind].map((row) => binds.map((bind) => row[bind]));
+};
+
+// L3 decision 2 (showcase-lang-budget-es-v5b): the rows of the list tab read "Comida 12.25" and "Comida 7.5", and the total over them read "23,50".
+// The forms of a figure (money with 2 decimals, a percent with its sign) were too much in a row: "180.00" beside "0 – 1000", "13%" for a typed 12.5.
+test("entries (L3 decision 2): a number, money, or percent cell of a row prints the typed value in the language of the app, and a date, a time, a choice, and a count stay", async () => {
+  const fields = 'fields={what: "text", cost: "money", share: "percent", qty: "number", day: "date", at: "time"}';
+  const rows = 'rows=[{what: "x", cost: 7.5, share: 12.5, qty: 1.234, day: "2026-11-20", at: "09:30"}, {what: "y", cost: 1234.5, share: 50, qty: 1000, day: "2026-11-21", at: "18:00"}, '
+    + '{what: "z", cost: 12.25, share: 0, qty: 12345.5, day: "2026-11-22", at: "12:00"}]';
+  const log = async (lang) => rowTexts(await built(`app("T", lang="${lang}")`, `need log = entries("Log", ${fields}, ${rows})`));
+  // Each of the three kinds is amount(x, 2): the decimal sign and the digit groups of the language, at most 2 decimals, and no forced decimals or
+  // percent sign, so a whole price stays "180" beside a range with no decimals and a typed 12.5 stays 12.5. In es a whole part of four digits has no group.
+  // The title, the date, and the time of a row stay as they were.
+  expect(await log("es")).toEqual([["x", "7,5", "12,5", "1,23", "2026-11-20", "09:30"], ["y", "1234,5", "50", "1000", "2026-11-21", "18:00"], ["z", "12,25", "0", "12.345,5", "2026-11-22", "12:00"]]);
+  expect(await log("en")).toEqual([["x", "7.5", "12.5", "1.23", "2026-11-20", "09:30"], ["y", "1,234.5", "50", "1,000", "2026-11-21", "18:00"], ["z", "12.25", "0", "12,345.5", "2026-11-22", "12:00"]]);
+  // A choice (here the muted line under the title) and a count stay as they were.
+  const kinds = await built('app("T", lang="es")', 'need log = entries("Log", fields={what: "text", kind: ["A", "B"], n: "count", cost: "money"}, rows=[{what: "x", kind: "B", n: 3, cost: 7.5}])');
+  expect(rowTexts(kinds)).toEqual([["x", "B", "7,5", 3]]);
+  // An editable row keeps its controls: each number field binds the stored number, and a count keeps its minus, field, and plus.
+  const edit = rowOf((await built('app("T", lang="es")', 'need log = entries("Log", fields={what: "text", cost: "money", share: "percent", qty: "number", n: "count"}, edit=true)')).definition);
+  expect(every(edit).filter((node) => ["cost", "share", "qty", "n"].includes(node.bind)).map((node) => [node.bind, node.type])).toEqual([["cost", "numberInput"], ["share", "numberInput"], ["qty", "numberInput"], ["n", "numberInput"]]);
+  // Each printed number is one more field of a row, and a row of Alphy has at most 12 fields with the id (rows.js MAX_ROW_FIELDS).
+  // A row that its printed numbers would take past the limit keeps the raw numbers, so it compiles as before.
+  const numbers = (more) => `need log = entries("Log", fields={what: "text", p: "number", q: "money", r: "percent", s: "number", t: "money"${more}}, rows=[{what: "x", p: 1.5, q: 2, r: 3, s: 4, t: 5}])`;
+  const fits = await built('app("T", lang="es")', numbers(""));
+  expect(rowTexts(fits)).toEqual([["x", "1,5", "2", "3", "4", "5"]]);
+  // That row is at the limit of rows.js, so the limit of parts.js is the same.
+  const { MAX_ROW_FIELDS } = await import("../src/rows.js");
+  expect(Object.keys(fits.definition.stateSchema[every(fits.definition.ui).find((node) => node.rowTemplate).bind].fields)).toHaveLength(MAX_ROW_FIELDS);
+  expect(rowTexts(await built('app("T", lang="es")', numbers(', u: "number"')))).toEqual([["x", 1.5, 2, 3, 4, 5, 0]]);
+  // An icon= formula is a value that the run-time computes for each row too, so it counts.
+  expect(rowTexts(await built('app("T", lang="es")', numbers("").replace(", rows=", ', icon=$p > 1 ? "🙂" : "🙁", rows=')))).toEqual([["🙂", "x", 1.5, 2, 3, 4, 5]]);
+});
+
 test("entries: the row is a title with a muted second line, then the value cells, the check marks, and the remove button", async () => {
   const { definition } = await built('app("Spesa", lang="it")',
     'need items = entries("Prodotti", fields={name: "text", qty: "text", price: "money", aisle: ["Frutta", "Forno"], done: "check"}, labels={done: "Preso"})');
   expect(rowOf(definition)).toEqual({ type: "row", wrap: false, style: { crossAlign: "center" }, children: [
     { type: "column", style: { gap: "none" }, layout: { weight: 1 }, children: [{ type: "text", text: "", bind: "name" }, { type: "text", text: "", bind: "qty", style: muted }] },
     // A value that is not text, and a choice that the row does not change, is a small label in the group after the column (L2 decision 1).
-    { type: "flowRow", layout: { maxWidth: 120 }, children: [{ type: "text", text: "", bind: "price", style: cell }, { type: "text", text: "", bind: "aisle", style: cell }] },
+    { type: "flowRow", layout: { maxWidth: 120 }, children: [{ type: "text", text: "", bind: "items_price_text", style: cell }, { type: "text", text: "", bind: "aisle", style: cell }] },
     { type: "checkbox", text: "Preso", bind: "done", action: "items_done" },
     { type: "icon", name: "Trash", text: "Rimuovi", action: "items_remove" },
   ] });
@@ -278,7 +316,7 @@ test("entries (L1 item 1): a count in a row is one group of a minus, its number 
   const menu = await built('app("T", lang="en")', 'need drinks = entries("Menu", fields={drink: "text", price: "money", qty: "count"}, add=false, remove=false, rows=[{drink: "Tea", price: 2.5, qty: 0}])');
   const [top, counted] = rowOf(menu.definition).children;
   expect([rowOf(menu.definition).type, top.children[0].bind, top.children[1].children.map((node) => node.bind), counted.children.map((node) => node.type)])
-    .toEqual(["column", "drink", ["price"], ["icon", "numberInput", "icon"]]);
+    .toEqual(["column", "drink", ["drinks_price_text"], ["icon", "numberInput", "icon"]]);
 });
 
 test("entries (L1 item 1): in each model plan and saved plan, a text field of a row shares its line with no control, and no number field of a row has a stepper", async () => {
