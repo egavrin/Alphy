@@ -21,6 +21,10 @@ import java.io.File
  * with its first chat model. Each paid run writes `step-1.png` to `step-4.png`, `sheet.png`, `events.log`, `replay.json` (for a replay
  * at another size, ruling OD-D2 b), and `dialogue.json` to `live-check/<run id>/`, and merges the fields of `dialogue.json` into the
  * `report.json` of `liveCheck`. [DialogueStageRehearsalTest] runs the same driver with no cost.
+ *
+ * Lane V: `pendulum`, `volcano`, and `water` are adaptive dialogues on new subjects. They answer a question back with «Да» and a
+ * spoken failure with «Попробуй ещё раз», let the full generation run, and fail when a step fails [PASS_BAR]. The report holds the
+ * outcome and verdict of each step and the `coverage` of the elements of the owner's talk. `water` is the run at the fold size.
  */
 class LiveDialogueStageTest {
     @Test fun heart() = live("heart")
@@ -28,6 +32,12 @@ class LiveDialogueStageTest {
     @Test fun moon() = live("moon")
 
     @Test fun japanese() = live("japanese")
+
+    @Test fun pendulum() = live("pendulum")
+
+    @Test fun volcano() = live("volcano")
+
+    @Test fun water() = live("water")
 
     private fun live(name: String) {
         val runId = InstrumentationRegistry.getArguments().getString("liveRunId")
@@ -50,7 +60,8 @@ class LiveDialogueStageTest {
                 val transport = LiveTransport { url, key, listener -> check(key == MARKER); socket.connect(url, account.key, listener) }
                 try {
                     val report = DialogueRun(DIALOGUES.getValue(name), directory, "live", "dialogue.json").run(transport, chat, Endpoints.PRODUCTION)
-                    "${report.getJSONArray("steps").length()} steps, ${report.getInt("chatCalls")} chat calls, ${report.opt("voiceSeconds")} voice seconds"
+                    "${report.getJSONArray("steps").length()} steps, ${report.getInt("chatCalls")} chat calls, ${report.opt("voiceSeconds")} voice seconds" +
+                        (report.optJSONObject("coverage")?.let { ", coverage $it" } ?: "")
                 } finally {
                     val leaked = directory.listFiles().orEmpty().filter { it.isFile && it.extension in setOf("json", "log") }
                         .filter { account.key in it.readText() }.map { it.name }
