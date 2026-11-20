@@ -14,7 +14,8 @@ class WavFeederTest {
     @Test fun fixturesAre16kMonoPcm() {
         val assets = InstrumentationRegistry.getInstrumentation().context.assets
         for (name in listOf("explain-moon", "teach-japanese", "show-rainbow", "explain-atom", "teach-times-seven", "japanese-next",
-                "ask-largest-planet", "ask-photosynthesis", "ask-seven-times-eight", "ask-fall-asleep")) {
+                "ask-largest-planet", "ask-photosynthesis", "ask-seven-times-eight", "ask-fall-asleep",
+                "explain-heart", "heart-press", "heart-change", "moon-press", "moon-change", "japanese-press", "japanese-change")) {
             val samples = wavSamples(assets.open("voice/$name.wav").use { it.readBytes() })
             assertTrue("$name has ${samples.size} samples", samples.size >= LIVE_RATE)
         }
