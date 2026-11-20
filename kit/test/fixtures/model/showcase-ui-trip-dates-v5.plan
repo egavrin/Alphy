@@ -1,0 +1,4 @@
+app("Weekend trip", lang="en", preset="soft", palette="blue", kind="Trip planner")
+need start = input("date", "Start date", addDays(today(), (13 - weekday(today())) % 7), icon="Calendar")
+need end = input("date", "End date", addDays($/start, 1), icon="Calendar")
+need itinerary = entries("Itinerary timeline", fields={day: "date", time: "time", activity: "text"}, rows=[], labels={day: "Day", time: "Time", activity: "Activity"}, group=$day, sort=[$day, $time], sheet=true, icon="📍", icons={day: "Calendar", time: "Clock", activity: "Pencil"}, addText="Add activity", emptyText="No activities yet", countText="Activities")

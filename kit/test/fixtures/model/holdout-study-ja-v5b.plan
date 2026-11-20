@@ -1,0 +1,4 @@
+app("勉強時間", lang="ja", preset="clean", palette="blue", kind="トラッカー")
+need weekly = figure("number", "今週の合計", sum(filter($/study, days(addDays(today(), 1 - weekday(today())), $day) >= 0 && days(addDays(today(), 1 - weekday(today())), $day) < 7), $hours), example=[{study: [{subject: "数学", day: today(), hours: 1}, {subject: "英語", day: today(), hours: 2}]}, 3], decimals=1, icon="📚", unit="時間")
+need bySubject = content(join(map(groups(filter($/study, days(addDays(today(), 1 - weekday(today())), $day) >= 0 && days(addDays(today(), 1 - weekday(today())), $day) < 7), $subject, $hours), $key + ": " + text(round($value, 2)) + "時間"), " · "))
+need study = entries("勉強の記録", fields={subject: "text", day: "date", hours: "number"}, rows=[], labels={subject: "科目", day: "日付", hours: "時間"}, icon="📖", icons={subject: "Book", day: "Calendar", hours: "Clock"}, addText="記録する", emptyText="まだ記録がありません")

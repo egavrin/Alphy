@@ -206,7 +206,7 @@ class AppFileLookTest {
         val sandbox=SandboxClient(instrumentation.targetContext)
         val compiler=AppFileCompiler(instrumentation.targetContext,sandbox)
         val ids=modelPlans()
-        assertEquals(52,ids.size)
+        assertEquals(56,ids.size)
         // The index of the plans (kit/test/fixtures/model/index.json): the request of each plan is the request of its write.
         val requests=JSONObject(instrumentation.context.assets.open("appfile/model/index.json").use {it.readBytes().decodeToString()})
         val lines=ids.associateWith {mutableListOf<String>()}

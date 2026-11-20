@@ -1,5 +1,6 @@
 // The plans that a model wrote in the model check (test/fixtures/model): the final plan of each clean record of the runs
-// final-terra-low and fresh-terra-low. index.json holds the request and the run of each one. Each plan compiles with no fault.
+// final-terra-low and fresh-terra-low, and four first replies of v5-terra-low and v5b-terra-low under a key that names the run.
+// index.json holds the request and the run of each one. Each plan compiles with no fault.
 
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -17,7 +18,7 @@ const plans = plansIn(directory);
 test("model plans: the index holds each fixture of the sets C, D, and E with its request and run", () => {
   expect(plans.map((path) => basename(path, ".plan")).sort()).toEqual(Object.keys(index).sort());
   const sets = Object.values(index).map((entry) => entry.set);
-  expect(["C", "D", "E"].map((set) => sets.filter((one) => one === set).length)).toEqual([24, 8, 20]);
+  expect(["C", "D", "E"].map((set) => sets.filter((one) => one === set).length)).toEqual([28, 8, 20]);
   for (const [id, entry] of Object.entries(index)) {
     expect(Object.keys(entry), id).toEqual(["request", "dialogue", "set", "model", "effort", "prompt", "label"]);
     expect(entry.request.length, id).toBeGreaterThan(0);

@@ -1,0 +1,2 @@
+app("Today's top tasks", lang="en", preset="clean", palette="blue", kind="Task ranker")
+need tasks = entries("Top five tasks", fields={task: "text", priority: ["High", "Medium", "Low"]}, rows=[], labels={task: "Task", priority: "Priority"}, addText="Add task", emptyText="No tasks yet", icon="📋", icons={task: "Pencil"}, max=5, reorder=true, countText="Tasks")

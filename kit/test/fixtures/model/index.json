@@ -305,6 +305,15 @@
     "prompt": "c3d65bf76c7b",
     "label": "final-terra-low"
   },
+  "holdout-study-ja-v5b": {
+    "request": "勉強時間トラッカー：科目ごとに時間を記録して、今週の合計を見たい。",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "b16985b0dd19",
+    "label": "v5b-terra-low"
+  },
   "holdout-tip-ru": {
     "request": "Калькулятор чаевых: сумма счёта, процент чаевых и на сколько человек делим.",
     "dialogue": false,
@@ -331,6 +340,15 @@
     "effort": "low",
     "prompt": "c3d65bf76c7b",
     "label": "final-terra-low"
+  },
+  "showcase-lang-budget-es-v5b": {
+    "request": "Un control de gastos del mes por categorías con un gráfico de barras, y una pestaña para ver el resumen y otra para añadir gastos.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "b16985b0dd19",
+    "label": "v5b-terra-low"
   },
   "showcase-lang-habits-uk": {
     "request": "Трекер звичок на тиждень: три звички, відмітки по днях і серія днів поспіль для кожної.",
@@ -449,6 +467,15 @@
     "prompt": "c3d65bf76c7b",
     "label": "final-terra-low"
   },
+  "showcase-ui-priorities-v5": {
+    "request": "Rank my top five tasks for today by dragging them into order, and mark each one as high, medium or low priority.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "83037bb270d9",
+    "label": "v5-terra-low"
+  },
   "showcase-ui-steps-chart": {
     "request": "Schrittzähler-Tagebuch: ich trage die Schritte für jeden Tag der Woche ein und sehe ein Liniendiagramm und den Durchschnitt.",
     "dialogue": false,
@@ -466,5 +493,14 @@
     "effort": "low",
     "prompt": "c3d65bf76c7b",
     "label": "final-terra-low"
+  },
+  "showcase-ui-trip-dates-v5": {
+    "request": "Plan a weekend trip: pick the travel dates, add activities to each day, and see the whole itinerary as a timeline. Put the add form in a sheet.",
+    "dialogue": false,
+    "set": "C",
+    "model": "gpt-6.1-terra",
+    "effort": "low",
+    "prompt": "83037bb270d9",
+    "label": "v5-terra-low"
   }
 }
