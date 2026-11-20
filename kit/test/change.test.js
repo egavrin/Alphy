@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BLOCKS, MISMATCH, isRecord } from "../src/change.js";
-import { compileAppFile } from "../src/compile.js";
+import { compileAppFile, patchAppFile } from "../src/compile.js";
 import { handle } from "../src/run.js";
 import { plansIn } from "../build.js";
 import { T0, fixture, gateEach, plan, valueAt } from "./helpers.js";
@@ -654,4 +654,20 @@ for (const path of plansIn(models)) test(`change (rule 3b): ${basename(path)} wi
   const result = await compileAppFile(more, { appFile: text, stateSchema: definition.stateSchema, state: definition.initialState });
   expect(result.faults).toEqual([]);
   expect(values(result.state)).toEqual(values(changedStart.definition.initialState));
+});
+
+test("change (FX-11): a button that turns a value that a drawing shows a full turn passes the smoke run, and a turn that no part shows or no motion stays a fault", async () => {
+  // The owner's change of the voice dialogue (dlg1 T2) follows the example of the prompt: [set($/angle, 0), animate($/angle, 360, ...)] from 0, so the end looks as the start.
+  const sky = 'app("Orbits", lang="en")\nneed note = content("Two planets on their orbits.")\n';
+  const changeOf = (shapes, actions) => `$/angle = 0\nneed sky = drawing("Two planets", 200, 200, [circle(100, 100, 12, "sun")${shapes}])\nneed spin = button("Spin", [${actions}], icon="Play")\n`;
+  const changed = async (reply) => (await compileAppFile(patchAppFile(sky, reply), await stored(sky))).faults;
+  const turn = "set($/angle, 0), animate($/angle, 360, 10000)";
+  // The planets turn 4 and 2 times as fast as $/angle, so a look at a quarter or a half of the time sees the start too.
+  const planets = ', circle(100 + 50 * cos($/angle * 4), 100 - 50 * sin($/angle * 4), 4, "water"), circle(100 + 80 * cos($/angle * 2), 100 - 80 * sin($/angle * 2), 6, "sand")';
+  expect(await changed(changeOf(planets + ', circle(100 + 95 * cos($/angle), 100 - 95 * sin($/angle), 5, "accent")', turn))).toEqual([]);
+  expect(await changed(changeOf(planets, turn))).toEqual([]);
+  // A drawing that does not read $/angle shows no part of the turn.
+  expect(await changed(changeOf(', circle(100, 100, 80, "ink", stroke=true)', turn))).toEqual(['smoke run: the Button "Spin" of need spin changes a value, and no part of the screen shows it']);
+  // An animate to the value that it has starts no motion, so the button does nothing.
+  expect(await changed(changeOf(planets, "set($/angle, 0), animate($/angle, 0, 10000)"))).toEqual(['smoke run: the Button "Spin" of need spin never changes a value: its action does nothing']);
 });

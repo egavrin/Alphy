@@ -1941,6 +1941,17 @@ function smokeRun(file, limit, clock) {
     }
     return later;
   };
+  /** True when the screen differs from seen while the timed changes that a press started move. A full turn ends where it started (FX-11). */
+  const moves = (pressed, seen) => {
+    const ended = save();
+    restore(pressed);
+    // A share of the time that is no simple fraction: a shape that turns 2, 3, or 4 times as fast as the value is not at a whole turn there.
+    clock.now = Math.min(...app.state._run.map((run) => run.start + (run.end - run.start) * 0.37));
+    app.tick();
+    const shown = look(screen()) !== seen;
+    restore(ended);
+    return shown;
+  };
   // Each control is used from the state in which it came to the screen. So one control cannot hide or delete what the next one needs.
   const queue = [start];
   const drain = () => {
@@ -1994,7 +2005,8 @@ function smokeRun(file, limit, clock) {
           if (error) { faults.push("smoke run: " + head(error)); continue; }
         }
         // A timed change shows only when time passes. The run moves its clock to the end of each one before it looks at the screen.
-        if (app.state._run) { wait(); app.tick(); }
+        const pressed = app.state._run && save();
+        if (pressed) { wait(); app.tick(); }
         const after = controls(), late = [...new Set(app.faults.map(faultOf))].filter((text) => !known.has(text));
         if (late.length) { faults.push(`smoke run: after ${title}, ${late.join("; ")}`); continue; }
         const broken = Object.keys(app.state).filter((name) => !finite(app.state[name]));
@@ -2014,7 +2026,7 @@ function smokeRun(file, limit, clock) {
         const was = JSON.parse(base.text);
         trace.push(`${p.bind ? "set" : "tap"} ${node.name ?? title}: ` + Object.keys({ ...was, ...app.state }).filter((name) => JSON.stringify(was[name]) !== JSON.stringify(app.state[name]))
           .map((name) => `${name} ${short(was[name])} -> ${short(app.state[name])}`).join(", "));
-        if (look(screen()) === seen) faults.push([title, "changes a value, and no part of the screen shows it"]);
+        if (look(screen()) === seen) { if (!pressed || !moves(pressed, seen)) faults.push([title, "changes a value, and no part of the screen shows it"]); }
         else if (onOff(node) && look({ ...(after.find((control) => control.key === key)?.node ?? {}), children: [] }) === own) {
           // One on-off button can show its effect in a different part of the screen. A group of them cannot: the person must see which ones are on.
           const finding = [title, "turns a value on and off, and looks the same in both states. Give it selected=test"];
