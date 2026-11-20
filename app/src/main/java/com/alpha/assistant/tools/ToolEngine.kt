@@ -926,6 +926,9 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             if (it.savedDataFault) throw savedDataBlocks()
         }
 
+    // Deliberate second path from a compile to a spec: the repairs of AppAgent.validate fix the shapes that a model writes, and the kit emits the strict form.
+    // The checks of validate accept a new app from a model, and a restore or a manual edit has no model that can repair. AppFileChangeWorkflowTest ties the
+    // two paths: aRestoreOfAnOlderPlanKeepsTheRowsOfThePerson and aManualEditOfTheAppFileThatAddsANeedKeepsTheStoredValues give the spec of the change step.
     /** The spec of the clean plan [appFile] and the next state that the kit computed. Each other compile is a failure with no change. */
     private fun kitRevision(compiled: AppFileCompilation, old: ToolRecord, stored: ToolSpec, appFile: String): Pair<ToolSpec, String> {
         // A hole is a part that the kit does not have: the plan step never saves one, and each later change by lines refuses it.
