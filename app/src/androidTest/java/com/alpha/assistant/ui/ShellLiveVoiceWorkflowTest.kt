@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.SystemClock
 import android.provider.AlarmClock
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.lifecycle.viewModelScope
@@ -386,6 +387,12 @@ class ShellLiveVoiceWorkflowTest {
         assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE), provider.script.calls.map { it.generationStage })
     }
 
+    /** Plan D, Db4, ruling OD-4: with a screen on the stage, a spoken press starts no early plan and makes no plan call. */
+    @Test fun aPressDoesNotUseTheEarlyPlan() = afterAScreen(PRESS_REQUEST, Scripted.Text(CALC_CHANGE)) { _, provider, phases ->
+        assertTrue(phases.isEmpty())
+        assertEquals(listOf(CloudGenerationStage.APP_FILE), provider.script.calls.map { it.generationStage })
+    }
+
     /** Plan D, Db4, ruling OD-4: with a screen on the stage, a new screen starts no early plan. Its own plan call has the brief and the dialogue text. */
     @Test fun noEarlyPlanWhileAScreenShows() = afterAScreen(SCREEN_REQUEST, Scripted.Text(appFilePlan("calc"))) { model, provider, phases ->
         assertTrue(phases.isEmpty())
@@ -577,6 +584,115 @@ class ShellLiveVoiceWorkflowTest {
             assertNull(routing.shownScreen)
         }
     }
+
+    /** Plan D, Dc2: a spoken change edits the stage app by lines. The voice speaks only when the changed screen is there. */
+    @Test fun aSpokenChangeChangesTheShownScreen() {
+        val changes = CompletableDeferred<Unit>()
+        val provider = StageProvider(changes = changes,
+            script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("lesson")), Scripted.Text(LESSON_CHANGE))))
+        onStage(provider = provider) { _, model, app ->
+            val before = messages(model).size
+            socket.say(CHANGE_REQUEST, "d2", 2_000)
+            robot.waitUntil(60_000) { provider.calls.any { it.first.generationStage == CloudGenerationStage.APP_FILE_CHANGE } }
+            robot.awaitFrames(5)
+            assertTrue(commentary().none { it.first == "d2" })
+            changes.complete(Unit)
+            waitForTheAnswer(model, before)
+            robot.waitUntil { "d2" to CHANGED in commentary() }
+            assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE), provider.script.calls.map { it.generationStage })
+            assertEquals(listOf(app, 2), messages(model).last().let { listOf(it.toolId, it.toolRevision) })
+            // The controller reads its list again after the commit, and the stage shows the new revision from that list.
+            robot.waitUntil { stored(model, app).revision == 2 }
+            assertTrue("Медленный круг" in stored(model, app).ui)
+            assertEquals(app, model.stageToolId)
+            robot.awaitFrames(5)
+            assertEquals(listOf("d2" to CHANGED), commentary().filter { it.first == "d2" })
+        }
+    }
+
+    /** Plan D, Dc2: when the change and the new screen both give no app, the voice says so once, and the stage keeps the old app. */
+    @Test fun aChangeAndItsNewScreenBothFail() =
+        failedChange(Scripted.Text(appFilePlan("calc").replace("/ \$/people, example", "/ , example")), CHANGE_FAILED) { model, app, script ->
+            // The change, its repair, the plan of the new screen, and its repair.
+            assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE) + List(3) { CloudGenerationStage.APP_FILE },
+                script.calls.map { it.generationStage })
+            assertEquals(listOf(app), model.tools.tools.map { it.id })
+            assertEquals(listOf("complete", CHANGE_FAILED, null), messages(model).last().let { listOf(it.status, it.text, it.toolId) })
+            assertEquals(app, model.stageToolId)
+        }
+
+    /** Plan D, Dc2, review focus 5: a change by lines keeps the value that the person set on the slider of the stage app. */
+    @Test fun aChangeKeepsTheSliderValue() {
+        val provider = StageProvider(script = AgentScriptProvider(listOf(Scripted.Text(VOLUME), Scripted.Text(VOLUME_HALF))))
+        onStage(provider = provider) { scenario, model, app ->
+            // The progress action of the slider on the stage, not of its card in the chat below, goes through its live input as a drag does.
+            // A share of 0.75 is exact in a float, so the value is 60 and not a number near it. An action before the live input of the
+            // stage is ready changes nothing, so the action repeats until the label shows the value.
+            robot.waitUntil {
+                robot.composedIn(scenario, STAGE) { config ->
+                    config.getOrNull(SemanticsProperties.ContentDescription)?.contains(VOLUME_LABEL) == true &&
+                        config.getOrNull(SemanticsActions.SetProgress)?.action?.invoke(0.75f) == true
+                }
+                inStage(scenario, "$VOLUME_LABEL: 60")
+            }
+            robot.waitUntil(30_000) { JSONObject(stored(model, app).state).optInt("level") == 60 }
+            val before = messages(model).size
+            socket.say(CHANGE_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            robot.waitUntil { stored(model, app).revision == 2 }
+            val changed = stored(model, app)
+            assertEquals(60, JSONObject(changed.state).getInt("level"))
+            assertEquals("30", JSONObject(changed.state).getJSONObject("d").getString("half_text"))
+        }
+    }
+
+    /** Plan D, Dc2, review focus 5: a change that the kit cannot make becomes a new screen. The old app stays as it was in the store. */
+    @Test fun aFailedChangeBuildsANewScreenAndKeepsTheOld() = failedChange(Scripted.Text(appFilePlan("lesson")), CHANGED) { model, app, script ->
+        val fresh = checkNotNull(messages(model).last().toolId)
+        assertNotEquals(app, fresh)
+        robot.waitUntil { model.stageToolId == fresh }
+        assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE, CloudGenerationStage.APP_FILE,
+            CloudGenerationStage.APP_FILE), script.calls.map { it.generationStage })
+        // Ruling OD-5: the new screen gets the plan prompt of a screen, with the dialogue text.
+        val dialogue = AppFilePrompt.load(fixture.context).dialogue
+        assertTrue(script.calls.last().turns.single().text.startsWith("User request: $CHANGE_REQUEST\n$dialogue\nWidget brief: $HALF_BRIEF"))
+    }
+
+    /**
+     * Plan D, Dc2, review focus 3: a spoken change edits the stage app only. A later app of the same chat that is not on the stage
+     * stays the same. With two apps in the chat, the typed refine path has no target and asks which app to change.
+     */
+    @Test fun aChangeTargetsOnlyTheStageScreen() {
+        val calc = Scripted.Text(appFilePlan("calc"))
+        val provider = StageProvider(script = AgentScriptProvider(listOf(calc, calc, Scripted.Text(CALC_CHANGE))))
+        onStage(provider = provider) { scenario, model, app ->
+            var before = messages(model).size
+            scenario.onActivity { model.submitDraft(Draft(APP_REQUEST), search = false) }
+            waitForTheAnswer(model, before)
+            val other = checkNotNull(messages(model).last().toolId)
+            robot.waitUntil { model.tools.tools.any { it.id == other } }
+            assertEquals(app, model.stageToolId)
+            val record = stored(model, other)
+            before = messages(model).size
+            socket.say(CHANGE_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            assertEquals(listOf(app, 2), messages(model).last().let { listOf(it.toolId, it.toolRevision) })
+            robot.waitUntil { stored(model, app).revision == 2 }
+            assertEquals(listOf(record.revision, record.state), stored(model, other).let { listOf(it.revision, it.state) })
+            assertEquals(app, model.stageToolId)
+        }
+    }
+
+    /** Plan D, Dc2: a new topic while a screen shows makes a new screen, and the stage shows it. */
+    @Test fun aNewTopicMakesANewScreen() =
+        onStage(script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc")), Scripted.Text(appFilePlan("lesson"))))) { _, model, app ->
+            val before = messages(model).size
+            socket.say(SCREEN_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            val fresh = checkNotNull(messages(model).last().toolId)
+            assertNotEquals(app, fresh)
+            robot.waitUntil { model.stageToolId == fresh }
+        }
 
     /** Plan D, Da1: the app of the stage is a stored app of the chat, so the chat shows it after the end. */
     @Test fun theStageScreenIsInTheChatAfterTheEnd() = onStage { scenario, model, app ->
@@ -1131,6 +1247,25 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
+    /**
+     * The calc app is on the stage, and the change of [CHANGE_REQUEST] and its repair give a line with a fault. [next] is the reply of each
+     * plan call of the new screen. The stored calc app stays as it was, the voice says only [line], and [check] runs before that last check.
+     */
+    private fun failedChange(next: Scripted, line: String, check: (ShellViewModel, String, AgentScriptProvider) -> Unit) {
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc")), Scripted.Text(BROKEN_CHANGE), Scripted.Text(BROKEN_CHANGE), next))
+        onStage(script = script) { _, model, app ->
+            val record = stored(model, app)
+            val before = messages(model).size
+            socket.say(CHANGE_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            robot.waitUntil { "d2" to line in commentary() }
+            check(model, app, script)
+            assertEquals(listOf(record.revision, record.state), stored(model, app).let { listOf(it.revision, it.state) })
+            robot.awaitFrames(5)
+            assertEquals(listOf("d2" to line), commentary().filter { it.first == "d2" })
+        }
+    }
+
     /** The library record of [app]. */
     private fun stored(model: ShellViewModel, app: String) = model.tools.tools.first { it.id == app }
 
@@ -1216,13 +1351,15 @@ class ShellLiveVoiceWorkflowTest {
     /**
      * Each call goes to [calls] with its session. The routing call waits for [routing], then creates an app for [APP_REQUEST], changes it
      * for [CHANGE_REQUEST], gives a screen with [show] and [brief] for [SCREEN_REQUEST], presses the control [press] for [PRESS_REQUEST],
-     * and answers each other request. A plan call waits for [plans] and answers from [script] (the app file [plan]). The early plan call
-     * of a request that gets no screen waits for its cancel, so it takes no reply of [script] and no test depends on when the cancel comes.
+     * and answers each other request. A plan call waits for [plans] and a change call for [changes], and both answer from [script] (the
+     * app file [plan]). The early plan call of a request that gets no screen waits for its cancel, so it takes no reply of [script] and
+     * no test depends on when the cancel comes.
      */
     private class StageProvider(plan: String = "calc", val plans: CompletableDeferred<Unit> = CompletableDeferred(Unit),
         private val show: Boolean = false, private val brief: String = SCREEN_BRIEF,
         val script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan)))),
-        val routing: CompletableDeferred<Unit> = CompletableDeferred(Unit), private val press: String = NEXT) : ChatProvider {
+        val routing: CompletableDeferred<Unit> = CompletableDeferred(Unit), private val press: String = NEXT,
+        private val changes: CompletableDeferred<Unit> = CompletableDeferred(Unit)) : ChatProvider {
         val calls = CopyOnWriteArrayList<Pair<CloudRequest, CloudSession>>()
         val planCalls get() = calls.filter { it.first.generationStage != null }
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -1231,12 +1368,13 @@ class ShellLiveVoiceWorkflowTest {
                 val input = request.turns.last().text
                 if (EARLY_BRIEF in input && SCREEN_REQUEST !in input) awaitCancellation()
                 plans.await()
+                if (request.generationStage == CloudGenerationStage.APP_FILE_CHANGE) changes.await()
                 return script.respond(key, request, session, emit)
             }
             routing.await()
             emit(CloudEvent.RoundComplete(when (request.decisionContext?.originalUserTurn?.text) {
                 APP_REQUEST -> chatDecision("create", "Готово.", "Make the app")
-                CHANGE_REQUEST -> chatDecision("refine", "Готово.", "Add half of the bill")
+                CHANGE_REQUEST -> chatDecision("refine", "Готово.", HALF_BRIEF)
                 SCREEN_REQUEST -> JSONObject(chatDecision("screen", SCREEN_TEXT, brief)).put("show", show).toString()
                 PRESS_REQUEST -> chatDecision("press", PRESS_TEXT, press)
                 else -> chatDecision("answer", "Fixture response")
@@ -1296,6 +1434,18 @@ class ShellLiveVoiceWorkflowTest {
         const val SCREEN_FAILED = "Картинку показать не получилось."
         const val TIMER_REQUEST = "Поставь таймер на 10 минут"
         const val CHANGE_REQUEST = "Покажи ещё половину счёта"
+        const val HALF_BRIEF = "Add half of the bill"
+        /** The spoken line of a changed or new screen of [CHANGE_REQUEST], and of a change that gave no screen. */
+        const val CHANGED = "Ответ Alphy: Готово."
+        const val CHANGE_FAILED = "Изменить экран не получилось."
+        /** A change line of the calc plan with a fault: the division has no right side. */
+        const val BROKEN_CHANGE = "need half = figure(\"money\", \"Half bill\", \$/bill / , example=[{bill: 80}, 40])"
+        /** A change line of the lesson plan: the lap button gets a new label and a slower lap. */
+        const val LESSON_CHANGE = """need lap = button("Медленный круг", [set(${'$'}/angle, 0), animate(${'$'}/angle, 360, 10000)])"""
+        /** A slider plan and a change line that adds a figure from the slider value. */
+        const val VOLUME_LABEL = "Громкость"
+        const val VOLUME = "app(\"Звук\", lang=\"ru\")\nneed level = input(\"slider\", \"Громкость\", 50, min=0, max=80)\n"
+        const val VOLUME_HALF = "need half = figure(\"count\", \"Половина\", \$/level / 2, example=[{level: 60}, 30])"
         /** A spoken press of the shown screen, the routing text of the press, and the next button of the lesson app. */
         const val PRESS_REQUEST = "Покажи следующий шаг"
         const val PRESS_TEXT = "Метка всё время смотрит на Землю."

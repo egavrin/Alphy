@@ -59,6 +59,8 @@ internal class LiveVoiceBridge(
     private val done = HashSet<String>()
     /** The assistant message id of each running screen of a hand-off to its show flag (plan D, Db2). */
     private val screens = HashMap<String, Boolean>()
+    /** The assistant message id of each running change of the stage app by a hand-off (plan D, Dc2). */
+    private val changes = HashSet<String>()
     /** The assistant message of the latest hand-off or typed turn (spec 5.2.3). */
     var cardId by mutableStateOf<String?>(null); private set
     /** The app of the latest tracked message that made or changed one, for the stage (plan D, Da1). The end of the mode clears it. */
@@ -120,6 +122,12 @@ internal class LiveVoiceBridge(
         screens[messageId] = show
         session.commentary(delegation, spoken(ANSWER, answer))
     }
+
+    /**
+     * The change of the stage app by the hand-off of [messageId] starts: the voice says nothing while it runs, the answer when the changed
+     * or the new screen is there, and [CHANGE_FAILED] when neither came. A message of no hand-off gets nothing.
+     */
+    fun changeStarted(messageId: String) { if (messageId in handOffs.values) changes += messageId }
 
     /** The capture of the press for the first request, spoken or typed. Later requests get null (spec 5.11.4). */
     fun takeFirstCapture(): AssistCapture? = capture?.takeIf { it.id == assistantInvocation }.also { capture = null }
@@ -190,6 +198,15 @@ internal class LiveVoiceBridge(
                 val show = screens.remove(id) == true
                 if (message.status == "complete") {
                     if (show && message.toolId == null) session.commentary(delegation, SCREEN_FAILED)
+                    continue
+                }
+            }
+            // The words of a change never come before its screen. A stop or a failure still goes on to the failure text.
+            if (id in changes) {
+                if (message.status == "generating") continue
+                changes -= id
+                if (message.status == "complete") {
+                    session.commentary(delegation, if (message.toolId != null) spoken(ANSWER, message.text) else CHANGE_FAILED)
                     continue
                 }
             }
@@ -285,6 +302,7 @@ internal class LiveVoiceBridge(
         const val SCREEN_FAILED = "Картинку показать не получилось."
         /** A spoken press named no single control of the shown screen, so nothing ran. */
         const val PRESS_MISSING = "На экране нет такой кнопки."
+        const val CHANGE_FAILED = "Изменить экран не получилось."
         const val FAILED = "Alphy не смог выполнить запрос: "
         const val ON_SCREEN = "Нужно подтверждение на экране."
         const val PROPOSE = "Alphy предлагает: "

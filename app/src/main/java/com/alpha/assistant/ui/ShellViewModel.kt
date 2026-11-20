@@ -1647,7 +1647,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 }
                 val toolStorageWarning = getApplication<Application>().getString(R.string.tool_storage_request_unavailable)
                 val choices = knownTools.orEmpty().map(::choice)
-                val targetId = assistant.hostTargetId ?: choices.singleOrNull()?.toolId
+                // A spoken change edits the app that the stage shows, not the single app of the chat (plan D, Dc2, review focus 3).
+                val stageTarget = next.voiceTarget?.takeIf { id -> !assistant.requiresRefinement && choices.any { it.toolId == id } }
+                val targetId = stageTarget ?: assistant.hostTargetId ?: choices.singleOrNull()?.toolId
                 val target = knownTools?.find { it.id == targetId }
                 if(assistant.requiresRefinement) {
                     if(knownTools == null) throw CloudFailure("tool_storage", toolStorageWarning)
@@ -2002,19 +2004,23 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         }
                     }
                 } else {
+                    val changed = target.takeIf { decoded.kind == "refine" }
+                    // A spoken change of the stage app is a change by lines only when the kit made that app (plan D, Dc2).
+                    val screenChange = changed != null && changed.id == stageTarget && tools.planStep() != null &&
+                        ToolSpec.availablePersisted(changed)?.appFile != null
+                    val bridge = liveBridge?.takeIf { liveVoice.active }
                     // The voice says the answer of a screen now: the screen comes later, or not at all (plan D, Db2).
-                    if (decoded.isScreen) liveBridge?.takeIf { liveVoice.active }?.screenStarted(assistant.id, decoded.text, decoded.show)
-                    try {
-                        val host = if (decoded.isScreen) withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue else ""
-                        val prompt = try {
-                            ChatToolReply.generationPrompt(user.text,decoded.brief,decoded.text,sources,selectedText,host)
-                        } catch (failure: CloudFailure) {
-                            // The routing check of the brief does not count the dialogue text, so this is no error of the person.
-                            throw if (decoded.isScreen && failure.code == "widget_size") ScreenFallback(AppFileNames.PROMPT_SIZE) else failure
-                        }
-                        // Only a screen with no search keeps it. It stays on the request, so a stop or the end can still cancel it.
-                        val early = request.earlyPlan?.use()
-                        tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
+                    if (decoded.isScreen) bridge?.screenStarted(assistant.id, decoded.text, decoded.show)
+                    if (screenChange) bridge?.changeStarted(assistant.id)
+                    suspend fun dialogue() = withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue
+                    fun prompt(host: String) = try {
+                        ChatToolReply.generationPrompt(user.text,decoded.brief,decoded.text,sources,selectedText,host)
+                    } catch (failure: CloudFailure) {
+                        // The routing check of the brief does not count the dialogue text, so this is no error of the person.
+                        throw if (host.isNotEmpty() && failure.code == "widget_size") ScreenFallback(AppFileNames.PROMPT_SIZE) else failure
+                    }
+                    suspend fun generate(prompt: String, base: ToolRecord?, screen: ScreenRun?) =
+                        tools.generateAutomatic(prompt,base,conversationId,operationId,key,images,request.session,
                             cancelRequest = ::cancelRequest, sceneAttachments = sceneAttachments,
                             prepared = { prepareToolOperation() },
                             onPublicUpdate = { note -> if (canCommit()) publicGenerationUpdate = note },
@@ -2022,10 +2028,19 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                             committed = { tool -> updateMessage(request,assistant.id) {
                                 it.copy(text = decoded.text,status = "complete",toolId = tool.id,toolRevision = tool.revision,
                                     provenance = replyProvenance)
-                            } }, screen = ScreenRun(early).takeIf { decoded.isScreen })
+                            } }, screen = screen)
+                    try {
+                        val input = prompt(if (decoded.isScreen) dialogue() else "")
+                        // Only a screen with no search keeps it. It stays on the request, so a stop or the end can still cancel it.
+                        val early = request.earlyPlan?.use()
+                        generate(input, changed, if (decoded.isScreen) ScreenRun(early) else ScreenRun().takeIf { screenChange })
                     } catch (_: ScreenFallback) {
+                        // A change that the kit cannot make becomes a new screen with the plan prompt of a screen, and the old app stays (ruling OD-5).
+                        val built = screenChange && try { generate(prompt(dialogue()), null, ScreenRun()); true } catch (_: ScreenFallback) { false }
                         // The answer is complete without its screen, so the stage stays as it was and no error shows.
-                        updateMessage(request, assistant.id) { it.copy(text = decoded.text, status = "complete", provenance = replyProvenance) }
+                        if (!built) updateMessage(request, assistant.id) {
+                            it.copy(text = if (screenChange) LiveVoiceBridge.CHANGE_FAILED else decoded.text, status = "complete", provenance = replyProvenance)
+                        }
                     }
                 }
                 if (isActive(request) && voiceBelongsTo(null)) {
