@@ -6,7 +6,7 @@ import { ICON_NAMES } from "../src/core.js";
 import { HOST_ICONS } from "../src/icons.js";
 import { PROMPT as SECTIONS, changeText, repairText } from "../prompt.js";
 import { promptAsset } from "../build.js";
-import { faultsOf } from "./helpers.js";
+import { every, faultsOf, valueAt } from "./helpers.js";
 
 const SYSTEM = SECTIONS.System;
 /** Each kind of the list "Kinds." as [kind, its paragraph]: the line need NAME = kind(...) and the lines under it. */
@@ -75,6 +75,37 @@ test("prompt (P3): the entries paragraph names the count of check fields that pu
   const circles = async (count) => JSON.stringify((await compileAppFile(['app("T", lang="en")', `need days = entries("Days", fields={name: "text", ${["a", "b", "c"].slice(0, count).map((field) => `${field}: "check"`).join(", ")}})`].join("\n"))).definition).includes('"variant":"circle"');
   expect([await circles(2), await circles(3)]).toEqual([false, true]);
   expect(await faultsOf('need by = input("choice", "Order by", "aisle", options=["aisle", "name"])', `need items = entries("Items", fields={name: "text", aisle: "text"}, ${sortBy})`)).toEqual([]);
+});
+
+test("prompt (P4): the section System says what a request implies, and each form that it names compiles and gives what it says", async () => {
+  const { compileAppFile } = await import("../src/compile.js"), { settings } = await import("../src/core.js");
+  const entries = KINDS.find(([kind]) => kind === "entries")[1];
+  for (const part of ["Plan what the request asks for, and nothing more", "What a request implies is a part of what it asks for.", 'such as "top five" or "up to three", is max= of the entries',
+    "The first screen of an app must not be empty"]) expect([part, SYSTEM.includes(part)]).toEqual([part, true]);
+  expect(optionsIn(entries)).toContain("max");
+  const shown = (result, name) => {
+    expect(result.faults).toEqual([]);
+    return valueAt(result.definition.initialState, every(result.definition.ui).find((node) => node.bind?.includes(name) || node.text === name)?.bind);
+  };
+  // The total of a budget is the main figure, the sum of each group is one line of text in the form of the prompt, and the first tab holds the chart with the total.
+  const line = /content\(join\(map\(groups\(.*?\), ", "\)\)/.exec(SYSTEM)[0];
+  const budget = await compileAppFile(['app("Costs", lang="en")', 'need total = figure("money", "This month", sum($/costs, $amount), example=[{costs: [{amount: 1}, {amount: 2}]}, 3])',
+    'need chart = chart("By category", groups($/costs, $category, $amount), $key, $value)', `need byCategory = ${line}`,
+    'need costs = entries("Costs", fields={category: ["Food", "Home"], amount: "money"}, rows=[{category: "Food", amount: 1.1}, {category: "Food", amount: 2.2}, {category: "Home", amount: 5}])',
+    'need pages = tabs(["Summary", "Add"], [[total, chart, byCategory], [costs]])'].join("\n"));
+  expect(shown(budget, "byCategory")).toBe("Food: 3.3, Home: 5");
+  expect(every(budget.definition.ui).find((node) => node.children?.some((child) => child.type === "chart")).children.map((node) => [node.type, node.variant])).toEqual([["card", "hero"], ["chart", undefined], ["text", undefined]]);
+  // A number that limits a list: the hero count shows the rows against max=.
+  expect(shown(await compileAppFile('app("Top", lang="en")\nneed tasks = entries("Top five", fields={task: "text"}, reorder=true, max=5, countText="Ranked")'), "Ranked")).toBe("0 / 5");
+  // A weekend starts on the coming Saturday, and the end of a range one day later, on each day of a week.
+  const saturday = /addDays\(today\(\), \(13 - weekday\(today\(\)\)\) % 7\)/.exec(SYSTEM)[0], end = /addDays\(\$\/start, 1\)/.exec(SYSTEM)[0], now = settings.now;
+  try {
+    for (const [today, start, last] of [["2026-11-16", "2026-11-21", "2026-11-22"], ["2026-11-20", "2026-11-21", "2026-11-22"], ["2026-11-21", "2026-11-21", "2026-11-22"], ["2026-11-22", "2026-11-28", "2026-11-29"]]) {
+      settings.now = () => Date.parse(`${today}T12:00:00`);
+      const trip = await compileAppFile(['app("Trip", lang="en")', `need start = input("date", "From", ${saturday})`, `need end = input("date", "To", ${end})`].join("\n"));
+      expect([today, trip.faults, trip.definition.initialState.start, trip.definition.initialState.end]).toEqual([today, [], start, last]);
+    }
+  } finally { settings.now = now; }
 });
 
 test("prompt: each kind that the prompt names is a part of the kit", async () => {
