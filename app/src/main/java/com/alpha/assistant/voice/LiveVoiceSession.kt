@@ -70,6 +70,8 @@ internal class LiveVoiceSession(
     var userSpeaking by mutableStateOf(false); private set
     /** The microphone button state (spec 5.2.5). An away mute does not change it. */
     var userMuted by mutableStateOf(false); private set
+    /** The output transcript of the current or the last reply (plan D, Da3). The end of the mode clears it. */
+    var speech by mutableStateOf(""); private set
 
     private var generation = 0
     private var host: LiveVoiceHost? = null
@@ -85,6 +87,8 @@ internal class LiveVoiceSession(
     private var dropping = false
     /** A barge-in emptied the playback, so the next user turn still started over Alphy's voice. */
     private var interrupted = false
+    /** The next output transcript delta starts [speech] again. */
+    private var replyEnded = true
     /**
      * The silent output chunks after the last voiced chunk of the open reply. They play only if a voiced chunk of the reply follows
      * while the device still plays (ruling R26).
@@ -176,6 +180,7 @@ internal class LiveVoiceSession(
         if (!active) return
         generation++
         active = false; started = false; this.status = status; this.settingsRequired = settingsRequired; userSpeaking = false; level = 0f; waiting = null; tolerated.clear()
+        speech = ""
         // An open reply of this session must not count as open in the next one.
         replyJob?.cancel(); held.clear()
         playback++
@@ -218,7 +223,11 @@ internal class LiveVoiceSession(
                 gapJob?.cancel()
                 gapJob = after(timing.turnGapMs) { turn(transcript.endTurn()) }
             }
-            is LiveEvent.OutputTranscript -> turn(transcript.output(event.delta, event.startMs, event.endMs))
+            is LiveEvent.OutputTranscript -> {
+                // An empty delta must not empty the line, or the strip would lose its place.
+                if (event.delta.isNotEmpty()) { speech = if (replyEnded) event.delta else speech + event.delta; replyEnded = false }
+                turn(transcript.output(event.delta, event.startMs, event.endMs))
+            }
             is LiveEvent.Delegation -> delegation(event)
             is LiveEvent.Appended -> host?.appended(event.clientEventId)
             is LiveEvent.Closed -> end(string(when (event.reason) {
@@ -302,6 +311,7 @@ internal class LiveVoiceSession(
     private fun endReply() {
         replyJob?.cancel(); replyJob = null
         held.clear()
+        replyEnded = true
         host?.outputEnded(transcript.outputEndMs)
         heardMs = SystemClock.uptimeMillis()
         countSilence()

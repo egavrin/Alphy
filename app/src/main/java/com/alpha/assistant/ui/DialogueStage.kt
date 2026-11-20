@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
@@ -23,10 +25,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -44,6 +49,7 @@ import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.three.ThreeScenePane
 import com.alpha.assistant.voice.LivePhase
+import com.alpha.assistant.voice.LiveVoiceSession
 
 /**
  * A card of the voice mode that the stage shows: a card that waits for a tap (an error or an unsent request with its retry, or the
@@ -129,9 +135,23 @@ private val STAGE_TEXT_HEIGHT = 256.dp
     }
 }
 
+/** The top of a text that fits its place, and the end of a longer text, so the newest words stay in view. */
+private val EndInView = Alignment.Vertical { size, space -> minOf(0, space - size) }
+
+/** The words that the voice speaks now (plan D, Da3). A screen reader skips them, because the voice speaks them. */
+@Composable private fun SpeechLine(voice: LiveVoiceSession) {
+    if (voice.speech.isEmpty()) return
+    val style = MaterialTheme.typography.bodyMedium
+    // A fixed place of two lines: the stage does not move with each word, and one line showed one word after each wrap.
+    Text(voice.speech.trim(), Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 6.dp)
+        .height(with(LocalDensity.current) { style.lineHeight.toDp() } * 2).clipToBounds()
+        .wrapContentHeight(EndInView, unbounded = true).testTag("live_voice_speech").semantics { hideFromAccessibility() },
+        color = MaterialTheme.colorScheme.onSurface, style = style)
+}
+
 /**
- * The strip of the voice mode (plan D, Da1): the status with the microphone state, then the composer row with «+», the field, send, mute,
- * and end (spec 5.7.1). [compact] makes the composer one row for the assistant sheet (spec 5.11.3).
+ * The strip of the voice mode (plan D, Da1): the status with the microphone state, the words of the voice (Da3), then the composer row
+ * with «+», the field, send, mute, and end (spec 5.7.1). [compact] makes the composer one row for the assistant sheet (spec 5.11.3).
  */
 @Composable internal fun DialogueStrip(model: ShellViewModel, compact: Boolean, onEnd: () -> Unit, openContext: () -> Unit,
     settings: () -> Unit, onContextAnchorChanged: (ContextMenuAnchor?) -> Unit) {
@@ -152,6 +172,7 @@ private val STAGE_TEXT_HEIGHT = 256.dp
             Text(stringResource(if (voice.userMuted || voice.phase == LivePhase.MUTED) R.string.live_voice_mic_off else R.string.live_voice_mic_on),
                 Modifier.then(PoliteLiveRegion), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
         }
+        SpeechLine(voice)
         Composer(model, openContext, compact = compact, onContextAnchorChanged = onContextAnchorChanged, settings = settings) { hasInput ->
             // Implementation choice: typed text goes as a normal message with its own send button (spec 5.7.1).
             if (hasInput) {
