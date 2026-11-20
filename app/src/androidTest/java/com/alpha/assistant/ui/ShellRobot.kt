@@ -61,6 +61,8 @@ import com.alpha.assistant.data.ScreenContext
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.data.ShellStore
 import com.alpha.assistant.diagnostics.UiFailureDiagnostics
+import com.alpha.assistant.images.ImageProvider
+import com.alpha.assistant.images.imageProviders
 import com.alpha.assistant.surfaces.ASSIST_INVOCATION
 import com.alpha.assistant.surfaces.AlphaTileService
 import com.alpha.assistant.surfaces.AssistantCapture
@@ -213,12 +215,13 @@ internal class ShellFixture(prefix: String) {
     fun liveVoice(transport: LiveTransport, audio: FakeLiveAudio, endpoints: Endpoints, timing: LiveTiming = LiveTiming()): LiveVoiceFactory =
         { app, scope -> LiveVoiceSession(app, scope, transport, { audio }, { keys.account().getOrNull() }, endpoints, timing) }
 
-    /** A loopback test passes a [chat] provider that reads [models]. */
+    /** A loopback test passes a [chat] provider that reads [models], and [imageProviders] with no network. */
     fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false, chat: ChatProvider = provider,
-        liveVoice: LiveVoiceFactory? = null) {
+        liveVoice: LiveVoiceFactory? = null, imageProviders: Map<String, ImageProvider> = imageProviders(Endpoints.PRODUCTION)) {
         if (saveKey) check(keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
         CloudTestActivity.factory = { app ->
-            ShellViewModel(app, chat, store, keys, voiceFactory = voice, liveVoiceFactory = liveVoice, offerOnboarding = onboarding, keyCheck = { keyCheck(it) }, legacy = legacy, models = models, imageStore = imageStore, voiceStore = voiceStore)
+            ShellViewModel(app, chat, store, keys, voiceFactory = voice, liveVoiceFactory = liveVoice, offerOnboarding = onboarding, keyCheck = { keyCheck(it) }, legacy = legacy, models = models, imageStore = imageStore, voiceStore = voiceStore,
+                imageProviders = imageProviders)
                 .openSeededChat(store).also { model = it }
         }
     }
@@ -542,8 +545,24 @@ internal class ShellRobot(fixture: String) {
     }
     /** True when a composed text inside the node with [tag] is [text]. */
     fun composedTextIn(scenario: ActivityScenario<*>, tag: String, text: String): Boolean = composedIn(scenario, tag, hasText(text))
-    private fun hasText(text: String): (SemanticsConfiguration) -> Boolean =
+    /** A node whose text is [text]. */
+    fun hasText(text: String): (SemanticsConfiguration) -> Boolean =
         { config -> config.getOrNull(SemanticsProperties.Text)?.any { it.text.trimEnd() == text } == true }
+    /**
+     * The window bounds of the first composed node inside the node with [tag] that matches, or null. The bounds come from the position
+     * and the size of the node, so a scroll container or the strip does not clip them.
+     */
+    fun composedBoundsIn(scenario: ActivityScenario<*>, tag: String, match: (SemanticsConfiguration) -> Boolean): Rect? {
+        var result: Rect? = null
+        scenario.onActivity { activity ->
+            fun find(node: SemanticsNode): SemanticsNode? = node.takeIf { match(it.config) } ?: node.children.firstNotNullOfOrNull(::find)
+            val node = nodes(activity).filter { it.config.getOrNull(SemanticsProperties.TestTag) == tag }.firstNotNullOfOrNull(::find)
+                ?: return@onActivity
+            val at = node.positionInWindow
+            result = Rect(at.x.roundToInt(), at.y.roundToInt(), (at.x + node.size.width).roundToInt(), (at.y + node.size.height).roundToInt())
+        }
+        return result
+    }
     /** The window bounds of the composed node with [tag] and the width of its Compose root, in pixels. */
     fun composedBounds(scenario: ActivityScenario<*>, tag: String): Pair<Rect, Int> =
         checkNotNull(composedBoundsOrNull(scenario, tag)) { "Expected one composed node with tag $tag" }

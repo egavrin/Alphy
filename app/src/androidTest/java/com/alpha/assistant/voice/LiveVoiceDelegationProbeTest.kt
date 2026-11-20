@@ -20,8 +20,9 @@ import java.io.File
  * Alphy, and does it also answer by itself? Form J asks whether GPT-Live chooses the hand-off by itself: four plain questions and four
  * visual requests. One paid session for each form says its requests one after the other, with the real
  * socket and the fake host of [LiveVoiceDialogTest] (no chat call). `probe.json` next to `events.log` records each request. The app's
- * instructions stay unchanged: [Instructed] gives the session the text of the form. The probe asserts only that it ran and that no
- * record holds the key, because what GPT-Live does is the measurement.
+ * instructions stay unchanged: [Instructed] gives the session the text of the form. Each form builds on the instructions that the probe
+ * measured, not on today's ([MEASURED_INSTRUCTIONS]). The probe asserts only that it ran and that no record holds the key, because what
+ * GPT-Live does is the measurement.
  */
 class LiveVoiceDelegationProbeTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -77,8 +78,26 @@ class LiveVoiceDelegationProbeTest {
     }
 }
 
-/** Today's instructions with [added] after the delegation line, where the draft of the voice plan puts its lines. */
-private fun probeInstructions(vararg added: String) = LiveProtocol.INSTRUCTIONS.lines().let { (it.take(2) + added + it.drop(2)).joinToString("\n") }
+/**
+ * The instructions of the app that the probe measured (commit 5b97f28). The app later took the rules of form J into its own text, so a
+ * form on today's text would send them twice.
+ */
+private const val MEASURED_INSTRUCTIONS = """Ты голосовой режим помощника Alphy. Говори по-русски, коротко и естественно. Пользователь говорит по-русски или по-английски.
+Ты сам не выполняешь действия и не знаешь свежих фактов. Любую просьбу о действии на телефоне, поиске, свежих фактах, погоде, мини-приложении, памяти, файлах или о том, что на экране, сразу передавай Alphy через делегирование.
+Не задавай уточняющих вопросов о задаче сам. Alphy спросит, если нужно, а ты озвучишь его вопрос.
+Пока Alphy работает, скажи одну короткую фразу ожидания.
+Никогда не говори, что действие выполнено, пока Alphy этого не подтвердил.
+Когда Alphy предлагает действие, прочитай предложение и попроси сказать «да» или «нет». Никогда не говори, что действие одобрено или запущено. Это подтверждает Alphy.
+Если Alphy сообщает, что нужно подтверждение на экране, попроси нажать кнопку на карточке и никогда не проси сказать «да» или «нет».
+Ответ Alphy перескажи кратко. Полный ответ пользователь видит на экране.
+Ты не видишь экран пользователя. Любой вопрос об экране передавай Alphy.
+Если Alphy сообщает, что готовит мини-приложение, скажи об этом один раз и не придумывай его содержание."""
+
+/** The measured instructions with [added] after the delegation line, where the draft of the voice plan puts its lines. Each added line must be new. */
+private fun probeInstructions(vararg added: String) = MEASURED_INSTRUCTIONS.lines().let { lines ->
+    require(added.none { it in lines }) { "A line of the form is already in the instructions." }
+    (lines.take(2) + added + lines.drop(2)).joinToString("\n")
+}
 
 /** The text with its line [old] replaced by [new]. The line must exist, so a changed app text cannot make the probe send the old line. */
 private fun String.replaceLine(old: String, new: String) = lines().also { require(old in it) { "No line «$old»" } }

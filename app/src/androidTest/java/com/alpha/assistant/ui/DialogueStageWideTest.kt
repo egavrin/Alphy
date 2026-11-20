@@ -1,11 +1,8 @@
 package com.alpha.assistant.ui
 
 import android.graphics.Rect
-import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsConfiguration
-import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.getAllSemanticsNodes
 import androidx.compose.ui.semantics.getOrNull
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.CloudTestActivity
@@ -26,7 +23,6 @@ import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
-import kotlin.math.roundToInt
 
 /** Plan D, Da2: the stage puts the main visual with its controls at the left and the cards at the right at the fold and the tablet size. */
 class DialogueStageWideTest {
@@ -39,7 +35,7 @@ class DialogueStageWideTest {
         stage.onStage(appFilePlan("lesson")) { scenario, _ ->
             val orbit = lessonDrawn(scenario)
             listOf(LESSON_STEP, QUESTION).forEach { card ->
-                val bounds = checkNotNull(stage.boundsIn(scenario, STAGE, StageShell.text(card))) { card }
+                val bounds = checkNotNull(robot.composedBoundsIn(scenario, STAGE, robot.hasText(card))) { card }
                 assertTrue("$card $bounds is right of the orbit $orbit", bounds.left > orbit.right)
             }
             assertTitleUnderTheLabel(scenario)
@@ -50,8 +46,8 @@ class DialogueStageWideTest {
         assumeTrue("a phone", stage.smallestWidth < 600)
         stage.onStage(appFilePlan("lesson")) { scenario, _ ->
             lessonDrawn(scenario)
-            val lap = checkNotNull(stage.boundsIn(scenario, STAGE, StageShell.text(LAP)))
-            val step = checkNotNull(stage.boundsIn(scenario, STAGE, StageShell.text(LESSON_STEP)))
+            val lap = checkNotNull(robot.composedBoundsIn(scenario, STAGE, robot.hasText(LAP)))
+            val step = checkNotNull(robot.composedBoundsIn(scenario, STAGE, robot.hasText(LESSON_STEP)))
             assertTrue("the lesson card $step is under «Один круг» $lap", step.top >= lap.bottom)
             assertTitleUnderTheLabel(scenario)
         }
@@ -61,7 +57,7 @@ class DialogueStageWideTest {
     @Test fun theOrbitAndItsFieldFitAboveTheStrip() {
         stage.onStage(appFilePlan("lesson")) { scenario, _ ->
             val orbit = lessonDrawn(scenario)
-            val field = checkNotNull(stage.boundsIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.EditableText) != null })
+            val field = checkNotNull(robot.composedBoundsIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.EditableText) != null })
             val top = robot.composedBounds(scenario, STAGE).first.top
             val strip = robot.composedBounds(scenario, STRIP).first.top
             assertTrue("the orbit $orbit is under the top of the stage $top", orbit.top >= top)
@@ -71,13 +67,15 @@ class DialogueStageWideTest {
 
     /** Waits for the first frame of the orbit drawing on the stage, and gives its bounds. */
     private fun lessonDrawn(scenario: ActivityScenario<CloudTestActivity>): Rect {
-        robot.waitUntil(30_000) { stage.boundsIn(scenario, STAGE, ::isOrbit) != null && stage.boundsIn(scenario, STAGE, StageShell.text(QUESTION)) != null }
-        return checkNotNull(stage.boundsIn(scenario, STAGE, ::isOrbit))
+        robot.waitUntil(30_000) {
+            robot.composedBoundsIn(scenario, STAGE, ::isOrbit) != null && robot.composedBoundsIn(scenario, STAGE, robot.hasText(QUESTION)) != null
+        }
+        return checkNotNull(robot.composedBoundsIn(scenario, STAGE, ::isOrbit))
     }
 
     private fun assertTitleUnderTheLabel(scenario: ActivityScenario<CloudTestActivity>) {
-        val label = checkNotNull(stage.boundsIn(scenario, STAGE, StageShell.text(KIND)))
-        val title = checkNotNull(stage.boundsIn(scenario, STAGE, StageShell.text(TITLE)))
+        val label = checkNotNull(robot.composedBoundsIn(scenario, STAGE, robot.hasText(KIND)))
+        val title = checkNotNull(robot.composedBoundsIn(scenario, STAGE, robot.hasText(TITLE)))
         assertTrue("the title $title is under the kind label $label", title.top >= label.bottom)
     }
 
@@ -149,28 +147,7 @@ internal class StageShell(prefix: String) {
         test(scenario, model)
     }
 
-    /**
-     * The window bounds of the first composed node inside the node with [tag] that matches, or null. The bounds come from the position
-     * and the size of the node, so a scroll container or the strip does not clip them.
-     */
-    fun boundsIn(scenario: ActivityScenario<*>, tag: String, match: (SemanticsConfiguration) -> Boolean): Rect? {
-        var result: Rect? = null
-        scenario.onActivity { activity ->
-            fun root(view: android.view.View): ViewRootForTest? = view as? ViewRootForTest
-                ?: (view as? android.view.ViewGroup)?.let { group -> (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) } }
-            fun find(node: SemanticsNode): SemanticsNode? = node.takeIf { match(it.config) } ?: node.children.firstNotNullOfOrNull(::find)
-            val node = checkNotNull(root(activity.window.decorView)).semanticsOwner.getAllSemanticsNodes(mergingEnabled = false)
-                .filter { it.config.getOrNull(SemanticsProperties.TestTag) == tag }.firstNotNullOfOrNull(::find) ?: return@onActivity
-            val at = node.positionInWindow
-            result = Rect(at.x.roundToInt(), at.y.roundToInt(), (at.x + node.size.width).roundToInt(), (at.y + node.size.height).roundToInt())
-        }
-        return result
-    }
-
     companion object {
         const val APP_REQUEST = "Сделай калькулятор чаевых"
-        /** A node whose text is [value]. */
-        fun text(value: String): (SemanticsConfiguration) -> Boolean =
-            { config -> config.getOrNull(SemanticsProperties.Text)?.any { it.text.trimEnd() == value } == true }
     }
 }

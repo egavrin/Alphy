@@ -3,14 +3,12 @@ package com.alpha.assistant.ui
 import android.graphics.Bitmap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
-import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.cloud.KeyCheck
 import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.images.ImageProvider
 import com.alpha.assistant.images.ProviderImage
@@ -57,21 +55,16 @@ class DialogueStageContentTest {
         }
     }
 
-    /** The shell as [ShellFixture.install] builds it, with an image provider of OpenAI that returns a 16 px picture with no network. */
+    /** The shell with an image provider of OpenAI that returns a 16 px picture with no network. */
     private fun installWithPictures(chat: ChatProvider) {
-        val fixture = stage.fixture
-        check(fixture.keys.save("alpha-test-only", AiProvider.OPENAI).isSuccess)
         val pictures = ImageProvider { _, _, _ ->
             val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.RED) }
             val bytes = ByteArrayOutputStream()
             try { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, bytes)) } finally { bitmap.recycle() }
             ProviderImage(bytes.toByteArray(), "image/png")
         }
-        CloudTestActivity.factory = { app ->
-            ShellViewModel(app, chat, fixture.store, fixture.keys, liveVoiceFactory = fixture.liveVoice(stage.socket, stage.audio),
-                keyCheck = { KeyCheck.ACCEPTED }, legacy = fixture.legacy, models = fixture.models, imageStore = fixture.imageStore,
-                voiceStore = fixture.voiceStore, imageProviders = mapOf(AiProvider.OPENAI.id to pictures)).also { fixture.model = it }
-        }
+        stage.fixture.install(chat = chat, liveVoice = stage.fixture.liveVoice(stage.socket, stage.audio),
+            imageProviders = mapOf(AiProvider.OPENAI.id to pictures))
     }
 
     private companion object {

@@ -42,7 +42,7 @@ class DialogueStripSpeechTest {
         robot.waitUntil { inStrip(scenario, LONG) }
         // The clipped bounds are what a person sees. The unclipped bounds hold the whole text.
         val shown = robot.composedBounds(scenario, SPEECH).first
-        val whole = checkNotNull(stage.boundsIn(scenario, SPEECH) { true })
+        val whole = checkNotNull(robot.composedBoundsIn(scenario, SPEECH) { true })
         val lineCount = robot.composedTextFit(scenario, SPEECH).single().second
         val lineHeight = whole.height().toFloat() / lineCount
         assertTrue("the text has more lines ($lineCount) than its place", lineCount > LINES)
