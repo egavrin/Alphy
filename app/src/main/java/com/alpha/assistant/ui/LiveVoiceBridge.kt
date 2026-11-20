@@ -194,7 +194,8 @@ internal class LiveVoiceBridge(
             message.toolId?.let { stageToolId = it }
             // A typed plan has no hand-off, so GPT-Live neither reads nor approves it.
             if (message.text == planReady) planHandOff = null
-            session.thinking(spoken("Пользователь написал: ${LiveProtocol.spoken(text, TYPED_MAX)} Ответ Alphy на экране: ", message.text))
+            session.thinking(spoken("Пользователь написал: ${LiveProtocol.spoken(text, TYPED_MAX)} " +
+                (if (message.toolId != null) MINI_APP_READY else ANSWER), message.text))
         }
         reportPlan()
     }

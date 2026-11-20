@@ -392,15 +392,29 @@ class ShellLiveVoiceWorkflowTest {
     @Test fun typedTurnGoesToTheAgentAndThinking() {
         install()
         live { scenario, model ->
-            scenario.onActivity { model.editDraft(Draft("Привет")); model.sendLiveTyped() }
-            robot.waitUntil { socket.types().contains("session.thinking.append") }
+            val thinking = typedThinking(scenario, model, "Привет")
             assertEquals("Привет", messages(model).first().text)
             assertEquals("complete", messages(model).last().status)
             assertEquals(messages(model).last().id, model.liveVoiceCardId)
-            val thinking = socket.sent.map(::JSONObject).single { it.getString("type") == "session.thinking.append" }
-            assertEquals("Пользователь написал: Привет. Ответ Alphy на экране: Fixture response.", thinking.getString("content"))
+            assertEquals("Пользователь написал: Привет. Ответ Alphy: Fixture response.", thinking)
             assertTrue(commentary().isEmpty())
         }
+    }
+
+    /** A typed message that made an app gets the same retell text as a hand-off with an app. */
+    @Test fun typedAppTurnSaysTheAppIsReady() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+        install(chat = stageProvider("calc"))
+        live { scenario, model ->
+            assertEquals("Пользователь написал: $APP_REQUEST. Мини-приложение готово. Ответ Alphy: Готово.",
+                typedThinking(scenario, model, APP_REQUEST))
+        }
+    }
+
+    /** Sends [text] as a typed message of the voice mode and returns the content of its single thinking append. */
+    private fun typedThinking(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel, text: String): String {
+        scenario.onActivity { model.editDraft(Draft(text)); model.sendLiveTyped() }
+        robot.waitUntil(60_000) { socket.types().contains("session.thinking.append") }
+        return socket.sent.map(::JSONObject).single { it.getString("type") == "session.thinking.append" }.getString("content")
     }
 
     @Test fun refinementAsksForTheScreen() = refinement { _, model ->

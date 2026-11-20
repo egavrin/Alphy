@@ -546,7 +546,7 @@ internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, accoun
         // The texts that the chat bridge sends for a timer plan with voice approval off, then on (LiveVoiceBridge).
         const val ON_SCREEN = "Нужно подтверждение на экране."
         const val DONE = "Готово. План завершён."
-        const val THINKING = "Пользователь написал: Сколько будет два плюс два? Ответ Alphy на экране: Четыре."
+        const val THINKING = "Пользователь написал: Сколько будет два плюс два? Ответ Alphy: Четыре."
         const val LONG_ANSWER = "Ответ Alphy: Луна — единственный естественный спутник Земли. Она находится примерно в трёхстах восьмидесяти " +
             "четырёх тысячах километров от нас и всегда повёрнута к Земле одной стороной. Приливы и отливы в океанах возникают в основном " +
             "из-за притяжения Луны, а полный цикл её фаз длится около двадцати девяти с половиной суток."
