@@ -13,7 +13,7 @@ import java.io.File
 /**
  * Plan D, Dd3: the driver of the live dialogues on a scripted voice server and a scripted chat with fixture plans, so a fault of the
  * driver, its waits, its pictures, its sheet, or its report does not spend a paid run. No model call and no voice socket.
- * The argument `dialogueSteps` (default 2) sets the steps of a rehearsal: steps 3 and 4 need the spoken press and the spoken change.
+ * The argument `dialogueSteps` (default 4) sets the steps of a rehearsal: steps 3 and 4 are the spoken press and the spoken change.
  */
 class DialogueStageRehearsalTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -51,7 +51,7 @@ class DialogueStageRehearsalTest {
     private fun rehearse(name: String, folder: String = "dialogue-rehearsal/$name"): File {
         val dialogue = DIALOGUES.getValue(name)
         val directory = File(files, folder).apply { deleteRecursively() }
-        val count = arguments.getString("dialogueSteps")?.toInt() ?: 2
+        val count = arguments.getString("dialogueSteps")?.toInt() ?: 4
         lateinit var run: DialogueRun
         run = DialogueRun(dialogue, directory, "rehearsal", count = count)
         val report = run.run(server(dialogue), ScriptedChat(REHEARSALS.getValue(name)) { run.step }, LOOPBACK)
