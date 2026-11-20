@@ -463,8 +463,10 @@ class AppFileLoopWorkflowTest {
                 })
                 fixture.launch().use {
                     val model = checkNotNull(fixture.model)
+                    // The controller reads its library once at its start, and a tool operation in that time fails with widget_busy.
                     val deadline = SystemClock.uptimeMillis() + 10_000
-                    while (model.loading && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(50)
+                    while ((model.loading || model.tools.busy) && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(50)
+                    assertFalse("The shell and its tool controller did not get ready within 10 s.", model.loading || model.tools.busy)
                     test(model.tools)
                 }
             }
@@ -498,7 +500,9 @@ class AppFileLoopWorkflowTest {
         val operation = UUID.randomUUID().toString()
         withController(script) { tools ->
             tools.generationTraceObserver = { events += it }
-            assertEquals(AppFileNames.FAULTS, (tools.screenRun(ScreenRun(), operation) as? ScreenFallback)?.reason)
+            val failure = tools.screenRun(ScreenRun(), operation)
+            // The message names what the run threw, or that it saved an app.
+            assertEquals(failure?.stackTraceToString() ?: "The screen run saved an app.", AppFileNames.FAULTS, (failure as? ScreenFallback)?.reason)
             tools.assertNothingLeft(operation)
         }
         assertEquals(listOf(APP_FILE, APP_FILE), script.calls.map { it.generationStage })
