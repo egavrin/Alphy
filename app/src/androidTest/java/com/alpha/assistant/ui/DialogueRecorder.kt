@@ -8,6 +8,7 @@ import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.tools.ToolGenerationTraceEvent
+import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.voice.LIVE_VOICED_RMS
 import com.alpha.assistant.voice.LiveConnection
 import com.alpha.assistant.voice.LiveListener
@@ -120,7 +121,8 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
 
     /**
      * For each request (the marks from one `speech_end` to the next): the times from the end of speech to the hand-off, to the first
-     * voiced output, to the first voice after a commentary, and to a new screen, the routing kind, and the chat calls by stage.
+     * voiced output, to the first voice after a commentary, and to a new screen, the routing kind, the chat calls by stage, and the
+     * last plan outcome, such as `fallback:host_check:javascript_busy`, which tells why a screen did not come.
      */
     fun report(): JSONObject {
         val all = marks()
@@ -131,6 +133,7 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
             JSONObject().put("speechEndToDelegationMs", after("delegation")).put("speechEndToFirstVoiceMs", after("voice_first"))
                 .put("speechEndToAnswerVoiceMs", after("voice_out")).put("speechEndToScreenMs", after("screen_visible"))
                 .put("kind", window.firstOrNull { it.name == "kind" }?.detail).put("calls", calls(window))
+                .put("planOutcome", window.lastOrNull { it.name == AppFileNames.PLAN_OUTCOME }?.detail)
         }
         return JSONObject().put("requests", JSONArray(requests)).put("calls", calls(all))
             .put("chatCalls", all.count { it.name == "call_start" })

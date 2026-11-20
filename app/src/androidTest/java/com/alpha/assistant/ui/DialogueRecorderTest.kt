@@ -67,6 +67,7 @@ class DialogueRecorderTest {
                 assertEquals(requests.toString(), 1, requests.length())
                 val request = requests.getJSONObject(0)
                 assertEquals("screen", request.getString("kind"))
+                assertEquals("accepted", request.getString("planOutcome"))
                 assertTrue(request.toString(), request.getLong("speechEndToScreenMs") > request.getLong("speechEndToDelegationMs"))
                 // The clock holds names only: no word of the request or of the answer.
                 val recorded = marks.toString() + recorder.report()
