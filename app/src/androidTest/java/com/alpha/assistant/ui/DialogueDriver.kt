@@ -353,8 +353,8 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         const val HAND_OFF_MS = 8_000L
         const val VOICE_MS = 10_000L
         const val QUIET_MS = 2_000L
-        /** The cap of the plan (values that this plan proposes). */
-        const val MAX_CALLS = 10
+        /** A cost guard: the early plan call and the new screen after a failed change let a working dialogue make 11 calls or more. */
+        const val MAX_CALLS = 14
         const val SPOKEN_CHARS = 280
     }
 }
