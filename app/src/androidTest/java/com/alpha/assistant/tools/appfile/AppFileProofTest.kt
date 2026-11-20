@@ -24,6 +24,9 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.temporal.TemporalAdjusters
 
 /** Each saved plan of kit/plans with the language of its app. */
 internal val SAVED_PLANS=mapOf("calc" to "en","list" to "it","quiz" to "ja","tabs-chart" to "es","timer-rounds" to "de","tea" to "tr","section" to "uk",
@@ -65,6 +68,14 @@ internal suspend fun smoked(sandbox: SandboxClient,spec: ToolSpec,name: String,s
 internal suspend fun checked(sandbox: SandboxClient,spec: ToolSpec,id: String,steps: JSONArray): Pair<AppSteps.Outcome,JSONObject> =
     ToolGenerationSmoke(sandbox,spec,id,1,spec.initialState,checkActive={},generation=ToolGenerationService(AgentScriptProvider(),sandbox))
         .probe {AppSteps.run(this,AppSteps.parse(steps),everyStep=false) to state}
+/**
+ * The named dates of the model scenarios: a step writes "{saturday}" or "{sunday}" for a date that depends on today, and the host puts in
+ * the date from its own calendar, so the expected value stays in the host. The coming Saturday is today on a Saturday.
+ */
+internal fun scenarioDates(today: LocalDate): Map<String,String> {
+    val saturday=today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY))
+    return mapOf("{saturday}" to "$saturday","{sunday}" to "${saturday.plusDays(1)}")
+}
 
 /** The plan of items 5 of the final review: a division, a doubling, and a text that grows. kit/test/run.test.js has the same plan. */
 internal val PLAIN_VALUES="app(\"Big\", lang=\"en\")\n\$/r = 0\n\$/n = 1\n\$/note = \"x\"\nneed a = input(\"number\", \"A\", 6, min=0, max=100)\n" +
@@ -857,11 +868,13 @@ class AppFileProofTest {
      * The behavior scenarios of the plans that a model wrote (appfile/model-scenarios.json): the steps of each scenario, written from its request,
      * through the agent step checker on a disposable copy of the plan that the sandbox compiled. A step presses or types through the action id of a
      * real control of the screen, in the sandbox, not on the screen. Each scenario runs, and the test asserts at the end that none failed.
+     * A named date of scenarioDates in the file is the date of today's calendar of the device.
      * The folder appfile-model-scenarios of the external files gets the result of each scenario and the screen text after its last step.
      */
     @Test fun eachScenarioOfAModelPlanPasses(): Unit=runBlocking {
         val sandbox=SandboxClient(instrumentation.targetContext)
-        val scenarios=JSONArray(instrumentation.context.assets.open("appfile/model-scenarios.json").use {it.readBytes().decodeToString()})
+        val text=instrumentation.context.assets.open("appfile/model-scenarios.json").use {it.readBytes().decodeToString()}
+        val scenarios=JSONArray(scenarioDates(LocalDate.now()).entries.fold(text) {all,(name,date) -> all.replace(name,date)})
         val results=List(scenarios.length()) {index ->
             val scenario=scenarios.getJSONObject(index)
             val id=scenario.getString("id")
@@ -881,6 +894,15 @@ class AppFileProofTest {
         check(folder.isDirectory || folder.mkdirs())
         File(folder,"results.json").writeText(JSONArray(results).toString(2))
         assertEquals(emptyList<String>(),results.filterNot {it.getBoolean("passed")}.map {"${it.getString("id")}: ${it.get("failure")}"})
+    }
+    @Test fun theNamedDatesOfAScenarioAreTheComingSaturdayAndTheSundayAfterIt() {
+        // Monday 2026-11-16 to Saturday 2026-11-21 give that Saturday, and Sunday 2026-11-22 gives the next one.
+        for(day in 16..21) assertEquals(mapOf("{saturday}" to "2026-11-21","{sunday}" to "2026-11-22"),scenarioDates(LocalDate.of(2026,11,day)))
+        assertEquals(mapOf("{saturday}" to "2026-11-28","{sunday}" to "2026-11-29"),scenarioDates(LocalDate.of(2026,11,22)))
+        // The last day of a month and of a year, and a Saturday whose Sunday is in the next month.
+        assertEquals(mapOf("{saturday}" to "2026-12-05","{sunday}" to "2026-12-06"),scenarioDates(LocalDate.of(2026,11,30)))
+        assertEquals(mapOf("{saturday}" to "2027-01-02","{sunday}" to "2027-01-03"),scenarioDates(LocalDate.of(2026,12,31)))
+        assertEquals(mapOf("{saturday}" to "2026-10-31","{sunday}" to "2026-11-01"),scenarioDates(LocalDate.of(2026,10,31)))
     }
     @Test fun aHostilePlanGivesAFaultAndTheSandboxStaysUsable(): Unit=runBlocking {
         // Item 14: the hostile plans of item 9 of the final review. Each one gives a fault in the time of a compile, and calc compiles directly after it in the same sandbox.
