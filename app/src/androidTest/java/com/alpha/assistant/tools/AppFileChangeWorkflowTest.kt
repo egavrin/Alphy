@@ -512,8 +512,11 @@ class AppFileChangeWorkflowTest {
         assertTrue(back.state, sameToolJson(JSONObject(today.state), JSONObject(back.state)))
     }
 
-    /** The list of versions gives the generic text of a failed check for [target], the restore fails with a text that the person does not see, and the store keeps [before]. */
-    private fun assertRestoreFailed(before: ToolRecord, target: Int) {
+    /**
+     * The list of versions gives the generic text of a failed check for [target], the restore fails with a text that the person does not see, and the store keeps [before].
+     * Gives the failure of the restore.
+     */
+    private fun assertRestoreFailed(before: ToolRecord, target: Int): Throwable? {
         val revisions = store.revisions(before.id).size
         assertEquals(ToolRestoreAvailability(CHECK_FAILED), runBlocking { engine.restoreAvailability(before, target) })
         val failure = restore(before, target).exceptionOrNull()
@@ -521,6 +524,19 @@ class AppFileChangeWorkflowTest {
         assertTrue(failure.toString(), failure is IllegalStateException && failure.message.orEmpty().startsWith("The kit did not compile"))
         assertEquals(before, store.tool(before.id))
         assertEquals(revisions, store.revisions(before.id).size)
+        return failure
+    }
+
+    /** The compile of [text] with [record] as the stored app, as the restore and the manual edit compile it. */
+    private fun compiled(record: ToolRecord, text: String) = runBlocking {
+        AppFileCompiler(context, SandboxClient(context)).compile(text,
+            AppFilePrevious(checkNotNull(appFile(record)), ToolSpec.parsePersisted(record.spec).schema.toString(), record.state))
+    }
+
+    /** The shopping plan with [HOLE] and its view. The kit compiles it on [record] with no fault and with hole true, so only the hole check of the host stops it. */
+    private fun builtHole(record: ToolRecord): String = "$shopping$HOLE\n$HOLE_VIEW\n".also { text ->
+        val compilation = compiled(record, text)
+        assertEquals(compilation.faults.toString(), listOf("ok", true), listOf(compilation.status, compilation.hole))
     }
 
     // Failure case: a version whose plan the kit of today does not take came back with code that its plan does not make.
@@ -532,6 +548,16 @@ class AppFileChangeWorkflowTest {
         val current = base.copy(revision = 4).also { store.saveTool(it, true) }
         assertRestoreFailed(current, 2)
         assertRestoreFailed(current, 3)
+    }
+
+    // Failure case: a hole with its own view compiles clean, so a restore of a version with one brought back a part that the kit does not have.
+    @Test fun aRestoreOfAPlanWithABuiltHoleChangesNothing() {
+        val base = shoppingWithData()
+        // An older kit could have taken this version, as in aRestoreOfAPlanThatTheKitRefusesChangesNothing.
+        store.saveTool(base.copy(revision = 2, spec = ToolSpec.parsePersisted(base.spec).withAppFile(builtHole(base)).json), true)
+        val failure = assertRestoreFailed(base.copy(revision = 3).also { store.saveTool(it, true) }, 2)
+        // The status is ok, so the hole check stopped the restore.
+        assertEquals(HOLE_REFUSED, failure?.message)
     }
 
     // Failure case: a stored state that its own plan does not give went to the kit, which could put a value on another line.
@@ -607,16 +633,24 @@ class AppFileChangeWorkflowTest {
     // Failure case: a manual edit that breaks the plan gave a text that names no line, so the person could not fix the plan.
     @Test fun aManualEditThatBreaksThePlanShowsTheFaultOfTheKit() {
         val before = shoppingWithData()
-        val broken = shopping + BROKEN + "\n"
-        val previous = AppFilePrevious(shopping, ToolSpec.parsePersisted(before.spec).schema.toString(), before.state)
-        val faults = runBlocking { AppFileCompiler(context, SandboxClient(context)).compile(broken, previous) }.faults
-        assertTrue(faults.toString(), faults.isNotEmpty() && faults.all { it.startsWith("need bought") })
-        assertEditRefused(before, JSONObject(before.spec).put("appFile", broken).toString(), faults.joinToString("\n"))
+        // A line with a fault, and a hole with no view (a part that the kit does not have): the person sees each fault of the kit with its line.
+        for ((line, start) in listOf(BROKEN to "need bought", HOLE to "hole chart")) {
+            val text = shopping + line + "\n"
+            val faults = compiled(before, text).faults
+            assertTrue(faults.toString(), faults.isNotEmpty() && faults.all { it.startsWith(start) })
+            assertEditRefused(before, JSONObject(before.spec).put("appFile", text).toString(), faults.joinToString("\n"))
+        }
         // A plan that the saved rows block gives the message of widget_state.
         val aisle = shopping.replace(shopping.lines()[2], AISLE_NUMBER)
         assertEditRefused(before, JSONObject(before.spec).put("appFile", aisle).toString(), refused, "widget_state")
-        // A hole is a part that the kit does not have, so a plan with one saves nothing.
-        assertTrue(edited(before, JSONObject(before.spec).put("appFile", shopping + HOLE + "\n").toString()).isFailure)
+    }
+
+    // Failure case: a manual edit saved a plan with a hole and its own view, a part that the kit does not have.
+    @Test fun aManualEditWithABuiltHoleChangesNothing() {
+        val before = shoppingWithData()
+        val failure = edited(before, JSONObject(before.spec).put("appFile", builtHole(before)).toString()).exceptionOrNull()
+        // The hole check stops the clean compile. It is not a refusal of the plan, so the dialog shows its generic text.
+        assertTrue(failure.toString(), failure is IllegalStateException && failure.message == HOLE_REFUSED)
         assertEquals(before, store.tool(before.id))
         assertEquals(1, store.revisions(before.id).size)
     }
@@ -635,6 +669,10 @@ class AppFileChangeWorkflowTest {
             "need people = input(\"count\", \"People\", 4, min=1, max=20)"
         /** A need of a part that the kit does not have. */
         const val HOLE = "need chart = hole(\"A chart\")"
+        /** The view that an author writes for [HOLE]. With it, the kit gives no fault for the hole. */
+        const val HOLE_VIEW = "chart_view = Text(\"A chart\")"
+        /** The failure of the check of a clean compile with a hole (ToolEngine.kitRevision). */
+        const val HOLE_REFUSED = "The kit did not compile the app file: ok."
         /** The text of the list of versions for a version that fails its check (ToolEngine.restoreAvailability). */
         const val CHECK_FAILED = "Эта версия не прошла проверку на текущих данных."
         /** The replies of the loop: one write of the fixture app and a finish. */
