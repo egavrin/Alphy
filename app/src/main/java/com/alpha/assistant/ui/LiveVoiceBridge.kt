@@ -16,6 +16,7 @@ import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.surfaces.AssistCapture
 import com.alpha.assistant.surfaces.AssistantCapture
+import com.alpha.assistant.tools.ShownControl
 import com.alpha.assistant.voice.ApprovalWindow
 import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.LiveVoiceHost
@@ -25,6 +26,9 @@ import com.alpha.assistant.voice.UserTurn
 import com.alpha.assistant.voice.spokenAnswer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -76,8 +80,15 @@ internal class LiveVoiceBridge(
         var window: ApprovalWindow? = null
     }
 
+    private val pressed = MutableSharedFlow<Pair<String, ShownControl>>(extraBufferCapacity = 8)
+    /** Each spoken press of a control of the stage app, with the app id (plan D, Dc1). The stage runs it as a tap of that control. */
+    val presses: SharedFlow<Pair<String, ShownControl>> = pressed.asSharedFlow()
+
     /** A hand-off or typed turn is queued or runs. A reader sees it change when one starts and when it ends. */
     val working: Boolean get() = tracked.any { message(it)?.status in unfinishedStatuses }
+
+    /** Runs [control] of the stage app [toolId] as a tap. */
+    fun press(toolId: String, control: ShownControl) { pressed.tryEmit(toolId to control) }
 
     fun start(firstSpeech: Boolean) {
         session.start(this, firstSpeech)
@@ -192,6 +203,7 @@ internal class LiveVoiceBridge(
                 message.status != "complete" -> FAILED + message.error.take(MAX - FAILED.length)
                 message.refinementChoices.isNotEmpty() -> ON_SCREEN
                 message.toolId != null -> spoken(MINI_APP_READY, message.text)
+                message.text == PRESS_MISSING -> PRESS_MISSING
                 else -> spoken(ANSWER, message.text)
             })
         }
@@ -261,7 +273,7 @@ internal class LiveVoiceBridge(
     private fun string(id: Int, vararg args: Any): String =
         model.getApplication<Application>().let { if (args.isEmpty()) it.getString(id) else it.getString(id, *args) }
 
-    private companion object {
+    internal companion object {
         const val MAX = 1200
         /** The typed text of a thinking append. The rest of the limit is for the reply. */
         const val TYPED_MAX = 400
@@ -271,6 +283,8 @@ internal class LiveVoiceBridge(
         const val MINI_APP_STARTED = "Alphy готовит мини-приложение, оно появится на экране."
         const val MINI_APP_READY = "Мини-приложение готово. Ответ Alphy: "
         const val SCREEN_FAILED = "Картинку показать не получилось."
+        /** A spoken press named no single control of the shown screen, so nothing ran. */
+        const val PRESS_MISSING = "На экране нет такой кнопки."
         const val FAILED = "Alphy не смог выполнить запрос: "
         const val ON_SCREEN = "Нужно подтверждение на экране."
         const val PROPOSE = "Alphy предлагает: "

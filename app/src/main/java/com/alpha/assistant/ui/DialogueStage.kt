@@ -44,12 +44,16 @@ import com.alpha.assistant.tools.ArtifactSnapshot
 import com.alpha.assistant.tools.CoveredToolSurface
 import com.alpha.assistant.tools.MiniAppActions
 import com.alpha.assistant.tools.MiniAppContent
+import com.alpha.assistant.tools.ShownControl
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.three.ThreeScenePane
 import com.alpha.assistant.voice.LivePhase
 import com.alpha.assistant.voice.LiveVoiceSession
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 
 /**
  * A card of the voice mode that the stage shows: a card that waits for a tap (an error or an unsent request with its retry, or the
@@ -103,7 +107,7 @@ private val STAGE_TEXT_HEIGHT = 256.dp
                 // The plan of the chat, as the chat list shows it. A later hand-off keeps it while it waits for a tap.
                 model.agent.plan?.takeIf { it.conversationId == chat.id }?.let { AgentPlanCard(model.agent, it) }
             }
-            if (tool != null) StageApp(model.tools, tool, cardActions, canvasHeight)
+            if (tool != null) StageApp(model.tools, tool, cardActions, canvasHeight, model.livePresses)
             else character?.let { AlphyCharacter(model.liveVoice, it, Modifier.testTag("live_voice_character")) }
         }
     }
@@ -115,8 +119,10 @@ private val STAGE_TEXT_HEIGHT = 256.dp
  * The app of the stage, drawn as an open mini-app draws it (FocusedToolPane): a 3D scene, a drawing with its host, or the app. The app draws
  * its title after its kind label. A 3D scene and a closed app draw no app, so the stage gives them the title.
  */
-@Composable private fun StageApp(controller: ToolController, tool: ToolRecord, actions: MiniAppActions, canvasHeight: Dp) {
+@Composable private fun StageApp(controller: ToolController, tool: ToolRecord, actions: MiniAppActions, canvasHeight: Dp,
+    presses: Flow<Pair<String, ShownControl>>?) {
     val spec = remember(tool.spec, tool.ui, tool.state) { ToolSpec.availablePersisted(tool) }
+    val voicePresses = remember(presses, tool.id) { presses?.filter { it.first == tool.id }?.map { it.second } }
     if (spec == null || spec.threeScene) Text(spec?.title ?: ToolSpec.storedTitle(tool.spec), Modifier.fillMaxWidth().semantics { heading() },
         style = MaterialTheme.typography.headlineSmall)
     if (spec == null) { Text(stringResource(R.string.tool_closed_format)); return }
@@ -126,7 +132,7 @@ private val STAGE_TEXT_HEIGHT = 256.dp
     var snapshot by remember(host) { mutableStateOf<ArtifactSnapshot?>(null) }
     val content: @Composable () -> Unit = {
         MiniAppContent(controller, tool, tool, spec.title, enabled, graphicsHost = host, graphicsSnapshot = snapshot,
-            liveAllowed = !actions.covers(tool.id), allowVideo = true, dialogueTitle = spec.title)
+            liveAllowed = !actions.covers(tool.id), allowVideo = true, dialogueTitle = spec.title, voicePresses = voicePresses)
     }
     when {
         spec.threeScene -> ThreeScenePane(controller, tool, spec, canvasHeight, null, enabled)

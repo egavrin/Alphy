@@ -966,7 +966,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     enabled: Boolean, embedded: Boolean = false, routeSystemBackEnabled: Boolean = true,
     graphicsHost: ArtifactUiHost? = null, graphicsSnapshot: ArtifactSnapshot? = null, openNonGraphics: Boolean = false,
     liveAllowed: Boolean = true, allowVideo: Boolean = false, onLiveInputState: (Boolean, Boolean) -> Unit = { _, _ -> },
-    dialogueTitle: String? = null) {
+    dialogueTitle: String? = null, voicePresses: kotlinx.coroutines.flow.Flow<ShownControl>? = null) {
     val navigationContext = LocalContext.current
     val navigationLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     val navigationForeground = {
@@ -1050,6 +1050,14 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     val visibleUi = remember(current.ui, localButtons) {
         if (localButtons) JSONObject(current.ui).takeUnless(::hasLiveControl) else null
     }
+    val tap: (String, Any?) -> Unit = { id, value ->
+        if (value == null && visibleUi?.let { ToolUiCatalog.action(it, id)?.optString("type") } == "button") {
+            controller.queueLocalButton(current, id, buttonHost) { buttonHost.get() && currentVisibility && navigationForeground() }
+        } else controller.interact(current,id,value,deviceHost,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
+    }
+    // A spoken press of the voice talk is a tap of its control, so it runs only when a tap could (plan D, Dc1).
+    val pressTap by rememberUpdatedState(tap.takeIf { enabled && !controller.settlingPhoto })
+    if (voicePresses != null) LaunchedEffect(voicePresses) { voicePresses.collect { pressTap?.invoke(it.actionId, it.value) } }
     Box(Modifier.fillMaxWidth().onGloballyPositioned { inWindow = !it.boundsInWindow().isEmpty }) {
         ToolContent(current.ui,current.state,enabled && !controller.settlingPhoto,
             heading=heading,calendarHost=calendarHost,embedded=embedded,
@@ -1067,11 +1075,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
                 else controller.nativeImageAvailable(tool.id, handle)
             },
             routeSystemBackEnabled = routeSystemBackEnabled, liveInput = liveInput, videoHost = videoHost, timerHost = timerHost,
-            onLiveInputState = onLiveInputState, appLanguage = spec?.appLanguage, dialogueTitle = dialogueTitle) {id,value ->
-            if (value == null && visibleUi?.let { ToolUiCatalog.action(it, id)?.optString("type") } == "button") {
-                controller.queueLocalButton(current, id, buttonHost) { buttonHost.get() && currentVisibility && navigationForeground() }
-            } else controller.interact(current,id,value,deviceHost,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
-        }
+            onLiveInputState = onLiveInputState, appLanguage = spec?.appLanguage, dialogueTitle = dialogueTitle, event = tap)
         if (deviceHost != null && controller.tiltOwner == tool.id) {
             TextButton(onClick = controller::stopTilt, modifier = Modifier.align(Alignment.TopEnd)) {
                 Text(stringResource(R.string.tool_stop_tilt))

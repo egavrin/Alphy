@@ -37,6 +37,7 @@ import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.surfaces.AssistantCapture
 import com.alpha.assistant.tools.AgentScriptProvider
 import com.alpha.assistant.tools.Scripted
+import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.ToolGenerationTraceEvent
 import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.tools.ToolRecord
@@ -518,6 +519,63 @@ class ShellLiveVoiceWorkflowTest {
         assertEquals(app, model.stageToolId)
         assertTrue(inStage(scenario, CALC_LABEL))
         assertFalse(inStage(scenario, "Fixture response"))
+    }
+
+    /** Plan D, Dc1: a spoken press runs the control of the shown screen as a tap does, with no plan call. Then the voice says the routing text. */
+    @Test fun aSpokenPressRunsTheControl() {
+        val provider = StageProvider(plan = "lesson")
+        onStage(provider = provider) { _, model, app ->
+            assertEquals(1, JSONObject(stored(model, app).state).getInt("lesson"))
+            val before = messages(model).size
+            socket.say(PRESS_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            robot.waitUntil { JSONObject(stored(model, app).state).getInt("lesson") == 2 }
+            robot.waitUntil { "d2" to "Ответ Alphy: $PRESS_TEXT" in commentary() }
+            assertTrue(routingOf(provider, PRESS_REQUEST).shownScreen.orEmpty().startsWith(ShownScreen.PREFIX))
+            assertEquals(listOf(CloudGenerationStage.APP_FILE), provider.script.calls.map { it.generationStage })
+            assertEquals(listOf("complete", PRESS_TEXT, null), messages(model).last().let { listOf(it.status, it.text, it.toolId) })
+            assertEquals(app, model.stageToolId)
+        }
+    }
+
+    /** Plan D, Dc1, review focus 2: a press of a label that the screen does not have runs nothing, and the voice says so. */
+    @Test fun aPressOfAnUnknownLabelRunsNothing() = pressRunsNothing(StageProvider(plan = "lesson", press = "Удалить всё"))
+
+    /**
+     * Plan D, Dc1, review focus 2: an app that declares a capability has no control on the shown screen, because a press of its button
+     * could request a device action. A press of that button runs nothing.
+     */
+    @Test fun aPressNeverRunsADeviceAction() =
+        pressRunsNothing(StageProvider(script = AgentScriptProvider(listOf(Scripted.Text(TEA))), press = "Yeşil çay seç")) { model, app ->
+            assertTrue("\"Yeşil çay seç\"" in stored(model, app).ui)
+            assertEquals("Siyah çay", JSONObject(stored(model, app).state).getString("cay"))
+        }
+
+    /** Plan D, Dc1: with no app on the stage, the routing call gets no shown screen, so it cannot offer a press. */
+    @Test fun noPressWithoutAShownScreen() = early(StageProvider()) { _, _, provider, _ ->
+        socket.say("Какая погода", "d1", 100)
+        robot.waitUntil { commentary().size == 1 }
+        val routing = routingOf(provider, "Какая погода")
+        assertTrue(routing.voiceScreen)
+        assertNull(routing.shownScreen)
+    }
+
+    /** Plan D, Dc1, review focus 3: the screen of a stage app that the person deleted goes to no routing call, and the stage shows the character. */
+    @Test fun aDeletedStageToolIsNotSent() {
+        val provider = StageProvider()
+        onStage(provider = provider) { scenario, model, app ->
+            val tool = stored(model, app)
+            scenario.onActivity { model.viewModelScope.launch { model.tools.delete(model.tools.prepareDeletion(tool)) } }
+            robot.waitUntil { model.tools.tools.none { it.id == app } }
+            assertNull(model.stageToolId)
+            robot.waitUntil { robot.composedIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.TestTag) == CHARACTER } }
+            val before = messages(model).size
+            socket.say("Какая погода", "d2", 2_000)
+            waitForTheAnswer(model, before)
+            val routing = routingOf(provider, "Какая погода")
+            assertTrue(routing.voiceScreen)
+            assertNull(routing.shownScreen)
+        }
     }
 
     /** Plan D, Da1: the app of the stage is a stored app of the chat, so the chat shows it after the end. */
@@ -1024,9 +1082,10 @@ class ShellLiveVoiceWorkflowTest {
      */
     private fun onStage(plan: String = "calc", show: Boolean = false, brief: String = SCREEN_BRIEF,
         script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan)))),
+        provider: StageProvider = StageProvider(show = show, brief = brief, script = script),
         test: (ActivityScenario<CloudTestActivity>, ShellViewModel, String) -> Unit) =
         withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-            install(chat = StageProvider(show = show, brief = brief, script = script))
+            install(chat = provider)
             live { scenario, model ->
                 socket.say(APP_REQUEST, "d1", 100)
                 robot.waitUntil(60_000) { model.stageToolId != null }
@@ -1071,6 +1130,32 @@ class ShellLiveVoiceWorkflowTest {
             assertTrue(model.liveVoice.active)
         }
     }
+
+    /** The library record of [app]. */
+    private fun stored(model: ShellViewModel, app: String) = model.tools.tools.first { it.id == app }
+
+    /** The routing call of the spoken [request]. */
+    private fun routingOf(provider: StageProvider, request: String) =
+        provider.calls.map { it.first }.single { it.generationStage == null && it.decisionContext?.originalUserTurn?.text == request }
+
+    /**
+     * The app of [provider] is on the stage, and [PRESS_REQUEST] presses a label that is no control of its shown screen. The stored app
+     * stays the same, the voice says [PRESS_MISSING], and [check] runs.
+     */
+    private fun pressRunsNothing(provider: StageProvider, check: (ShellViewModel, String) -> Unit = { _, _ -> }) =
+        onStage(provider = provider) { _, model, app ->
+            val record = stored(model, app)
+            val before = messages(model).size
+            socket.say(PRESS_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            robot.waitUntil { "d2" to PRESS_MISSING in commentary() }
+            assertNotNull(routingOf(provider, PRESS_REQUEST).shownScreen)
+            robot.awaitFrames(5)
+            assertEquals(listOf(record.revision, record.state), stored(model, app).let { listOf(it.revision, it.state) })
+            assertEquals(listOf("complete", PRESS_MISSING, null), messages(model).last().let { listOf(it.status, it.text, it.toolId) })
+            assertEquals(app, model.stageToolId)
+            check(model, app)
+        }
 
     /** The answer of the request after [before] messages ended. */
     private fun waitForTheAnswer(model: ShellViewModel, before: Int = 0) =
@@ -1130,14 +1215,14 @@ class ShellLiveVoiceWorkflowTest {
 
     /**
      * Each call goes to [calls] with its session. The routing call waits for [routing], then creates an app for [APP_REQUEST], changes it
-     * for [CHANGE_REQUEST], gives a screen with [show] and [brief] for [SCREEN_REQUEST], and answers each other request. A plan call waits
-     * for [plans] and answers from [script] (the app file [plan]). The early plan call of a request that gets no screen waits for its
-     * cancel, so it takes no reply of [script] and no test depends on when the cancel comes.
+     * for [CHANGE_REQUEST], gives a screen with [show] and [brief] for [SCREEN_REQUEST], presses the control [press] for [PRESS_REQUEST],
+     * and answers each other request. A plan call waits for [plans] and answers from [script] (the app file [plan]). The early plan call
+     * of a request that gets no screen waits for its cancel, so it takes no reply of [script] and no test depends on when the cancel comes.
      */
     private class StageProvider(plan: String = "calc", val plans: CompletableDeferred<Unit> = CompletableDeferred(Unit),
         private val show: Boolean = false, private val brief: String = SCREEN_BRIEF,
         val script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan)))),
-        val routing: CompletableDeferred<Unit> = CompletableDeferred(Unit)) : ChatProvider {
+        val routing: CompletableDeferred<Unit> = CompletableDeferred(Unit), private val press: String = NEXT) : ChatProvider {
         val calls = CopyOnWriteArrayList<Pair<CloudRequest, CloudSession>>()
         val planCalls get() = calls.filter { it.first.generationStage != null }
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -1153,6 +1238,7 @@ class ShellLiveVoiceWorkflowTest {
                 APP_REQUEST -> chatDecision("create", "Готово.", "Make the app")
                 CHANGE_REQUEST -> chatDecision("refine", "Готово.", "Add half of the bill")
                 SCREEN_REQUEST -> JSONObject(chatDecision("screen", SCREEN_TEXT, brief)).put("show", show).toString()
+                PRESS_REQUEST -> chatDecision("press", PRESS_TEXT, press)
                 else -> chatDecision("answer", "Fixture response")
             }, false))
         }
@@ -1210,6 +1296,18 @@ class ShellLiveVoiceWorkflowTest {
         const val SCREEN_FAILED = "Картинку показать не получилось."
         const val TIMER_REQUEST = "Поставь таймер на 10 минут"
         const val CHANGE_REQUEST = "Покажи ещё половину счёта"
+        /** A spoken press of the shown screen, the routing text of the press, and the next button of the lesson app. */
+        const val PRESS_REQUEST = "Покажи следующий шаг"
+        const val PRESS_TEXT = "Метка всё время смотрит на Землю."
+        const val NEXT = "Дальше"
+        const val PRESS_MISSING = "На экране нет такой кнопки."
+        /** A screen with a choice and a button that declares the capabilities of an alerting countdown (ShownScreenTest). */
+        val TEA = """
+            app("Çay", lang="tr")
+            need cay = input("choice", "Çay türü", "Siyah çay", options=["Siyah çay", "Yeşil çay"])
+            need hazir = button("Yeşil çay seç", [set(${'$'}/cay, "Yeşil çay")])
+            need demleme = timer("Demleme", 300, alert=true, start="Başlat", pause="Duraklat", reset="Sıfırla", done="Hazır")
+        """.trimIndent()
         /** The grounded answer of a screen that needs fresh facts, and its source. */
         const val FRESH_TEXT = "Сегодня сердце бьётся 70 раз в минуту."
         val FRESH_SOURCE = Source("Пульс", "https://example.com/pulse", "Пульс в покое: 70 ударов в минуту")

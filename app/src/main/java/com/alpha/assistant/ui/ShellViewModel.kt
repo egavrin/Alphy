@@ -47,6 +47,8 @@ import com.alpha.assistant.memory.MemoryPageState
 import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.EarlyPlan
+import com.alpha.assistant.tools.ShownControl
+import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.TestFixStatus
 import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.agent.AppFileNames
@@ -78,6 +80,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -176,6 +179,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     internal val stageToolId: String? get() = liveBridge?.stageToolId?.takeIf { id -> tools.tools.any { it.id == id && !it.archived } }
     /** A hand-off or typed turn of the voice mode is queued or runs. */
     internal val liveVoiceWorking: Boolean get() = liveBridge?.working == true
+    /** Each spoken press of a control of the stage app, with the app id (plan D, Dc1). */
+    internal val livePresses: Flow<Pair<String, ShownControl>>? get() = liveBridge?.presses
     /** The uptime until which a screen or an app that Alphy opens is expected in front (spec 5.8.1, [expectAlphyScreen]). */
     internal var alphyScreenUntil = 0L
     /** The activity class that started the voice mode. The shell and the assistant sheet share this model ([ownsLiveVoice]). */
@@ -764,9 +769,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     private data class Active(val conversationId: String, val assistantId: String, val originDraft: Draft, val session: CloudSession = CloudSession(), var job: Job? = null, var weatherDraft: Draft? = null, var cancelled: Boolean = false,
         var earlyPlan: EarlyPlan? = null)
     private var active: Active? = null
-    /** [voice]: a spoken request of the voice mode. A retry is not spoken. */
+    /** [voice]: a spoken request of the voice mode. A retry is not spoken. [voiceTarget]: the stage app when the person spoke (plan D, Dc1). */
     private data class QueuedRequest(val conversationId: String, val assistantId: String, val originDraft: Draft,
-        val saved: CompletableDeferred<Boolean>, val voice: Boolean = false)
+        val saved: CompletableDeferred<Boolean>, val voice: Boolean = false, val voiceTarget: String? = null)
     private class ChooseRefinement(val choices: List<RefinementChoice>) : Exception()
     private val requests = ArrayDeque<QueuedRequest>()
     private var queueOrder = 0L
@@ -1605,7 +1610,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         enqueue(updated, assistant, persist { store.updateConversation(updated) })
     }
     private fun enqueue(conversation: Conversation, assistant: Message, saved: CompletableDeferred<Boolean>, spoken: Boolean = false) {
-        requests.addLast(QueuedRequest(conversation.id, assistant.id, snapshot.draft, saved, spoken))
+        requests.addLast(QueuedRequest(conversation.id, assistant.id, snapshot.draft, saved, spoken, stageToolId.takeIf { spoken }))
         dispatchNext()
     }
     private fun dispatchNext() {
@@ -1651,6 +1656,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 // A spoken request with no image, no screen of the phone, and no chosen app to change can get a screen (plan D, Db1).
                 val voiceScreen = next.voice && user.attachments.isEmpty() && user.screenContext == null &&
                     !assistant.requiresRefinement && tools.planStep() != null
+                // The screen of the stage app goes to the routing call as untrusted data, unless the app was deleted or archived (plan D, Dc1).
+                val stage = next.voiceTarget?.takeIf { voiceScreen }?.let { id -> tools.tools.find { it.id == id && !it.archived } }
+                val shownScreen = stage?.let(ShownScreen::of)?.line()
                 fun validateOperation(decision: ChatToolReply.Decision) {
                     if(decision.isMiniApp) {
                         if(knownTools == null) throw CloudFailure("tool_storage",toolStorageWarning)
@@ -1736,7 +1744,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     val cloudRequest = CloudRequest(turns(history) + originalTurn,assistant.search,toolInstructions,
                         chatDecision = true,selectedText = selectedText,weatherLocation = { resolveWeatherPlace(request) },
                         validateOperation = ::validateOperation, allowCourseDecision = courseHost != null && !next.voice,
-                        voiceScreen = voiceScreen,
+                        voiceScreen = voiceScreen, shownScreen = shownScreen,
                         allowChatImage = !assistant.requiresRefinement, chatImageEnabled = chatImageSelection != null,
                         decisionContext = ChatDecisionContext(originalTurn, turns(cleanHistory), toolInstructions, inputProvenance, memoryStore),
                         automationDraftChatId = draftChat, screenContext = user.screenContext, screenImages = screenImages,
@@ -1847,7 +1855,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         ChatToolReply.Decision("course", "", "", "none")
                     }
                     testFix != null -> ChatToolReply.Decision("test_fix", "", "", "none")
-                    else -> ChatToolReply.decode(completed.text, allowScreen = voiceScreen)
+                    else -> ChatToolReply.decode(completed.text, allowScreen = voiceScreen, allowPress = shownScreen != null)
                 }
                 // The early plan has no brief and no found facts, so only a screen with no search uses it.
                 if (!decoded.isScreen || decoded.search != "none") stopEarlyPlan(request)
@@ -1947,6 +1955,18 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                                         toolId = saved?.id, toolRevision = saved?.revision, provenance = replyProvenance)
                                 }
                             })
+                    }
+                } else if (decoded.kind == "press") {
+                    // The state can change after the routing call, so the controls are read again from the app that the stage shows now.
+                    // A label that names no single control runs nothing (review focus 2).
+                    val record = tools.tools.find { it.id == stageToolId && it.id == stage?.id }
+                    val control = record?.let(ShownScreen::of)?.controls?.singleOrNull { it.label == decoded.brief }
+                    val bridge = liveBridge?.takeIf { liveVoice.active }
+                    if (record != null && control != null && bridge != null) bridge.press(record.id, control)
+                    // The voice speaks the text of the message when it completes, so after the press (ruling OD-D3).
+                    updateMessage(request, assistant.id) {
+                        it.copy(text = if (control != null && bridge != null) decoded.text else LiveVoiceBridge.PRESS_MISSING, status = "complete",
+                            provenance = replyProvenance)
                     }
                 } else if (!decoded.isMiniApp) {
                     val intent = decoded.image
