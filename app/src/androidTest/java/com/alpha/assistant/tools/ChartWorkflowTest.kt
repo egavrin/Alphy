@@ -71,6 +71,26 @@ class ChartWorkflowTest {
         }
     }
 
+    // L3 decision 1 (showcase-lang-budget-es-v5b): the kit names the one series of a chart with the title of the chart,
+    // so "Gastos por categoría" showed as the heading over the chart and again as the caption under it.
+    @Test fun aChartShowsTheCaptionOfItsOneSeriesOnlyWhenTheHeadingDoesNotNameIt() {
+        val values = listOf(1, 3, 2)
+        // The texts of the series, and how many nodes show each text: the heading counts once, and each caption once more.
+        val cases = listOf(
+            listOf(title) to mapOf(title to 1),
+            listOf(series) to mapOf(title to 1, series to 1),
+            listOf(series, title) to mapOf(title to 2, series to 1),
+        )
+        for ((texts, counts) in cases) {
+            val spec = ToolSpec.parse(definition(chart("bar", texts), state(categories, values)).toString())
+            withSavedChart(spec) { _, _ ->
+                robot.waitFor(description(categories, values, texts))
+                val shown = robot.texts()
+                assertEquals("Series $texts", counts, counts.keys.associateWith { text -> shown.count { it == text } })
+            }
+        }
+    }
+
     @Test fun invalidChartsLeaveTheSavedAppAndRevisionIntact() {
         val initial = state(categories, listOf(1, 3, 0))
         val invalid = linkedMapOf(
@@ -78,7 +98,7 @@ class ChartWorkflowTest {
             "nonfinite" to "input.state.values = [1e309, 3, 0];",
             "negative" to "input.state.values = [-1, 3, 0];",
             "kind" to "return {state: input.state, ui: ${chart("unknown")}};",
-            "series" to "return {state: input.state, ui: ${chart("pie", secondSeries = true)}};",
+            "series" to "return {state: input.state, ui: ${chart("pie", listOf(series, "Второй ряд"))}};",
             "points" to "input.state.categories = Array(257).fill('A'); input.state.values = Array(257).fill(1);",
             "work" to """
                 input.state.categories = Array(256).fill('A');
@@ -165,16 +185,14 @@ class ChartWorkflowTest {
         } finally { fixture.remove() }
     }
 
-    private fun description(labels: List<String>, values: List<Int>) = buildString {
-        append("$title. $series: ")
-        labels.zip(values).forEach { (label, value) -> append("$label $value; ") }
+    private fun description(labels: List<String>, values: List<Int>, texts: List<String> = listOf(series)) = buildString {
+        append("$title. ")
+        texts.forEach { text -> append("$text: "); labels.zip(values).forEach { (label, value) -> append("$label $value; ") } }
     }
 
-    private fun chart(kind: String, secondSeries: Boolean = false) = JSONObject().put("type", "chart").put("kind", kind)
+    private fun chart(kind: String, texts: List<String> = listOf(series)) = JSONObject().put("type", "chart").put("kind", kind)
         .put("text", title).put("categories", "categories")
-        .put("series", JSONArray().put(JSONObject().put("text", series).put("bind", "values")).apply {
-            if (secondSeries) put(JSONObject().put("text", "Второй ряд").put("bind", "values"))
-        })
+        .put("series", JSONArray(texts.map { JSONObject().put("text", it).put("bind", "values") }))
 
     private fun ui(kind: String, controls: List<JSONObject>) = JSONObject().put("type", "column")
         .put("children", JSONArray(controls + chart(kind)))

@@ -562,7 +562,7 @@ test("emit: tabs-chart.plan gives a tabs control, groups with visibleBind, and a
   expect(tabs.children[0]).toEqual({ type: "tabs", text: "Resumen, Añadir", bind: "resumen_s.tab", action: "resumen_view", options: ["Resumen", "Añadir"].map((value) => ({ text: value, value })) });
   expect(tabs.children.slice(1).map((group) => [group.type, group.visibleBind, group.children.map((node) => node.type)])).toEqual([
     ["column", "v.resumen_view_tab0", ["chart", "card"]], ["column", "v.resumen_view_tab1", ["section"]]]);
-  // The kit writes the title once, as the label of the chart (Task 11b-2b, A.6). Its one series has the same text, which Alphy draws as a caption (L2 decision 3).
+  // The kit writes the title once, as the label of the chart (Task 11b-2b, A.6). Its one series has the same text, which Alphy does not draw again (L3 decision 1).
   expect(tabs.children[1].children[0]).toEqual({ type: "chart", text: title, kind: "bar", categories: "grafico_chart_labels", series: [{ text: title, bind: "grafico_chart_values" }] });
   // The figure that is the main element stays the hero card in its tab.
   expect(tabs.children[1].children[1]).toMatchObject({ type: "card", variant: "hero" });
@@ -572,10 +572,10 @@ test("emit: tabs-chart.plan gives a tabs control, groups with visibleBind, and a
 });
 
 // L2 decision 3 (showcase-lang-budget-es-v5b): "Gastos por categoría" showed above the chart and under it in the accent color. The kit writes the
-// title in one node: the text of the chart, which Alphy draws as its heading (NativeToolUi.kt, showsToolHeading). Alphy also draws the text of each
-// series as its caption in the color of the series, and its catalog needs a series text of 1 to 100 characters (ToolUiCatalog.kt chart_series_entry).
-// The one series of the kit has the title as its text, so the second line is the caption of the host, and the kit has no second title to leave out.
-test("emit (L2 decision 3): the kit writes the title of a chart in one node, and the one series has the same text, which Alphy draws as its caption", async () => {
+// title in one node: the text of the chart, which Alphy draws as its heading (NativeToolUi.kt, showsToolHeading). Alphy's catalog needs a series text
+// of 1 to 100 characters (ToolUiCatalog.kt chart_series_entry), so the one series of the kit has the title as its text too. Alphy draws the text of
+// each series as a caption in the color of the series, but not the text of one series that equals the heading (NativeChart, L3 decision 1).
+test("emit (L2 decision 3): the kit writes the title of a chart in one node, and the one series has the same text, which Alphy does not draw again", async () => {
   const { definition } = await compileAppFile(readFileSync(new URL("./fixtures/model/showcase-lang-budget-es-v5b.plan", import.meta.url), "utf8"));
   const title = "Gastos por categoría", chart = every(definition.ui).find((node) => node.type === "chart");
   expect([chart.text, chart.series.map((series) => series.text)]).toEqual([title, [title]]);

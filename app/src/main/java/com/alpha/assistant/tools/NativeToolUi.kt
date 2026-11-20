@@ -1907,7 +1907,9 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
                 }
             }
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {Text(categories.get(0).toString(),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall); if(categories.length()>1) Text(categories.get(categories.length()-1).toString(),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall,textAlign=TextAlign.End)}
-            repeat(series.length()) {Text(series.getJSONObject(it).getString("text"),color=colors[it],style=MaterialTheme.typography.labelMedium)}
+            // The heading already names one series with its own text, so that caption would show the title a second time (L3 decision 1).
+            val named = series.length() == 1 && series.getJSONObject(0).getString("text") == node.getString("text")
+            if (!named) repeat(series.length()) {Text(series.getJSONObject(it).getString("text"),color=colors[it],style=MaterialTheme.typography.labelMedium)}
         }
     }
 }
