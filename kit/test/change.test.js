@@ -192,7 +192,7 @@ const BLANK_FORM = { new_name: "", new_aisle: "" }, TYPED_FORM = { ...BLANK_FORM
 /** The shopping app with Eggs typed in its add form, changed to the app with no list. */
 const withoutTyped = async () => compileAppFile(WITHOUT, await stored(SHOPPING, [...SHOPPING_EVENTS, { type: "liveInput", actionId: "items_new_name", value: "Eggs" }]));
 
-/** Each field whose value in the state differs from its value in the start state: the host finds the data of the person so (AppAgent.kt). */
+/** Each field whose value in the state differs from its value in the start state: the host finds the data of the person so (ToolSpec.holdsDataOfThePerson, task U2-A). */
 const differing = ({ definition, state }) => Object.keys(definition.stateSchema).filter((field) => JSON.stringify(state[field]) !== JSON.stringify(definition.initialState[field]));
 
 test("change (kept start): a removed list with two stored rows gives an empty list in the start state and the two rows in the state, and an untouched list is blank in both", async () => {

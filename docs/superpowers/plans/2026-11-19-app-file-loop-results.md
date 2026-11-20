@@ -795,7 +795,7 @@ Decision 5 permits one change of the section "Change". It did not apply:
 - The tea timer is the foreground timer of the host and keeps no state, so no stored state held a timer that runs.
 - The controller wrote the requests. Each one is short and asks for one change.
 - The times come from this computer, with 4 calls in parallel and a warm cache for 29 of 32 first calls. A cold call from the phone can differ.
-- Assumption: the change call of the app merges and compiles as the harness does (`patchAppFile`, then `compileAppFile` with the stored app). Test it: log the steps of the change call of the app for one case.
+- The change call of the app and the harness now run the same `compileStep` of the kit, with the read of the reply and the cap of the app (`AppFileCompiler.kt` `patch`, `kit/modelcheck.js` `compile`). So the code settles the earlier Assumption that the two merge and compile alike. The records of this section ran before that change.
 - The verdicts read plans and compiled screens. No plan ran on a device.
 
 ### Calls and tokens

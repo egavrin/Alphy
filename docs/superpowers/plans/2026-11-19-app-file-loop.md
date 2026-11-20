@@ -547,7 +547,7 @@ The draft is `plan-a-draft.md` (anchors at `fc17a24`). The controller read all o
 
 ### As built
 
-The code at `6d4b349` differs from the tasks below in these points (task U-K, item 14). The code wins.
+The code at `b9c7b1f` differs from the tasks below in these points (task U-K, item 14, and task U2-K, item 4). The code wins.
 
 - The comparison of the stored state with the start state uses the helper `sameToolJson` that the app has. There is no new `sameValue`.
 - A test-and-fix reply with no line gives `UNVERIFIED`, not `PASSED`. The detail is the string resource `tool_test_fix_no_line`. The test is `aTestFixWithNoLineIsUnverified`.
@@ -556,6 +556,19 @@ The code at `6d4b349` differs from the tasks below in these points (task U-K, it
 - A fault that the saved data blocks, and the mismatch fault, give `fallback:data_blocks` with no repair call (`AppFileSteps.outcome`).
 - Test and fix by lines never goes to the loop. When the kit cannot apply its reply, the request fails and the app, its data, and its revision stay.
 - The change call uses the low effort of a plan call and the limits of a plan call (`AppFileLimits()`: 20 s to the first text and 45 s in all).
+- The plan step and the change step run in `routeAppFile` (`tools/agent/AppFileSteps.kt`), which `AppAgent.run` calls. The tasks place them in `AppAgent.run`.
+- The bundle of the kit defines one global, `compileStep`, and the script of `AppFileCompiler.kt` calls only it. It reads the reply, merges it, and compiles the plan in one call. The globals `compileAppFile`, `readPlanReply`, and `patchAppFile` of tasks 1, 2, and K1 are gone.
+- The restore of a version (`ToolEngine.kt` `restoreSpec`, `kitCompile`, `kitRevision`):
+  - When the app and the version both have an app file, the kit compiles the app file of the version with the current app as `previous`.
+  - A restore between the two forms (one has an app file, the other has none) is refused with `widget_state` when the app holds data of the person or either version has a collection. OD-6 names only the data of the person. Else the version comes back with its own start state.
+  - The two saved-data faults (the flags `blockedBySavedData` and `savedDataMismatch`) refuse the restore with `widget_state`.
+  - Each other fault, a hole, and a sandbox status that is not ok fail the check of `kitRevision`. The restore check then gives its general text, "Эта версия не прошла проверку на текущих данных." OD-6 does not name these cases.
+  - The restored version keeps the icon of the current app. OD-6 says that the version comes back as it was saved.
+- The manual edit of an app with an app file (`ToolEngine.kt` `saveManualDefinition`):
+  - Only the field `appFile` may change. An edit of another field, an edit that removes `appFile`, and an edit that adds `appFile` to an app of today's form are refused with `app_file_edit` and the text `tool_manual_edit_app_file`.
+  - The kit compiles the new app file with the current app as `previous`. The two saved-data faults refuse the edit with `widget_state`.
+  - Each other fault of the kit goes to the person with its line (`app_file_edit`, with the faults of the kit as the text). A clean plan with a hole and a sandbox status that is not ok fail the check of `kitRevision`, and nothing is saved.
+- No function has the name `hasStoredData` (task 9, OD-6). The rule of the data of the person is `ToolSpec.holdsDataOfThePerson` (task U2-A adds it under this name).
 
 ## Decisions of the controller
 
