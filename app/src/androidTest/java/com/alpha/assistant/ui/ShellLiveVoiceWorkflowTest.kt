@@ -44,6 +44,7 @@ import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
+import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.tools.agentReply
 import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.plan as appFilePlan
@@ -581,6 +582,20 @@ class ShellLiveVoiceWorkflowTest {
             assertTrue(model.tools.busy)
             robot.instrumentation.runOnMainSync { model.tools.cancel() }
             robot.waitUntil { !model.tools.busy }
+        }
+    }
+
+    /** A press that a stage takes but does not answer in time changes nothing, the voice says so, and a later answer runs no tap. */
+    @Test fun aPressWithNoAnswerDoesNotRun() {
+        val taken = CopyOnWriteArrayList<VoicePress>()
+        var stage: Job? = null
+        // This shell draws no stage, so the only collector is one that takes each press and never answers, as a stage with no frame.
+        pressRunsNothing(StageProvider(plan = "lesson"), PRESS_FAILED, owner = Unit::class.java, before = { model ->
+            robot.instrumentation.runOnMainSync { stage = model.viewModelScope.launch { checkNotNull(model.livePresses).collect { taken += it } } }
+        }) { model, app ->
+            stage?.cancel()
+            assertEquals(1, JSONObject(stored(model, app).state).getInt("lesson"))
+            assertFalse(taken.single().ran.complete(true))
         }
     }
 
