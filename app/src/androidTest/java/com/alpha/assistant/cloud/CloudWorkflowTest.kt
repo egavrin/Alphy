@@ -1834,27 +1834,68 @@ class CloudWorkflowTest {
         assertEquals("decision.kind", (decoded as? CloudFailure)?.shape?.rule)
     }
 
-    /** Task Db1: a screen with a search keeps its kind through the grounded decision. */
-    @Test fun aScreenKeepsItsKindThroughASearch(): Unit = kotlinx.coroutines.runBlocking {
-        Server { request, output ->
-            when {
-                request.path == "/v1/tools/search" -> {
-                    val hit = JSONObject().put("title", "Gold price").put("url", "https://example.com/gold")
-                    output.headers(type = "application/json")
-                    output.write(JSONObject().put("results", JSONArray().put(hit)).toString().toByteArray())
+    /**
+     * Tasks Db1 and Db5: a spoken screen that needs current facts searches first, and the grounded decision is still a screen with its
+     * sources. The grounded call has no rule for show, so the screen keeps the show of the routing decision (concern 3 of task Db2).
+     */
+    @Test fun aScreenWithSearchRunsTheSearchFirst(): Unit = kotlinx.coroutines.runBlocking {
+        for (show in listOf(true, false)) {
+            val stages = mutableListOf<String>()
+            Server { request, output ->
+                when {
+                    request.path == "/v1/tools/search" -> {
+                        stages += "search"
+                        val hit = JSONObject().put("title", "Gold price").put("url", "https://example.com/gold")
+                        output.headers(type = "application/json")
+                        output.write(JSONObject().put("results", JSONArray().put(hit)).toString().toByteArray())
+                    }
+                    request.searching -> { stages += "search_plan"; output.calls(call(0)) }
+                    request.grounded -> {
+                        stages += "grounded"
+                        // The grounded reply leaves show out, or gives the other value.
+                        val grounded = JSONObject(decision("Gold costs more this week [1].", "screen", "required", "A chart of the gold price [1]."))
+                        output.answer((if (show) grounded else grounded.put("show", true)).toString())
+                    }
+                    else -> {
+                        stages += "routing"
+                        request.requireStrictDecision(show = true)
+                        output.classification(JSONObject(decision("Gold costs more this week.", "screen", "required", "A chart of the gold price."))
+                            .put("show", show).toString())
+                    }
                 }
-                request.searching -> output.calls(call(0))
-                request.grounded -> output.answer(decision("Gold costs more this week [1].", "screen", "required", "A chart of the gold price [1]."))
-                else -> output.classification(decision("Gold costs more this week.", "screen", "required", "A chart of the gold price."))
+            }.use { server ->
+                val events = mutableListOf<CloudEvent>()
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
+                    cleanChatRequest("Show me the gold price this week").copy(voiceScreen = true), CloudSession()) { events += it }
+                assertTrue(server.failures.toString(), server.failures.isEmpty())
+                assertEquals(listOf("routing", "search_plan", "search", "grounded"), stages)
+                // The sources come before the decision, which the app then builds the screen from.
+                assertEquals(listOf("searching", "found"), events.dropLast(1).map { (it as CloudEvent.Search).status })
+                assertEquals(listOf("https://example.com/gold"), events.filterIsInstance<CloudEvent.Search>().flatMap { it.sources }.map { it.url })
+                val result = ChatToolReply.decode((events.last() as CloudEvent.RoundComplete).text, allowScreen = true)
+                assertEquals(ChatToolReply.Decision("screen", ChatToolReply.SOURCE_LIMITATION + "\n\nGold costs more this week [1].",
+                    "A chart of the gold price [1].\n" + ChatToolReply.SOURCE_LIMITATION, "required", show = show), result)
             }
+        }
+        // The routing text asks for the search only for a screen of current facts.
+        assertTrue("Use search required when the screen needs current facts" in ChatToolReply.voiceScreenInstructions)
+    }
+
+    /** Ruling of the controller after task Dc1: a press loses its image string before the decode, as a screen does, so it costs no correction call. */
+    @Test fun aPressWithAnImageStringPassesWithOneCall() = kotlinx.coroutines.runBlocking {
+        val image = JSONObject().put("slot", "illustration").put("prompt", "The Moon").put("required", false).toString()
+        Server { request, output ->
+            assertTrue("press" in request.responsesKinds())
+            output.responsesCall("decision-0", "submit_chat_decision", JSONObject(pressDecision()).put("image", image).toString())
         }.use { server ->
             val events = mutableListOf<CloudEvent>()
-            CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
-                cleanChatRequest("Show me the gold price this week").copy(voiceScreen = true), CloudSession()) { events += it }
+            CloudChatProvider({ AiAccount(AiProvider.OPENAI, "alpha-test-only") }, Endpoints { server.url }).respond("alpha-test-only",
+                cleanChatRequest("Дальше").copy(voiceScreen = true, shownScreen = lessonScreen().line(), allowChatImage = true),
+                CloudSession()) { events += it }
             assertTrue(server.failures.toString(), server.failures.isEmpty())
-            val result = ChatToolReply.decode(events.filterIsInstance<CloudEvent.RoundComplete>().single().text, allowScreen = true)
-            assertEquals("screen" to "required", result.kind to result.search)
-            assertEquals(4, server.requests.size)
+            assertEquals(1, server.requests.size)
+            val result = ChatToolReply.decode((events.single() as CloudEvent.RoundComplete).text, allowScreen = true, allowPress = true)
+            assertEquals(ChatToolReply.Decision("press", "Метка всё время смотрит на Землю.", "Дальше", "none"), result)
         }
     }
 

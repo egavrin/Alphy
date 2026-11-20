@@ -104,7 +104,7 @@ opens outline review. The user starts and saves the course from that review.
 The latest request comes from a spoken talk. The voice of the talk speaks your text aloud.
 Choose kind screen when a thing to see or to try makes the answer clearer: a drawing, a model that the person can change, steps, an experiment, or a check. For this request, such an explanation is a screen, not an answer. Examples: how a rainbow forms, how an atom is built, the times table of seven.
 Choose answer for a plain question with a short fact. Choose create when the person asks for a tool or an app. Use the device plan for a command to the phone.
-For screen, text is one to three short spoken sentences in the language of the request. They agree with the screen. The brief names the main thing that the screen shows and is never empty. Use search none.
+For screen, text is one to three short spoken sentences in the language of the request. They agree with the screen. The brief names the main thing that the screen shows and is never empty. Use search required when the screen needs current facts that change with time. Use search none for each other screen.
 Set show to true only for a screen that the person asks in words to see or to be shown, and set it to false for each other decision.
 A request to learn a subject gets a screen with one lesson, not a course.
 """.trimIndent()

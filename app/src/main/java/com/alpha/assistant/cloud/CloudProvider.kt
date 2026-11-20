@@ -831,7 +831,7 @@ The user reviews and approves the plan before any device action.
                 return ChatToolReply.decode(kotlinx.serialization.json.JsonObject((json - "image") +
                     ("kind" to kotlinx.serialization.json.JsonPrimitive(ordinaryKind))), allowScreen).copy(kind = kind)
             }
-            return ChatToolReply.decode(if (kind == "create" || kind == "refine" || kind == "screen")
+            return ChatToolReply.decode(if (kind == "create" || kind == "refine" || kind == "screen" || kind == "press")
                 kotlinx.serialization.json.JsonObject(json - "image") else json, allowScreen, allowPress)
         }
         suspend fun readDecision(body: JSONObject, stage: CompletionStage,
@@ -1146,7 +1146,8 @@ The user reviews and approves the plan before any device action.
                 val candidate = ChatToolReply.decode(completed.text, allowScreen, allowPress)
                 requireSameOperation(decision, candidate)
                 if (candidate.isMiniApp) ChatToolReply.requireBriefFits(candidate.brief, allowance)
-                accept(candidate)
+                // The grounded call has no rule for show, so a screen keeps the show of the routing decision.
+                accept(candidate.copy(show = decision.show && candidate.isScreen))
             }
         }
         session.checkActive(currentCoroutineContext())
