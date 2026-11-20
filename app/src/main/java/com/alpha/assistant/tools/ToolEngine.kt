@@ -912,7 +912,9 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
             // The plan of the version is the source: the kit moves each value of the person by its rules, or it refuses the restore.
             activeSpec.appFile != null && appFile != null -> kitRevision(kitCompile(current, activeSpec, appFile), current, activeSpec, appFile)
             // No rule moves a state between the two forms, so only an app with no value of the person takes the version with its start state.
-            !sameToolJson(JSONObject(current.state), JSONObject(activeSpec.initialState)) -> throw savedDataBlocks()
+            // A collection keeps records of the person outside the state, so a version with one in either form counts as data.
+            activeSpec.collections.length() > 0 || targetSpec.collections.length() > 0 ||
+                !sameToolJson(JSONObject(current.state), JSONObject(activeSpec.initialState)) -> throw savedDataBlocks()
             else -> targetSpec.withIcon(activeSpec.iconId) to targetSpec.initialState
         }
     }

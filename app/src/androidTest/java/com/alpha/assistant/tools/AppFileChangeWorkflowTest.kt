@@ -474,6 +474,18 @@ class AppFileChangeWorkflowTest {
         assertEquals(5, store.revisions(used.id).size)
     }
 
+    // Failure case: the list of versions offered a part-built version to an app with a collection, and the commit then refused the restore.
+    @Test fun aRestoreBetweenTheTwoFormsRefusesAnAppWithACollection() {
+        val records = JSONObject(FIXTURE_APP).put("collections", JSONObject().put("history",
+            JSONObject().put("type", "object").put("fields", JSONObject().put("at", "number")))).toString()
+        val today = change(created(), listOf(Scripted.Text("outside(\"game\")"), Scripted.Text(agentWrite(records)),
+            Scripted.Text(agentFixtureFinish))).saved
+        assertEquals(1, ToolSpec.parsePersisted(today.spec).collections.length())
+        // The state has no value of the person, but a collection is data of the person: it keeps their records outside the state.
+        assertTrue(sameToolJson(JSONObject(today.state), JSONObject(ToolSpec.parsePersisted(today.spec).initialState)))
+        assertRestoreRefused(today, 1)
+    }
+
     /**
      * The shopping list built again in today's form (version 2), its plan restored with no value (version 3), Milk marked when [mark]
      * is true, and a change by lines that removes the list (version 4). Gives versions 2 and 4.
