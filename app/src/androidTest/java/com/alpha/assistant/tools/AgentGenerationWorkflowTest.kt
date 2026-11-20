@@ -128,6 +128,7 @@ class AgentGenerationWorkflowTest {
         val phases = events.map { it as ToolGenerationTraceEvent.Phase }
         assertEquals(List(outcomes.size) { AppFileNames.PLAN_OUTCOME } + AppFileNames.PHASES, phases.map { it.name })
         assertEquals(outcomes + List(AppFileNames.PHASES.size) { null }, phases.map { it.detail })
+        assertEquals(AppFileNames.SANDBOX_STATUSES.toList(), AppFileNames.SANDBOX_STATUSES.map(::safeGenerationCode))
     }
 
     /** Generates with [replies] and asserts that the app with [title] is accepted after the last reply. */

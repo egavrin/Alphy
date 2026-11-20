@@ -17,7 +17,6 @@ import com.alpha.assistant.tools.AppFileLimits
 import com.alpha.assistant.tools.AppFileReply
 import com.alpha.assistant.tools.AppLanguage
 import com.alpha.assistant.tools.GenerationLanguage
-import com.alpha.assistant.tools.SANDBOX_CODES
 import com.alpha.assistant.tools.ToolGenerationProgress
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolGenerationSmoke
@@ -119,7 +118,7 @@ internal class AppAgent(
                 is CloudFailure -> cause.code
                 else -> null
             }
-            if (code != null && code in SANDBOX_CODES) return code
+            if (code != null && code in AppFileNames.SANDBOX_STATUSES) return code
         }
         return (failure as? Feedback)?.finding?.reason ?: AppFileNames.HOST_ERROR
     }
