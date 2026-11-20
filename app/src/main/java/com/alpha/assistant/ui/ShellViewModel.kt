@@ -46,6 +46,7 @@ import com.alpha.assistant.surfaces.assistantUnavailable
 import com.alpha.assistant.memory.MemoryPageState
 import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.EarlyPlan
 import com.alpha.assistant.tools.TestFixStatus
 import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.agent.AppFileNames
@@ -760,7 +761,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     var attachmentBusy by mutableStateOf(false); private set
     var activeConversationId by mutableStateOf<String?>(null); private set
     internal val activeRequestMessageId: String? get() = active?.assistantId
-    private data class Active(val conversationId: String, val assistantId: String, val originDraft: Draft, val session: CloudSession = CloudSession(), var job: Job? = null, var weatherDraft: Draft? = null, var cancelled: Boolean = false)
+    private data class Active(val conversationId: String, val assistantId: String, val originDraft: Draft, val session: CloudSession = CloudSession(), var job: Job? = null, var weatherDraft: Draft? = null, var cancelled: Boolean = false,
+        var earlyPlan: EarlyPlan? = null)
     private var active: Active? = null
     /** [voice]: a spoken request of the voice mode. A retry is not spoken. */
     private data class QueuedRequest(val conversationId: String, val assistantId: String, val originDraft: Draft,
@@ -1722,6 +1724,14 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     !assistant.requiresRefinement && user.attachments.isEmpty() && user.screenContext == null &&
                         selectedText.isEmpty() && knownTools != null
                 }
+                val operationId = assistant.toolOperationId ?: assistant.id
+                // A screen does not wait for the routing call: its plan call starts now, with no brief yet (plan D, Db4, ruling OD-4).
+                if (voiceScreen && stageToolId == null) {
+                    val dialogue = withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue
+                    // A request too long for a plan prompt gets no early plan, and its routing decides as before.
+                    val prompt = try { ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = dialogue) } catch (_: CloudFailure) { null }
+                    request.earlyPlan = prompt?.let { tools.startEarlyPlan(it, key, operationId) }
+                }
                 withContext(Dispatchers.IO) {
                     val cloudRequest = CloudRequest(turns(history) + originalTurn,assistant.search,toolInstructions,
                         chatDecision = true,selectedText = selectedText,weatherLocation = { resolveWeatherPlace(request) },
@@ -1777,6 +1787,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 val memoryFact = completed.memoryFact
                 val preparedActions = listOfNotNull(courseTopic, testFix, devicePlanSteps, completed.automationDraft, memoryFact)
                 if (preparedActions.isNotEmpty()) {
+                    stopEarlyPlan(request)
                     if (completed.text.isNotEmpty() || preparedActions.size != 1 || answerFragment.isNotEmpty() ||
                         completed.provenance != MessageProvenance.CLEAN) {
                         throw CloudFailure("decision_changed", "The assistant returned an invalid prepared action.")
@@ -1834,6 +1845,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     testFix != null -> ChatToolReply.Decision("test_fix", "", "", "none")
                     else -> ChatToolReply.decode(completed.text, allowScreen = voiceScreen)
                 }
+                // The early plan has no brief and no found facts, so only a screen with no search uses it.
+                if (!decoded.isScreen || decoded.search != "none") stopEarlyPlan(request)
                 if(answerFragment.isNotEmpty() && decoded.kind != "answer")
                     throw CloudFailure("decision_changed","The assistant changed the requested operation after streaming an answer.")
                 val reported = completed.provenance ?: inputProvenance
@@ -1849,7 +1862,6 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 val sources = snapshot.conversations.find { it.id == conversationId }?.messages?.find { it.id == assistant.id }?.sources.orEmpty()
                 if(decoded.search == "required" && !assistant.search) throw CloudFailure("search_disabled","This request requires web search, but search is disabled.")
                 if(decoded.search == "required" && sources.isEmpty()) throw CloudFailure("search_required","No validated search sources were returned. The requested facts could not be verified.")
-                val operationId = assistant.toolOperationId ?: assistant.id
                 suspend fun prepareToolOperation(@StringRes progress: Int? = null) {
                     val text = progress?.let { getApplication<Application>().getString(it) }.orEmpty()
                     updateMessage(request, assistant.id, persist = false) {
@@ -1976,6 +1988,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                             // The routing check of the brief does not count the dialogue text, so this is no error of the person.
                             throw if (decoded.isScreen && failure.code == "widget_size") ScreenFallback(AppFileNames.PROMPT_SIZE) else failure
                         }
+                        // Only a screen with no search keeps it. It stays on the request, so a stop or the end can still cancel it.
+                        val early = request.earlyPlan?.also { it.phase(AppFileNames.EARLY_PLAN_USED) }
                         tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
                             cancelRequest = ::cancelRequest, sceneAttachments = sceneAttachments,
                             prepared = { prepareToolOperation() },
@@ -1984,7 +1998,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                             committed = { tool -> updateMessage(request,assistant.id) {
                                 it.copy(text = decoded.text,status = "complete",toolId = tool.id,toolRevision = tool.revision,
                                     provenance = replyProvenance)
-                            } }, screen = ScreenRun().takeIf { decoded.isScreen })
+                            } }, screen = ScreenRun(early?.result).takeIf { decoded.isScreen })
                     } catch (_: ScreenFallback) {
                         // The answer is complete without its screen, so the stage stays as it was and no error shows.
                         updateMessage(request, assistant.id) { it.copy(text = decoded.text, status = "complete", provenance = replyProvenance) }
@@ -2008,12 +2022,21 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 updateMessage(request, user.id) { if (it.status == "pending") it.copy(status = "not_sent") else it }
                 updateMessage(request, assistant.id) { it.copy(status = "error", errorCode = known?.code ?: "network", error = known?.message ?: if(it.toolOperationId != null) "The widget could not be created safely. Existing tools and data are unchanged. Retry the request." else accountProvider?.let { provider -> text(R.string.chat_offline, provider.displayName) } ?: text(R.string.chat_offline_unknown), searchStatus = if (it.searchStatus == "searching") "error" else it.searchStatus) }
             } finally {
+                stopEarlyPlan(request)
                 if (active === request) {
                     clearActiveRequest()
                     dispatchNext()
                 }
             }
         }
+    }
+    /** Stops the plan call beside the routing call of [request] once. Only a call that still runs gets the mark canceled. */
+    private fun stopEarlyPlan(request: Active) {
+        val early = request.earlyPlan ?: return
+        request.earlyPlan = null
+        if (early.result.isActive) early.phase(AppFileNames.EARLY_PLAN_CANCELED)
+        early.session.cancel()
+        early.result.cancel()
     }
     private fun updateMessage(request: Active, messageId: String, persist: Boolean = true, assetLease: Closeable? = null,
         transform: (Message) -> Message): Boolean {
@@ -2044,6 +2067,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         answerFragment = ""
         request.cancelled = true
         request.job?.cancel()
+        stopEarlyPlan(request)
     }
     fun cancelRequest(messageId: String) {
         if(active?.assistantId == messageId) {

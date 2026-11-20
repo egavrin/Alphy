@@ -474,7 +474,7 @@ class ToolController internal constructor(private val app: Application, private 
         run?.phase(AppFileNames.EARLY_PLAN_START)
         // The scope of the shell is a supervisor (viewModelScope), so a failed or cancelled plan does not end it.
         val result = scope.async(Dispatchers.IO) { generationService.earlyPlan(key, prompt, session, limits, run?.let { it::phase }) }
-        return EarlyPlan(result, session)
+        return EarlyPlan(result, session) { name -> run?.phase(name) }
     }
     internal class ManualChatSave(val canCommit: () -> Boolean, val finish: suspend (ToolRecord?) -> Unit)
 
@@ -1448,8 +1448,11 @@ private fun ToolDraftPreview.matchesDraft(draft: ToolDraft,allowPending: Boolean
         ((allowPending && draft.candidate==null && draft.previewState==null && draft.previewUi==null) ||
             (draft.candidate==candidateJson && draft.previewState==stateJson && draft.previewUi==uiJson))
 
-/** The plan call of a spoken request that started beside its routing call (ToolController.startEarlyPlan). A cancel of [session] stops the call. */
-internal class EarlyPlan(val result: Deferred<AppFileOutcome>, val session: CloudSession)
+/**
+ * The plan call of a spoken request that started beside its routing call (ToolController.startEarlyPlan). A cancel of [session] stops the call.
+ * [phase] marks a phase of the call, such as its use or its cancel, on the trace of the request.
+ */
+internal class EarlyPlan(val result: Deferred<AppFileOutcome>, val session: CloudSession, val phase: (String) -> Unit)
 
 /** The request owns one candidate. Clearing its atomic state also fences callbacks already in transit to Main. */
 internal class ToolControllerDraftPreviews(

@@ -34,6 +34,8 @@ import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.surfaces.AssistantCapture
 import com.alpha.assistant.tools.AgentScriptProvider
 import com.alpha.assistant.tools.Scripted
+import com.alpha.assistant.tools.ToolGenerationTraceEvent
+import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
@@ -93,14 +95,15 @@ class ShellLiveVoiceWorkflowTest {
     }
 
     @Test fun delegationSubmitsTheTranscriptAndSpeaksTheAnswer() {
-        install()
+        val routed = CopyOnWriteArrayList<CloudRequest>()
+        install(chat = routing(routed))
         live { scenario, model ->
             scenario.onActivity { model.editDraft(Draft("Черновик")) }
             socket.say("Какая погода", "d1", 100)
             robot.waitUntil { commentary().isNotEmpty() }
             assertEquals("Какая погода", messages(model).first().text)
             assertEquals(messages(model).single { it.role == "assistant" }.id, model.liveVoiceCardId)
-            assertTrue(checkNotNull(fixture.provider.lastRequest).search)
+            assertTrue(routed.single().search)
             // spoken() ends a reply without a sentence end with a period.
             assertEquals(listOf("d1" to "Ответ Alphy: Fixture response."), commentary())
             // The text that the user typed on the voice screen stays in the composer.
@@ -136,13 +139,9 @@ class ShellLiveVoiceWorkflowTest {
     @Test fun miniAppHandOffGetsThePlanStep() {
         val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))))
         withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-            install(chat = object : ChatProvider {
-                override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
-                    if (request.generationStage != null) script.respond(key, request, session, emit)
-                    else emit(CloudEvent.RoundComplete(chatDecision("create", "Готово.", "Make a tip calculator"), false))
-            })
+            install(chat = StageProvider(script = script))
             live { _, model ->
-                socket.say("Сделай калькулятор чаевых", "d1", 100)
+                socket.say(APP_REQUEST, "d1", 100)
                 robot.waitUntil(60_000) { commentary().size == 2 }
                 assertEquals(listOf("d1" to "Alphy готовит мини-приложение, оно появится на экране.",
                     "d1" to "Мини-приложение готово. Ответ Alphy: Готово."), commentary())
@@ -158,35 +157,37 @@ class ShellLiveVoiceWorkflowTest {
 
     /** Plan D, Db1: a spoken request with the plan step on can get the kind screen. With the switch off, or typed, it cannot. */
     @Test fun voiceHandOffMarksTheRequest() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-        install()
+        val routed = CopyOnWriteArrayList<CloudRequest>()
+        install(chat = routing(routed))
         live { scenario, model ->
             socket.say("Как работает сердце", "d1", 100)
             robot.waitUntil { commentary().size == 1 }
-            assertTrue(checkNotNull(fixture.provider.lastRequest).voiceScreen)
+            assertTrue(routed.last().voiceScreen)
             scenario.onActivity { model.editDraft(Draft("Привет")); model.sendLiveTyped() }
             robot.waitUntil { socket.types().contains("session.thinking.append") }
-            assertFalse(checkNotNull(fixture.provider.lastRequest).voiceScreen)
+            assertFalse(routed.last().voiceScreen)
             withPlanStep(fixture.context, AiProvider.OPENAI, false) {
                 socket.say("Как работает печень", "d2", 3_000)
                 robot.waitUntil { commentary().size == 2 }
-                assertFalse(checkNotNull(fixture.provider.lastRequest).voiceScreen)
+                assertFalse(routed.last().voiceScreen)
             }
+            assertEquals(3, routed.size)
         }
     }
 
-    /** Plan D, Db1: a screen takes the create path, and its plan call gets the dialogue text of the prompt after the request line. */
+    /** Plan D, Db1 and Db4: a screen takes the create path, and its plan call (the early plan) gets the dialogue text after the request line. */
     @Test fun voiceScreenBuildsAnApp() {
         val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))))
         withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-            install(chat = stageProvider("calc", script = script))
+            install(chat = StageProvider(script = script))
             live { _, model ->
                 socket.say(SCREEN_REQUEST, "d1", 100)
-                robot.waitUntil(60_000) { messages(model).lastOrNull()?.let { it.role == "assistant" && it.status !in unfinishedStatuses } == true }
+                waitForTheAnswer(model)
                 val message = messages(model).last()
                 assertEquals("complete", message.status)
                 assertEquals(listOf(CloudGenerationStage.APP_FILE), script.calls.map { it.generationStage })
                 val dialogue = AppFilePrompt.load(fixture.context).dialogue
-                assertTrue(script.calls.single().turns.single().text.startsWith("User request: $SCREEN_REQUEST\n$dialogue\nWidget brief: $SCREEN_BRIEF"))
+                assertTrue(script.calls.single().turns.single().text.startsWith("User request: $SCREEN_REQUEST\n$dialogue$EARLY_BRIEF"))
                 robot.waitUntil { model.stageToolId != null }
                 assertEquals(message.toolId, model.stageToolId)
             }
@@ -218,6 +219,7 @@ class ShellLiveVoiceWorkflowTest {
         val routed = CopyOnWriteArrayList<CloudRequest>()
         install(chat = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                awaitEarlyCancel(request)
                 if (request.chatDecision) routed += request
                 // The routing call offers the course decision only when the request allows it.
                 emit(if (request.allowCourseDecision) CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, courseTopic = "Испанский язык")
@@ -236,26 +238,125 @@ class ShellLiveVoiceWorkflowTest {
 
     /** Plan D, Db1, review focus 4: the first hand-off of a press carries the screen, so it gets no screen kind. A later one does. */
     @Test fun noScreenKindWithAScreenshot() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-        install()
-        val press = beginCapture(ScreenContext(visibleText = "Screen"))
-        try {
+        val routed = CopyOnWriteArrayList<CloudRequest>()
+        install(chat = routing(routed))
+        withScreenshot { press ->
             live(press = press) { _, model ->
                 socket.say("Что на экране?", "d1", 100)
                 robot.waitUntil { commentary().size == 1 }
-                val first = checkNotNull(fixture.provider.lastRequest)
+                val first = routed.single()
                 assertNotNull(first.screenContext)
                 assertFalse(first.voiceScreen)
                 socket.say("Как работает сердце", "d2", 3_000)
                 robot.waitUntil { commentary().size == 2 }
-                assertTrue(checkNotNull(fixture.provider.lastRequest).voiceScreen)
-                // The message owns its screenshot file, and the fixture removes only the databases.
-                messages(model).flatMap { it.attachments }.filter { it.automaticScreen }
-                    .forEach { AssistContext.mediaFile(fixture.context, Uri.parse(it.uri)).delete() }
+                assertTrue(routed.last().voiceScreen)
+                deleteScreenshots(model)
             }
-        } finally {
-            robot.instrumentation.runOnMainSync { AssistantCapture.clear(press) }
         }
     }
+
+    /** Plan D, Db4, review focus 4: the hand-off of a press with a screenshot starts no early plan, so the screenshot reaches no plan call. */
+    @Test fun noEarlyPlanWithAScreenshot() = withScreenshot { press ->
+        early(StageProvider(), press = press) { _, model, provider, phases ->
+            socket.say("Что на экране?", "d1", 100)
+            robot.waitUntil { commentary().size == 1 }
+            assertNotNull(provider.calls.single().first.screenContext)
+            assertTrue(phases.isEmpty())
+            deleteScreenshots(model)
+        }
+    }
+
+    /** Plan D, Db4, review focus 4: with the plan step off, a spoken request starts no plan call beside its routing call. */
+    @Test fun noEarlyPlanWhenTheSwitchIsOff() = early(StageProvider(), planStep = false) { _, _, provider, phases ->
+        socket.say("Какая погода", "d1", 100)
+        robot.waitUntil { commentary().size == 1 }
+        assertFalse(provider.calls.single().first.voiceScreen)
+        assertTrue(phases.isEmpty())
+    }
+
+    /** Plan D, Db4, review focus 4: a typed turn of the voice mode starts no plan call beside its routing call. */
+    @Test fun noEarlyPlanForATypedTurn() = early(StageProvider()) { scenario, model, provider, phases ->
+        typedThinking(scenario, model, "Какая погода")
+        assertFalse(provider.calls.single().first.voiceScreen)
+        assertTrue(phases.isEmpty())
+    }
+
+    /** Plan D, Db4: the plan call of a spoken request starts while its routing call waits. */
+    @Test fun theVoicePlanStartsBesideTheRouting() = early(StageProvider(routing = CompletableDeferred())) { _, model, provider, phases ->
+        socket.say(SCREEN_REQUEST, "d1", 100)
+        robot.waitUntil { provider.planCalls.isNotEmpty() }
+        assertEquals(listOf(AppFileNames.EARLY_PLAN_START), phases)
+        provider.routing.complete(Unit)
+        robot.waitUntil(60_000) { model.stageToolId != null }
+    }
+
+    /** Plan D, Db4: a screen uses that plan call. One plan call in all, marked used, and its app on the stage. */
+    @Test fun aScreenByVoiceUsesTheEarlyPlan() = early(StageProvider()) { _, model, provider, phases ->
+        socket.say(SCREEN_REQUEST, "d1", 100)
+        robot.waitUntil(60_000) { model.stageToolId != null }
+        assertEquals(1, provider.planCalls.size)
+        assertEquals(messages(model).last().toolId, model.stageToolId)
+        assertEquals(listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_USED), phases)
+    }
+
+    /** Plan D, Db4: an answer stops the plan call beside its routing call. The voice says the answer, and no app comes. */
+    @Test fun anAnswerCancelsTheEarlyPlan() = early(StageProvider(routing = CompletableDeferred())) { _, model, provider, phases ->
+        socket.say("Какая погода", "d1", 100)
+        robot.waitUntil { provider.planCalls.isNotEmpty() }
+        provider.routing.complete(Unit)
+        robot.waitUntil { commentary().isNotEmpty() }
+        assertTrue(runCatching { provider.planCalls.single().second.check() }.isFailure)
+        assertEquals(listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_CANCELED), phases)
+        assertNull(messages(model).last().toolId)
+        assertEquals(listOf("d1" to "Ответ Alphy: Fixture response."), commentary())
+    }
+
+    /** Plan D, Db4: a stop while the routing call and the plan call wait stops both, and no app comes when they could answer. */
+    @Test fun aStopCancelsBothCalls() =
+        early(StageProvider(plans = CompletableDeferred(), routing = CompletableDeferred())) { scenario, model, provider, phases ->
+            socket.say(SCREEN_REQUEST, "d1", 100)
+            robot.waitUntil { provider.planCalls.isNotEmpty() && provider.calls.size == 2 }
+            scenario.onActivity { model.cancelRequest() }
+            assertTrue(provider.calls.all { (_, session) -> runCatching { session.check() }.isFailure })
+            assertEquals(listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_CANCELED), phases)
+            provider.routing.complete(Unit)
+            provider.plans.complete(Unit)
+            robot.awaitFrames(5)
+            assertEquals("cancelled", messages(model).last().status)
+            assertNull(messages(model).last().toolId)
+            assertNull(model.stageToolId)
+            assertEquals(2, provider.calls.size)
+        }
+
+    /** Plan D, Db4, ruling OD-4: with a screen on the stage, a change request starts no early plan and makes only its change call. */
+    @Test fun aRefineDoesNotUseTheEarlyPlan() = afterAScreen(CHANGE_REQUEST, Scripted.Text(CALC_CHANGE)) { _, provider, phases ->
+        assertTrue(phases.isEmpty())
+        assertEquals(listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE), provider.script.calls.map { it.generationStage })
+    }
+
+    /** Plan D, Db4, ruling OD-4: with a screen on the stage, a new screen starts no early plan. Its own plan call has the brief and the dialogue text. */
+    @Test fun noEarlyPlanWhileAScreenShows() = afterAScreen(SCREEN_REQUEST, Scripted.Text(appFilePlan("calc"))) { model, provider, phases ->
+        assertTrue(phases.isEmpty())
+        assertNotNull(messages(model).last().toolId)
+        val dialogue = AppFilePrompt.load(fixture.context).dialogue
+        assertTrue(provider.script.calls.last().turns.single().text.startsWith("User request: $SCREEN_REQUEST\n$dialogue\nWidget brief: $SCREEN_BRIEF"))
+    }
+
+    /** Plan D, Db4: an early plan call with a provider error makes its screen fall back with no error, and the next early plan still runs. */
+    @Test fun anEarlyPlanWithAProviderErrorFallsBackSilently() =
+        early(StageProvider(script = AgentScriptProvider(listOf(Scripted.Fails("network"), Scripted.Text(appFilePlan("calc")))))) { _, model, provider, phases ->
+            socket.say(SCREEN_REQUEST, "d1", 100)
+            waitForTheAnswer(model)
+            assertSilentFallback(model)
+            assertNull(model.stageToolId)
+            // The failed call ended no work of the controller: the early plan of the next screen request runs on the same scope.
+            socket.say(SCREEN_REQUEST, "d2", 3_000)
+            robot.waitUntil(60_000) { model.stageToolId != null }
+            assertEquals(List(2) { CloudGenerationStage.APP_FILE }, provider.script.calls.map { it.generationStage })
+            assertEquals(List(2) { listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_USED) }.flatten(), phases)
+            robot.awaitFrames(5)
+            assertEquals(listOf("d1" to SCREEN_ANSWER, "d2" to SCREEN_ANSWER), commentary())
+        }
 
     /** Plan D, Db2: the voice says the answer of a screen when the routing call ends, before the plan call. The app goes to the stage with no line. */
     @Test fun aScreenSpeaksTheAnswerBeforeTheScreen() = gatedRequest { _, model, gate ->
@@ -369,6 +470,7 @@ class ShellLiveVoiceWorkflowTest {
         val gate = CompletableDeferred<Unit>()
         install(chat = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                awaitEarlyCancel(request)
                 gate.await()
                 val asked = checkNotNull(request.decisionContext).originalUserTurn.text
                 emit(CloudEvent.RoundComplete(chatDecision("answer", "Ответ на: $asked"), false))
@@ -420,7 +522,7 @@ class ShellLiveVoiceWorkflowTest {
 
     /** A typed message that made an app gets the same retell text as a hand-off with an app. */
     @Test fun typedAppTurnSaysTheAppIsReady() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-        install(chat = stageProvider("calc"))
+        install(chat = StageProvider())
         live { scenario, model ->
             assertEquals("Пользователь написал: $APP_REQUEST. Мини-приложение готово. Ответ Alphy: Готово.",
                 typedThinking(scenario, model, APP_REQUEST))
@@ -461,10 +563,12 @@ class ShellLiveVoiceWorkflowTest {
         }))
         fixture.store.seedOpenChat("chat")
         install(chat = object : ChatProvider {
-            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                awaitEarlyCancel(request)
                 // The app agent of the chosen refinement writes a changed app.
                 if (request.generationStage != null) emit(CloudEvent.Text(request.agentReply(FIXTURE_APP.replace("\"Fixture\"", "\"Fixture Plus\""))))
                 else emit(CloudEvent.RoundComplete(chatDecision("refine", "Готово.", "Change the counter"), false))
+            }
         })
         live { scenario, model ->
             socket.say("Измени приложение", "d1", 100)
@@ -754,10 +858,11 @@ class ShellLiveVoiceWorkflowTest {
     /** A hand-off runs to its end after the mode ends by [end] with the status [status] (spec 5.5.9). */
     private fun endKeepsTheRequest(status: Int?, end: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit) {
         fixture.provider.gate = CompletableDeferred()
-        install()
+        val routed = CopyOnWriteArrayList<CloudRequest>()
+        install(chat = routing(routed))
         live { scenario, model ->
             socket.say("Какая погода", "d1", 100)
-            robot.waitUntil { fixture.provider.calls == 1 }
+            robot.waitUntil { routed.size == 1 }
             end(scenario, model)
             robot.waitUntil { !model.liveVoice.active }
             assertEquals(status?.let { robot.text(it) }.orEmpty(), model.liveVoice.status)
@@ -789,7 +894,7 @@ class ShellLiveVoiceWorkflowTest {
         script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan)))),
         test: (ActivityScenario<CloudTestActivity>, ShellViewModel, String) -> Unit) =
         withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-            install(chat = stageProvider(plan, show = show, brief = brief, script = script))
+            install(chat = StageProvider(show = show, brief = brief, script = script))
             live { scenario, model ->
                 socket.say(APP_REQUEST, "d1", 100)
                 robot.waitUntil(60_000) { model.stageToolId != null }
@@ -805,7 +910,7 @@ class ShellLiveVoiceWorkflowTest {
         test: (ActivityScenario<CloudTestActivity>, ShellViewModel, CompletableDeferred<Unit>) -> Unit) {
         val gate = CompletableDeferred<Unit>()
         withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-            install(chat = stageProvider("calc", gate, show = show))
+            install(chat = StageProvider(plans = gate, show = show))
             live { scenario, model ->
                 socket.say(request, "d1", 100)
                 robot.waitUntil(60_000) { messages(model).lastOrNull()?.status == "generating" && commentary().isNotEmpty() }
@@ -824,42 +929,107 @@ class ShellLiveVoiceWorkflowTest {
         onStage(show = show, brief = brief, script = script) { _, model, app ->
             val before = messages(model).size
             socket.say(SCREEN_REQUEST, "d2", 2_000)
-            robot.waitUntil(60_000) { messages(model).size == before + 2 && messages(model).last().status !in unfinishedStatuses }
-            val message = messages(model).last()
-            assertEquals("complete", message.status)
-            assertEquals(SCREEN_TEXT, message.text)
-            assertNull(message.toolId)
-            assertEquals("" to "", message.errorCode to message.error)
+            waitForTheAnswer(model, before)
+            assertSilentFallback(model)
             assertEquals(List(1 + planCalls) { CloudGenerationStage.APP_FILE }, script.calls.map { it.generationStage })
             robot.waitUntil { commentary().count { it.first == "d2" } == lines.size }
             robot.awaitFrames(5)
             assertEquals(lines.map { "d2" to it }, commentary().filter { it.first == "d2" })
             assertEquals(app, model.stageToolId)
             assertTrue(model.liveVoice.active)
-            assertTrue(model.tools.drafts.none { it.id == message.toolOperationId })
-            assertNull(model.tools.error)
         }
     }
 
+    /** The answer of the request after [before] messages ended. */
+    private fun waitForTheAnswer(model: ShellViewModel, before: Int = 0) =
+        robot.waitUntil(60_000) { messages(model).size == before + 2 && messages(model).last().status !in unfinishedStatuses }
+
+    /** The last message is the answer of a screen with no app: complete, with no error, and the controller keeps no draft or error. */
+    private fun assertSilentFallback(model: ShellViewModel) {
+        val message = messages(model).last()
+        assertEquals(listOf("complete", SCREEN_TEXT, "", ""), listOf(message.status, message.text, message.errorCode, message.error))
+        assertNull(message.toolId)
+        assertTrue(model.tools.drafts.none { it.id == message.toolOperationId })
+        assertNull(model.tools.error)
+    }
+
     /**
-     * The model calls of an app answer from [script] (the app file [plan]) after [gate]. The routing call creates an app for
-     * [APP_REQUEST], gives a screen with [show] for [SCREEN_REQUEST], and answers each other request.
+     * The voice mode with the plan step on or off and [provider]. [test] gets the early plan phases of the trace in their order:
+     * a phase marks the start before the routing call starts, so a test that waits for the routing end reads them with no timing.
      */
-    private fun stageProvider(plan: String, gate: CompletableDeferred<Unit>? = null, show: Boolean = false, brief: String = SCREEN_BRIEF,
-        script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan))))): ChatProvider = object : ChatProvider {
-        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) = when {
-            request.generationStage != null -> { gate?.await(); script.respond(key, request, session, emit) }
-            else -> emit(CloudEvent.RoundComplete(when (request.decisionContext?.originalUserTurn?.text) {
+    private fun early(provider: StageProvider, planStep: Boolean = true, press: String? = null,
+        test: (ActivityScenario<CloudTestActivity>, ShellViewModel, StageProvider, MutableList<String>) -> Unit) =
+        withPlanStep(fixture.context, AiProvider.OPENAI, planStep) {
+            install(chat = provider)
+            live(press = press) { scenario, model ->
+                val phases = CopyOnWriteArrayList<String>()
+                scenario.onActivity { model.tools.generationTraceObserver = { event ->
+                    (event as? ToolGenerationTraceEvent.Phase)?.name?.takeIf { it.startsWith("early_plan") }?.let(phases::add)
+                } }
+                test(scenario, model, provider, phases)
+            }
+        }
+
+    /** The calc app is on the stage. Then the hand-off of [request], with [next] as the reply of its plan call, ends, and [check] runs. */
+    private fun afterAScreen(request: String, next: Scripted, check: (ShellViewModel, StageProvider, List<String>) -> Unit) =
+        early(StageProvider(script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc")), next)))) { _, model, provider, phases ->
+            socket.say(APP_REQUEST, "d1", 100)
+            robot.waitUntil(60_000) { model.stageToolId != null }
+            val before = messages(model).size
+            phases.clear()
+            socket.say(request, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            check(model, provider, phases)
+        }
+
+    /** [test] gets an assistant press with a screenshot. */
+    private fun withScreenshot(test: (String) -> Unit) {
+        val press = beginCapture(ScreenContext(visibleText = "Screen"))
+        try {
+            test(press)
+        } finally {
+            robot.instrumentation.runOnMainSync { AssistantCapture.clear(press) }
+        }
+    }
+
+    /** The message owns its screenshot file, and the fixture removes only the databases. */
+    private fun deleteScreenshots(model: ShellViewModel) = messages(model).flatMap { it.attachments }.filter { it.automaticScreen }
+        .forEach { AssistContext.mediaFile(fixture.context, Uri.parse(it.uri)).delete() }
+
+    /**
+     * Each call goes to [calls] with its session. The routing call waits for [routing], then creates an app for [APP_REQUEST], changes it
+     * for [CHANGE_REQUEST], gives a screen with [show] and [brief] for [SCREEN_REQUEST], and answers each other request. A plan call waits
+     * for [plans] and answers from [script] (the app file [plan]). The early plan call of a request that gets no screen waits for its
+     * cancel, so it takes no reply of [script] and no test depends on when the cancel comes.
+     */
+    private class StageProvider(plan: String = "calc", val plans: CompletableDeferred<Unit> = CompletableDeferred(Unit),
+        private val show: Boolean = false, private val brief: String = SCREEN_BRIEF,
+        val script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan)))),
+        val routing: CompletableDeferred<Unit> = CompletableDeferred(Unit)) : ChatProvider {
+        val calls = CopyOnWriteArrayList<Pair<CloudRequest, CloudSession>>()
+        val planCalls get() = calls.filter { it.first.generationStage != null }
+        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+            calls += request to session
+            if (request.generationStage != null) {
+                val input = request.turns.last().text
+                if (EARLY_BRIEF in input && SCREEN_REQUEST !in input) awaitCancellation()
+                plans.await()
+                return script.respond(key, request, session, emit)
+            }
+            routing.await()
+            emit(CloudEvent.RoundComplete(when (request.decisionContext?.originalUserTurn?.text) {
                 APP_REQUEST -> chatDecision("create", "Готово.", "Make the app")
+                CHANGE_REQUEST -> chatDecision("refine", "Готово.", "Add half of the bill")
                 SCREEN_REQUEST -> JSONObject(chatDecision("screen", SCREEN_TEXT, brief)).put("show", show).toString()
                 else -> chatDecision("answer", "Fixture response")
             }, false))
         }
     }
 
-    /** The fixture provider, which keeps each routing request in [routed]. */
+    /** The fixture provider, which keeps each routing request in [routed]. An early plan call waits for its cancel. */
     private fun routing(routed: MutableList<CloudRequest>) = object : ChatProvider {
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+            awaitEarlyCancel(request)
             if (request.chatDecision) routed += request
             fixture.provider.respond(key, request, session, emit)
         }
@@ -907,6 +1077,15 @@ class ShellLiveVoiceWorkflowTest {
         const val SCREEN_ANSWER = "Ответ Alphy: $SCREEN_TEXT"
         const val SCREEN_FAILED = "Картинку показать не получилось."
         const val TIMER_REQUEST = "Поставь таймер на 10 минут"
+        const val CHANGE_REQUEST = "Покажи ещё половину счёта"
+        /** A change line of the calc plan: a new figure. */
+        const val CALC_CHANGE = "need half = figure(\"money\", \"Half bill\", \$/bill / 2, example=[{bill: 80}, 40])"
+        /** The plan call beside the routing call starts before a brief exists, so its prompt has an empty brief line. */
+        const val EARLY_BRIEF = "\nWidget brief: \n"
+        /** The early plan call of a request that gets no screen waits for its cancel, so no test result depends on when the cancel comes. */
+        suspend fun awaitEarlyCancel(request: CloudRequest) {
+            if (request.generationStage != null && EARLY_BRIEF in request.turns.last().text) awaitCancellation()
+        }
         /** A figure label of the calc app. */
         const val CALC_LABEL = "Per person"
         /** The text of the drawing of the lesson app. */
