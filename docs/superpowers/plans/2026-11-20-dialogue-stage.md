@@ -64,9 +64,9 @@ A stop while the routing call and the early plan run is the next input on the li
 | --- | --- | --- |
 | Two columns on the stage | `smallestScreenWidthDp >= 600`, stage width ≥ 600 dp, font scale ≤ 1.3 | Fold (sw692) and both tablets (sw800) pair. A phone (sw411) stays one column in both orientations. The font limit is the one of `CourseSceneSlots`. |
 | Width of the main column | 3/5 of the stage width | The fold and tablet mocks (model about 60 %). |
-| Line after a screen falls back (OD-D1 a) | «Картинку показать не получилось.» | Ruling OD-2. |
+| Line before the full generation of a screen or a change | «Быстро не получилось. Alphy собирает экран заново, это займёт около минуты.» | Ruling FX-4 of the plan of 2026-11-21 replaces OD-2. |
 | Line for a press with no match | «На экране нет такой кнопки.» | Ruling OD-3: a label that is not in the list is no press. |
-| Line when a change and its new screen both fail | «Изменить экран не получилось.» | The person asked for a change of the picture. |
+| Line when the full generation fails | The reason group, then «Скажите запрос полностью, одной фразой.» | Ruling FX-5 of the plan of 2026-11-21. |
 | Microphone state | «Микрофон включён», «Микрофон выключен» | The mocks. |
 | SHOWN_SCREEN size | at most 8000 characters, else the title and the controls only | Plan B task B6. |
 | Chat calls per live dialogue | cap 10 | Worst case 9 (see the cost). |
@@ -276,13 +276,13 @@ Check before Da1: `git log --oneline -- app/src/androidTest/java/com/alpha/assis
   - `routeAppFile`: with `request.screen` and no base, the outcome is `screen.early?.await()` or one `AppFileSteps.plan`. A clean outcome is the app. Each other outcome, and a closed gate, throws `ScreenFallback(reason)`. It never calls the loop or `rebuild`.
   - `Decision.show: Boolean = false`: the schema field `show` for `screen`, true when the person asked in words to see or to show a thing (OD-D1 a).
   - `LiveVoiceBridge.screenStarted(messageId: String, answer: String, show: Boolean)`: sends `ANSWER` + the answer at once and marks the hand-off. `report()` sends nothing for a marked hand-off while it generates, nothing at its tool, and `SCREEN_FAILED` at a fallback with `show`.
-  - `LiveVoiceBridge.SCREEN_FAILED = "Картинку показать не получилось."`.
+  - `LiveVoiceBridge.SCREEN_FAILED = "Картинку показать не получилось."`. Removed later, with the `show` parameter of `screenStarted`, by rulings FX-4 and FX-5 of the plan of 2026-11-21.
   - In `startRequest`: a `ScreenFallback` sets the message to status `complete`, the decision text, and no tool.
 
 - [ ] **Step 1: Write the failing tests.**
   - `ShellLiveVoiceWorkflowTest.aScreenSpeaksTheAnswerBeforeTheScreen`: the plan call waits on a gate. Expect the commentary `d1` to `ANSWER` + the decision text before the gate opens, then the tool on the stage, and no further commentary.
   - `ShellLiveVoiceWorkflowTest.aFallbackScreenRunsNoLoopAndStaysSilent`: the plan reply has a fault, and the repair reply has a fault. Expect exactly two calls of the stage `APP_FILE` (the plan and its repair) and no call of the stage `AGENT`, one commentary, an unchanged `stageToolId`, a message with status `complete` and no `toolId`, and no draft left in `model.tools`.
-  - `ShellLiveVoiceWorkflowTest.aFallbackOfAShowRequestSaysOneLine`: the same with `show = true`. Expect a second commentary «Картинку показать не получилось.».
+  - `ShellLiveVoiceWorkflowTest.aFallbackOfAShowRequestSaysOneLine`: the same with `show = true`. Expect a second commentary «Картинку показать не получилось.». Replaced later by `aFallbackOfAShowRequestGetsTheFullGeneration` (ruling FX-4 of the plan of 2026-11-21).
   - `AppFileLoopWorkflowTest.aScreenRunNeverStartsTheLoop`: `AppAgent.run` with `screen = ScreenRun()` and an outside reply. Expect `ScreenFallback` and no agent call.
 - [ ] **Step 2:** Run both classes. Expected: fail.
 - [ ] **Step 3:** Implement the interfaces above. `ShellViewModel` calls `screenStarted` when the decoded decision is a screen of a voice request, before `generateAutomatic`.
@@ -398,11 +398,11 @@ After group (b), the controller gives the owner a build to install and try (desi
 - Produces:
   - A `refine` of a voice request with `voiceTarget` targets that tool, not `cachedTarget`, and runs with `screen = ScreenRun()`. In `routeAppFile`, with `request.screen` and a base, the change by lines is the only path. A fault, `RETRY_FAILURE`, or `STATE_FAILURE` throws `ScreenFallback("change")`. In `startRequest`, that fallback of a voice refine runs `generateAutomatic(target = null, screen = ScreenRun())` with `generationPrompt(user.text, brief, text, sources, host = dialogue)` (ruling OD-5).
   - `LiveVoiceBridge.changeStarted(messageId: String)`: marks the hand-off. `report()` then sends nothing while it generates, `ANSWER` + the decision text when the changed or the new screen is committed (about 4 s for a change, so the words never come before the picture), and `CHANGE_FAILED` when both the change and the new screen fall back.
-  - `LiveVoiceBridge.CHANGE_FAILED = "Изменить экран не получилось."`.
+  - `LiveVoiceBridge.CHANGE_FAILED = "Изменить экран не получилось."`. Removed later by rulings FX-4 and FX-5 of the plan of 2026-11-21.
 
 - [ ] **Step 1: Write the failing tests.**
   - `ShellLiveVoiceWorkflowTest.aSpokenChangeChangesTheShownScreen`: the stage holds `lesson.plan`. The routing returns `refine`, and the change call waits on a gate. Expect no commentary before the gate opens. Then expect one `APP_FILE_CHANGE` call, the same tool id with a new revision, and then the commentary `ANSWER` + the text.
-  - `ShellLiveVoiceWorkflowTest.aChangeAndItsNewScreenBothFail`: the change reply and both plan replies have a fault. Expect the commentary «Изменить экран не получилось.», the same `stageToolId`, and the old tool unchanged.
+  - `ShellLiveVoiceWorkflowTest.aChangeAndItsNewScreenBothFail`: the change reply and both plan replies have a fault. Expect the commentary «Изменить экран не получилось.», the same `stageToolId`, and the old tool unchanged. Replaced later by `aChangeWhoseFullGenerationFailsSaysTheReason` (ruling FX-5 of the plan of 2026-11-21).
   - `ShellLiveVoiceWorkflowTest.aChangeKeepsTheSliderValue` (review focus 5): a slider plan whose value the test set to 70. Expect 70 after the change.
   - `ShellLiveVoiceWorkflowTest.aFailedChangeBuildsANewScreenAndKeepsTheOld` (review focus 5): the change reply has a fault. Expect a new tool on the stage, the commentary after its commit, and the old tool with its revision and its values unchanged in the store.
   - `ShellLiveVoiceWorkflowTest.aChangeTargetsOnlyTheStageScreen` (review focus 3): the stage shows app A of a hand-off, and the store holds app B of the same chat with a later time, so `cachedTarget` names B. Expect a change of A and an unchanged B.

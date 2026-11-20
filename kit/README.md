@@ -30,6 +30,7 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 The gate of the kit is `"smoke"`: the smoke run uses each control. The report also runs each check line.
 In each new state, the smoke run presses again each control that it used in an earlier state, such as a tab, when that press shows a control that it did not use yet.
 So a control that only a later state enables is used too, such as the buttons of a deck over an empty list in a tab.
+A press that starts an `animate` gets one more look at the screen while the value moves, at 0.37 of its time, when the end looks as the start: a full turn ends where it started, and the person sees it move.
 The report gives the fault "no root line" only when no fault of a need, of a need line, or of the root line says why the screen has no root.
 The example of a figure (`example=[{n: 2}, 4]`) is a check line of its part. A failed example is a fault of the need with the given values, the computed value, and the expected value.
 A check line of the plan (`check("name", [steps])`) that fails is a fault of its line.

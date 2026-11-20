@@ -115,7 +115,7 @@ The dialogue mode is one full screen with two zones.
 5. If the routing call says that the request needs no screen, the plan call is cancelled, and the voice model speaks the text answer.
 6. A request that needs fresh facts (the owner's example: the prices of a stock as a chart) searches first, as today. The screen is then built from the found facts, so its plan call starts after the search and not beside the routing call. The voice says a short line while this runs. An estimate from the measured parts: the chart is on the stage 12 to 18 s after the end of speech.
 
-The request to explain stays with the fast path only. A plan that falls back gets no long generation here: the voice has answered, and the stage stays as it was. When the person asked in words to see a thing, the voice says in one line that the picture could not be made.
+The request to explain starts with the fast path. When the person asked in words to see a thing and the plan falls back, the voice says in one line that the screen takes about a minute, and the full generation builds a new app (ruling FX-4 of the plan of 2026-11-21, which reverses OD-5). The old app stays in the store. When the person did not ask to see a thing, a plan that falls back gets no more call: the voice has answered, and the stage stays as it was. A failed full generation says its reason group and one hint to say the request in full (ruling FX-5).
 
 ### 3. A follow-up
 
@@ -123,7 +123,7 @@ The routing call gets the title and the plan of the screen on the stage. A follo
 
 - **A press**: the screen has a control for it ("разбери по частям", "а если не вращать?"). The app runs that control. No plan call. The voice says the text of the new state.
 - **A change**: one change call with lines ("покажи связь", "убери панель"). The stored values of the screen stay.
-- **A new screen**: a new topic, or a change that the kit cannot apply.
+- **A new screen**: a new topic, or a change that the kit cannot apply. The new screen of a change gets the plan of the old screen as untrusted data (ruling FX-3). When it also gives no app, the full generation builds a new app (ruling FX-4).
 
 So a screen is planned with the controls that the talk will need, as the prompt section "Dialogue" already asks.
 
