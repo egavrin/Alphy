@@ -479,4 +479,5 @@
     <string name="image_export_unavailable">Формат экспорта не включает изображения этого мини-приложения.</string>
     <string name="chat_internal_error">Внутренняя ошибка Alphy. Повторите запрос.</string>
     <string name="chat_app_internal_error">Внутренняя ошибка Alphy: мини-приложение не готово. Сохранённые мини-приложения и данные не изменились. Повторите запрос.</string>
+    <string name="tool_session_waiting">Запустится, когда другое мини-приложение остановится.</string>
 </resources>

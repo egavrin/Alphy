@@ -236,6 +236,8 @@ internal val InlineToolViewportCornerRadius = 16.dp
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val handle = remember(tool.id, tool.revision, host) { Any() }
     var latestSnapshot by remember(handle) { mutableStateOf<ArtifactSnapshot?>(null) }
+    // The last drawing of the tool outlives its host, so an accepted change goes from the old drawing to the new one.
+    val lastDrawing = remember(tool.id) { mutableStateOf<ArtifactSnapshot?>(null) }
     DisposableEffect(host, enabled) {
         onDispose { if (enabled) (host as? LiveArtifactUiHost)?.cancelLiveInput() }
     }
@@ -267,8 +269,10 @@ internal val InlineToolViewportCornerRadius = 16.dp
             content = content,
             onSnapshot = {
                 latestSnapshot = it
+                lastDrawing.value = it
                 onSnapshot(it)
-            })
+            },
+            drawingBefore = { lastDrawing.value })
     }
 }
 

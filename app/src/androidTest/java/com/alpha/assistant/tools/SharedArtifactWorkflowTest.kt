@@ -4,8 +4,14 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.capabilities.CapabilityResult
 import com.alpha.assistant.cloud.*
+import com.alpha.assistant.data.Conversation
+import com.alpha.assistant.data.Message
+import com.alpha.assistant.sandbox.GraphicsSession
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.ui.ShellFixture
+import com.alpha.assistant.ui.ShellRobot
 import com.alpha.assistant.ui.removeSemanticIndexes
+import com.alpha.assistant.ui.seedOpenChat
 import kotlinx.coroutines.*
 import org.json.*
 import org.junit.Assert.*
@@ -78,6 +84,91 @@ class SharedArtifactWorkflowTest {
                 engine.closeArtifact(next.id,next.revision)
             }
         }
+    }
+
+    /**
+     * A chat with one drawing card for each of [sources], with tools "busy0", "busy1", and so on. When [hold], another session holds
+     * the one retained slot before the chat composes. [block] gets the shell, the robot, the slot holder, and a read of the labels of
+     * the card canvases. The holder closes at the end.
+     */
+    private fun busyCards(vararg sources: String,hold: Boolean=true,block: (ShellFixture,ShellRobot,GraphicsSession,()->List<String>)->Unit) {
+        val shell=ShellFixture("busy-card");val robot=ShellRobot("busy-card");val holder=GraphicsSession(context)
+        val specs=sources.map(::definition)
+        fun canvases()=robot.texts().filter {it.startsWith("${specs[0].title}.")}
+        try {
+            ToolStore(context,"${shell.name}.db-tools.db").use {store ->
+                specs.forEachIndexed {i,spec -> store.saveTool(ToolRecord("busy$i",1,1,spec.json,spec.initialState,spec.ui.toString(),"chat",true),true)}
+            }
+            shell.store.saveConversation(Conversation("chat","Чат",1,1,messages=specs.indices.map {
+                Message("card$it","assistant","",1,"complete",toolId="busy$it",toolRevision=1)
+            }))
+            shell.seedChat("other","Другой чат","Привет")
+            shell.store.seedOpenChat("chat")
+            if(hold) assertEquals("OK",runBlocking {holder.open("return {state:input.state};","{}")}.status)
+            shell.install()
+            shell.launch().use {
+                robot.waitUntil {canvases().size==specs.size}
+                block(shell,robot,holder,::canvases)
+            }
+        } finally {holder.close();shell.removeWithModel()}
+    }
+
+    /** Polls [check] every 50 ms for [ms]. */
+    private fun during(ms: Long,check: ()->Unit) {
+        val end=android.os.SystemClock.uptimeMillis()+ms
+        while(android.os.SystemClock.uptimeMillis()<end) {check();android.os.SystemClock.sleep(50)}
+    }
+
+    /** A drawing that counts its opens and draws [text]. */
+    private fun counted(text: String)=
+        "const s=input.state;if(input.event.type==='open')s.count++;return {state:s,surfaces:{left:{commands:[{type:'text',x:10,y:20,size:14,text:'$text',color:'default'}]}}};"
+
+    /** FX-7: a card that waits longer than 25 s for a busy slot says why, shows no stopped line, and draws with no tap when the slot frees. */
+    @Test fun aCardWaitsForABusySlotAndDrawsWhenItFrees()=busyCards(counted("Ready")) {_,robot,holder,canvases ->
+        val stopped=robot.text(com.alpha.assistant.R.string.tool_session_stopped)
+        val waiting=robot.text(com.alpha.assistant.R.string.tool_session_waiting)
+        var shownStopped=false;var shownWaiting=false
+        during(26_000) {if(robot.find(stopped)!=null)shownStopped=true;if(robot.find(waiting)!=null)shownWaiting=true}
+        holder.close()
+        var drawn=false
+        during(10_000) {if(canvases().any {"Ready" in it})drawn=true}
+        assertTrue("stopped line while the slot was busy: $shownStopped, waiting line: $shownWaiting, drawing after the slot freed: $drawn",
+            !shownStopped && shownWaiting && drawn)
+    }
+
+    /** FX-7: of two cards on the screen, the waiting one never takes the slot from the other, and it draws with no tap when the other leaves. */
+    @Test fun aWaitingCardDrawsWhenTheOtherCardLeaves()=busyCards(counted("First"),counted("Second"),hold=false) {shell,robot,_,canvases ->
+        val stopped=robot.text(com.alpha.assistant.R.string.tool_session_stopped)
+        robot.waitUntil {canvases().count {"First" in it || "Second" in it}==1}
+        val (drawn,waits)=if(canvases().any {"First" in it}) "First" to "Second" else "Second" to "First"
+        val faults=sortedSetOf<String>()
+        during(26_000) {
+            val labels=canvases()
+            if(robot.find(stopped)!=null) faults+="stopped line"
+            if(labels.none {drawn in it}) faults+="$drawn lost its drawing"
+            if(labels.any {waits in it}) faults+="$waits drew while $drawn held the slot"
+        }
+        val left=if(drawn=="First") "busy0" else "busy1"
+        robot.instrumentation.runOnMainSync {val tools=checkNotNull(shell.model).tools;tools.archive(tools.tools.single {it.id==left})}
+        var followed=false
+        during(10_000) {if(canvases().any {waits in it})followed=true}
+        // One open in all: the waiting card never forced the drawn card to give up the slot and open again.
+        val opens=ToolStore(context,"${shell.name}.db-tools.db").use {JSONObject(checkNotNull(it.tool(left)).state).getInt("count")}
+        assertTrue("faults: $faults, opens of $drawn: $opens, $waits drew after $drawn left: $followed",faults.isEmpty() && opens==1 && followed)
+    }
+
+    /** FX-7: the tries of a waiting card stop when the card leaves the screen, so a freed slot opens nothing. */
+    @Test fun aCardThatLeavesStopsItsTries()=busyCards(counted("Ready")) {shell,robot,holder,canvases ->
+        robot.waitUntil {robot.find(robot.text(com.alpha.assistant.R.string.tool_session_waiting))!=null}
+        robot.instrumentation.runOnMainSync {checkNotNull(shell.model).select("other")}
+        robot.waitFor("Привет")
+        robot.waitUntil {canvases().isEmpty()}
+        holder.close()
+        // A try that still ran would take the freed slot within the retry delay and count its open.
+        android.os.SystemClock.sleep(3_000)
+        val reopened=GraphicsSession(context)
+        try {assertEquals("OK",runBlocking {reopened.open("return {state:input.state};","{}")}.status)} finally {reopened.close()}
+        ToolStore(context,"${shell.name}.db-tools.db").use {assertEquals(0,JSONObject(checkNotNull(it.tool("busy0")).state).getInt("count"))}
     }
 
     @Test fun widgetEvaluationCannotOverwriteNewerSavedStateWhileARetainedFrameIsPending(): Unit=runBlocking {

@@ -1,6 +1,12 @@
 package com.alpha.assistant.ui
 
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.core.view.doOnAttach
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.R
 import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.tools.appfile.plan as appFilePlan
 import com.alpha.assistant.voice.ScriptedLiveServer
@@ -9,6 +15,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Plan D, Dd3: the driver of the live dialogues on a scripted voice server and a scripted chat with fixture plans, so a fault of the
@@ -20,9 +27,9 @@ class DialogueStageRehearsalTest {
     private val arguments = InstrumentationRegistry.getArguments()
     private val files = checkNotNull(context.getExternalFilesDir(null))
 
-    @Test fun heart() { rehearse("heart") }
+    @Test fun heart() { rehearse("heart", drawing = LESSON_DRAWING) }
 
-    @Test fun moon() { rehearse("moon") }
+    @Test fun moon() { rehearse("moon", drawing = LESSON_DRAWING) }
 
     @Test fun japanese() { rehearse("japanese") }
 
@@ -47,14 +54,38 @@ class DialogueStageRehearsalTest {
         assertTrue(File(directory, "sheet.png").isFile)
     }
 
-    /** Runs the rehearsal of the dialogue [name] into [folder] and checks its files. Returns the folder. */
-    private fun rehearse(name: String, folder: String = "dialogue-rehearsal/$name"): File {
+    /**
+     * Runs the rehearsal of the dialogue [name] into [folder] and checks its files. Returns the folder. Each frame that the window draws
+     * must not show the stopped line on the stage, and the canvas of [drawing] must not be empty on the stage after it drew (ruling FX-8).
+     */
+    private fun rehearse(name: String, folder: String = "dialogue-rehearsal/$name", drawing: String? = null): File {
         val dialogue = DIALOGUES.getValue(name)
         val directory = File(files, folder).apply { deleteRecursively() }
         val count = arguments.getString("dialogueSteps")?.toInt() ?: 4
         lateinit var run: DialogueRun
         run = DialogueRun(dialogue, directory, "rehearsal", count = count)
-        val report = run.run(server(dialogue), ScriptedChat(REHEARSALS.getValue(name)) { run.step }, LOOPBACK)
+        val stopped = context.getString(R.string.tool_session_stopped)
+        val faults = CopyOnWriteArrayList<String>()
+        var drew = false
+        fun frame(root: ViewRootForTest) {
+            fun visit(node: SemanticsNode, stage: Boolean) {
+                val inStage = stage || node.config.getOrNull(SemanticsProperties.TestTag) == "dialogue_stage"
+                if (inStage) {
+                    if (node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == stopped } == true)
+                        faults.addIfAbsent("step ${run.step}: the stage shows «$stopped»")
+                    node.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull { drawing != null && it.startsWith("$drawing. ") }?.let {
+                        if (it != "$drawing. ") drew = true else if (drew) faults.addIfAbsent("step ${run.step}: the canvas on the stage is empty")
+                    }
+                }
+                node.children.forEach { visit(it, inStage) }
+            }
+            if (run.step >= 2) visit(root.semanticsOwner.unmergedRootSemanticsNode, false)
+        }
+        ViewRootForTest.onViewCreatedCallback = { root -> root.view.doOnAttach { it.viewTreeObserver.addOnDrawListener { frame(root) } } }
+        val report = try { run.run(server(dialogue), ScriptedChat(REHEARSALS.getValue(name)) { run.step }, LOOPBACK) }
+            finally { ViewRootForTest.onViewCreatedCallback = null }
+        assertEquals(faults.toString(), emptyList<String>(), faults)
+        if (drawing != null) assertTrue("the stage never drew «$drawing»", drew)
         assertEquals(report.toString(), "complete", report.getString("phase"))
         val steps = report.getJSONArray("steps")
         assertEquals(count, steps.length())
@@ -84,6 +115,8 @@ class DialogueStageRehearsalTest {
 
     private companion object {
         val LOOPBACK = Endpoints { "http://127.0.0.1:4000" }
+        /** The text of the drawing of `lesson.plan`, the start of the label of its canvas. */
+        const val LESSON_DRAWING = "Земля в центре, Луна на орбите и метка её стороны"
         /** A change by lines of `lesson.plan`: the lap button gets a new label and a slower lap. */
         const val LESSON_CHANGE = """need lap = button("Медленный круг", [set(${'$'}/angle, 0), animate(${'$'}/angle, 360, 10000)])"""
         /** A change by lines of `quiz.plan`: the button that counts a learned card gets a Russian label. */

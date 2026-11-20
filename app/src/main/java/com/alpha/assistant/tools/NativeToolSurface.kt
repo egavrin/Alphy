@@ -48,6 +48,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.alpha.assistant.sandbox.SurfaceFrameMetrics
 import kotlinx.coroutines.*
 import com.alpha.assistant.R
+import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.ui.AlphaIcon
 import com.alpha.assistant.ui.StatusLine
 import com.alpha.assistant.ui.Glyph
@@ -69,6 +70,19 @@ internal class SurfaceEventQueue {
 
 internal val LocalToolCanvas = compositionLocalOf<(@Composable (List<String>, String, Modifier, Boolean) -> Unit)?> { null }
 
+/** A host call of a revision after a newer revision was saved. The surface keeps its drawing until it composes the new revision. */
+internal class SurfaceRevisionReplaced(cause: Throwable): Exception("A newer revision replaced this mini-app.",cause)
+
+// Each busy try also waits up to 4 s for the slot in the runtime, so a waiting surface tries about every 5 s.
+private const val OPEN_RETRIES=3
+private const val OPEN_RETRY_MS=1_000L
+
+/** One log line for each exception that a surface drops: its class, its code, and what the surface does next. A replaced revision logs the call failure under it. Never its message. */
+private fun logDropped(failure: Throwable,outcome: String) {
+    val dropped=(failure as? SurfaceRevisionReplaced)?.cause ?: failure
+    android.util.Log.w("AlphyGeneration","surface ${dropped.javaClass.simpleName} ${(dropped as? CloudFailure)?.code ?: "-"} ${if(failure is SurfaceRevisionReplaced) "replaced" else outcome}")
+}
+
 private data class DrawingHost(val host: ArtifactUiHost,val generation: Long)
 
 /** The screen boxes of the text that [snapshot] draws on a stage at [stage]. Text in transformed groups is left out. */
@@ -86,11 +100,13 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},stageAvailableHeight: Dp? = null,
-    content: @Composable () -> Unit = {},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
+    content: @Composable () -> Unit = {},drawingBefore: () -> ArtifactSnapshot? = {null},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
     val context=LocalContext.current
     val view=LocalView.current
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     var attempt by remember(tool.id,tool.revision) {mutableIntStateOf(0)}
+    var retries by remember(tool.id,tool.revision) {mutableIntStateOf(0)}
+    var slotWait by remember(tool.id,tool.revision) {mutableStateOf(false)}
     var error by remember(tool.id,tool.revision) {mutableStateOf<Int?>(null)}
     var controlsExpanded by remember(tool.id,tool.revision) {mutableStateOf(false)}
     // The full-screen menu button moves to another top position when the game draws text under it. It stays there after.
@@ -108,13 +124,13 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
     var acceptedViewport by remember(tool.id,tool.revision) {mutableStateOf<ToolSurface?>(null)}
     if(immersive) ImmersiveSystemBars(error==null)
     val queue=remember(tool.id,tool.revision,attempt) {SurfaceEventQueue()}
-    val effectiveSurfaces=snapshot?.viewport?.let {listOf(it)} ?: spec.surfaces.values.toList()
+    val effectiveSurfaces=(snapshot ?: drawingBefore())?.viewport?.let {listOf(it)} ?: spec.surfaces.values.toList()
     val router=remember(tool.id,tool.revision,attempt) {SurfacePointerRouter(spec.surfaces.values.toList())}
     val latestCovered=rememberUpdatedState(covered)
     val latestCoverReady=rememberUpdatedState(onCoverReady)
     val latestHost=rememberUpdatedState(host)
     val latestSnapshot=rememberUpdatedState(onSnapshot)
-    fun enqueue(event: JSONObject) {if(enabled && error==null)try {queue.add(event)}catch(_: Exception) {error=R.string.tool_session_input_limit}}
+    fun enqueue(event: JSONObject) {if(enabled && error==null)try {queue.add(event)}catch(failure: Exception) {logDropped(failure,"input");error=R.string.tool_session_input_limit}}
     LaunchedEffect(tool.id,tool.revision,enabled,attempt) {
         if(!enabled)return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -122,9 +138,10 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
             val metrics=if(spec.surfaces.isNotEmpty())SurfaceFrameMetrics.start(java.util.UUID.randomUUID().toString(),0) else null
             trace=metrics
             queue.clear();router.cancel();error=null;acceptedViewport=null
+            var published=false
             fun publish(value: ArtifactSnapshot,touchAtNs: Long?=null) {
                 requestedImages=ArtifactProtocol.bitmapHandles(value.surfaces)
-                snapshot=value;latestSnapshot.value(value);metrics?.validated(value.sequence,touchAtNs)
+                snapshot=value;latestSnapshot.value(value);metrics?.validated(value.sequence,touchAtNs);published=true
             }
             suspend fun deliver(event: JSONObject,touchAtNs: Long?=null): ArtifactSnapshot {
                 val begin=SystemClock.elapsedRealtimeNanos()
@@ -142,8 +159,12 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
             val tiltWanted=immersive && TiltContract.ID in spec.capabilities
             var tilt: AccelerometerStream?=null
             var tiltUnavailable=false
+            var replaced=false
+            var waits=false
+            var retry=false
             try {
                 val opened=active.open()
+                if(slotWait) {slotWait=false;android.util.Log.i("AlphyGeneration","surface javascript_busy opened")}
                 if(spec.surfaces.isNotEmpty()) {
                     openedDrawingHost=DrawingHost(active,opened.sessionGeneration)
                     drawingHost=openedDrawingHost
@@ -237,19 +258,30 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
                     metrics?.paused(coverActive || snapshot?.playback!="playing")
                 }
             } catch(cancel: CancellationException) {throw cancel}
-              catch(_: Exception) {error=R.string.tool_session_stopped}
+              catch(failure: Exception) {
+                // A replaced revision ends with no line, a busy slot is no failure and waits with no bound, and another failed open tries a few times first.
+                replaced=failure is SurfaceRevisionReplaced
+                waits=!published && (failure as? CloudFailure)?.code=="javascript_busy"
+                retry=waits || !replaced && !published && retries<OPEN_RETRIES
+                if(!waits || !slotWait) logDropped(failure,when {waits -> "wait";retry -> "retry";else -> "stopped"})
+                slotWait=waits
+                if(!replaced && !retry) error=R.string.tool_session_stopped
+              }
             finally {
                 tilt?.close()
                 if(drawingHost==openedDrawingHost) drawingHost=null
                 withContext(NonCancellable) {
-                    for(cancel in input.cancel())runCatching {deliver(cancel)}
+                    for(cancel in input.cancel())runCatching {deliver(cancel)}.onFailure {logDropped(it,"input")}
                     router.cancel()
-                    if(error==null)try {publish(active.flush())}catch(_: Exception) {error=R.string.tool_session_save_failed}
-                    try {active.close()} catch(_: Exception) {error=R.string.tool_session_save_failed}
+                    if(error==null && published && !replaced)try {publish(active.flush())}catch(failure: Exception) {
+                        logDropped(failure,"save");if(failure !is SurfaceRevisionReplaced) error=R.string.tool_session_save_failed
+                    }
+                    try {active.close()} catch(failure: Exception) {logDropped(failure,"save");error=R.string.tool_session_save_failed}
                 }
                 metrics?.stop(if(error==null)"STOPPED" else "ERROR")
                 queue.clear()
             }
+            if(retry) {delay(OPEN_RETRY_MS);if(!waits)retries++;attempt++}
         }
     }
     val imageHost=drawingHost.takeIf {enabled && error==null}
@@ -284,9 +316,11 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
             val inputWidth=acceptedViewport?.width ?: stageWidth
             val inputHeight=acceptedViewport?.height ?: stageHeight
             val current=snapshot
+            // Until the open publishes, the canvas keeps the drawing of the revision that this one replaced.
+            val drawn=current ?: drawingBefore()
             val resources=LocalResources.current
             val labels=placements.joinToString(" ") {
-                surfaceLabels(current?.surfaces?.optJSONObject(it.surface.id)?.optJSONArray("commands") ?: JSONArray(),drawingImages.images.keys) {label ->
+                surfaceLabels(drawn?.surfaces?.optJSONObject(it.surface.id)?.optJSONArray("commands") ?: JSONArray(),drawingImages.images.keys) {label ->
                     resources.getString(R.string.tool_image_unavailable,label)
                 }
             }
@@ -325,7 +359,7 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
                         canvas.scale(size.width/stageWidth,size.height/stageHeight)
                         for(placement in placements) {
                             val surface=placement.surface
-                            val commands=current?.surfaces?.optJSONObject(surface.id)?.optJSONArray("commands") ?: JSONArray()
+                            val commands=drawn?.surfaces?.optJSONObject(surface.id)?.optJSONArray("commands") ?: JSONArray()
                             val surfaceSaved=canvas.save()
                             try {
                                 canvas.translate(placement.x.toFloat(),placement.y.toFloat())
@@ -395,6 +429,7 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
         val playback: @Composable () -> Unit = {
             val failure = error
             if (failure != null) recovery(failure)
+            else if (slotWait) StatusLine(Glyph.History, LocalContentColor.current, stringResource(R.string.tool_session_waiting))
             else {
                 if (spec.hostControls.playback) {
                     val (icon, label) = when(snapshot?.playback) {

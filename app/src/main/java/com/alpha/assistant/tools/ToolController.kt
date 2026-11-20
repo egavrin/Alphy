@@ -648,31 +648,40 @@ class ToolController internal constructor(private val app: Application, private 
                 cancelLiveInput()
                 inputLease=null
                 liveInputHosts.remove(host)
-                withContext(NonCancellable+Dispatchers.IO) {
+                throw withContext(NonCancellable+Dispatchers.IO) {
                     try {acquired?.let {closeGeneration(it)}}
                     catch(cleanup: Exception) {failure.addSuppressed(cleanup)}
+                    replaced(failure)
                 }
-                throw failure
             }
         }
-        override suspend fun startSession(): ArtifactSnapshot=withContext(Dispatchers.IO) {
-            publish(if(nonGraphics) localHost {startHostSession(store,t.id,t.revision,owner,it)}
-                else engine.startArtifactHostSession(t.id,t.revision,checkNotNull(generation)))
+        override suspend fun startSession(): ArtifactSnapshot=call {
+            if(nonGraphics) localHost {startHostSession(store,t.id,t.revision,owner,it)}
+                else engine.startArtifactHostSession(t.id,t.revision,checkNotNull(generation))
         }
-        override suspend fun snapshot(): ArtifactSnapshot=withContext(Dispatchers.IO) {
-            publish(if(nonGraphics) localHost {refreshHostSnapshot(store,owner,it)}
-                else engine.artifactSnapshot(t.id,t.revision,checkNotNull(generation)))
+        override suspend fun snapshot(): ArtifactSnapshot=call {
+            if(nonGraphics) localHost {refreshHostSnapshot(store,owner,it)}
+                else engine.artifactSnapshot(t.id,t.revision,checkNotNull(generation))
         }
-        override suspend fun flush(): ArtifactSnapshot=withContext(Dispatchers.IO) {
-            publish(if(nonGraphics) localHost {
+        override suspend fun flush(): ArtifactSnapshot=call {
+            if(nonGraphics) localHost {
                 if(hostSnapshot(store,owner,it).frameOwner) flush(store)
                 hostSnapshot(store,owner,it)
-            } else engine.flushArtifact(t.id,t.revision,checkNotNull(generation)))
+            } else engine.flushArtifact(t.id,t.revision,checkNotNull(generation))
         }
-        override suspend fun event(event: org.json.JSONObject): ArtifactSnapshot=withContext(Dispatchers.IO) {
-            publish(if(nonGraphics) localHost {hostEvent(store,t.id,t.revision,owner,it,event)}
-                else engine.artifactEvent(t.id,t.revision,event,checkNotNull(generation)))
+        override suspend fun event(event: org.json.JSONObject): ArtifactSnapshot=call {
+            if(nonGraphics) localHost {hostEvent(store,t.id,t.revision,owner,it,event)}
+                else engine.artifactEvent(t.id,t.revision,event,checkNotNull(generation))
         }
+
+        /** Runs [block] on IO and publishes its snapshot. */
+        private suspend fun call(block: suspend () -> ArtifactSnapshot): ArtifactSnapshot=withContext(Dispatchers.IO) {
+            publish(try {block()} catch(failure: Exception) {throw replaced(failure)})
+        }
+
+        /** A call of [t] fails after a newer revision is saved. The surface of [t] then stops with no error, and the tool list gives it the new one. */
+        private fun replaced(failure: Throwable): Throwable =
+            if(failure !is CancellationException && store.tool(t.id)?.let {!it.archived && it.revision>t.revision}==true) SurfaceRevisionReplaced(failure) else failure
 
         private suspend fun localHost(block: suspend ArtifactCoordinator.(Long)->ArtifactSnapshot): ArtifactSnapshot = coordinator.ordered {
             ensureAvailable();current(store,t.id,t.revision);block(checkNotNull(generation))
