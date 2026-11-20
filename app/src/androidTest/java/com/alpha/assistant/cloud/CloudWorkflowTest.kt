@@ -1728,7 +1728,10 @@ class CloudWorkflowTest {
         assertEquals(typed.toString(), voice.toString())
     }
 
-    /** Task Db2 (ruling OD-D1): the boolean show of a spoken request. Only a screen can have it true. A typed request decodes as before. */
+    /**
+     * Task Db2 (ruling OD-D1): the boolean show of a spoken request. Only a screen can have it true. A true show on another kind reads as
+     * false and is not refused (ruling of the controller after Db2). A typed request decodes as before.
+     */
     @Test fun aScreenDecisionCarriesShow() {
         fun withShow(json: String, show: Any) = JSONObject(json).put("show", show).toString()
         fun rule(json: String, allowScreen: Boolean = true) =
@@ -1738,10 +1741,14 @@ class CloudWorkflowTest {
         assertTrue(ChatToolReply.decode(withShow(screen, true), allowScreen = true).show)
         assertFalse(ChatToolReply.decode(withShow(screen, false), allowScreen = true).show)
         assertFalse(ChatToolReply.decode(screen, allowScreen = true).show)
-        // The strict schema sends show with each kind. False passes for another kind, and true is refused.
+        // The strict schema sends show with each kind. For another kind, false and true both read as false, and the decision stays valid.
         assertFalse(ChatToolReply.decode(withShow(answer, false), allowScreen = true).show)
-        assertEquals("decision.show", rule(withShow(answer, true)))
+        val shownAnswer = ChatToolReply.decode(withShow(answer, true), allowScreen = true)
+        assertEquals(ChatToolReply.Decision("answer", "Луна светит отражённым светом.", "", "none"), shownAnswer)
+        assertEquals(answer, ChatToolReply.encode(shownAnswer))
+        // The type check stays: a show that is not a boolean is refused.
         assertEquals("decision.show", rule(withShow(screen, "true")))
+        assertEquals("decision.show", rule(withShow(answer, "true")))
         // A typed request has no field show: the key is refused as an extra field, as before.
         assertEquals("decision.fields", rule(withShow(answer, false), allowScreen = false))
         // The encoded decision, which the app decodes again, keeps show. Each other decision encodes as before.

@@ -175,10 +175,10 @@ A request to learn a subject gets a screen with one lesson, not a course.
         if (if (kind in miniAppKinds) brief.isBlank() else brief.isNotEmpty())
             invalidDecision("decision.brief", "$.brief", "string")
         if (kind == "clarify" && search != "none") invalidDecision("decision.clarify_search", "$.search", "string")
+        // A true show on another kind reads as false: a refusal would cost a second routing call in a spoken talk.
         val show = json["show"]?.let { value ->
             (value as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: invalidDecision("decision.show", "$.show", jsonType(value))
-        } ?: false
-        if (show && kind != "screen") invalidDecision("decision.show", "$.show", "boolean")
+        } == true && kind == "screen"
         val image = if ("image" in json) string("image") else ""
         if (image.isBlank()) return Decision(kind, text, brief, search, show = show)
         if (kind != "answer" || image.length > 4096) invalidDecision("decision.image", "$.image", "string")
