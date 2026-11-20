@@ -53,14 +53,14 @@ Each fact has its source.
 
 | Fact | Source |
 | --- | --- |
-| The voice model has one tool: the hand-off to Alphy (client delegation). Alphy answers a hand-off with text that the voice model speaks. | `docs/voice-integration.md`, line 95 |
+| The voice model has one tool: the hand-off to Alphy (client delegation). Alphy answers a hand-off with text that the voice model speaks. | `docs/voice-integration.md`, line 97 |
 | The voice model hands off a request to explain or to teach in 15 of 15 requests when its instructions say so, about 1.0 s after the end of speech. | Probe of 2026-11-20, `b2-report.md` of the task folder |
 | After a hand-off the voice model never answers the request by itself. It says a short phrase at about 1.6 s and waits. Three wordings, 0 of 15. | Same probe |
 | The voice model speaks the text of Alphy about 1.6 s after Alphy sends it. | Same probe, form (b) |
 | The routing call of the app takes 3.5 to 5.1 s on OpenAI. | Paired run of 2026-11-20 |
 | A dialogue plan takes a median of 9 to 11 s for the whole call. Its first text comes after 3.3 to 4.4 s. | Model check, results document |
 | A change of a stored screen by lines takes a median of 3.9 s. | Change check, results document |
-| The voice endpoint gives the text of the speech of the voice model, with times that lead the audio. | `docs/voice-integration.md`, lines 221 to 227 |
+| The voice endpoint gives the text of the speech of the voice model, with times that lead the audio. | `docs/voice-integration.md`, lines 226 to 232 |
 | Today the voice screen shows one chat card of the latest hand-off in a column of at most 620 dp, then the character, a status text, and the composer. A later answer replaces the card. | `ui/LiveVoiceScreen.kt`, `LiveVoiceLayer` |
 | Today a mini-app is a column of at most 640 dp at each screen size. | `tools/ToolUi.kt`; gate run of 2026-11-20 |
 | The kit has the parts of the four mock screens: drawing, slider, timed change, lesson, question, card, model3d, deck, and a found picture. | `kit/README.md`; the fixtures named above |
@@ -95,7 +95,7 @@ The dialogue mode is one full screen with two zones.
 - Before the first screen, the stage shows only the Alphy character, and the strip shows the status and the microphone state with no small character. With a screen, the strip also shows the small character beside the status.
 - With a screen, the stage shows the app: its kind label, its title, and its parts. The stage scrolls when the app is taller than its space.
 - At the phone size the parts stand in one column, as in the four phone mocks.
-- At the fold and the tablet size the stage has two columns, as in the wide mocks: the main visual with its controls at the left, and the cards (the focus card, the lesson step, the question) at the right. The host places the parts by their role, and the role comes from the kind of the part. The main visual is the first drawing, 3D model, picture, or deck, and the inputs and buttons that change it stay under it. A card, a lesson, a question, a text, a figure, and a list go to the second column. A screen with no main visual stays one column. A plan does not name columns.
+- At the fold and the tablet size the stage has two columns, as in the wide mocks: the main visual with its controls at the left, and the cards (the focus card, the lesson step, the question) at the right. The host places the parts by their role, and the role comes from the kind of the part. The main visual is the first part that is a drawing or a 3D model (a canvas, or a card that holds only canvases), or a deck. The main visual and each next part up to the first card or list stay at the left. So the inputs and buttons that change it stay under it, and a text right after it is its caption or status and stays with it. Each other part goes to the second column. Changed during the build (task Da2): a text after the main visual stays with it, and a picture part is not built, so it is no main visual. A screen with no main visual stays one column. A plan does not name columns.
 - The stage keeps its screen until a hand-off replaces or changes it. A spoken answer with no screen leaves the stage as it is.
 - A screen is a stored app with its plan. So it is in the chat of the conversation, and the person finds it after the mode ends.
 

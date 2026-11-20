@@ -604,3 +604,15 @@ The draft is `plan-d-draft.md` (anchors at `d9b87c5`). The controller read all o
 ### What the controller checked in the draft
 
 The file structure, each task with its interfaces and tests, the values table, the assumptions, the cost, and the coverage table against the design. The plan holds no function body. Not checked by the controller: each anchor in the code (the plan writer labels each one as checked at `d9b87c5`).
+
+## Changed during the work
+
+The code differs from this plan on these points. The rulings in the ledger and the commits record each one.
+
+- `waitsForATap` (lines 78, 86, 131, 135, 152) became `showsOnTheStage` in `ui/DialogueStage.kt`. It also shows a finished answer with a generated image (task Da2, ruling 3).
+- The current line of speech (line 200) shows two lines, not one line with an ellipsis.
+- The cap of chat calls in one live dialogue (line 72) is 14, not 10 (`DialogueDriver.MAX_CALLS`, `f4daddf`). Basis: the early plan and the new screen after a failed change add calls to a dialogue that works (the ledger, the pre-flight of the paid dialogues).
+- `EarlyPlan` (line 315) also takes a mark function and has `use()` and `stop()` (`tools/ToolController.kt`).
+- Tasks Db1, Db2, Dc1, and Dc2 were each built as a cloud or engine half and a wiring half.
+- A failed host check names its reason on the trace, and the check runs once more after a sandbox timeout or a busy sandbox (`c095b9c`).
+- A spoken press gives its result back. The voice says the answer only after a tap that ran, and «Нажать не получилось.» (`PRESS_FAILED`) otherwise (`9dc2fa1`).

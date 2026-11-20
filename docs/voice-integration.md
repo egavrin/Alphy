@@ -85,7 +85,9 @@ The spec is `docs/superpowers/specs/2026-11-18-live-voice-dialog-design.md`.
 - With an OpenAI account, a press of the assistant button opens the compact assistant with the voice view and starts the voice mode at once. With another provider, the sheet opens as before, and «Непрерывный голосовой сеанс» stays in its menu.
 - The course composers have no voice mode.
 - The start needs the microphone permission. The voice mode and the continuous voice session never run at the same time.
-- The voice screen shows the card of the latest hand-off, the Alphy character, and a status line: «Слушаю», «Alphy говорит», «Alphy выполняет запрос», or «Микрофон выключен».
+- The voice screen is a stage above a low strip (`docs/superpowers/specs/2026-11-20-dialogue-stage-design.md`). The stage shows the app of the latest hand-off that made or changed an app. Before the first app, it shows the Alphy character.
+- The stage shows a chat card only when the card waits for a tap, or when a finished answer has a generated image. At a smallest width of 600 dp or more, the stage has two columns: the main visual with its controls at the left, and the other parts at the right.
+- The strip shows the status («Слушаю», «Alphy говорит», or «Alphy выполняет запрос»), the microphone state («Микрофон включён» or «Микрофон выключен»), and the current line of the speech of GPT-Live.
 - The microphone button mutes the capture and sends `session.input_audio.mute`. ✕ ends the voice mode.
 
 ### Session and hand-offs
@@ -98,7 +100,10 @@ The session omits `delegation`, so GPT-Live runs in client mode. GPT-Live sends 
 - When the reply is complete, Alphy sends «Ответ Alphy: » and the speakable reply, cut at a sentence end to at most 1,200 characters.
 - A mini-app request first sends «Alphy готовит мини-приложение, оно появится на экране.». The ready mini-app sends «Мини-приложение готово. Ответ Alphy: » and the reply.
 - A failed request sends «Alphy не смог выполнить запрос: » and the error text.
-- A phone-action plan shows its plan card in the voice card. Each end phase of the plan sends one more commentary: «Готово.», «Не получилось.», or «Действие отменено.».
+- A phone-action plan shows its plan card on the stage. Each end phase of the plan sends one more commentary: «Готово.», «Не получилось.», or «Действие отменено.».
+- A spoken request that a picture or a model makes clearer can get the routing kind `screen`. The voice says «Ответ Alphy: » and the answer at once, and the screen comes later on the stage. When the person asked in words to see a thing and no screen came, the voice says «Картинку показать не получилось.».
+- With an app on the stage, the routing call gets the shown screen (its title and its controls) as untrusted data, and it can answer with the kind `press`. A press runs the named control as a tap, and then the voice says the answer. A label that names no control gives «На экране нет такой кнопки.». A tap that does not run in 2 s gives «Нажать не получилось.».
+- A spoken change of the app on the stage runs the change by lines. The voice stays silent until the changed screen shows, and then it says the answer. A change that the kit cannot make becomes a new screen, and the old app stays. When the new screen also fails, the voice says «Изменить экран не получилось.».
 - A memory fact, an automation draft, or a course topic ends the voice mode with «Продолжите на экране».
 - A hand-off request runs to its end, also after the voice mode ends. Its result stays in the chat.
 - Text that the user types on the voice screen goes to Alphy. The reply goes to GPT-Live as quiet context (`session.thinking.append`).

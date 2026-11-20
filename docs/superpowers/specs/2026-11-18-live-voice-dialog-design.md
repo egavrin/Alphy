@@ -94,6 +94,8 @@ Card source, two options. (User) The first option.
 
 ### 5.2 Voice screen
 
+The stage and the strip of `2026-11-20-dialogue-stage-design.md` (section 1) replace this layout.
+
 ```
 ┌───────────────────────────────┐
 │ ┌───────────────────────────┐ │
