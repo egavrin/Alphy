@@ -59,10 +59,10 @@ class LiveVoiceDialogTest {
     }
 }
 
-private class Outcome(val failures: List<String>, val summary: String)
+internal class Outcome(val failures: List<String>, val summary: String)
 
 /** One server event, or one sent append. Times are milliseconds since the dialog began; start, end, and offset are session ms. */
-private data class Seen(val at: Long, val type: String, val text: String = "", val startMs: Long? = null, val endMs: Long? = null,
+internal data class Seen(val at: Long, val type: String, val text: String = "", val startMs: Long? = null, val endMs: Long? = null,
     val id: String? = null)
 
 /** One output audio chunk as it arrived. */
@@ -71,10 +71,10 @@ private class Chunk(val at: Long, val samples: Int, val voiced: Boolean)
 /** One reply on the output stream by the rule of rulings R24 and R27. Times are dialog ms of chunk arrivals. */
 private class StreamReply(val first: Long) { var lastVoiced = first; var voicedChunks = 0 }
 
-private const val INPUT = "session.input_transcript.delta"
-private const val OUTPUT = "session.output_transcript.delta"
-private const val DELEGATION = "session.delegation.created"
-private const val APPENDED = "session.commentary.appended"
+internal const val INPUT = "session.input_transcript.delta"
+internal const val OUTPUT = "session.output_transcript.delta"
+internal const val DELEGATION = "session.delegation.created"
+internal const val APPENDED = "session.commentary.appended"
 private const val QUIET_MS = 1_500L
 /**
  * Two output transcript replies are apart by at least this stamp gap. The stamps step by 200 ms; the first live run had stamp gaps of
@@ -88,27 +88,26 @@ private const val TRANSCRIPT_GAP_MS = 1_000L
  * fixture. Every step runs with a bounded wait, and the checks are judged at the end, so one paid run observes every assumption. The log
  * holds event types, ids, timeline values, and transcript text. It never holds the raw text of an event, an error message, or the key.
  */
-private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account: AiAccount, private val commentaryDelayMs: Long) {
+internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account: AiAccount, private val commentaryDelayMs: Long) {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val begin = SystemClock.elapsedRealtime()
+    val begin = SystemClock.elapsedRealtime()
     private val lines = ArrayList<Pair<Long, String>>()
-    private val events = CopyOnWriteArrayList<Seen>()
+    val events = CopyOnWriteArrayList<Seen>()
     private val sends = CopyOnWriteArrayList<Seen>()
     /** The arrival times of voiced output audio chunks. */
-    private val voiced = CopyOnWriteArrayList<Long>()
+    val voiced = CopyOnWriteArrayList<Long>()
     private val chunks = CopyOnWriteArrayList<Chunk>()
     private val timing = LiveTiming()
     private val audio = FakeLiveAudio(realTime = true)
     private val speaker = Speaker(audio)
-    private val host = Host()
+    val host = Host()
     private val session = LiveVoiceSession(instrumentation.targetContext, scope, Recorder(transport), { speaker }, { account }, endpoints, timing)
-    private val blocks = LinkedBlockingQueue<ShortArray>()
-    private val feeder = Thread(::feed, "live-dialog-capture")
-    @Volatile private var feeding = true
-    /** The blocks that the feeder has given to the session: session audio ms / 20. */
-    @Volatile private var fed = 0L
+    val feeder = WavFeeder(audio, afterBlock = ::sample)
     @Volatile private var feedStart = 0L
+    /** The last `playbackActive` and phase that [sample] saw. Only the feeder thread uses them. */
+    private var sampledActive: Boolean? = null
+    private var sampledPhase: LivePhase? = null
     /** The dialog ms when the interrupting fixture was queued, or -1. */
     @Volatile private var interruptAt = -1L
     /** (dialog ms, voiced) of each chunk that the session wrote to the speaker. */
@@ -127,7 +126,7 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
 
     private class AudioRun(val voiced: Boolean, val from: Long) { var to = from; var chunks = 0; var samples = 0L; var maxGap = 0L }
 
-    private inner class Host : LiveVoiceHost {
+    inner class Host : LiveVoiceHost {
         @Volatile var history = emptyList<Message>()
         @Volatile var ended: String? = null
         val delegations = LinkedBlockingQueue<Pair<String, String>>()
@@ -164,9 +163,10 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         }
     }
 
-    fun run(log: File): Outcome {
+    /** Runs the dialog of spec 6.3, or [probe] in its place without the core path checks of that dialog. */
+    fun run(log: File, probe: (() -> Unit)? = null): Outcome {
         try {
-            script()
+            if (probe != null) probe() else script()
         } catch (failure: Throwable) {
             failures += "The script stopped: ${failure.javaClass.simpleName}"
             note("script stopped: ${failure.javaClass.simpleName}")
@@ -175,12 +175,12 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
             expect("core: no error ends the mode", ended == null, "end before the stop «$ended»; errors ${errors(0)}")
             main { session.stop() }
             waitFor("session.closed", 5_000, whileActive = false) { events.any { it.type == "session.closed" } }
-            feeding = false
-            feeder.join(1_000)
+            feeder.stop()
+            phaseChanges += now() to LivePhase.IDLE
             scope.cancel()
             synchronized(audioLock) { audioRun?.let(::logRun); audioRun = null }
         }
-        corePath()
+        if (probe == null) corePath()
         val summary = summary()
         log.writeText(synchronized(lines) { lines.sortedBy { it.first }.joinToString("\n") { "%7d %s".format(it.first, it.second) } } +
             "\n\n" + summary + "\n")
@@ -196,8 +196,7 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
             host.history = emptyList(); host.ended = null
             if (!start()) { failures += "No session.started without history."; return }
         }
-        feedStart = now()
-        feeder.start()
+        listen()
         SystemClock.sleep(1_000)
 
         // Step 1: the request, its delegation, and no claim before the late commentary.
@@ -266,7 +265,7 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         val proposal = outputs(p.first)
         val proposalEnd = proposal.maxOfOrNull { it.endMs ?: 0 }
         // The approval window compares session times, so «да» starts after the proposal's last transcript end on the audio clock.
-        if (proposalEnd != null) waitFor("session audio past the proposal", 10_000) { fed * 20 > proposalEnd + 500 }
+        if (proposalEnd != null) waitFor("session audio past the proposal", 10_000) { feeder.fed * 20 > proposalEnd + 500 }
         val asking = now()
         say("da")
         waitFor("the «да» transcript", 10_000) { inputs(asking).isNotEmpty() }
@@ -394,45 +393,35 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
         return before == LivePhase.LISTENING || phaseChanges.any { it.first in from until to && it.second == LivePhase.LISTENING }
     }
 
-    private fun start(): Boolean {
+    fun start(): Boolean {
         main { session.start(host) }
         return waitFor("session.started", 12_000) { main { session.phase } == LivePhase.LISTENING }
     }
 
+    /** Starts the capture feeder: from now on the session hears silence or a queued fixture. */
+    fun listen() { feedStart = now(); feeder.start() }
+
     /** Queues one fixture and waits until the feeder has sent it. Returns the session audio ms of its speech onset. */
     private fun say(name: String): Long {
         val samples = wavSamples(instrumentation.context.assets.open("voice/$name.wav").use { it.readBytes() })
-        val onset = fed * 20 + maxOf(0, samples.indexOfFirst { abs(it.toInt()) > 1000 }) * 1000L / LIVE_RATE
-        for (from in samples.indices step LIVE_BLOCK) {
-            blocks += ShortArray(LIVE_BLOCK).also { samples.copyInto(it, 0, from, minOf(from + LIVE_BLOCK, samples.size)) }
-        }
+        val onset = feeder.fed * 20 + maxOf(0, samples.indexOfFirst { abs(it.toInt()) > 1000 }) * 1000L / LIVE_RATE
+        feeder.say(samples)
         said += Triple(name, onset, now())
         note("say $name: ${samples.size * 1000L / LIVE_RATE} ms, speech onset at session audio $onset ms")
-        waitFor("$name sent", 10_000) { blocks.isEmpty() }
+        waitFor("$name sent", 10_000) { feeder.idle }
         return onset
     }
 
-    /** Sends the capture blocks and samples `playbackActive` and the phase after each block. */
-    private fun feed() {
-        val start = System.nanoTime()
-        var i = 0L
-        var active: Boolean? = null
-        var phase: LivePhase? = null
-        while (feeding) {
-            audio.capture(blocks.poll() ?: ShortArray(LIVE_BLOCK))
-            fed = ++i
-            val nowActive = audio.playbackActive
-            if (nowActive != active) { active = nowActive; activeChanges += now() to nowActive }
-            // A read of the snapshot state outside the main thread sees the last applied value.
-            val nowPhase = session.phase
-            if (nowPhase != phase) { phase = nowPhase; phaseChanges += now() to nowPhase; note("phase $nowPhase") }
-            val wait = start + i * 20_000_000L - System.nanoTime()
-            if (wait > 0) Thread.sleep(wait / 1_000_000, (wait % 1_000_000).toInt())
-        }
-        phaseChanges += now() to LivePhase.IDLE
+    /** Samples `playbackActive` and the phase after each capture block. */
+    private fun sample() {
+        val nowActive = audio.playbackActive
+        if (nowActive != sampledActive) { sampledActive = nowActive; activeChanges += now() to nowActive }
+        // A read of the snapshot state outside the main thread sees the last applied value.
+        val nowPhase = session.phase
+        if (nowPhase != sampledPhase) { sampledPhase = nowPhase; phaseChanges += now() to nowPhase; note("phase $nowPhase") }
     }
 
-    private fun comment(delegation: String, text: String): Pair<Long, String> {
+    fun comment(delegation: String, text: String): Pair<Long, String> {
         val at = now()
         return at to main { session.commentary(delegation, text) }
     }
@@ -536,13 +525,13 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
     private fun info(name: String, detail: String) { checks += "INFO $name: $detail" }
 
     // The send time is taken before the send, so a part that arrives in the same millisecond answers it.
-    private fun outputs(from: Long, to: Long = Long.MAX_VALUE) = events.filter { it.type == OUTPUT && it.at >= from && it.at <= to }
+    fun outputs(from: Long, to: Long = Long.MAX_VALUE) = events.filter { it.type == OUTPUT && it.at >= from && it.at <= to }
     private fun inputs(from: Long) = events.filter { it.type == INPUT && it.at > from }
     private fun errors(from: Long) = events.filter { it.type == "error" && it.at >= from }.map { "${it.text} for ${it.id}" }
-    private fun text(seen: List<Seen>) = seen.joinToString("") { it.text }
-    private fun lastOutput() = maxOf(events.lastOrNull { it.type == OUTPUT }?.at ?: -1, voiced.lastOrNull() ?: -1)
-    private fun now() = SystemClock.elapsedRealtime() - begin
-    private fun note(line: String) = note(now(), line)
+    fun text(seen: List<Seen>) = seen.joinToString("") { it.text }
+    fun lastOutput() = maxOf(events.lastOrNull { it.type == OUTPUT }?.at ?: -1, voiced.lastOrNull() ?: -1)
+    fun now() = SystemClock.elapsedRealtime() - begin
+    fun note(line: String) = note(now(), line)
     private fun note(at: Long, line: String) { synchronized(lines) { lines += at to line } }
     private fun JSONObject.long(name: String) = if (has(name)) optLong(name) else null
 
@@ -577,9 +566,10 @@ private class LiveDialog(transport: LiveTransport, endpoints: Endpoints, account
  * 2 s ahead of its audio. It hears speech by level on the input audio clock and gives the next scripted transcript after 300 ms of
  * silence. A reply that the user talked over stops at the end of that user turn, as in the second live run: the audio of the words
  * already in the transcript still streams, and the next reply starts after at least 1.1 s of silent stream audio. Each turn opens a
- * delegation and gets a filler line.
+ * delegation and gets a filler line, except a turn of [undelegated]: it gets a short answer and no delegation. [script] gives the
+ * transcript of each turn.
  */
-private class ScriptedLiveServer : LiveTransport {
+internal class ScriptedLiveServer(private val script: List<String> = TURNS, private val undelegated: Set<Int> = emptySet()) : LiveTransport {
     // A daemon worker that is never shut down, so a late audio send after the close cannot throw.
     private val worker = Executors.newSingleThreadScheduledExecutor { Thread(it, "scripted-live").apply { isDaemon = true } }
     private lateinit var listener: LiveListener
@@ -640,7 +630,7 @@ private class ScriptedLiveServer : LiveTransport {
             if (speechStart < 0) speechStart = input - 20
             lastVoiced = input
         } else if (speechStart >= 0 && input - lastVoiced >= 300) {
-            val text = TURNS.getOrElse(turns++) { "Ещё." }
+            val text = script.getOrElse(turns++) { "Ещё." }
             if (true in planned) {
                 // The transcript runs 20 chunks ahead of the audio. 6 more silent chunks keep the next reply's stamps 1,000 ms apart.
                 while (planned.size > 20) planned.removeLast()
@@ -648,8 +638,11 @@ private class ScriptedLiveServer : LiveTransport {
                 repeat(6) { planned += false }
             }
             emit(JSONObject().put("type", INPUT).put("delta", text).put("start_ms", speechStart).put("end_ms", lastVoiced))
-            emit(JSONObject().put("type", DELEGATION).put("offset_ms", lastVoiced + 100).put("delegation", JSONObject().put("id", "item_$turns")))
-            speak(if (turns == 1) "Секундочку." else "Понял.")
+            if (turns - 1 in undelegated) speak("Отвечу сама, коротко.")
+            else {
+                emit(JSONObject().put("type", DELEGATION).put("offset_ms", lastVoiced + 100).put("delegation", JSONObject().put("id", "item_$turns")))
+                speak(if (turns == 1) "Секундочку." else "Понял.")
+            }
             speechStart = -1
         }
     }
