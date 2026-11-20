@@ -68,6 +68,7 @@ import com.alpha.assistant.tools.agentReply
 import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.LiveTiming
+import com.alpha.assistant.voice.LiveTransport
 import com.alpha.assistant.voice.LiveVoiceSession
 import com.alpha.assistant.voice.VoiceSession
 import kotlinx.coroutines.CompletableDeferred
@@ -207,6 +208,10 @@ internal class ShellFixture(prefix: String) {
     /** A voice mode with a scripted [socket] and [audio] on a loopback endpoint, so no test reaches OpenAI. */
     fun liveVoice(socket: FakeLiveTransport, audio: FakeLiveAudio, timing: LiveTiming = LiveTiming()): LiveVoiceFactory =
         { app, scope -> LiveVoiceSession(app, scope, socket, { audio }, { keys.account().getOrNull() }, Endpoints { "http://127.0.0.1:4000" }, timing) }
+
+    /** A voice mode with any [transport] on [endpoints], such as a scripted server or a real socket of a paid check. */
+    fun liveVoice(transport: LiveTransport, audio: FakeLiveAudio, endpoints: Endpoints, timing: LiveTiming = LiveTiming()): LiveVoiceFactory =
+        { app, scope -> LiveVoiceSession(app, scope, transport, { audio }, { keys.account().getOrNull() }, endpoints, timing) }
 
     /** A loopback test passes a [chat] provider that reads [models]. */
     fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false, chat: ChatProvider = provider,
