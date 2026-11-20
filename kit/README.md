@@ -201,6 +201,7 @@ A text that a format function printed is for a person: do not read it back as a 
   - In a row with one text field, a choice that the row does not change is the muted line under the title.
   - With `group=$field`, Alphy shows the value of the field as the heading of each group, so a row that cannot change the field leaves it out (L2 decision 2).
     A check mark, a switch, a count, and a picture stay, and so does each control of an editable row (`edit=true`). The add form and the data keep the field.
+    A row with no other field than the field of its group (and the field of its emoji) keeps it, so the row is not empty.
   - More than two check marks are circles in a second row under the other cells, each named by `labels=` or its field. The host draws each row of a list on a card of its own, so the row has no card of the part.
   - `icon="🛒"` gives each row the same sign. An icon name in its place, such as `icon="Cart"`, is a note, and the rows have no sign. `icon=$x` reads `x` from a field of `fields=` or a name of `show=`. A row that the add form makes gets its sign the same way: `show=` computes it from the new row, or the person types the field.
   - The text of the emoji for a screen reader is the title of the list.

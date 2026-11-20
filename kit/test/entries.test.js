@@ -172,6 +172,11 @@ test("entries (L2 decision 2): a row of a list with group=$field leaves that fie
   // With edit=true the row keeps the control of its group field (holdout-reading-es).
   const edit = rowOf((await built('app("T", lang="en")', `need pack = entries("Pack", ${fields}, group=$kind, edit=true)`)).definition);
   expect(every(edit).filter((node) => node.bind === "kind").map((node) => node.type)).toEqual(["segmented"]);
+  // A row whose only field is the field of its group keeps it: else the row is empty, or holds only its remove button.
+  for (const more of [", remove=false", ""]) {
+    const alone = rowOf((await built('app("T", lang="en")', `need log = entries("Log", fields={day: "date"}, group=$day${more})`)).definition);
+    expect(every(alone).map((node) => node.bind).filter(Boolean)).toEqual(["day"]);
+  }
   // In each model plan and saved plan, the row of a grouped list shows its group field only when the person edits the row.
   const { allPlans } = await import("./helpers.js");
   const { plansIn } = await import("../build.js");

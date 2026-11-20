@@ -1279,9 +1279,9 @@ const PARTS = {
     const many = fields.filter(([, kindTree]) => kindTree.v === "check").length > 2;
     const kindOf = (kindTree) => (kindTree.k === "list" ? "choice" : own(FIELD_KINDS, kindTree.v) ?? "text");
     // group=$field: Alphy shows the value of the field as the heading of each group, so a row that cannot change the field leaves it out (L2 decision 2).
-    // A check mark, a switch, and a count change in the row, so they stay. The add form and the data keep the field.
+    // A check mark, a switch, and a count change in the row, so they stay. The add form and the data keep the field. A row with no other field keeps it.
     const grouped = opt.group?.k === "path" && !opt.group.abs && opt.group.segs.length === 1 ? fields.find(([field]) => field === opt.group.segs[0]) : undefined;
-    const heading = !edit && grouped && !["check", "switch", "count", "picture"].includes(kindOf(grouped[1])) ? grouped[0] : null;
+    const heading = !edit && grouped && !["check", "switch", "count", "picture"].includes(kindOf(grouped[1])) && fields.some(([field]) => field !== sign && field !== grouped[0]) ? grouped[0] : null;
     const others = fields.filter(([field]) => field !== sign && field !== heading);
     // In a row with one text, a choice that the row does not change is the muted line under the title: as a label beside it, "Frutta e verdura" broke into two lines.
     const under = !edit && others.filter(([, kindTree]) => kindOf(kindTree) === "text").length === 1 ? others.find(([, kindTree]) => kindOf(kindTree) === "choice")?.[0] : undefined;
