@@ -7,9 +7,13 @@ private data class Delta(val text: String, val startMs: Long, val endMs: Long)
 
 /**
  * Input deltas at most this far apart are one speech run, and a run is current only when its last delta ends at most this far
- * before the hand-off (rulings R31 and R32). Gaps inside a turn were at most 400 ms in the live checks.
+ * before the hand-off (rulings R31 and R32). The same gap ends the run of a late last word. Gaps inside a turn were at most
+ * 400 ms in the live checks.
  */
 private const val SPEECH_RUN_GAP_MS = 1_000L
+
+/** The input and output stamps of GPT-Live sit on this grid. */
+private const val STAMP_STEP_MS = 200L
 
 /** The session transcript of spec 5.5.1 and 5.5.2: user turns and the request text of a hand-off. */
 internal class LiveTranscript {
@@ -41,21 +45,30 @@ internal class LiveTranscript {
      * after the start of the current speech run talked over the user, so it does not cut the request (ruling R31). Without a
      * current run, every output end cuts (ruling R32). A blank result does not count as a hand-off, so the session can ask again
      * after it waits for late input deltas (spec 5.5.2).
+     *
+     * The late last word of an answered turn does not join the request either. A run that began before the answer, has no
+     * hand-off, has no output end before its last input, and ends with one single input at most one stamp step after the stamp
+     * end of the answer gave that input to the answered turn. A person who heard the answer starts later, because the answer
+     * audio ends after its output stamp (form J: « системе» at the end of «Юпитер.»). Each sign makes the cut rarer, so the
+     * worst result is the text of the rules above. Known limit: a new request loses its first input when that input starts
+     * within one stamp step of the stamp end of an answer, within 1,000 ms of a turn that GPT-Live did not talk over, and
+     * before a pause of more than 1,000 ms. A late word still joins the next request after two late inputs, or when its run
+     * holds a hand-off.
      */
     fun request(offsetMs: Long): String {
         val heard = inputs.filter { it.startMs <= offsetMs }
-        val last = heard.lastOrNull() ?: return ""
-        var runStart = offsetMs
-        if (offsetMs - last.endMs <= SPEECH_RUN_GAP_MS) {
-            runStart = last.startMs
-            for (i in heard.lastIndex downTo 1) {
-                if (heard[i].startMs - heard[i - 1].endMs > SPEECH_RUN_GAP_MS) break
-                runStart = heard[i - 1].startMs
-            }
-        }
+        if (heard.isEmpty()) return ""
+        fun joinsRun(i: Int) = i in 1..heard.lastIndex && heard[i].startMs - heard[i - 1].endMs <= SPEECH_RUN_GAP_MS
+        val runStarts = LongArray(heard.size)
+        for (i in heard.indices) runStarts[i] = if (joinsRun(i)) runStarts[i - 1] else heard[i].startMs
+        val runStart = if (offsetMs - heard.last().endMs <= SPEECH_RUN_GAP_MS) runStarts.last() else offsetMs
         // An input that starts when an output ends comes after it: the stamps sit on a 200 ms grid, so the two often meet.
         val answered = outputEnds.filter { it <= runStart }.maxOrNull() ?: -1L
-        val text = heard.filter { it.startMs > lastHandOffMs && it.startMs >= answered }.joinToString("") { it.text }.trim()
+        fun lateLastWord(i: Int) = heard[i].startMs - answered <= STAMP_STEP_MS && runStarts[i] < answered &&
+            !joinsRun(i + 1) && lastHandOffMs < runStarts[i] && heard[i - 1].startMs < answered &&
+            outputEnds.none { it > runStarts[i] && it <= heard[i - 1].endMs }
+        val text = heard.filterIndexed { i, it -> it.startMs > lastHandOffMs && it.startMs >= answered && !lateLastWord(i) }
+            .joinToString("") { it.text }.trim()
         if (text.isNotEmpty()) lastHandOffMs = offsetMs
         return text
     }
