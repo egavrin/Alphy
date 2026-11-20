@@ -747,9 +747,9 @@ class ToolController internal constructor(private val app: Application, private 
     fun interact(t: ToolRecord, action: String, value: Any?, foreground: ()->Boolean = { false }, launch: ((android.content.Intent)->Unit)? = null) {
         interactNative(t,action,value,foreground,launch,null,null)
     }
-    internal fun interact(t: ToolRecord, action: String, value: Any?, host: DeviceReadHost?, foreground: ()->Boolean, launch: (android.content.Intent)->Unit) {
+    /** False when the controller refused the interaction now, as [afterLiveFinal] does. */
+    internal fun interact(t: ToolRecord, action: String, value: Any?, host: DeviceReadHost?, foreground: ()->Boolean, launch: (android.content.Intent)->Unit) =
         interactNative(t,action,value,foreground,launch,null,host)
-    }
 
     internal fun interactFromDesktop(tool: ToolRecord, action: String, value: Any?, active: () -> Boolean) {
         if (!active() || storageUnavailable) return
@@ -765,14 +765,15 @@ class ToolController internal constructor(private val app: Application, private 
         }
     }
 
-    internal fun queueLocalButton(tool: ToolRecord, action: String, host: Any, active: () -> Boolean) {
-        if (closing || busy || !active()) return
+    /** False when the controller refused the button now. True when it queued the button, which can still be skipped or fail later. */
+    internal fun queueLocalButton(tool: ToolRecord, action: String, host: Any, active: () -> Boolean): Boolean {
+        if (closing || busy || !active()) return false
         if (localButtons.size >= ArtifactProtocol.QUEUE_LIMIT) {
             error = app.getString(R.string.tool_local_input_full)
-            return
+            return false
         }
         localButtons.addLast(LocalButton(tool, action, host, active))
-        if (localButtonJob?.isActive == true) return
+        if (localButtonJob?.isActive == true) return true
         clearError()
         localButtonJob = scope.launch {
             var changed = false
@@ -803,6 +804,7 @@ class ToolController internal constructor(private val app: Application, private 
                 if (changed && store.primaryLibrary && !closing) scope.launch(Dispatchers.IO) { ToolWidgets.updateAll(app) }
             }
         }
+        return true
     }
     internal fun releaseLocalButtonHost(host: Any) {
         localButtonChains.remove(host)
@@ -1073,8 +1075,9 @@ class ToolController internal constructor(private val app: Application, private 
         refresh(deliverResults=!foregroundEffects)
     }
 
-    private fun afterLiveFinal(id: String,work: suspend ()->Unit) {
-        if(busy || closing || settlingPhoto || waitingDiscreteInput?.isActive==true) return
+    /** False when the controller refused [work] now. True when it started or queued it, which can still be skipped or fail later. */
+    private fun afterLiveFinal(id: String,work: suspend ()->Unit): Boolean {
+        if(busy || closing || settlingPhoto || waitingDiscreteInput?.isActive==true) return false
         val finalInputs=ArtifactCoordinator.get(store,id).pendingFinalLiveInput()
         if(finalInputs.isEmpty()) run(work)
         else waitingDiscreteInput=scope.launch {
@@ -1082,6 +1085,7 @@ class ToolController internal constructor(private val app: Application, private 
             finally {waitingDiscreteInput=null}
             if (!settlingPhoto) run(work)
         }
+        return true
     }
     internal suspend fun writableCalendars(): List<NativeOwnedCalendar> = withContext(Dispatchers.IO) {OwnedCalendarCapabilities(app,store).writableCalendars()}
     internal fun finishImage(prompt: CapabilityPrompt.Image, confirmed: Boolean) {

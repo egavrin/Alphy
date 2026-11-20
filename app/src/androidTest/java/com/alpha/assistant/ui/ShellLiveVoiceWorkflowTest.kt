@@ -546,6 +546,55 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
+    /** A spoken press of a button that the app queues as a local button runs it, and the voice says the routing text. */
+    @Test fun aSpokenPressRunsALocalButton() {
+        val provider = StageProvider(script = AgentScriptProvider(listOf(Scripted.Text(CHOICE))), press = "Yeşil çay seç")
+        onStage(provider = provider) { _, model, app ->
+            assertTrue(checkNotNull(ToolSpec.availablePersisted(stored(model, app))).canQueueLocalButtons)
+            val before = messages(model).size
+            socket.say(PRESS_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            assertEquals(listOf("complete", PRESS_TEXT, null), messages(model).last().let { listOf(it.status, it.text, it.toolId) })
+            robot.waitUntil { JSONObject(stored(model, app).state).getString("cay") == "Yeşil çay" }
+        }
+    }
+
+    /** A press of a button that the app refuses, because an operation of the apps starts as the press comes, changes nothing. */
+    @Test fun aPressOfAButtonThatTheAppRefusesDoesNotRun() = pressThatTheAppRefuses("Yeşil çay seç")
+
+    /** A press of a choice option that the app refuses, because an operation of the apps starts as the press comes, changes nothing. */
+    @Test fun aPressOfAChoiceThatTheAppRefusesDoesNotRun() = pressThatTheAppRefuses("Çay türü: Yeşil çay")
+
+    /**
+     * A press of [label] while an operation of the apps starts in the same main-thread step. The stage has not drawn a new frame, so its
+     * tap is still enabled, and only the refusal of the tap handler keeps the press from a change. The voice says that the press failed.
+     */
+    private fun pressThatTheAppRefuses(label: String) {
+        // The second plan call is the generation that holds the controller busy until its cancel.
+        val script = AgentScriptProvider(listOf(Scripted.Text(CHOICE), Scripted.Waits(120_000, CHOICE)))
+        val busyAtPress = CopyOnWriteArrayList<Boolean>()
+        var starter: Job? = null
+        pressRunsNothing(StageProvider(script = script, press = label), PRESS_FAILED, before = { model ->
+            robot.awaitFrames(5)
+            // Main.immediate runs this collector inside the emit of the press, before the stage collector and before the next frame.
+            robot.instrumentation.runOnMainSync {
+                starter = model.viewModelScope.launch {
+                    checkNotNull(model.livePresses).collect {
+                        busyAtPress += model.tools.busy
+                        model.tools.generate("Счётчик", null, null, emptyList())
+                    }
+                }
+            }
+        }) { model, app ->
+            starter?.cancel()
+            assertEquals(listOf(false), busyAtPress)
+            assertEquals("Siyah çay", JSONObject(stored(model, app).state).getString("cay"))
+            assertTrue(model.tools.busy)
+            robot.instrumentation.runOnMainSync { model.tools.cancel() }
+            robot.waitUntil { !model.tools.busy }
+        }
+    }
+
     /** Plan D, Dc1, review focus 2: a press of a label that the screen does not have runs nothing, and the voice says so. */
     @Test fun aPressOfAnUnknownLabelRunsNothing() = pressRunsNothing(StageProvider(plan = "lesson", press = "Удалить всё"))
 
@@ -1506,6 +1555,8 @@ class ShellLiveVoiceWorkflowTest {
             need hazir = button("Yeşil çay seç", [set(${'$'}/cay, "Yeşil çay")])
             need demleme = timer("Demleme", 300, alert=true, start="Başlat", pause="Duraklat", reset="Sıfırla", done="Hazır")
         """.trimIndent()
+        /** [TEA] without its alerting timer: it declares no capability, so its choice and its local button are controls of the shown screen. */
+        val CHOICE = TEA.lineSequence().filterNot { "timer(" in it }.joinToString("\n")
         /** The grounded answer of a screen that needs fresh facts, and its source. */
         const val FRESH_TEXT = "Сегодня сердце бьётся 70 раз в минуту."
         val FRESH_SOURCE = Source("Пульс", "https://example.com/pulse", "Пульс в покое: 70 ударов в минуту")

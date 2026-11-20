@@ -1050,7 +1050,8 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     val visibleUi = remember(current.ui, localButtons) {
         if (localButtons) JSONObject(current.ui).takeUnless(::hasLiveControl) else null
     }
-    val tap: (String, Any?) -> Unit = { id, value ->
+    // True when the controller accepted the tap. A finger tap ignores it, and a spoken press reports it.
+    val tap: (String, Any?) -> Boolean = { id, value ->
         if (value == null && visibleUi?.let { ToolUiCatalog.action(it, id)?.optString("type") } == "button") {
             controller.queueLocalButton(current, id, buttonHost) { buttonHost.get() && currentVisibility && navigationForeground() }
         } else controller.interact(current,id,value,deviceHost,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
@@ -1060,8 +1061,8 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     if (voicePresses != null) LaunchedEffect(voicePresses) {
         voicePresses.collect { press ->
             val run = pressTap
-            // The press takes its result before the tap, so a press that its request already gave up never runs.
-            if (run != null && press.ran.complete(true)) run(press.control.actionId, press.control.value) else press.ran.complete(false)
+            // A press that its request already gave up is complete, so no tap runs. The request and this collector share the main thread.
+            press.ran.complete(run != null && !press.ran.isCompleted && run(press.control.actionId, press.control.value))
         }
     }
     Box(Modifier.fillMaxWidth().onGloballyPositioned { inWindow = !it.boundsInWindow().isEmpty }) {
@@ -1081,7 +1082,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
                 else controller.nativeImageAvailable(tool.id, handle)
             },
             routeSystemBackEnabled = routeSystemBackEnabled, liveInput = liveInput, videoHost = videoHost, timerHost = timerHost,
-            onLiveInputState = onLiveInputState, appLanguage = spec?.appLanguage, dialogueTitle = dialogueTitle, event = tap)
+            onLiveInputState = onLiveInputState, appLanguage = spec?.appLanguage, dialogueTitle = dialogueTitle, event = { id, value -> tap(id, value) })
         if (deviceHost != null && controller.tiltOwner == tool.id) {
             TextButton(onClick = controller::stopTilt, modifier = Modifier.align(Alignment.TopEnd)) {
                 Text(stringResource(R.string.tool_stop_tilt))
