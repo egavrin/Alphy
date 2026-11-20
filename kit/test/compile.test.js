@@ -126,6 +126,21 @@ test("LINE (U-K item 7): each kind of line that parseLine reads has a head in HE
   expect(needsIn("need tip = figure(\n  need вода = counter(\nneedle = 1\n")).toEqual(["tip", "вода"]);
 });
 
+test("parseLine (U2-K item 5): each pattern of parseLine is the head of its kind in HEADS at the start of the line, then the value of the line", async () => {
+  // parseLine keeps its own patterns, because a build from HEADS adds bytes to the run-time of each app. This test ties the two texts.
+  const PATTERN = /\/(\^(?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\\\n[])*)\/([a-z]*)\.(?:exec|test)\(line\)[^]*?(?:kind: |entry\()"(\w+)"/g;
+  const patterns = [...parseLine.toString().matchAll(PATTERN)].map(([, source, flags, kind]) => [kind, source, flags]);
+  // The value after each head. A value that starts with = is a comparison, such as need x == 1, so no kind reads it.
+  const values = [["delete", 'check\\s*\\(\\s*"(.*)"\\s*\\)$'], ["delete", "(?:need\\s+)?(\\S+)$"], ["need", "(?!=)(.*)$"], ["formula", "(.*)$"], ["state", "(?!=)(.*)$"],
+    ["app", ""], ["check", ""], ["component", "(?!=)(.*)$"]];
+  // The head of a delete ends with (?=\S), which reads no character: each value of a delete starts with that character.
+  const head = (kind) => HEADS[kind].source.replace(/\(\?=\\S\)$/, "");
+  expect(patterns).toEqual(values.map(([kind, value]) => [kind, `^${head(kind)}${value}`, HEADS[kind].flags]));
+  // A need line with == passes LINE and stays in the plan, so the compile names its fault: the plan never drops the line in silence.
+  const calc = plan("calc"), merged = patchAppFile(calc, "need x == 1"), at = merged.split("\n").indexOf("need x == 1") + 1;
+  expect([merged, (await compileAppFile(merged)).faults.filter((fault) => fault.includes("need x == 1"))]).toEqual([patchAppFile(calc, "") + "need x == 1\n", [`line ${at}: line not understood: need x == 1`]]);
+});
+
 test("patchAppFile (A0-K1): a repair reply that deletes a name and writes it again gives the plan that a person gets by hand", async () => {
   const plan = 'app("T", lang="en")\n$/days = []\nneed note = content("a")\nneed old = content("b")\n';
   const reply = 'delete $/days\nneed days = entries("Days", fields={day: "date"}, rows=[])\nneed note = content("c")\ndelete old\ndelete nothing\n';
