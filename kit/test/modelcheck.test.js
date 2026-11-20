@@ -2,7 +2,8 @@
 // the prose count of a repair reply, and the record of a request. No test calls the API.
 
 import { expect, test } from "bun:test";
-import { BARS, SET_E, SET_F, barFaults, bodyOf, changeNumbers, checkOne, droppedOf, faultTable, keptOf, kindOf, numbers, repairsOf, storedOf, worstCase } from "../modelcheck.js";
+import { readFileSync } from "node:fs";
+import { APP_CAP, BARS, SET_E, SET_F, barFaults, bodyOf, changeNumbers, checkOne, droppedOf, faultTable, keptOf, kindOf, numbers, overCap, repairsOf, storedOf, worstCase } from "../modelcheck.js";
 import { PROMPT, changeText, repairText, taskText } from "../prompt.js";
 import { BLOCKS } from "../src/change.js";
 import { patchAppFile } from "../src/compile.js";
@@ -106,6 +107,16 @@ test("modelcheck (U-K fix 1): a repair reply is read as the app reads it, so an 
   const long = PLAN + `need note = card("Note", "${"x".repeat(65536)}")\n`;
   const over = await checkOne(item, { ...fake(long, PLAN), model: "m", effort: "low" });
   expect([over.outcome, over.calls.length, over.steps[0].faults]).toEqual(["not", 1, [`the plan has ${long.length} characters, and Alphy reads at most 65536. Use shorter texts and fewer lines`]]);
+});
+
+test("modelcheck (U2-K item 2): the cap of the harness and its fault are APP_FILE_MAX_CHARS and the fault of overCap in AppFileCompiler.kt", () => {
+  // The test reads the Kotlin source as kit/build.js reads ToolUiCatalog.kt, so a change on one side fails here.
+  const kotlin = readFileSync(new URL("../../app/src/main/java/com/alpha/assistant/tools/appfile/AppFileCompiler.kt", import.meta.url), "utf8");
+  const cap = /\bAPP_FILE_MAX_CHARS=(\d+)/.exec(kotlin)?.[1], start = /\bTOO_LONG="([^"]*)"/.exec(kotlin)?.[1];
+  const template = /fun overCap\(length: Int\)=AppFileCompilation\("faults",\s*listOf\("([^"]*)"\)/.exec(kotlin)?.[1];
+  expect([typeof cap, typeof start, typeof template]).toEqual(["string", "string", "string"]);
+  const length = Number(cap) + 1, sentence = template.replace("$TOO_LONG", start).replace("$length", String(length)).replace("$APP_FILE_MAX_CHARS", cap);
+  expect([APP_CAP, overCap(length).faults, sentence.includes("$")]).toEqual([Number(cap), [sentence], false]);
 });
 
 test("modelcheck: the device bars and the host forms that the kit takes", () => {

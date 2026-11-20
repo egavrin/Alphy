@@ -163,10 +163,13 @@ function changeOf(item, stored, reply, plan, definition) {
     same: plan === patchAppFile(item.plan, ""), gone: plan === null ? [] : [...needsIn(item.plan).filter((need) => !needs.has(need)), ...columns] };
 }
 
-/** The cap of the app on the reply, the plan, and the merged plan (AppFileCompiler.kt APP_FILE_MAX_CHARS). */
-const APP_CAP = 65536;
-/** The fault of the app for a text past its cap (AppFileCompiler.kt overCap). The app gives it no repair call (AppFileSteps.outcome, tooLong). */
-const overCap = (length) => ({ faults: [`the plan has ${length} characters, and Alphy reads at most ${APP_CAP}. Use shorter texts and fewer lines`], notes: [],
+/** The cap of the app on the reply, the plan, and the merged plan (AppFileCompiler.kt APP_FILE_MAX_CHARS). A test compares it with that file. */
+export const APP_CAP = 65536;
+/**
+ * The fault of the app for a text past its cap (AppFileCompiler.kt overCap). The app gives it no repair call (AppFileSteps.outcome, tooLong).
+ * A test compares its sentence with that file.
+ */
+export const overCap = (length) => ({ faults: [`the plan has ${length} characters, and Alphy reads at most ${APP_CAP}. Use shorter texts and fewer lines`], notes: [],
   definition: null, tooLong: true });
 
 /**
