@@ -208,11 +208,16 @@ class ShellLiveVoiceWorkflowTest {
     }
 
     /** Plan D, Db1, ruling OD-D4: a spoken request with the screen kind gets no course decision, so the mode goes on. */
-    @Test fun courseRequestByVoiceKeepsTheMode() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+    @Test fun courseRequestByVoiceKeepsTheMode() = spokenCourse(planStep = true)
+
+    /** Ruling OD-D4: a spoken request with no screen kind (the plan step is off) also gets no course decision. */
+    @Test fun courseRequestByVoiceWithThePlanStepOffKeepsTheMode() = spokenCourse(planStep = false)
+
+    private fun spokenCourse(planStep: Boolean) = withPlanStep(fixture.context, AiProvider.OPENAI, planStep) {
         val routed = CopyOnWriteArrayList<CloudRequest>()
         install(chat = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
-                routed += request
+                if (request.chatDecision) routed += request
                 // The routing call offers the course decision only when the request allows it.
                 emit(if (request.allowCourseDecision) CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, courseTopic = "Испанский язык")
                     else CloudEvent.RoundComplete(chatDecision("answer", "Fixture response"), false))
@@ -221,7 +226,8 @@ class ShellLiveVoiceWorkflowTest {
         live { _, model ->
             socket.say("Научи меня испанскому языку", "d1", 100)
             robot.waitUntil { commentary().isNotEmpty() || !model.liveVoice.active }
-            assertFalse(routed.first().allowCourseDecision)
+            assertEquals(planStep, routed.single().voiceScreen)
+            assertFalse(routed.single().allowCourseDecision)
             assertTrue(model.liveVoice.active)
             assertNull(model.courseSetup)
         }

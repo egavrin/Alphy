@@ -1724,7 +1724,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 withContext(Dispatchers.IO) {
                     val cloudRequest = CloudRequest(turns(history) + originalTurn,assistant.search,toolInstructions,
                         chatDecision = true,selectedText = selectedText,weatherLocation = { resolveWeatherPlace(request) },
-                        validateOperation = ::validateOperation, allowCourseDecision = courseHost != null && !voiceScreen,
+                        validateOperation = ::validateOperation, allowCourseDecision = courseHost != null && !next.voice,
                         voiceScreen = voiceScreen,
                         allowChatImage = !assistant.requiresRefinement, chatImageEnabled = chatImageSelection != null,
                         decisionContext = ChatDecisionContext(originalTurn, turns(cleanHistory), toolInstructions, inputProvenance, memoryStore),
