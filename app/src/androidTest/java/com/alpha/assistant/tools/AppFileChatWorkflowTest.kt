@@ -171,6 +171,13 @@ class AppFileChatWorkflowTest {
         assertEquals((0 until list.length()).count { list.getJSONObject(it).has("expect") }, outcome.expectations)
     }
 
+    /** Waits until the chat card of [saved] has opened its host. That open uses the one transient sandbox slot, so a probe during it gets BUSY. */
+    private fun cardHostOpened(saved: ToolRecord) = ToolStore(fixture.context, "${fixture.name}.db-tools.db").use { store ->
+        val coordinator = ArtifactCoordinator.get(store, saved.id)
+        // The open adds its host in one ordered block after its event leaves the slot. Before the open, the snapshot fails or has no host.
+        robot.waitUntil { runBlocking { coordinator.ordered { runCatching { snapshot(store).sessionGeneration }.getOrDefault(0L) } } > 0 }
+    }
+
     // Failure case: the plan step worked only below the chat, so a person never got the fast app.
     @Test fun aModelPlanBecomesASavedAppThatWorks() {
         val tip = plan("model/holdout-tip-ru")
@@ -178,6 +185,7 @@ class AppFileChatWorkflowTest {
         create("Калькулятор чаевых: сумма счёта, процент чаевых и на сколько человек делим.", script) { saved ->
             assertEquals(listOf(APP_FILE), script.calls.map { it.generationStage })
             assertEquals(tip, ToolSpec.parsePersisted(saved.spec).appFile)
+            cardHostOpened(saved)
             // The start values give 1000 × 1.10 / 2 = 550. A bill of 1200 with a tip of 20 % for 3 people gives 1200 × 1.20 / 3 = 480.
             works(saved, """[{"expect":"value","target":"d.perperson_text","equals":"550,00"},
                 {"set":"bill_field","value":1200},{"set":"tip_field","value":20},{"set":"people_field","value":3},
