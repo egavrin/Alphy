@@ -436,7 +436,7 @@ class ToolController internal constructor(private val app: Application, private 
     internal fun traceFor(id: String) = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
 
     /** The plan step needs the switch of the provider and the chat model that the model check measured: the first of the provider (ruling OD-3). */
-    private fun planStep(): AppFileLimits? {
+    internal fun planStep(): AppFileLimits? {
         val model = chatModel ?: return null
         val provider = keys.provider() ?: return null
         val on = GenerationSettings(app).planStep(provider) && model(provider) == provider.profile.chatModels.first()

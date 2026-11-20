@@ -102,7 +102,7 @@ internal class LiveVoiceBridge(
         // Rule 7: the hand-off of an approval or rejection turn gets the rule-5 text, and the chat saves nothing.
         answered?.takeIf { spokenAnswer(request) == it.first }?.let { answered = null; session.commentary(id, it.second); return }
         if (request.isBlank()) { session.commentary(id, NOT_HEARD); return }
-        if (assistantInvocation == null) { track(id, model.submitDraft(Draft(request), search = true)); return }
+        if (assistantInvocation == null) { track(id, model.submitDraft(Draft(request), search = true, spoken = true)); return }
         val first = takeFirstCapture()
         model.viewModelScope.launch { track(id, handOffOrder.withLock { model.submitLiveRequest(request, assistantInvocation, first) }) }
     }

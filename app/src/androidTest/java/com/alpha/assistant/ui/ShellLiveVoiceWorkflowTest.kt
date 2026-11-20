@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.SystemClock
 import android.provider.AlarmClock
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -25,13 +26,18 @@ import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
+import com.alpha.assistant.data.MessageProvenance
+import com.alpha.assistant.data.ScreenContext
 import com.alpha.assistant.memory.MemoryStore
+import com.alpha.assistant.surfaces.AssistContext
+import com.alpha.assistant.surfaces.AssistantCapture
 import com.alpha.assistant.tools.AgentScriptProvider
 import com.alpha.assistant.tools.Scripted
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.tools.agentReply
+import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.plan as appFilePlan
 import com.alpha.assistant.tools.withPlanStep
 import com.alpha.assistant.voice.FakeLiveAudio
@@ -57,6 +63,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CopyOnWriteArrayList
 
 /** The hand-off bridge of spec 5.5 to 5.8: a scripted GPT-Live socket and scripted audio drive the real shell model. */
 class ShellLiveVoiceWorkflowTest {
@@ -145,6 +152,101 @@ class ShellLiveVoiceWorkflowTest {
                 robot.waitUntil { robot.instrumentation.runOnMainSync { saved = model.tools.tools.singleOrNull { it.id == card } }; saved != null }
                 assertEquals(appFilePlan("calc"), ToolSpec.parsePersisted(checkNotNull(saved).spec).appFile)
             }
+        }
+    }
+
+    /** Plan D, Db1: a spoken request with the plan step on can get the kind screen. With the switch off, or typed, it cannot. */
+    @Test fun voiceHandOffMarksTheRequest() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+        install()
+        live { scenario, model ->
+            socket.say("Как работает сердце", "d1", 100)
+            robot.waitUntil { commentary().size == 1 }
+            assertTrue(checkNotNull(fixture.provider.lastRequest).voiceScreen)
+            scenario.onActivity { model.editDraft(Draft("Привет")); model.sendLiveTyped() }
+            robot.waitUntil { socket.types().contains("session.thinking.append") }
+            assertFalse(checkNotNull(fixture.provider.lastRequest).voiceScreen)
+            withPlanStep(fixture.context, AiProvider.OPENAI, false) {
+                socket.say("Как работает печень", "d2", 3_000)
+                robot.waitUntil { commentary().size == 2 }
+                assertFalse(checkNotNull(fixture.provider.lastRequest).voiceScreen)
+            }
+        }
+    }
+
+    /** Plan D, Db1: a screen takes the create path, and its plan call gets the dialogue text of the prompt after the request line. */
+    @Test fun voiceScreenBuildsAnApp() {
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))))
+        withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+            install(chat = stageProvider("calc", script = script))
+            live { _, model ->
+                socket.say(SCREEN_REQUEST, "d1", 100)
+                robot.waitUntil(60_000) { messages(model).lastOrNull()?.let { it.role == "assistant" && it.status !in unfinishedStatuses } == true }
+                val message = messages(model).last()
+                assertEquals("complete", message.status)
+                assertEquals(listOf(CloudGenerationStage.APP_FILE), script.calls.map { it.generationStage })
+                val dialogue = AppFilePrompt.load(fixture.context).dialogue
+                assertTrue(script.calls.single().turns.single().text.startsWith("User request: $SCREEN_REQUEST\n$dialogue\nWidget brief: $SCREEN_BRIEF"))
+                robot.waitUntil { model.stageToolId != null }
+                assertEquals(message.toolId, model.stageToolId)
+            }
+        }
+    }
+
+    /** Plan D, Db1, review focus 1: a phone action by voice stays a phone plan that waits for a tap, also when the screen kind is offered. */
+    @Test fun timerByVoiceIsStillAPlan() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+        val routed = CopyOnWriteArrayList<CloudRequest>()
+        fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence(TIMER_REQUEST, "таймер"))
+        fixture.provider.agentProposal = """{"steps":[{"function":"clock.setTimer","args":{"seconds":600}}]}"""
+        install(chat = routing(routed))
+        live { _, model ->
+            val plan = proposed(model, TIMER_REQUEST, "d1", 100)
+            assertTrue(routed.single().voiceScreen)
+            assertEquals(AgentPhase.REVIEW, plan.phase)
+            assertNull(messages(model).last().toolId)
+            assertEquals(listOf("d1" to ON_SCREEN), commentary())
+        }
+    }
+
+    /** Plan D, Db1, ruling OD-D4: a spoken request with the screen kind gets no course decision, so the mode goes on. */
+    @Test fun courseRequestByVoiceKeepsTheMode() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+        val routed = CopyOnWriteArrayList<CloudRequest>()
+        install(chat = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                routed += request
+                // The routing call offers the course decision only when the request allows it.
+                emit(if (request.allowCourseDecision) CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN, courseTopic = "Испанский язык")
+                    else CloudEvent.RoundComplete(chatDecision("answer", "Fixture response"), false))
+            }
+        })
+        live { _, model ->
+            socket.say("Научи меня испанскому языку", "d1", 100)
+            robot.waitUntil { commentary().isNotEmpty() || !model.liveVoice.active }
+            assertFalse(routed.first().allowCourseDecision)
+            assertTrue(model.liveVoice.active)
+            assertNull(model.courseSetup)
+        }
+    }
+
+    /** Plan D, Db1, review focus 4: the first hand-off of a press carries the screen, so it gets no screen kind. A later one does. */
+    @Test fun noScreenKindWithAScreenshot() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+        install()
+        val press = beginCapture(ScreenContext(visibleText = "Screen"))
+        try {
+            live(press = press) { _, model ->
+                socket.say("Что на экране?", "d1", 100)
+                robot.waitUntil { commentary().size == 1 }
+                val first = checkNotNull(fixture.provider.lastRequest)
+                assertNotNull(first.screenContext)
+                assertFalse(first.voiceScreen)
+                socket.say("Как работает сердце", "d2", 3_000)
+                robot.waitUntil { commentary().size == 2 }
+                assertTrue(checkNotNull(fixture.provider.lastRequest).voiceScreen)
+                // The message owns its screenshot file, and the fixture removes only the databases.
+                messages(model).flatMap { it.attachments }.filter { it.automaticScreen }
+                    .forEach { AssistContext.mediaFile(fixture.context, Uri.parse(it.uri)).delete() }
+            }
+        } finally {
+            robot.instrumentation.runOnMainSync { AssistantCapture.clear(press) }
         }
     }
 
@@ -336,9 +438,6 @@ class ShellLiveVoiceWorkflowTest {
             "conditions":{},"actions":[{"id":"task","capability":"agent.run","args":{"instruction":"Напомни полить растения."}}]}
         """.trimIndent()
     }) { it.chatAutomationSetup != null }
-
-    @Test fun courseTopicEndsWithContinueOnScreen() = endsOnScreen("Научи меня испанскому языку",
-        { fixture.provider.courseTopic = "Испанский язык" }) { it.courseSetup != null }
 
     /** A chat change ends the mode without a status, as it stops the continuous voice session (ruling R15). */
     @Test fun selectionChangeEndsTheMode() {
@@ -641,16 +740,27 @@ class ShellLiveVoiceWorkflowTest {
             }
         }
 
-    /** The plan call answers with the app file [plan] after [gate]. The routing call creates an app for [APP_REQUEST] only. */
-    private fun stageProvider(plan: String, gate: CompletableDeferred<Unit>? = null): ChatProvider {
-        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan))))
-        return object : ChatProvider {
-            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) = when {
-                request.generationStage != null -> { gate?.await(); script.respond(key, request, session, emit) }
-                request.decisionContext?.originalUserTurn?.text == APP_REQUEST ->
-                    emit(CloudEvent.RoundComplete(chatDecision("create", "Готово.", "Make the app"), false))
-                else -> emit(CloudEvent.RoundComplete(chatDecision("answer", "Fixture response"), false))
-            }
+    /**
+     * The model calls of an app answer from [script] (the app file [plan]) after [gate]. The routing call creates an app for
+     * [APP_REQUEST], gives a screen for [SCREEN_REQUEST], and answers each other request.
+     */
+    private fun stageProvider(plan: String, gate: CompletableDeferred<Unit>? = null,
+        script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan))))): ChatProvider = object : ChatProvider {
+        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) = when {
+            request.generationStage != null -> { gate?.await(); script.respond(key, request, session, emit) }
+            else -> emit(CloudEvent.RoundComplete(when (request.decisionContext?.originalUserTurn?.text) {
+                APP_REQUEST -> chatDecision("create", "Готово.", "Make the app")
+                SCREEN_REQUEST -> chatDecision("screen", SCREEN_TEXT, SCREEN_BRIEF)
+                else -> chatDecision("answer", "Fixture response")
+            }, false))
+        }
+    }
+
+    /** The fixture provider, which keeps each routing request in [routed]. */
+    private fun routing(routed: MutableList<CloudRequest>) = object : ChatProvider {
+        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+            if (request.chatDecision) routed += request
+            fixture.provider.respond(key, request, session, emit)
         }
     }
 
@@ -668,11 +778,14 @@ class ShellLiveVoiceWorkflowTest {
     private fun install(chat: ChatProvider = fixture.provider, voice: VoiceFactory? = null) = fixture.install(chat = chat, voice = voice,
         liveVoice = fixture.liveVoice(socket, audio))
 
-    /** Launches the shell, starts the voice mode, and answers `session.started`. */
-    private fun live(voiceApproval: Boolean = false, test: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit) = fixture.launch().use { scenario ->
+    /** Launches the shell, starts the voice mode (for the assistant [press] when not null), and answers `session.started`. */
+    private fun live(voiceApproval: Boolean = false, press: String? = null, test: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit) = fixture.launch().use { scenario ->
         val model = checkNotNull(fixture.model)
         robot.waitUntil { !model.loading }
-        scenario.onActivity { model.startLiveVoice(voiceApproval = voiceApproval) }
+        scenario.onActivity {
+            press?.let(model::bindAssistantCapture)
+            model.startLiveVoice(press, AssistantCapture.current?.takeIf { it.id == press }, voiceApproval = voiceApproval)
+        }
         robot.waitUntil { socket.connected }
         socket.emit(LIVE_STARTED)
         robot.waitUntil { model.liveVoice.phase == LivePhase.LISTENING }
@@ -687,6 +800,10 @@ class ShellLiveVoiceWorkflowTest {
         const val STAGE = "dialogue_stage"
         const val CHARACTER = "live_voice_character"
         const val APP_REQUEST = "Сделай калькулятор чаевых"
+        const val SCREEN_REQUEST = "Объясни, как работает сердце"
+        const val SCREEN_TEXT = "Сердце — насос."
+        const val SCREEN_BRIEF = "A heart that pumps blood"
+        const val TIMER_REQUEST = "Поставь таймер на 10 минут"
         /** A figure label of the calc app. */
         const val CALC_LABEL = "Per person"
         /** The text of the drawing of the lesson app. */

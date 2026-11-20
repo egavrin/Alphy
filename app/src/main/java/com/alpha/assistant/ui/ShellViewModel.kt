@@ -47,6 +47,7 @@ import com.alpha.assistant.memory.MemoryPageState
 import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.TestFixStatus
+import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
@@ -758,8 +759,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     internal val activeRequestMessageId: String? get() = active?.assistantId
     private data class Active(val conversationId: String, val assistantId: String, val originDraft: Draft, val session: CloudSession = CloudSession(), var job: Job? = null, var weatherDraft: Draft? = null, var cancelled: Boolean = false)
     private var active: Active? = null
+    /** [voice]: a spoken request of the voice mode. A retry is not spoken. */
     private data class QueuedRequest(val conversationId: String, val assistantId: String, val originDraft: Draft,
-        val saved: CompletableDeferred<Boolean>)
+        val saved: CompletableDeferred<Boolean>, val voice: Boolean = false)
     private class ChooseRefinement(val choices: List<RefinementChoice>) : Exception()
     private val requests = ArrayDeque<QueuedRequest>()
     private var queueOrder = 0L
@@ -1445,7 +1447,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
      */
     internal suspend fun submitLiveRequest(text: String, assistantInvocation: String?, capture: AssistCapture?): String? {
         val draft = Draft(text)
-        val invocation = assistantInvocation?.takeIf { capture?.id == it } ?: return submitDraft(draft, search = true)
+        val invocation = assistantInvocation?.takeIf { capture?.id == it } ?: return submitDraft(draft, search = true, spoken = true)
         // Implementation choice: a capture without a screen and a screenshot, or with a page that still loads, is in progress.
         // A capture whose screen and screenshot the user removed has nothing to wait for.
         withTimeoutOrNull(ASSIST_CAPTURE_WAIT_MS) {
@@ -1454,16 +1456,16 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     it.pageStatus != AssistPageStatus.LOADING
             }
         }
-        val latest = AssistantCapture.current?.takeIf { it.id == invocation } ?: return submitDraft(draft, search = true)
-        return submitAssistant(draft, invocation, latest)
+        val latest = AssistantCapture.current?.takeIf { it.id == invocation } ?: return submitDraft(draft, search = true, spoken = true)
+        return submitAssistant(draft, invocation, latest, spoken = true)
     }
 
     /**
      * Sends [draft] with the screen context and the screenshot of [displayed] that the user did not remove, then discards the
      * capture, so a later request carries none. A typed request sends the composer draft, and a voice hand-off its own text.
-     * Returns the assistant message id, or null when nothing is sent.
+     * Returns the assistant message id, or null when nothing is sent. [spoken]: a spoken request.
      */
-    private suspend fun submitAssistant(draft: Draft, invocation: String, displayed: AssistCapture?): String? {
+    private suspend fun submitAssistant(draft: Draft, invocation: String, displayed: AssistCapture?, spoken: Boolean = false): String? {
         val application = getApplication<Application>()
         if (application.assistantUnavailable()) return null
         // The capture is bound to the composer draft (bindAssistantCapture).
@@ -1484,7 +1486,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
 
         val bitmap = shown?.screenshot?.takeUnless { capture.screenshotDiscarded }
         if (bitmap == null) {
-            return submitDraft(draft, search = true, screenContext = includedScreen(capture))?.also { AssistantCapture.discardAll(invocation) }
+            return submitDraft(draft, search = true, screenContext = includedScreen(capture), spoken = spoken)?.also { AssistantCapture.discardAll(invocation) }
         }
         if (loading || loadFailed || attachmentBusy || draft.text.isBlank()) return null
         if (draft.attachments.size >= ImageInput.MAX_IMAGES) {
@@ -1509,7 +1511,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 // A typed request goes only with the same composer draft. A voice hand-off has its own text.
                 if (!composer || snapshot.draft == draft) {
                     submitted = submitDraft(draft.copy(attachments = draft.attachments + checkNotNull(attachment)),
-                        search = true, screenContext = includedScreen(latest))
+                        search = true, screenContext = includedScreen(latest), spoken = spoken)
                     if (submitted != null) AssistantCapture.discardAll(invocation)
                 } else requestError = application.getString(R.string.context_draft_changed)
             }
@@ -1531,8 +1533,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         submitDraft(snapshot.draft, search)
     }
 
-    /** Returns the assistant message id, or null when the request is not sent. */
-    internal fun submitDraft(draft: Draft, search: Boolean, screenContext: ScreenContext? = null): String? {
+    /** Returns the assistant message id, or null when the request is not sent. [spoken]: a spoken request of the voice mode. */
+    internal fun submitDraft(draft: Draft, search: Boolean, screenContext: ScreenContext? = null, spoken: Boolean = false): String? {
         if (loading || loadFailed || attachmentBusy || (draft.text.isBlank() && draft.attachments.isEmpty())) return null
         if (draft.text.length > MAX_CHAT_INPUT) {
             requestError = "Сообщение превышает 16 000 символов. Сократите текст."
@@ -1561,7 +1563,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         snapshot = snapshot.copy(selectedId = updated.id, newDraft = nextNewDraft)
         enqueue(updated, assistant, persist {
             if (selected == null) store.createFromNewDraft(updated, nextNewDraft) else store.updateConversation(updated)
-        })
+        }, spoken)
         return assistant.id
     }
     fun retry(messageId: String, search: Boolean = true) {
@@ -1597,8 +1599,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         replace(updated)
         enqueue(updated, assistant, persist { store.updateConversation(updated) })
     }
-    private fun enqueue(conversation: Conversation, assistant: Message, saved: CompletableDeferred<Boolean>) {
-        requests.addLast(QueuedRequest(conversation.id, assistant.id, snapshot.draft, saved))
+    private fun enqueue(conversation: Conversation, assistant: Message, saved: CompletableDeferred<Boolean>, spoken: Boolean = false) {
+        requests.addLast(QueuedRequest(conversation.id, assistant.id, snapshot.draft, saved, spoken))
         dispatchNext()
     }
     private fun dispatchNext() {
@@ -1641,8 +1643,11 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     if(knownTools == null) throw CloudFailure("tool_storage", toolStorageWarning)
                     if(target == null) unavailableTool()
                 }
+                // A spoken request with no image, no screen of the phone, and no chosen app to change can get a screen (plan D, Db1).
+                val voiceScreen = next.voice && user.attachments.isEmpty() && user.screenContext == null &&
+                    !assistant.requiresRefinement && tools.planStep() != null
                 fun validateOperation(decision: ChatToolReply.Decision) {
-                    if(decision.kind == "create" || decision.kind == "refine") {
+                    if(decision.isMiniApp) {
                         if(knownTools == null) throw CloudFailure("tool_storage",toolStorageWarning)
                         if(decision.kind == "create" && assistant.requiresRefinement)
                             throw CloudFailure("decision_changed", "Этот запрос относится к изменению выбранного мини-приложения.")
@@ -1717,7 +1722,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 withContext(Dispatchers.IO) {
                     val cloudRequest = CloudRequest(turns(history) + originalTurn,assistant.search,toolInstructions,
                         chatDecision = true,selectedText = selectedText,weatherLocation = { resolveWeatherPlace(request) },
-                        validateOperation = ::validateOperation, allowCourseDecision = courseHost != null,
+                        validateOperation = ::validateOperation, allowCourseDecision = courseHost != null && !voiceScreen,
+                        voiceScreen = voiceScreen,
                         allowChatImage = !assistant.requiresRefinement, chatImageEnabled = chatImageSelection != null,
                         decisionContext = ChatDecisionContext(originalTurn, turns(cleanHistory), toolInstructions, inputProvenance, memoryStore),
                         automationDraftChatId = draftChat, screenContext = user.screenContext, screenImages = screenImages,
@@ -1823,7 +1829,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         ChatToolReply.Decision("course", "", "", "none")
                     }
                     testFix != null -> ChatToolReply.Decision("test_fix", "", "", "none")
-                    else -> ChatToolReply.decode(completed.text)
+                    else -> ChatToolReply.decode(completed.text, allowScreen = voiceScreen)
                 }
                 if(answerFragment.isNotEmpty() && decoded.kind != "answer")
                     throw CloudFailure("decision_changed","The assistant changed the requested operation after streaming an answer.")
@@ -1923,7 +1929,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                                 }
                             })
                     }
-                } else if (decoded.kind != "create" && decoded.kind != "refine") {
+                } else if (!decoded.isMiniApp) {
                     val intent = decoded.image
                     if (intent == null || !decoded.imageRequired && chatImageSelection == null) {
                         updateMessage(request, assistant.id) { it.copy(text = decoded.text, status = "complete", provenance = replyProvenance) }
@@ -1957,8 +1963,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         }
                     }
                 } else {
+                    val host = if (decoded.isScreen) withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue else ""
                     val prompt = ChatToolReply.generationPrompt(
-                        user.text,decoded.brief,decoded.text,sources,selectedText)
+                        user.text,decoded.brief,decoded.text,sources,selectedText,host)
                     tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
                         cancelRequest = ::cancelRequest, sceneAttachments = sceneAttachments,
                         prepared = { prepareToolOperation() },
