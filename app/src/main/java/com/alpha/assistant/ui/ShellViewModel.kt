@@ -48,6 +48,7 @@ import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.TestFixStatus
 import com.alpha.assistant.tools.appfile.AppFilePrompt
+import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.tools.agent.ScreenFallback
 import com.alpha.assistant.tools.agent.ScreenRun
 import com.alpha.assistant.tools.ToolGenerationService
@@ -1965,12 +1966,16 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         }
                     }
                 } else {
-                    val host = if (decoded.isScreen) withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue else ""
-                    val prompt = ChatToolReply.generationPrompt(
-                        user.text,decoded.brief,decoded.text,sources,selectedText,host)
                     // The voice says the answer of a screen now: the screen comes later, or not at all (plan D, Db2).
                     if (decoded.isScreen) liveBridge?.takeIf { liveVoice.active }?.screenStarted(assistant.id, decoded.text, decoded.show)
                     try {
+                        val host = if (decoded.isScreen) withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue else ""
+                        val prompt = try {
+                            ChatToolReply.generationPrompt(user.text,decoded.brief,decoded.text,sources,selectedText,host)
+                        } catch (failure: CloudFailure) {
+                            // The routing check of the brief does not count the dialogue text, so this is no error of the person.
+                            throw if (decoded.isScreen && failure.code == "widget_size") ScreenFallback(AppFileNames.PROMPT_SIZE) else failure
+                        }
                         tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
                             cancelRequest = ::cancelRequest, sceneAttachments = sceneAttachments,
                             prepared = { prepareToolOperation() },

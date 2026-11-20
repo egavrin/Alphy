@@ -18,6 +18,7 @@ import com.alpha.assistant.agent.AgentPlan
 import com.alpha.assistant.agent.PhoneActionEvidence
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
+import com.alpha.assistant.cloud.ChatToolReply
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudGenerationStage
@@ -272,6 +273,16 @@ class ShellLiveVoiceWorkflowTest {
 
     /** Plan D, Db2: a screen with no app that the person asked to see gets one line after the answer. */
     @Test fun aFallbackOfAShowRequestSaysOneLine() = fallbackScreen(show = true, SCREEN_ANSWER, SCREEN_FAILED)
+
+    /**
+     * A screen brief that fits the routing check, which does not count the dialogue text, but whose plan prompt with that text
+     * passes the generator limit. The screen falls back with no plan call and no error, as a screen with no app does.
+     */
+    @Test fun aScreenPromptOverTheLimitFallsBack() {
+        val dialogue = AppFilePrompt.load(fixture.context).dialogue
+        val brief = "b".repeat(ChatToolReply.generationBriefAllowance(SCREEN_REQUEST, emptyList(), "") - dialogue.length / 2)
+        fallbackScreen(show = true, SCREEN_ANSWER, SCREEN_FAILED, brief = brief, planCalls = 0)
+    }
 
     /** Plan D, Db2: a stop of a screen run stays a stop. The voice says the stop after the answer, and the mode goes on. */
     @Test fun aStopOfAScreenStaysAStop() = gatedRequest(show = true) { scenario, model, gate ->
@@ -774,11 +785,11 @@ class ShellLiveVoiceWorkflowTest {
      * The voice mode with the plan step: the hand-off of [APP_REQUEST] puts the app of [plan] on the stage, and [test] gets its id.
      * Each other request gets the answer «Fixture response».
      */
-    private fun onStage(plan: String = "calc", show: Boolean = false,
+    private fun onStage(plan: String = "calc", show: Boolean = false, brief: String = SCREEN_BRIEF,
         script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan)))),
         test: (ActivityScenario<CloudTestActivity>, ShellViewModel, String) -> Unit) =
         withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-            install(chat = stageProvider(plan, show = show, script = script))
+            install(chat = stageProvider(plan, show = show, brief = brief, script = script))
             live { scenario, model ->
                 socket.say(APP_REQUEST, "d1", 100)
                 robot.waitUntil(60_000) { model.stageToolId != null }
@@ -803,11 +814,14 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
-    /** The calc app is on the stage. Then the plan and the repair of [SCREEN_REQUEST] have faults, and the voice says [lines] for it. */
-    private fun fallbackScreen(show: Boolean, vararg lines: String) {
+    /**
+     * The calc app is on the stage. Then [SCREEN_REQUEST] with [brief] gets no app: its [planCalls] plan calls (the plan and the repair)
+     * have faults. The voice says [lines] for it.
+     */
+    private fun fallbackScreen(show: Boolean, vararg lines: String, brief: String = SCREEN_BRIEF, planCalls: Int = 2) {
         val broken = appFilePlan("calc").replace("/ \$/people, example", "/ , example")
         val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc")), Scripted.Text(broken)))
-        onStage(show = show, script = script) { _, model, app ->
+        onStage(show = show, brief = brief, script = script) { _, model, app ->
             val before = messages(model).size
             socket.say(SCREEN_REQUEST, "d2", 2_000)
             robot.waitUntil(60_000) { messages(model).size == before + 2 && messages(model).last().status !in unfinishedStatuses }
@@ -816,7 +830,7 @@ class ShellLiveVoiceWorkflowTest {
             assertEquals(SCREEN_TEXT, message.text)
             assertNull(message.toolId)
             assertEquals("" to "", message.errorCode to message.error)
-            assertEquals(List(3) { CloudGenerationStage.APP_FILE }, script.calls.map { it.generationStage })
+            assertEquals(List(1 + planCalls) { CloudGenerationStage.APP_FILE }, script.calls.map { it.generationStage })
             robot.waitUntil { commentary().count { it.first == "d2" } == lines.size }
             robot.awaitFrames(5)
             assertEquals(lines.map { "d2" to it }, commentary().filter { it.first == "d2" })
@@ -831,13 +845,13 @@ class ShellLiveVoiceWorkflowTest {
      * The model calls of an app answer from [script] (the app file [plan]) after [gate]. The routing call creates an app for
      * [APP_REQUEST], gives a screen with [show] for [SCREEN_REQUEST], and answers each other request.
      */
-    private fun stageProvider(plan: String, gate: CompletableDeferred<Unit>? = null, show: Boolean = false,
+    private fun stageProvider(plan: String, gate: CompletableDeferred<Unit>? = null, show: Boolean = false, brief: String = SCREEN_BRIEF,
         script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan))))): ChatProvider = object : ChatProvider {
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) = when {
             request.generationStage != null -> { gate?.await(); script.respond(key, request, session, emit) }
             else -> emit(CloudEvent.RoundComplete(when (request.decisionContext?.originalUserTurn?.text) {
                 APP_REQUEST -> chatDecision("create", "Готово.", "Make the app")
-                SCREEN_REQUEST -> JSONObject(chatDecision("screen", SCREEN_TEXT, SCREEN_BRIEF)).put("show", show).toString()
+                SCREEN_REQUEST -> JSONObject(chatDecision("screen", SCREEN_TEXT, brief)).put("show", show).toString()
                 else -> chatDecision("answer", "Fixture response")
             }, false))
         }

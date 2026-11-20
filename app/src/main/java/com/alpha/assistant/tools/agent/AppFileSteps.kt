@@ -62,6 +62,8 @@ internal object AppFileNames {
     const val EARLY_CANCELED = "early_canceled"
     /** The ScreenFallback reason of a change by lines of the shown screen that gave no app. Its plan outcome is on the trace. */
     const val CHANGE = "change"
+    /** The prompt of the screen with the dialogue text passes the generator limit, so no plan call starts. */
+    const val PROMPT_SIZE = "prompt_size"
 
     // The failure codes of a change by lines that the kit could not make. ToolEngine.testAndFix reads them back as UNREPAIRED.
     /** A failed call or compile made no change, so a retry can work. */
