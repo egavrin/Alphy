@@ -44,13 +44,18 @@ object ChatToolReply {
         decisionKeys.forEach { properties.put(it, JSONObject().put("type", "string")) }
         properties.getJSONObject("kind").put("enum", JSONArray(kinds))
         properties.getJSONObject("search").put("enum", JSONArray(searchPolicies))
+        val required = JSONArray(decisionKeys)
+        // Strict mode requires each property, so a spoken request sends show with each kind.
+        if (allowScreen) { properties.put("show", JSONObject().put("type", "boolean")); required.put("show") }
         return JSONObject().put("type", "object").put("properties", properties)
-            .put("required", JSONArray(decisionKeys)).put("additionalProperties", false)
+            .put("required", required).put("additionalProperties", false)
     }
 
     data class Decision(val kind: String, val text: String, val brief: String, val search: String,
         internal val devicePlanSteps: List<PhoneActionEvidence>? = null,
-        internal val image: ImageIntent? = null, internal val imageRequired: Boolean = false) {
+        internal val image: ImageIntent? = null, internal val imageRequired: Boolean = false,
+        /** A screen that the person asked in words to see or to show (ruling OD-D1). Only a screen can have it true. */
+        internal val show: Boolean = false) {
         internal val requiresCleanPreparation: Boolean get() = kind != "answer" && kind != "clarify"
         internal val isMiniApp: Boolean get() = kind in miniAppKinds
         internal val isScreen: Boolean get() = kind == "screen"
@@ -99,6 +104,7 @@ The latest request comes from a spoken talk. The voice of the talk speaks your t
 Choose kind screen when a thing to see or to try makes the answer clearer: a drawing, a model that the person can change, steps, an experiment, or a check. For this request, such an explanation is a screen, not an answer. Examples: how a rainbow forms, how an atom is built, the times table of seven.
 Choose answer for a plain question with a short fact. Choose create when the person asks for a tool or an app. Use the device plan for a command to the phone.
 For screen, text is one to three short spoken sentences in the language of the request. They agree with the screen. The brief names the main thing that the screen shows and is never empty. Use search none.
+Set show to true only for a screen that the person asks in words to see or to be shown, and set it to false for each other decision.
 A request to learn a subject gets a screen with one lesson, not a course.
 """.trimIndent()
 
@@ -138,7 +144,9 @@ A request to learn a subject gets a screen with one lesson, not a course.
     fun decode(json: String, allowScreen: Boolean = false): Decision = decode(decisionObject(json), allowScreen)
 
     internal fun decode(json: JsonObject, allowScreen: Boolean = false): Decision {
-        val decisionKeys = if ("image" in json) decisionKeys + "image" else decisionKeys
+        // Only a spoken request with allowScreen can carry show. For each other request, show is an extra field, as before.
+        val decisionKeys = (if ("image" in json) decisionKeys + "image" else decisionKeys)
+            .let { if (allowScreen && "show" in json) it + "show" else it }
         if (json.keys != decisionKeys) {
             val value = json["kind"]
             val kind = when {
@@ -167,8 +175,12 @@ A request to learn a subject gets a screen with one lesson, not a course.
         if (if (kind in miniAppKinds) brief.isBlank() else brief.isNotEmpty())
             invalidDecision("decision.brief", "$.brief", "string")
         if (kind == "clarify" && search != "none") invalidDecision("decision.clarify_search", "$.search", "string")
+        val show = json["show"]?.let { value ->
+            (value as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: invalidDecision("decision.show", "$.show", jsonType(value))
+        } ?: false
+        if (show && kind != "screen") invalidDecision("decision.show", "$.show", "boolean")
         val image = if ("image" in json) string("image") else ""
-        if (image.isBlank()) return Decision(kind, text, brief, search)
+        if (image.isBlank()) return Decision(kind, text, brief, search, show = show)
         if (kind != "answer" || image.length > 4096) invalidDecision("decision.image", "$.image", "string")
         val intent = try {
             val fields = JSONObject(image)
@@ -243,6 +255,7 @@ A request to learn a subject gets a screen with one lesson, not a course.
     fun encode(decision: Decision): String = JSONObject().put("kind",decision.kind).put("text",decision.text)
         .put("brief",decision.brief).put("search",decision.search).apply {
             decision.image?.let { put("image", it.json().put("required", decision.imageRequired).toString()) }
+            if (decision.show) put("show", true)
         }.toString()
 
     /** The source notes that [grounded] puts before a searched reply. The voice does not read them (spec 12.3). */

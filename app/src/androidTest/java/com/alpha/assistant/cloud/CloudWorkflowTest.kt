@@ -961,7 +961,8 @@ class CloudWorkflowTest {
     private fun decision(text: String = "A sourced answer [1]", kind: String = "answer", search: String = "none", brief: String = "") =
         JSONObject().put("kind",kind).put("text",text).put("brief",brief).put("search",search).toString()
 
-    private fun Request.requireStrictDecision(image: Boolean = false): JSONObject {
+    /** [show]: a spoken request with the kind screen on offer, whose schema also has the boolean show. */
+    private fun Request.requireStrictDecision(image: Boolean = false, show: Boolean = false): JSONObject {
         assertEquals("/beta/chat/completions", path)
         assertEquals("deepseek-flash", json.getString("model"))
         assertTrue(json.getBoolean("stream"))
@@ -985,12 +986,14 @@ class CloudWorkflowTest {
         val parameters = function.getJSONObject("parameters")
         assertEquals("object", parameters.getString("type"))
         assertFalse(parameters.getBoolean("additionalProperties"))
-        val fields = setOf("kind", "text", "brief", "search") + if (image) setOf("image") else emptySet()
+        val strings = setOf("kind", "text", "brief", "search") + if (image) setOf("image") else emptySet()
+        val fields = strings + if (show) setOf("show") else emptySet()
         val required = parameters.getJSONArray("required")
         assertEquals(fields, (0 until required.length()).map(required::getString).toSet())
         val properties = parameters.getJSONObject("properties")
         assertEquals(fields, properties.keys().asSequence().toSet())
-        fields.forEach { assertEquals("string", properties.getJSONObject(it).getString("type")) }
+        strings.forEach { assertEquals("string", properties.getJSONObject(it).getString("type")) }
+        if (show) assertEquals("boolean", properties.getJSONObject("show").getString("type"))
         val policies = properties.getJSONObject("search").getJSONArray("enum")
         assertEquals(setOf("none", "optional", "required"), (0 until policies.length()).map(policies::getString).toSet())
         return properties
@@ -1691,11 +1694,15 @@ class CloudWorkflowTest {
         }
     }
 
-    /** Task Db1: only a spoken request gets the kind screen. Its body differs from the typed body only by that kind and its text. */
+    /**
+     * Task Db1: only a spoken request gets the kind screen. Its body differs from the typed body only by that kind, its text,
+     * and the field show of task Db2.
+     */
     @Test fun screenKindIsOfferedOnlyForAVoiceRequest() = kotlinx.coroutines.runBlocking {
         val bodies = mutableListOf<JSONObject>()
         Server { request, output ->
-            request.requireStrictDecision()
+            // The typed request comes first.
+            request.requireStrictDecision(show = bodies.size == 1)
             bodies += request.json
             output.classification(decision("Which part should I show?", kind = "clarify"))
         }.use { server ->
@@ -1711,10 +1718,69 @@ class CloudWorkflowTest {
         assertFalse("screen" in kinds(typed).toString())
         assertFalse(ChatToolReply.voiceScreenInstructions in system(typed).getString("content"))
         assertTrue(ChatToolReply.voiceScreenInstructions in system(voice).getString("content"))
-        // Without the kind and its text, the spoken body is the typed body, byte for byte.
+        // Without the kind, its text, and show, the spoken body is the typed body, byte for byte.
         assertEquals("screen", kinds(voice).remove(kinds(voice).length() - 1))
         system(voice).put("content", system(voice).getString("content").replace("\n" + ChatToolReply.voiceScreenInstructions, ""))
+        val parameters = voice.getJSONArray("tools").getJSONObject(0).getJSONObject("function").getJSONObject("parameters")
+        assertNotNull(parameters.getJSONObject("properties").remove("show"))
+        val required = parameters.getJSONArray("required")
+        assertEquals("show", required.remove(required.length() - 1))
         assertEquals(typed.toString(), voice.toString())
+    }
+
+    /** Task Db2 (ruling OD-D1): the boolean show of a spoken request. Only a screen can have it true. A typed request decodes as before. */
+    @Test fun aScreenDecisionCarriesShow() {
+        fun withShow(json: String, show: Any) = JSONObject(json).put("show", show).toString()
+        fun rule(json: String, allowScreen: Boolean = true) =
+            (runCatching { ChatToolReply.decode(json, allowScreen) }.exceptionOrNull() as? CloudFailure)?.shape?.rule
+        val screen = screenDecision()
+        val answer = decision("Луна светит отражённым светом.")
+        assertTrue(ChatToolReply.decode(withShow(screen, true), allowScreen = true).show)
+        assertFalse(ChatToolReply.decode(withShow(screen, false), allowScreen = true).show)
+        assertFalse(ChatToolReply.decode(screen, allowScreen = true).show)
+        // The strict schema sends show with each kind. False passes for another kind, and true is refused.
+        assertFalse(ChatToolReply.decode(withShow(answer, false), allowScreen = true).show)
+        assertEquals("decision.show", rule(withShow(answer, true)))
+        assertEquals("decision.show", rule(withShow(screen, "true")))
+        // A typed request has no field show: the key is refused as an extra field, as before.
+        assertEquals("decision.fields", rule(withShow(answer, false), allowScreen = false))
+        // The encoded decision, which the app decodes again, keeps show. Each other decision encodes as before.
+        val shown = ChatToolReply.decode(withShow(screen, true), allowScreen = true)
+        assertEquals(shown, ChatToolReply.decode(ChatToolReply.encode(shown), allowScreen = true))
+        assertEquals(screen, ChatToolReply.encode(ChatToolReply.decode(withShow(screen, false), allowScreen = true)))
+        assertEquals(answer, ChatToolReply.encode(ChatToolReply.decode(withShow(answer, false), allowScreen = true)))
+        // The schema has a boolean show, which strict mode requires, only with the kind screen on offer.
+        val spoken = ChatToolReply.decisionSchema(allowAutomation = false, allowWeatherLocation = false, allowScreen = true)
+        assertEquals("boolean", spoken.getJSONObject("properties").getJSONObject("show").getString("type"))
+        val required = spoken.getJSONArray("required")
+        assertTrue("show" in (0 until required.length()).map(required::getString))
+        assertFalse(ChatToolReply.decisionSchema(allowAutomation = false, allowWeatherLocation = false).getJSONObject("properties").has("show"))
+        assertTrue("Set show to true" in ChatToolReply.voiceScreenInstructions)
+    }
+
+    /** Task Db2: the strict schema of a spoken request makes the model send show with each kind, and each kind passes with one call. */
+    @Test fun aSpokenDecisionWithShowPassesWithOneCall() = kotlinx.coroutines.runBlocking {
+        fun withShow(json: String, show: Boolean) = JSONObject(json).put("show", show).toString()
+        val replies = listOf(withShow(screenDecision(), true), withShow(decision("Какую часть показать?", kind = "clarify"), false),
+            withShow(decision("Холодно.", kind = "weather_answer"), false))
+        for (reply in replies) Server { _, output -> output.responsesCall("decision-0", "submit_chat_decision", reply) }.use { server ->
+            val events = mutableListOf<CloudEvent>()
+            val failure = runCatching {
+                CloudChatProvider({ AiAccount(AiProvider.OPENAI, "alpha-test-only") }, Endpoints { server.url }).respond("alpha-test-only",
+                    cleanChatRequest("Покажи, как светит Луна").copy(voiceScreen = true), CloudSession()) { events += it }
+            }.exceptionOrNull()
+            assertEquals(reply, 1, server.requests.size)
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+            val expected = JSONObject(reply)
+            if (expected.getString("kind") == "weather_answer") {
+                // The weather rule after the decode refuses a weather answer with no search. So the decode itself passed.
+                assertEquals(reply, "weather_search", (failure as? CloudFailure)?.code)
+            } else {
+                assertNull(reply, failure)
+                val result = ChatToolReply.decode((events.single() as CloudEvent.RoundComplete).text, allowScreen = true)
+                assertEquals(expected.getString("kind") to expected.getBoolean("show"), result.kind to result.show)
+            }
+        }
     }
 
     /** Task Db1. The voice mode runs only on OpenAI, so this test uses the Responses form of the routing call. */

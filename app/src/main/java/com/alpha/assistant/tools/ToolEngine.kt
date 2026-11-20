@@ -22,10 +22,13 @@ import com.alpha.assistant.tools.agent.AppAgentGuide
 import com.alpha.assistant.tools.agent.AppAgentRequest
 import com.alpha.assistant.tools.agent.AppAgentResult
 import com.alpha.assistant.tools.agent.AppFileNames
+import com.alpha.assistant.tools.agent.AppFileOutcome
+import com.alpha.assistant.tools.agent.AppFileSteps
 import com.alpha.assistant.tools.agent.AppImageMaker
 import com.alpha.assistant.tools.agent.AppLessonTarget
 import com.alpha.assistant.tools.agent.AppSnapshot
 import com.alpha.assistant.tools.agent.GenerationSettings
+import com.alpha.assistant.tools.agent.ScreenRun
 import com.alpha.assistant.tools.appfile.AppFileCompilation
 import com.alpha.assistant.tools.appfile.AppFileCompiler
 import com.alpha.assistant.tools.appfile.AppFilePrevious
@@ -164,14 +167,26 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     /** The plan call marks its times as phases. It does not go to [onCompletion], which counts the agent calls. */
     private fun appAgent(key: String, session: CloudSession, onCompletion: ((ModelCompletionTiming) -> Unit)? = null,
         onPhase: ((String, String?, Long?) -> Unit)? = null) =
-        AppAgent(this, sandbox, appFileCall = { stage, instructions, input, limits ->
-            appFileCall(key, session, stage, instructions, input, limits) { timing ->
-                timing.firstTextNanos?.let { onPhase?.invoke(AppFileNames.PLAN_FIRST_TEXT, null, it / 1_000_000) }
-                onPhase?.invoke(AppFileNames.PLAN_REPLY_END, null, timing.endNanos / 1_000_000)
-            }
-        }) { turns, instructions ->
+        AppAgent(this, sandbox, appFileCall = planCall(key, session, onPhase)) { turns, instructions ->
             response(key, turns, session, CloudGenerationStage.AGENT, instructions, expandedWriterOutput = true, onCompletion)
         }
+
+    /** The app-file call of the plan step and the change step. It marks the first text and the end of each reply as phases. */
+    private fun planCall(key: String, session: CloudSession, onPhase: ((String, String?, Long?) -> Unit)?):
+        suspend (CloudGenerationStage, String, String, AppFileLimits) -> AppFileReply = { stage, instructions, input, limits ->
+        appFileCall(key, session, stage, instructions, input, limits) { timing ->
+            timing.firstTextNanos?.let { onPhase?.invoke(AppFileNames.PLAN_FIRST_TEXT, null, it / 1_000_000) }
+            onPhase?.invoke(AppFileNames.PLAN_REPLY_END, null, timing.endNanos / 1_000_000)
+        }
+    }
+
+    /**
+     * The plan step alone, with the sandbox and the call of a generation, for the plan call of a spoken request that starts
+     * beside its routing call (ToolController.startEarlyPlan). A cancel of [session] stops the call.
+     */
+    internal suspend fun earlyPlan(key: String, prompt: String, session: CloudSession, limits: AppFileLimits,
+        onPhase: ((String, String?, Long?) -> Unit)?): AppFileOutcome =
+        AppFileSteps(sandbox, planCall(key, session, onPhase), onPhase ?: { _, _, _ -> }, {}).plan(prompt, limits)
 
     internal suspend fun response(key: String, turns: List<CloudTurn>, session: CloudSession, stage: CloudGenerationStage?,
         instructions: String = "", expandedWriterOutput: Boolean = false,
@@ -218,7 +233,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         progress: ((ToolGenerationProgress) -> Unit)? = null, trace: ToolGenerationTrace?,
         onPublicUpdate: (suspend (String) -> Unit)? = null, checkOwner: suspend () -> Unit = {},
         imageOperation: String? = null, imageSelection: ImageSettings.Selection? = null,
-        sceneAssets: List<ThreeSceneAssetRef> = emptyList(), planStep: AppFileLimits? = null): ToolPreview {
+        sceneAssets: List<ThreeSceneAssetRef> = emptyList(), planStep: AppFileLimits? = null, screen: ScreenRun? = null): ToolPreview {
         val run = trace?.Run()
         val previousTransportObserver = session.generationTransportObserver
         if (run != null) session.generationTransportObserver = {
@@ -234,7 +249,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
             return generateWithAgent(key, prompt, base, images, session, artifactId, privateState, progress, onPublicUpdate,
                 onStep = run?.let { { step, tool, reply, result, nanos -> it.agentStep(step, tool, reply, result, nanos) } },
                 onCompletion = run?.let { it::completion }, onPhase = run?.let { it::phase }, imageMaker = imageMaker, sceneAssets = sceneAssets,
-                planStep = planStep)
+                planStep = planStep, screen = screen)
                 .preview.also { checkOwner(); run?.finish() }
         } catch (failure: Throwable) {
             run?.finish(failure)
@@ -250,14 +265,14 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         onStep: ((Int, String, String, String, Long) -> Unit)? = null, onCompletion: ((ModelCompletionTiming) -> Unit)? = null,
         onPhase: ((String, String?, Long?) -> Unit)? = null, imageMaker: AppImageMaker? = null,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(), lesson: AppLessonTarget? = null,
-        lessonIllustration: Boolean = false, planStep: AppFileLimits? = null): AppAgentResult {
+        lessonIllustration: Boolean = false, planStep: AppFileLimits? = null, screen: ScreenRun? = null): AppAgentResult {
         val screenshot: (suspend (ToolPreview) -> String)? = if (!GenerationSettings(sandbox.context).screenshotReview) null else { preview ->
             val shot = AppSnapshot.capture(sandbox.context, preview)
             try { AppSnapshot.dataUrl(shot) } finally { shot.recycle() }
         }
         return appAgent(key, session, onCompletion, onPhase).run(AppAgentRequest(prompt, base, images, artifactId, privateState, extraInstructions,
             onPublicUpdate, progress, onStep, imageMaker = imageMaker, sceneAssets = sceneAssets, screenshot = screenshot, lesson = lesson,
-            lessonIllustration = lessonIllustration, onPhase = onPhase, planStep = planStep), session)
+            lessonIllustration = lessonIllustration, onPhase = onPhase, planStep = planStep, screen = screen), session)
     }
 
     /** Accepts scalar schema objects from model output. Stored artifacts keep the strict canonical contract. */
@@ -434,7 +449,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
         progress: ((ToolGenerationProgress) -> Unit)? = null, previewObserver: ToolDraftPreviewObserver?,
         trace: ToolGenerationTrace?,
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(), onPublicUpdate: (suspend (String) -> Unit)? = null,
-        checkOwner: suspend () -> Unit = {}, planStep: AppFileLimits? = null): ToolDraft {
+        checkOwner: suspend () -> Unit = {}, planStep: AppFileLimits? = null, screen: ScreenRun? = null): ToolDraft {
         val draftPreview=previewObserver?.let {ToolDraftPreviewPublisher(draftId,it)}
         val imageSelection = generation.imageGeneration.settings.selection()
         val assetLease = when {
@@ -448,7 +463,7 @@ class ToolEngine(private val store: ToolStore, private val generation: ToolGener
                 privateState = base?.let { store.privateResults(it.id) } == true, progress = progress,
                 trace = trace?.takeIf { it.operationId.toString() == draftId }, onPublicUpdate = onPublicUpdate,
                 checkOwner = checkOwner, imageOperation = "app:$draftId", imageSelection = imageSelection, sceneAssets = sceneAssets,
-                planStep = planStep)
+                planStep = planStep, screen = screen)
             val existingImages = base?.let { ToolSpec.parsePersisted(it.spec).generatedImages }.orEmpty()
             val newImages = preview.spec.generatedImages - existingImages.toSet()
             val approval = imageSelection?.takeIf { newImages.isNotEmpty() }

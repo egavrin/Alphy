@@ -823,7 +823,7 @@ The user reviews and approves the plan before any device action.
             if (kind == "weather_answer" || kind == "weather_location" || (kind == "automation" && draftChat != null)) {
                 val ordinaryKind = if (kind == "weather_answer") "answer" else "clarify"
                 return ChatToolReply.decode(kotlinx.serialization.json.JsonObject((json - "image") +
-                    ("kind" to kotlinx.serialization.json.JsonPrimitive(ordinaryKind)))).copy(kind = kind)
+                    ("kind" to kotlinx.serialization.json.JsonPrimitive(ordinaryKind))), allowScreen).copy(kind = kind)
             }
             return ChatToolReply.decode(if (kind == "create" || kind == "refine" || kind == "screen")
                 kotlinx.serialization.json.JsonObject(json - "image") else json, allowScreen)

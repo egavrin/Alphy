@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
@@ -13,14 +14,22 @@ import com.alpha.assistant.cloud.CloudGenerationStage.APP_FILE
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.agent.AppFileNames
+import com.alpha.assistant.tools.agent.AppFileOutcome
+import com.alpha.assistant.tools.agent.AppFileSteps
+import com.alpha.assistant.tools.agent.ScreenFallback
+import com.alpha.assistant.tools.agent.ScreenRun
 import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.plan
 import com.alpha.assistant.ui.FIXTURE_APP
+import com.alpha.assistant.ui.ShellFixture
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -48,21 +57,25 @@ class AppFileLoopWorkflowTest {
         val spec get() = result.getOrThrow().spec
     }
 
-    /** One generation of [PROMPT] with the plan step at [planStep]. [provider] can wrap the script. */
+    /** One generation of [PROMPT] with the plan step at [planStep]. [provider] can wrap the script. [screen]: a screen run. */
     private fun generate(replies: List<Scripted>, planStep: AppFileLimits? = AppFileLimits(500, 2000), images: List<String> = emptyList(),
         session: CloudSession = CloudSession(), provider: (AgentScriptProvider) -> ChatProvider = { it },
-        progress: (ToolGenerationProgress) -> Unit = {}, onPhase: (ToolGenerationTraceEvent.Phase) -> Unit = {}): Generated {
+        progress: (ToolGenerationProgress) -> Unit = {}, onPhase: (ToolGenerationTraceEvent.Phase) -> Unit = {},
+        screen: ScreenRun? = null): Generated {
         val script = AgentScriptProvider(replies)
         val events = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
         val trace = ToolGenerationTrace(UUID.randomUUID(), { event -> events += event; (event as? ToolGenerationTraceEvent.Phase)?.let(onPhase) })
         val result = runBlocking {
             runCatching {
                 ToolGenerationService(provider(script), SandboxClient(context)).generate("fixture", PROMPT, null, images, session,
-                    "appfile-loop", privateState = false, progress = progress, trace = trace, planStep = planStep)
+                    "appfile-loop", privateState = false, progress = progress, trace = trace, planStep = planStep, screen = screen)
             }
         }
         return Generated(script, events, result)
     }
+
+    /** The reason of the ScreenFallback of [run], or null when it ended in another way. */
+    private fun fallback(run: Generated) = (run.result.exceptionOrNull() as? ScreenFallback)?.reason
 
     // Failure case: each new app paid a loop of many model calls, also when one plan call gave a clean app.
     @Test fun aCleanPlanIsAcceptedWithOneCall() {
@@ -259,6 +272,203 @@ class AppFileLoopWorkflowTest {
         val run = generate(loop, images = listOf("data:image/png;base64,iVBORw0KGgo="))
         assertEquals(listOf<CloudGenerationStage?>(AGENT, AGENT), run.stages)
         assertTrue(run.phases.none { it.name.startsWith("plan_") })
+    }
+
+    // Failure case (task Db2): the screen of a spoken talk went on to the loop of many calls, and came a minute after the voice had answered.
+    @Test fun aScreenRunNeverStartsTheLoop() {
+        val run = generate(listOf(Scripted.Text("outside(\"game\")")) + loop, screen = ScreenRun())
+        assertEquals(AppFileNames.OUTSIDE, fallback(run))
+        assertEquals(listOf(APP_FILE), run.stages)
+        assertEquals("outside:game", run.outcome)
+        assertTrue(run.phases.none { it.name == "capability_guidance_start" || it.name == "agent_call_start" })
+        assertTrue(run.events.none { it is ToolGenerationTraceEvent.AgentStep })
+    }
+
+    @Test fun aScreenPlanThatFailsTheHostCheckFallsBack() {
+        val run = generate(listOf(Scripted.Text(calc.replace("lang=\"en\"", "lang=\"ru\""))) + loop, screen = ScreenRun())
+        assertEquals(AppFileNames.HOST_CHECK, fallback(run))
+        assertEquals(listOf(APP_FILE), run.stages)
+        assertEquals("fallback:host_check", run.outcome)
+    }
+
+    // A screen run whose plan step cannot run (the switch is off, or the request has an image) makes no call at all.
+    @Test fun aScreenRunWithAClosedGateMakesNoCall() {
+        for (run in listOf(generate(loop, planStep = null, screen = ScreenRun()),
+            generate(loop, images = listOf("data:image/png;base64,iVBORw0KGgo="), screen = ScreenRun()))) {
+            assertEquals(AppFileNames.CLOSED, fallback(run))
+            assertTrue(run.stages.isEmpty())
+            assertTrue(run.phases.isEmpty())
+        }
+    }
+
+    // Failure case (task Db4): the screen paid a second plan call after the plan call beside the routing call had given the app.
+    @Test fun anEarlyPlanReplacesThePlanCall() {
+        val clean = runBlocking {
+            AppFileSteps(SandboxClient(context), { _, _, _, _ -> AppFileReply.Text(calc) }, { _, _, _ -> }, {}).plan(PROMPT, AppFileLimits())
+        }
+        assertTrue(clean is AppFileOutcome.Clean)
+        val run = generate(loop, screen = ScreenRun(early = CompletableDeferred(clean)))
+        assertTrue(run.stages.isEmpty())
+        assertEquals(calc, run.spec.appFile)
+        assertEquals("accepted", run.outcome)
+        assertTrue(run.phases.none { it.name == "plan_call_start" || it.name == "agent_call_start" })
+    }
+
+    /**
+     * A cancel of the early plan alone ends the screen run as a fallback: the request goes on, and the stage stays as it was.
+     * A stop of the request while the run waits for the early plan stays a stop.
+     */
+    @Test fun aCancelledEarlyPlanFallsBackAndAStopStaysAStop() {
+        val cancelled = CompletableDeferred<AppFileOutcome>().apply { cancel() }
+        val stopped = CompletableDeferred<AppFileOutcome>().apply { completeExceptionally(CloudFailure("cancelled", "Запрос остановлен")) }
+        for (early in listOf(cancelled, stopped)) {
+            val run = generate(loop, screen = ScreenRun(early))
+            assertEquals(AppFileNames.EARLY_CANCELED, fallback(run))
+            assertTrue(run.stages.isEmpty())
+        }
+        val session = CloudSession()
+        val waiting = CompletableDeferred<AppFileOutcome>()
+        Thread { SystemClock.sleep(300); session.cancel(); waiting.cancel() }.start()
+        val run = generate(loop, session = session, screen = ScreenRun(waiting))
+        assertEquals("cancelled", (run.result.exceptionOrNull() as? CloudFailure)?.code)
+        assertTrue(run.stages.isEmpty())
+        assertEquals(ToolGenerationTraceOutcome.CANCELED, run.events.filterIsInstance<ToolGenerationTraceEvent.Finished>().single().outcome)
+    }
+
+    /** The tool controller of a launched shell with the plan step on. Only the generation calls reach [chat]. */
+    private fun withController(chat: ChatProvider, test: (ToolController) -> Unit) {
+        val fixture = ShellFixture("appfile-loop")
+        try {
+            withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+                fixture.install(chat = object : ChatProvider {
+                    override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                        if (request.generationStage != null) chat.respond(key, request, session, emit)
+                    }
+                })
+                fixture.launch().use {
+                    val model = checkNotNull(fixture.model)
+                    val deadline = SystemClock.uptimeMillis() + 10_000
+                    while (model.loading && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(50)
+                    test(model.tools)
+                }
+            }
+        } finally {
+            fixture.remove()
+        }
+    }
+
+    /** A screen run of [PROMPT] through the chat entry of the controller. Gives its failure, or null when it saved an app. */
+    private fun ToolController.screenRun(screen: ScreenRun, operation: String): Throwable? = runBlocking(Dispatchers.Main) {
+        runCatching {
+            generateAutomatic(PROMPT, null, "appfile-loop-chat", operation, "fixture", emptyList(), CloudSession(), cancelRequest = {},
+                prepared = {}, onPublicUpdate = {}, canCommit = { true }, committed = {}, screen = screen)
+        }.exceptionOrNull()
+    }
+
+    /** What a screen run leaves in the controller: no draft, no preview, no saved app, and no error. */
+    private fun ToolController.assertNothingLeft(operation: String) = runBlocking(Dispatchers.Main) {
+        assertTrue(drafts.isEmpty())
+        assertNull(previewFor(operation))
+        assertTrue(tools.isEmpty())
+        assertNull(error)
+        assertFalse(busy)
+    }
+
+    // Failure case (task Db2): a screen with a faulty plan and a faulty repair went on to the loop, or left a draft behind.
+    @Test fun aScreenFallbackMakesOnlyThePlanCallsAndLeavesNothing() {
+        val repair = brokenCalc.lines().single { it.startsWith("need perPerson") }
+        val script = AgentScriptProvider(listOf(Scripted.Text(brokenCalc), Scripted.Text(repair)) + loop)
+        val events = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+        val operation = UUID.randomUUID().toString()
+        withController(script) { tools ->
+            tools.generationTraceObserver = { events += it }
+            assertEquals(AppFileNames.FAULTS, (tools.screenRun(ScreenRun(), operation) as? ScreenFallback)?.reason)
+            tools.assertNothingLeft(operation)
+        }
+        assertEquals(listOf(APP_FILE, APP_FILE), script.calls.map { it.generationStage })
+        val run = TracedGeneration(script.calls, events)
+        assertEquals("fallback:faults", run.outcome)
+        assertTrue(events.none { it is ToolGenerationTraceEvent.AgentStep })
+        // ScreenFallback is not a CloudFailure, so the trace names no code for it.
+        val finished = events.filterIsInstance<ToolGenerationTraceEvent.Finished>().single()
+        assertEquals(ToolGenerationTraceOutcome.FAILED to "unknown", finished.outcome to finished.failureCode)
+    }
+
+    // Failure case (task Db4): the plan call of a spoken request waited for the routing call, so the screen came one routing call later.
+    @Test fun anEarlyPlanMakesOnePlanCallWithItsPrompt() {
+        val script = AgentScriptProvider(listOf(Scripted.Text(calc)))
+        val events = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+        val operation = UUID.randomUUID().toString()
+        withController(script) { tools ->
+            tools.generationTraceObserver = { events += it }
+            val early = checkNotNull(tools.startEarlyPlan(PROMPT, "fixture", operation))
+            assertEquals(calc, (runBlocking { early.result.await() } as? AppFileOutcome.Clean)?.appFile)
+        }
+        val call = script.calls.single()
+        assertEquals(APP_FILE, call.generationStage)
+        assertEquals(listOf(PROMPT), call.turns.map { it.text })
+        assertEquals(AppFilePrompt.load(context).system, call.systemInstructions)
+        val phases = events.filterIsInstance<ToolGenerationTraceEvent.Phase>()
+        assertTrue(phases.all { it.operationId.toString() == operation })
+        assertEquals(listOf("early_plan_start", "plan_call_start", "plan_first_text", "plan_reply_end", "compile"), phases.map { it.name })
+        assertTrue(events.none { it is ToolGenerationTraceEvent.Finished })
+    }
+
+    /** A provider whose first call runs until a cancel of its session, as an HTTP call that the abort of its session ends. Later calls give [calc]. */
+    private inner class UntilCancelled : ChatProvider {
+        val started = CompletableDeferred<Unit>()
+        val calls = CopyOnWriteArrayList<CloudRequest>()
+        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+            calls += request
+            if (calls.size == 1) {
+                started.complete(Unit)
+                while (true) { session.check(); delay(20) }
+            }
+            emit(CloudEvent.Text(calc))
+            emit(CloudEvent.RoundComplete(calc, false))
+        }
+    }
+
+    // Failure case (task Db4): a stop of the person left the plan call beside the routing call running until its limit of 45 s.
+    @Test fun aCancelOfTheEarlyPlanSessionStopsItsCall() {
+        val provider = UntilCancelled()
+        withController(provider) { tools ->
+            val early = checkNotNull(tools.startEarlyPlan(PROMPT, "fixture", UUID.randomUUID().toString()))
+            runBlocking { withTimeout(5000) { provider.started.await() } }
+            val cancelled = SystemClock.elapsedRealtime()
+            early.session.cancel()
+            val failure = runBlocking { withTimeout(5000) { runCatching { early.result.await() }.exceptionOrNull() } }
+            assertEquals("cancelled", (failure as? CloudFailure)?.code)
+            assertTrue(SystemClock.elapsedRealtime() - cancelled < 1000)
+            // The failed plan does not end the scope of the controller: a later early plan still gives its plan.
+            val next = checkNotNull(tools.startEarlyPlan(PROMPT, "fixture", UUID.randomUUID().toString()))
+            assertTrue(runBlocking { withTimeout(10_000) { next.result.await() } } is AppFileOutcome.Clean)
+        }
+        assertEquals(listOf(APP_FILE, APP_FILE), provider.calls.map { it.generationStage })
+    }
+
+    // The early plan is cancelled while the screen run waits for it: the run falls back with no other call and leaves nothing.
+    @Test fun aCancelOfTheEarlyPlanWhileTheScreenRunWaitsFallsBack() {
+        val provider = UntilCancelled()
+        val events = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+        val operation = UUID.randomUUID().toString()
+        withController(provider) { tools ->
+            tools.generationTraceObserver = { events += it }
+            val early = checkNotNull(tools.startEarlyPlan(PROMPT, "fixture", operation))
+            var failure: Throwable? = null
+            val screen = Thread { failure = tools.screenRun(ScreenRun(early.result), operation) }.apply { start() }
+            // The draft is ready just before the run waits for the early plan.
+            val deadline = SystemClock.uptimeMillis() + 10_000
+            while (events.none { it is ToolGenerationTraceEvent.Phase && it.name == "draft_end" } && SystemClock.uptimeMillis() < deadline)
+                SystemClock.sleep(20)
+            SystemClock.sleep(200)
+            early.session.cancel()
+            screen.join(10_000)
+            assertEquals(AppFileNames.EARLY_CANCELED, (failure as? ScreenFallback)?.reason)
+            tools.assertNothingLeft(operation)
+        }
+        assertEquals(listOf(APP_FILE), provider.calls.map { it.generationStage })
+        assertTrue(events.none { it is ToolGenerationTraceEvent.Phase && it.name == "plan_outcome" })
     }
 
     private companion object {

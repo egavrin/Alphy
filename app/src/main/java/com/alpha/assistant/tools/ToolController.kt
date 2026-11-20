@@ -20,7 +20,10 @@ import androidx.compose.runtime.setValue
 import androidx.activity.result.ActivityResult
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.*
+import com.alpha.assistant.tools.agent.AppFileNames
+import com.alpha.assistant.tools.agent.AppFileOutcome
 import com.alpha.assistant.tools.agent.GenerationSettings
+import com.alpha.assistant.tools.agent.ScreenRun
 import com.alpha.assistant.data.Attachment
 import com.alpha.assistant.data.SecureKeyStore
 import com.alpha.assistant.network.ui.MiniAppNetworkAccessHost
@@ -293,12 +296,15 @@ class ToolController internal constructor(private val app: Application, private 
         if(accepted.spec != receipt.candidate || accepted.state != receipt.previewState || accepted.ui != receipt.previewUi) return@withContext null
         id to revision
     }
-    /** Shell owns cancellation. The final guarded commit and message update run on Main without a suspension. */
-    suspend fun generateAutomatic(prompt: String, target: ToolRecord?, conversationId: String, operationId: String,
+    /**
+     * Shell owns cancellation. The final guarded commit and message update run on Main without a suspension.
+     * [screen]: a screen of a spoken talk. Its run makes no loop call, and a run with no app throws ScreenFallback.
+     */
+    internal suspend fun generateAutomatic(prompt: String, target: ToolRecord?, conversationId: String, operationId: String,
         key: String, images: List<String>, call: CloudSession, cancelRequest: () -> Unit,
         prepared: suspend () -> Unit, onPublicUpdate: (String) -> Unit,
         canCommit: () -> Boolean, committed: (ToolRecord) -> Unit,
-        sceneAttachments: List<Attachment> = emptyList()) {
+        sceneAttachments: List<Attachment> = emptyList(), screen: ScreenRun? = null) {
         if(busy || closing) throw CloudFailure("widget_busy","Another tool operation is active. Retry after it completes.")
         busy = true; error = null; errorCode = null; automaticCancel = cancelRequest; automaticJob = currentCoroutineContext()[Job]
         previews.clear()
@@ -328,7 +334,7 @@ class ToolController internal constructor(private val app: Application, private 
                         withContext(Dispatchers.Main.immediate) {
                             if (!canCommit()) throw CancellationException("The mini-app operation is no longer active.")
                         }
-                    })
+                    }, screen = screen)
             }
             currentCoroutineContext().ensureActive(); call.check()
             previews.clear(operationId)
@@ -423,8 +429,11 @@ class ToolController internal constructor(private val app: Application, private 
     }
     internal var generationTraceObserver: ((ToolGenerationTraceEvent) -> Unit)? = null
 
-    /** Null when no observer is set, so the normal path builds no trace. */
-    private fun traceFor(id: String) = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
+    /**
+     * Null when no observer is set, so the normal path builds no trace.
+     * The shell marks the end of an early plan (early_plan_used, early_plan_canceled) on it.
+     */
+    internal fun traceFor(id: String) = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
 
     /** The plan step needs the switch of the provider and the chat model that the model check measured: the first of the provider (ruling OD-3). */
     private fun planStep(): AppFileLimits? {
@@ -437,19 +446,35 @@ class ToolController internal constructor(private val app: Application, private 
     private suspend fun generateWithPreview(id: String,key: String,images: List<String>,call: CloudSession,
         trace: ToolGenerationTrace? = traceFor(id),
         sceneAssets: List<ThreeSceneAssetRef> = emptyList(), onPublicUpdate: (suspend (String) -> Unit)? = null,
-        checkOwner: suspend () -> Unit = {}) {
+        checkOwner: suspend () -> Unit = {}, screen: ScreenRun? = null) {
         check(!closing) {"The tool controller is closed."}
         val requestId=UUID.randomUUID().toString()
         val observer=previews.begin(id,requestId)
         try {
             val completed = engine.generate(id, key, images, call, previewObserver = observer,
                 trace = trace, sceneAssets = sceneAssets, onPublicUpdate = onPublicUpdate,
-                checkOwner = checkOwner, planStep = planStep())
+                checkOwner = checkOwner, planStep = planStep(), screen = screen)
             previews.complete(requestId,completed)
         } catch(failure: Throwable) {
             previews.clearRequest(requestId)
             throw failure
         }
+    }
+
+    /**
+     * Starts the plan call of a spoken request beside its routing call, so that a screen does not wait for the routing.
+     * Null when the plan step is off. It runs on the scope of the controller and marks its phases on the trace of [operationId].
+     * The caller passes [EarlyPlan.result] to a screen run (ScreenRun), or cancels [EarlyPlan.session] and the result.
+     */
+    internal fun startEarlyPlan(prompt: String, key: String, operationId: String): EarlyPlan? {
+        val limits = planStep() ?: return null
+        val session = CloudSession()
+        // Only phases: the generation run of the request marks the end of the operation.
+        val run = traceFor(operationId)?.Run()
+        run?.phase(AppFileNames.EARLY_PLAN_START)
+        // The scope of the shell is a supervisor (viewModelScope), so a failed or cancelled plan does not end it.
+        val result = scope.async(Dispatchers.IO) { generationService.earlyPlan(key, prompt, session, limits, run?.let { it::phase }) }
+        return EarlyPlan(result, session)
     }
     internal class ManualChatSave(val canCommit: () -> Boolean, val finish: suspend (ToolRecord?) -> Unit)
 
@@ -1422,6 +1447,9 @@ private fun ToolDraftPreview.matchesDraft(draft: ToolDraft,allowPending: Boolean
     identity.draftId==draft.id && draft.acceptedRevision==null &&
         ((allowPending && draft.candidate==null && draft.previewState==null && draft.previewUi==null) ||
             (draft.candidate==candidateJson && draft.previewState==stateJson && draft.previewUi==uiJson))
+
+/** The plan call of a spoken request that started beside its routing call (ToolController.startEarlyPlan). A cancel of [session] stops the call. */
+internal class EarlyPlan(val result: Deferred<AppFileOutcome>, val session: CloudSession)
 
 /** The request owns one candidate. Clearing its atomic state also fences callbacks already in transit to Main. */
 internal class ToolControllerDraftPreviews(

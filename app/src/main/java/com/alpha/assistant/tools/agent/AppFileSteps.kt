@@ -13,6 +13,8 @@ import com.alpha.assistant.tools.appfile.AppFileCompiler
 import com.alpha.assistant.tools.appfile.AppFilePrevious
 import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.AppFileRead
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 
@@ -46,7 +48,18 @@ internal object AppFileNames {
     const val PLAN_REPLY_END = "plan_reply_end"
     const val COMPILE = "compile"
     const val PLAN_OUTCOME = "plan_outcome"
-    val PHASES = setOf(PLAN_CALL_START, PLAN_FIRST_TEXT, PLAN_REPLY_END, COMPILE, REPAIR_CALL_START, CHANGE_CALL_START, PLAN_OUTCOME)
+    // The plan call of a spoken request that starts beside its routing call (ToolController.startEarlyPlan), and its end.
+    const val EARLY_PLAN_START = "early_plan_start"
+    const val EARLY_PLAN_USED = "early_plan_used"
+    const val EARLY_PLAN_CANCELED = "early_plan_canceled"
+    val PHASES = setOf(PLAN_CALL_START, PLAN_FIRST_TEXT, PLAN_REPLY_END, COMPILE, REPAIR_CALL_START, CHANGE_CALL_START, PLAN_OUTCOME,
+        EARLY_PLAN_START, EARLY_PLAN_USED, EARLY_PLAN_CANCELED)
+
+    // The reasons of a ScreenFallback that has no plan outcome. They are not on the trace.
+    /** The plan step cannot run for this screen run, for example because the switch is off. */
+    const val CLOSED = "closed"
+    /** The early plan of the screen run was cancelled, and the request goes on. */
+    const val EARLY_CANCELED = "early_canceled"
 
     // The failure codes of a change by lines that the kit could not make. ToolEngine.testAndFix reads them back as UNREPAIRED.
     /** A failed call or compile made no change, so a retry can work. */
@@ -69,6 +82,15 @@ internal sealed interface AppFileOutcome {
 }
 
 /**
+ * A screen of a spoken talk. Only the plan step builds it, never the loop: the voice has answered, and a screen from the loop comes too late.
+ * [early]: the outcome of the plan call that started beside the routing call (ToolController.startEarlyPlan). Null: the run makes its own plan call.
+ */
+internal class ScreenRun(val early: Deferred<AppFileOutcome>? = null)
+
+/** A screen run that gave no app. [reason] is a name of [AppFileNames], such as faults. The caller leaves the stage as it was. */
+internal class ScreenFallback(val reason: String) : Exception(reason)
+
+/**
  * The plan step of a new app and the change step of a saved app with an app file: one model call, its compile in the sandbox,
  * and at most one repair call. [phase] marks the trace phases. [progress] shows the states that the loop shows at its start.
  */
@@ -79,6 +101,11 @@ internal class AppFileSteps(
     private val phase: (String, String?, Long?) -> Unit,
     private val progress: (ToolGenerationProgress) -> Unit,
 ) {
+    /** The steps with the compiler and the prompt of [sandbox]. */
+    constructor(sandbox: SandboxClient, call: suspend (CloudGenerationStage, String, String, AppFileLimits) -> AppFileReply,
+        phase: (String, String?, Long?) -> Unit, progress: (ToolGenerationProgress) -> Unit) :
+        this(AppFileCompiler(sandbox.context, sandbox), AppFilePrompt.load(sandbox.context), call, phase, progress)
+
     /** Sends [task] (the generation prompt of the request) to the plan call. */
     suspend fun plan(task: String, limits: AppFileLimits): AppFileOutcome {
         phase(AppFileNames.PLAN_CALL_START, null, null)
@@ -158,6 +185,7 @@ internal class AppFileSteps(
  * The plan step of a new app and the change step of a saved app with an app file, before the loop of [AppAgent.run].
  * It returns the app of a clean plan that passes the host checks ([kitApp]), throws the failure of a change that the kit cannot make,
  * returns [rebuild] for such a change of an app that holds no data of the person, or returns null: the loop goes on.
+ * A screen run with no base never returns null: it returns the app or throws [ScreenFallback] (or the stop of the request).
  * [previous]: the stored spec of the base, null for a rebuild. [checkActive] stops a cancelled run. [byLines] marks the start of the change step.
  */
 internal suspend fun routeAppFile(
@@ -171,23 +199,26 @@ internal suspend fun routeAppFile(
     rebuild: suspend () -> AppAgentResult,
 ): AppAgentResult? {
     fun appFileSteps(call: suspend (CloudGenerationStage, String, String, AppFileLimits) -> AppFileReply) =
-        AppFileSteps(AppFileCompiler(sandbox.context, sandbox), AppFilePrompt.load(sandbox.context), call, request::phase) {
-            request.progress?.invoke(it)
-        }
+        AppFileSteps(sandbox, call, request::phase) { request.progress?.invoke(it) }
 
     // The plan step of a new app. A clean plan that passes the host checks is the app.
     // Each other outcome goes on with the loop of today, and the loop gets nothing of the plan.
+    // A screen run (a new screen of a spoken talk) ends at the plan step: each other outcome and a closed gate throw ScreenFallback.
     val planStep = request.planStep
-    if (planStep != null && appFileCall != null && request.base == null && request.lesson == null && request.images.isEmpty() &&
-        request.sceneAssets.isEmpty() && !request.testFix) {
-        val outcome = appFileSteps(appFileCall).plan(request.prompt, planStep)
+    val screen = request.screen.takeIf { request.base == null }
+    val gate = planStep != null && appFileCall != null && request.base == null && request.lesson == null && request.images.isEmpty() &&
+        request.sceneAssets.isEmpty() && !request.testFix
+    if (screen != null && !gate) throw ScreenFallback(AppFileNames.CLOSED)
+    if (gate) {
+        val outcome = screen?.early?.let { earlyOutcome(it, checkActive) } ?: appFileSteps(appFileCall).plan(request.prompt, planStep)
         checkActive()
-        val detail = when (outcome) {
-            is AppFileOutcome.Outside -> "outside:${outcome.word}"
-            is AppFileOutcome.Fallback -> "fallback:${outcome.reason}"
-            is AppFileOutcome.Clean -> kitApp(outcome)?.let { return it } ?: "fallback:${AppFileNames.HOST_CHECK}"
+        val reason = when (outcome) {
+            is AppFileOutcome.Outside -> AppFileNames.OUTSIDE
+            is AppFileOutcome.Fallback -> outcome.reason
+            is AppFileOutcome.Clean -> kitApp(outcome)?.let { return it } ?: AppFileNames.HOST_CHECK
         }
-        request.phase(AppFileNames.PLAN_OUTCOME, detail)
+        request.phase(AppFileNames.PLAN_OUTCOME, if (outcome is AppFileOutcome.Outside) "outside:${outcome.word}" else "fallback:$reason")
+        if (screen != null) throw ScreenFallback(reason)
     }
 
     // The change step of a saved app with an app file, for a change and for test and fix. The report of test and fix is the request.
@@ -219,4 +250,16 @@ internal suspend fun routeAppFile(
         return rebuild()
     }
     return null
+}
+
+/**
+ * The outcome of the plan call that started beside the routing call. A stop of the request goes up as a stop ([checkActive]).
+ * A cancel of the early plan alone is a fallback: a stop would leave the request with no end state, and an error would show a failure.
+ */
+private suspend fun earlyOutcome(early: Deferred<AppFileOutcome>, checkActive: suspend () -> Unit): AppFileOutcome = try {
+    early.await()
+} catch (failure: Exception) {
+    if (failure !is CancellationException && (failure as? CloudFailure)?.code != "cancelled") throw failure
+    checkActive()
+    throw ScreenFallback(AppFileNames.EARLY_CANCELED)
 }

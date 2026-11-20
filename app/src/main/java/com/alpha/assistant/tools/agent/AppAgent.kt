@@ -72,6 +72,8 @@ internal class AppAgentRequest(
     val onPhase: ((name: String, detail: String?, ms: Long?) -> Unit)? = null,
     /** The limits of the plan call before the loop. Null when the plan step is off for this request. */
     val planStep: AppFileLimits? = null,
+    /** A screen of a spoken talk: only the plan step builds it (routeAppFile). Null for each other request. */
+    val screen: ScreenRun? = null,
 ) {
     fun phase(name: String, detail: String? = null, ms: Long? = null) {
         onPhase?.let { runCatching { it(name, detail, ms) } }
