@@ -825,6 +825,8 @@ class CloudWorkflowTest {
                                     main { fixture.model.tools.interact(saved, input.getString("set"), input.getInt("value")) }
                                     waitUntil { JSONObject(store.tools().single { it.id == saved.id }.state).getInt("amount") ==
                                         input.getInt("value") }
+                                    // The tap stays busy after its stored state until the controller refreshes, and the next case needs it free.
+                                    waitUntil { var busy = true; main { busy = fixture.model.tools.busy }; !busy }
                                     val state = JSONObject(store.tools().single { it.id == saved.id }.state)
                                     for (i in 1 until expected.length()) {
                                         val assertion = expected.getJSONObject(i)
