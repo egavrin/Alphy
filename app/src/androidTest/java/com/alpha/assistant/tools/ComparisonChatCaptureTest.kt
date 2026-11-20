@@ -209,8 +209,8 @@ class ComparisonChatCaptureTest {
                     assertEquals(3, trace.getJSONArray("http_dispatches").length())
                     val events = trace.getJSONArray("generation").let { array -> List(array.length()) { array.getJSONObject(it) } }
                     val phases = events.filter { it.getString("kind") == "phase" }
-                    assertEquals(listOf("draft_start", "draft_end", "capability_guidance_start", "capability_guidance_end", "agent_call_start"),
-                        phases.map { it.getString("name") })
+                    assertEquals(listOf("draft_start", "draft_end", "plan_skipped:plan_step", "capability_guidance_start",
+                        "capability_guidance_end", "agent_call_start"), phases.map { it.getString("name") })
                     assertEquals(setOf("operation_id", "attempt", "at_ns", "kind", "name", "detail", "ms"), phases.first().keys().asSequence().toSet())
                     assertEquals(setOf(report.getString("operation_id")), events.map { it.getString("operation_id") }.toSet())
                     // The Open action of this request's own app, not a card of the earlier chat, ends its time.

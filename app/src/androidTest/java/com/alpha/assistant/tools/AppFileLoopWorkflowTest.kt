@@ -13,7 +13,11 @@ import com.alpha.assistant.cloud.CloudGenerationStage.AGENT
 import com.alpha.assistant.cloud.CloudGenerationStage.APP_FILE
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
+import com.alpha.assistant.sandbox.RuntimeFailure
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.sandbox.SandboxResult
+import com.alpha.assistant.tools.agent.AppAgent
+import com.alpha.assistant.tools.agent.AppAgentRequest
 import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.tools.agent.AppFileOutcome
 import com.alpha.assistant.tools.agent.AppFileSteps
@@ -76,6 +80,33 @@ class AppFileLoopWorkflowTest {
 
     /** The reason of the ScreenFallback of [run], or null when it ended in another way. */
     private fun fallback(run: Generated) = (run.result.exceptionOrNull() as? ScreenFallback)?.reason
+
+    /** A sandbox double: the smoke step of each host check throws the next of [failures], as the sandbox does, and then runs for real. */
+    private class Sandbox(vararg thrown: Exception) {
+        private val failures = ArrayDeque(thrown.toList())
+        /** The smoke steps that started, the failed ones too. */
+        var runs = 0
+        val smoke: suspend (ToolGenerationSmoke) -> ToolPreview = { runs++; failures.removeFirstOrNull()?.let { throw it } ?: it.run() }
+    }
+
+    /**
+     * One generation of [PROMPT] whose plan call replies [calc], through an AppAgent whose host checks run their smoke step through [smoke].
+     * [screen]: a screen run.
+     */
+    private fun checked(smoke: suspend (ToolGenerationSmoke) -> ToolPreview, session: CloudSession = CloudSession(),
+        screen: ScreenRun? = null): Generated {
+        val script = AgentScriptProvider(loop)
+        val events = CopyOnWriteArrayList<ToolGenerationTraceEvent>()
+        val run = ToolGenerationTrace(UUID.randomUUID(), { events += it }).Run()
+        val sandbox = SandboxClient(context)
+        val service = ToolGenerationService(script, sandbox)
+        val agent = AppAgent(service, sandbox, appFileCall = { _, _, _, _ -> AppFileReply.Text(calc) }, runSmoke = smoke) { turns, instructions ->
+            service.response("fixture", turns, session, AGENT, instructions, expandedWriterOutput = true)
+        }
+        val request = AppAgentRequest(PROMPT, null, emptyList(), "appfile-loop", privateState = false, onPhase = run::phase,
+            planStep = AppFileLimits(500, 2000), screen = screen)
+        return Generated(script, events, runBlocking { runCatching { agent.run(request, session).preview } })
+    }
 
     // Failure case: each new app paid a loop of many model calls, also when one plan call gave a clean app.
     @Test fun aCleanPlanIsAcceptedWithOneCall() {
@@ -178,7 +209,9 @@ class AppFileLoopWorkflowTest {
         val run = generate(listOf(Scripted.Text(calc.replace("lang=\"en\"", "lang=\"ru\""))) + loop)
         assertEquals(listOf("ok"), run.compiles)
         assertEquals(listOf(APP_FILE, AGENT, AGENT), run.stages)
-        assertEquals("fallback:host_check", run.outcome)
+        // A fault of the plan gets one try, and the trace names the check that failed.
+        assertEquals("fallback:host_check:language", run.outcome)
+        assertTrue(run.phases.none { it.name.startsWith("host_check_retry") })
         assertNull(run.spec.appFile)
     }
 
@@ -189,7 +222,75 @@ class AppFileLoopWorkflowTest {
         val run = generate(listOf(Scripted.Text(third)) + loop)
         assertEquals(listOf("ok"), run.compiles)
         assertEquals(listOf(APP_FILE, AGENT, AGENT), run.stages)
-        assertEquals("fallback:host_check", run.outcome)
+        assertEquals("fallback:host_check:long_decimal", run.outcome)
+    }
+
+    // Failure case: one sandbox evaluation over its deadline sent a correct plan to the loop, and the trace kept no reason.
+    @Test fun aTimeoutOfTheHostCheckGetsOneMoreTry() {
+        val sandbox = Sandbox(timeout())
+        val run = checked(sandbox.smoke)
+        assertEquals(calc, run.spec.appFile)
+        assertEquals(2, sandbox.runs)
+        assertEquals(listOf("plan_call_start", "compile", "host_check_retry:javascript_timeout", "plan_outcome"), run.phases.map { it.name })
+        assertEquals("accepted", run.outcome)
+        assertTrue(run.stages.isEmpty())
+    }
+
+    @Test fun twoTimeoutsOfTheHostCheckGoToTheLoopWithTheirReason() {
+        // A deadline of an event, then a deadline of the readiness check of the next isolate.
+        val run = checked(Sandbox(timeout(), RuntimeFailure("TIMEOUT")).smoke)
+        assertEquals(1, run.phases.count { it.name == "host_check_retry:javascript_timeout" })
+        assertEquals("fallback:host_check:javascript_timeout", run.outcome)
+        assertEquals(listOf(AGENT, AGENT), run.stages)
+        assertEquals("Fixture", run.spec.title)
+    }
+
+    // Failure case: a stop of the person between the two tries started the second try or the loop.
+    @Test fun aStopBetweenTheTriesOfTheHostCheckEndsTheRequest() {
+        val session = CloudSession()
+        val sandbox = Sandbox(timeout())
+        val run = checked({ session.cancel(); sandbox.smoke(it) }, session)
+        assertEquals("cancelled", (run.result.exceptionOrNull() as CloudFailure).code)
+        assertEquals(1, sandbox.runs)
+        assertTrue(run.phases.any { it.name == "host_check_retry:javascript_timeout" })
+        assertTrue(run.phases.none { it.name == "plan_outcome" || it.name == "capability_guidance_start" })
+    }
+
+    // Failure case: a person who used an open app while the plan was checked lost the plan.
+    @Test fun aBusyHostCheckGetsOneMoreTry() {
+        var slot: Slot? = null
+        try {
+            // The open app holds the slot from the end of the compile to the retry.
+            val run = generate(listOf(Scripted.Text(calc)) + loop, onPhase = {
+                if (it.name == "compile" && it.detail == "ok") slot = Slot(context)
+                if (it.name == "host_check_retry:javascript_busy") slot?.release()
+            })
+            assertEquals(listOf(APP_FILE), run.stages)
+            assertEquals(calc, run.spec.appFile)
+            assertEquals(1, run.phases.count { it.name == "host_check_retry:javascript_busy" })
+            assertEquals("accepted", run.outcome)
+        } finally {
+            runBlocking { slot?.free() }
+        }
+    }
+
+    @Test fun aSandboxBusyForBothTriesGoesToTheLoopWithItsReason() {
+        var slot: Slot? = null
+        try {
+            val run = generate(listOf(Scripted.Text(calc)) + loop, onPhase = { if (it.name == "compile" && it.detail == "ok") slot = Slot(context) },
+                provider = { script -> object : ChatProvider {
+                    override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                        if (request.generationStage == AGENT) slot?.free()
+                        script.respond(key, request, session, emit)
+                    }
+                } })
+            assertEquals(1, run.phases.count { it.name == "host_check_retry:javascript_busy" })
+            assertEquals("fallback:host_check:javascript_busy", run.outcome)
+            assertEquals(listOf(APP_FILE, AGENT, AGENT), run.stages)
+            assertEquals("Fixture", run.spec.title)
+        } finally {
+            runBlocking { slot?.free() }
+        }
     }
 
     /** Holds the transient slot of the sandbox, as an open app that runs an event does, until [free]. */
@@ -265,13 +366,15 @@ class AppFileLoopWorkflowTest {
     @Test fun theSwitchOffSendsNoPlanCall() {
         val run = generate(loop, planStep = null)
         assertEquals(listOf(AGENT, AGENT), run.stages)
-        assertEquals(listOf("capability_guidance_start", "capability_guidance_end", "agent_call_start"), run.phases.map { it.name })
+        // The trace names the condition that closed the plan step.
+        assertEquals(listOf("plan_skipped:plan_step", "capability_guidance_start", "capability_guidance_end", "agent_call_start"),
+            run.phases.map { it.name })
     }
 
     @Test fun aRequestWithAnImageSendsNoPlanCall() {
         val run = generate(loop, images = listOf("data:image/png;base64,iVBORw0KGgo="))
         assertEquals(listOf<CloudGenerationStage?>(AGENT, AGENT), run.stages)
-        assertTrue(run.phases.none { it.name.startsWith("plan_") })
+        assertEquals(listOf("plan_skipped:images"), run.phases.map { it.name }.filter { it.startsWith("plan_") })
     }
 
     // Failure case (task Db2): the screen of a spoken talk went on to the loop of many calls, and came a minute after the voice had answered.
@@ -286,18 +389,31 @@ class AppFileLoopWorkflowTest {
 
     @Test fun aScreenPlanThatFailsTheHostCheckFallsBack() {
         val run = generate(listOf(Scripted.Text(calc.replace("lang=\"en\"", "lang=\"ru\""))) + loop, screen = ScreenRun())
-        assertEquals(AppFileNames.HOST_CHECK, fallback(run))
+        assertEquals("host_check:language", fallback(run))
         assertEquals(listOf(APP_FILE), run.stages)
-        assertEquals("fallback:host_check", run.outcome)
+        assertEquals("fallback:host_check:language", run.outcome)
+    }
+
+    // Failure case: one sandbox deadline in the host check of a correct screen left the stage as it was.
+    @Test fun aScreenRunRetriesItsHostCheck() {
+        val passed = checked(Sandbox(timeout()).smoke, screen = ScreenRun())
+        assertEquals(calc, passed.spec.appFile)
+        assertEquals(1, passed.phases.count { it.name == "host_check_retry:javascript_timeout" })
+        assertEquals("accepted", passed.outcome)
+        val failed = checked(Sandbox(timeout(), timeout()).smoke, screen = ScreenRun())
+        assertEquals("host_check:javascript_timeout", fallback(failed))
+        assertEquals("fallback:host_check:javascript_timeout", failed.outcome)
+        assertTrue(failed.stages.isEmpty())
     }
 
     // A screen run whose plan step cannot run (the switch is off, or the request has an image) makes no call at all.
     @Test fun aScreenRunWithAClosedGateMakesNoCall() {
-        for (run in listOf(generate(loop, planStep = null, screen = ScreenRun()),
-            generate(loop, images = listOf("data:image/png;base64,iVBORw0KGgo="), screen = ScreenRun()))) {
+        for ((run, condition) in listOf(generate(loop, planStep = null, screen = ScreenRun()) to "plan_step",
+            generate(loop, images = listOf("data:image/png;base64,iVBORw0KGgo="), screen = ScreenRun()) to "images")) {
             assertEquals(AppFileNames.CLOSED, fallback(run))
             assertTrue(run.stages.isEmpty())
-            assertTrue(run.phases.isEmpty())
+            // The trace names only the condition that closed the plan step.
+            assertEquals(listOf("plan_skipped:$condition"), run.phases.map { it.name })
         }
     }
 
@@ -475,5 +591,7 @@ class AppFileLoopWorkflowTest {
         const val PROMPT = "User request: Split a restaurant bill with a tip\nWidget brief: A tip calculator for a bill and a group"
         /** The task text names the time of the request to the minute. */
         fun withoutTime(text: String) = text.replace(Regex("Today is [^\\n]*"), "")
+        /** A deadline of a smoke event, as ToolEngine.executeEvent reports a sandbox TIMEOUT. */
+        fun timeout() = ToolSmokeFailure("action", "$.ui", CloudFailure("javascript_timeout", SandboxResult("TIMEOUT").message))
     }
 }

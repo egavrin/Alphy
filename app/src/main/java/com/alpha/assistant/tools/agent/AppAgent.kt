@@ -9,6 +9,7 @@ import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.images.ImageFailure
 import com.alpha.assistant.images.ImageAspect
 import com.alpha.assistant.images.ImageIntent
+import com.alpha.assistant.sandbox.RuntimeFailure
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.semantic.SemanticRuntime
 import com.alpha.assistant.semantic.SemanticUnavailable
@@ -30,6 +31,7 @@ import com.alpha.assistant.tools.ToolUiDiagnostic
 import com.alpha.assistant.tools.ToolUiValidationStage
 import com.alpha.assistant.tools.ToolValidationFailure
 import com.alpha.assistant.tools.imageSlots
+import com.alpha.assistant.tools.agent.AppFileNames.Finding
 import com.alpha.assistant.tools.three.ThreeSceneAssetRef
 import com.alpha.assistant.tools.three.ThreeSceneFailure
 import com.alpha.assistant.tools.three.ThreeSceneProblem
@@ -38,6 +40,7 @@ import com.alpha.assistant.tools.three.checkThreeScene
 import com.alpha.assistant.tools.three.withThreeScene
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -97,11 +100,27 @@ internal class AppAgent(
     private val sandbox: SandboxClient,
     /** The plan call of the plan step. Null: no plan step. */
     private val appFileCall: (suspend (stage: CloudGenerationStage, instructions: String, input: String, limits: AppFileLimits) -> AppFileReply)? = null,
+    /** Runs the smoke step of each host check. A test replaces it to fail as the sandbox does. */
+    private val runSmoke: suspend (ToolGenerationSmoke) -> ToolPreview = { it.run() },
     private val complete: suspend (turns: List<CloudTurn>, instructions: String) -> String,
 ) {
-    private class Feedback(message: String) : Exception(message)
+    /** [finding]: the host check of validate that refused the app. [cause]: the failure of the smoke step. */
+    private class Feedback(message: String, val finding: Finding? = null, cause: Throwable? = null) : Exception(message, cause)
 
     private class Candidate(val definition: JSONObject, val spec: ToolSpec, val state: String, val preview: ToolPreview)
+
+    /** The reason of a failed host check, a name of [AppFileNames.HOST_CHECKS]. A sandbox status in the causes comes first. */
+    private fun hostCheckReason(failure: Throwable): String {
+        for (cause in generateSequence(failure) { it.cause }) {
+            val code = when (cause) {
+                is RuntimeFailure -> "javascript_" + cause.status.lowercase(Locale.ROOT)
+                is CloudFailure -> cause.code
+                else -> null
+            }
+            if (code != null && code in AppFileNames.SANDBOX_STATUSES) return code
+        }
+        return (failure as? Feedback)?.finding?.reason ?: AppFileNames.HOST_ERROR
+    }
 
     private class Finished(val summary: String, val lesson: AppLessonResult? = null)
 
@@ -162,7 +181,7 @@ internal class AppAgent(
             val tag = definition.remove("language")
             val language: AppLanguage? = when {
                 tag != null -> try { GenerationLanguage.parse(tag) }
-                    catch (_: Exception) { throw Feedback("language must be a lowercase language tag, for example \"en\" or \"ru\".") }
+                    catch (_: Exception) { throw Feedback("language must be a lowercase language tag, for example \"en\" or \"ru\".", Finding.DEFINITION) }
                 previous?.appLanguage != null -> AppLanguage(previous.appLanguage)
                 else -> null
             }
@@ -186,28 +205,28 @@ internal class AppAgent(
                     .withAppLanguage(language?.tag).withIcon(stored?.iconId).withAppFile(appFile)
             } catch (failure: ToolValidationFailure) {
                 throw Feedback(listOfNotNull(failure.message, failure.uiDiagnostic?.correction,
-                    failure.uiDiagnostic?.let { definitionHint(definition, it) }).joinToString(" "))
+                    failure.uiDiagnostic?.let { definitionHint(definition, it) }).joinToString(" "), Finding.DEFINITION)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
                 if (failure !is IllegalArgumentException && failure !is IllegalStateException && failure !is JSONException) throw failure
-                throw Feedback("The app definition is invalid: ${failure.message ?: failure.javaClass.simpleName}")
+                throw Feedback("The app definition is invalid: ${failure.message ?: failure.javaClass.simpleName}", Finding.DEFINITION)
             }
             // The model sees image nodes, not the saved image records. The host attaches the records for the slots in use.
             val pictures = (savedImages + madeImages).associateBy { it.slot }
             val used = imageSlots(parsed.ui)
             (used - pictures.keys).firstOrNull()?.let { slot ->
                 throw Feedback("The picture \"$slot\" does not exist. " + if (request.imageMaker != null)
-                    "Make it with generate_image first, or remove the image node." else "Pictures are off. Remove the image node.")
+                    "Make it with generate_image first, or remove the image node." else "Pictures are off. Remove the image node.", Finding.PICTURE)
             }
             val spec = if (!parsed.threeScene) parsed.withGeneratedImages(pictures.values.filter { it.slot in used }) else {
-                if (!threeD) throw Feedback(NO_THREE)
+                if (!threeD) throw Feedback(NO_THREE, Finding.THREE_D)
                 // The worker requires a binding for every listed texture, so only the slots that the source names are listed.
                 val textures = pictures.values.filter { "\"${it.slot}\"" in parsed.source || "'${it.slot}'" in parsed.source }
                 try {
                     parsed.withThreeAssets((models + textures.map { it.asset }).distinctBy { it.id }).withGeneratedImages(textures)
                 } catch (failure: CancellationException) { throw failure } catch (failure: Exception) {
-                    throw Feedback("The 3D app definition is invalid: ${failure.message ?: failure.javaClass.simpleName}")
+                    throw Feedback("The 3D app definition is invalid: ${failure.message ?: failure.javaClass.simpleName}", Finding.THREE_D)
                 }
             }
             val state = if (previous == null || request.base == null) spec.initialState else try {
@@ -216,11 +235,11 @@ internal class AppAgent(
                 throw failure
             } catch (failure: Exception) {
                 throw Feedback("The new state schema cannot hold the saved data. Keep every existing state field with its type, " +
-                    "and give new fields initial values. ${failure.message.orEmpty()}")
+                    "and give new fields initial values. ${failure.message.orEmpty()}", Finding.STATE)
             }
             lesson?.let { target ->
                 try { target.policy.validateDefinition(spec.json) } catch (failure: CancellationException) { throw failure }
-                    catch (failure: Exception) { throw Feedback("The slide breaks the course rules: ${failure.message.orEmpty()}") }
+                    catch (failure: Exception) { throw Feedback("The slide breaks the course rules: ${failure.message.orEmpty()}", Finding.LESSON) }
             }
             checkActive()
             if (spec.threeScene) {
@@ -228,37 +247,39 @@ internal class AppAgent(
                     checkThreeScene(spec, request.artifactId, (request.base?.revision ?: 0) + 1, state, checkActive = { checkActive() })
                 } catch (failure: ThreeSceneFailure) {
                     if (failure.problem == ThreeSceneProblem.FOREGROUND) throw CloudFailure(failure.problem.code, failure.problem.guidance)
-                    throw Feedback("The 3D scene check failed. ${AppSteps.failureText(failure)}")
+                    throw Feedback("The 3D scene check failed. ${AppSteps.failureText(failure)}", Finding.THREE_D)
                 }
                 if (language != null && GenerationLanguage.Check(language).mismatches(JSONObject(preview.ui), spec.title, spec.description)) {
-                    throw Feedback("The visible text is not in ${GenerationLanguage.name(language.tag)}. Translate every title, label, option, and message.")
+                    throw Feedback("The visible text is not in ${GenerationLanguage.name(language.tag)}. Translate every title, label, option, and message.",
+                        Finding.LANGUAGE)
                 }
-                presentationProblem(JSONObject(preview.ui), JSONObject(preview.state))?.let { throw Feedback(it) }
+                presentationProblem(JSONObject(preview.ui), JSONObject(preview.state))?.let { throw Feedback(it, Finding.PRESENTATION) }
                 return Candidate(definition, spec, state, preview)
             }
             val smoke = ToolGenerationSmoke(sandbox, spec, request.artifactId, (request.base?.revision ?: 0) + 1, state,
                 checkActive = { checkActive() }, generation = service, policy = lesson?.policy,
                 observeReplay = onReplay?.let { { _: List<String> -> } })
             val preview = try {
-                smoke.run()
+                runSmoke(smoke)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: ToolSmokeFailure) {
                 AppSteps.sandboxFailure(failure.cause)?.let { throw it }
                 onReplay?.invoke(failure.replay.orEmpty())
-                throw Feedback("The smoke test failed. ${failure.correction()} Cause: ${AppSteps.failureText(failure)}")
+                throw Feedback("The smoke test failed. ${failure.correction()} Cause: ${AppSteps.failureText(failure)}", Finding.SMOKE, failure)
             } catch (failure: CloudFailure) {
                 AppSteps.sandboxFailure(failure)?.let { throw it }
-                throw Feedback("The smoke test failed: ${failure.code}: ${failure.message}")
+                throw Feedback("The smoke test failed: ${failure.code}: ${failure.message}", Finding.SMOKE, failure)
             } catch (failure: Exception) {
                 AppSteps.sandboxFailure(failure)?.let { throw it }
                 if (failure !is IllegalArgumentException && failure !is IllegalStateException && failure !is JSONException) throw failure
-                throw Feedback("The smoke test failed: ${failure.message ?: failure.javaClass.simpleName}")
+                throw Feedback("The smoke test failed: ${failure.message ?: failure.javaClass.simpleName}", Finding.SMOKE, failure)
             }
             if (language != null && GenerationLanguage.Check(language).mismatches(JSONObject(preview.ui), spec.title, spec.description)) {
-                throw Feedback("The visible text is not in ${GenerationLanguage.name(language.tag)}. Translate every title, label, option, and message.")
+                throw Feedback("The visible text is not in ${GenerationLanguage.name(language.tag)}. Translate every title, label, option, and message.",
+                    Finding.LANGUAGE)
             }
-            presentationProblem(JSONObject(preview.ui), JSONObject(preview.state))?.let { throw Feedback(it) }
+            presentationProblem(JSONObject(preview.ui), JSONObject(preview.state))?.let { throw Feedback(it, Finding.PRESENTATION) }
             lesson?.let { checkLessonSlide(it, spec, preview) }
             return Candidate(definition, spec, state, preview)
         }
@@ -383,24 +404,35 @@ internal class AppAgent(
             }
         }
 
-        // The app of a clean plan of the kit when it passes the host checks. Null: a host check failed, or the check itself failed.
-        suspend fun kitApp(outcome: AppFileOutcome.Clean): AppAgentResult? = try {
+        // One run of the host checks on a clean plan of the kit: the app, or the check that failed, or the failure of the check itself.
+        suspend fun kitCheck(outcome: AppFileOutcome.Clean): KitCheck = try {
             val candidate = validate(outcome.definition, appFile = outcome.appFile, migrated = outcome.state)
             val preview = candidate.preview
             // The loop finds a raw float number on the screen in finish, which an accepted plan does not reach.
             if (longDecimalOn(AppScreen.render(JSONObject(preview.ui), JSONObject(preview.state), preview.surfaces ?: JSONObject(),
-                    System.currentTimeMillis(), candidate.spec.surfaces)) != null) null
+                    System.currentTimeMillis(), candidate.spec.surfaces)) != null) KitCheck.Failed(AppFileNames.LONG_DECIMAL)
             else {
                 edited = true
                 request.phase(AppFileNames.PLAN_OUTCOME, "accepted")
                 // A kit definition has an empty description, so the summary is its title.
-                AppAgentResult(preview, candidate.spec.description.ifBlank { candidate.spec.title }, outcome.calls, changed = true)
+                KitCheck.App(AppAgentResult(preview, candidate.spec.description.ifBlank { candidate.spec.title }, outcome.calls, changed = true))
             }
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Exception) {
             if (failure is CloudFailure && failure.code == "cancelled") throw failure
-            null
+            KitCheck.Failed(hostCheckReason(failure))
+        }
+
+        // A sandbox TIMEOUT or BUSY is a fault of the host, not of the plan, so the checks run once more when the sandbox answers.
+        suspend fun kitApp(outcome: AppFileOutcome.Clean): KitCheck {
+            val first = kitCheck(outcome)
+            if (first !is KitCheck.Failed || first.reason !in AppFileNames.HOST_CHECK_RETRIES) return first
+            request.phase(AppFileNames.HOST_CHECK_RETRY + first.reason)
+            delay(SANDBOX_RETRY_MS)
+            checkActive()
+            if (sandbox.availability().status != "OK") return first
+            return kitCheck(outcome)
         }
 
         routeAppFile(request, previous, sandbox, appFileCall, checkActive = { checkActive() }, kitApp = { kitApp(it) },

@@ -88,7 +88,8 @@ class AgentGenerationWorkflowTest {
             trace = ToolGenerationTrace(UUID.randomUUID(), { events += it }))
         val firstStep = events.indexOfFirst { it is ToolGenerationTraceEvent.AgentStep }
         val phases = events.filterIsInstance<ToolGenerationTraceEvent.Phase>()
-        assertEquals(listOf("capability_guidance_start", "capability_guidance_end", "agent_call_start"), phases.map { it.name })
+        assertEquals(listOf("plan_skipped:plan_step", "capability_guidance_start", "capability_guidance_end", "agent_call_start"),
+            phases.map { it.name })
         assertEquals(phases, events.take(firstStep))
         assertTrue(phases.zipWithNext().all { (before, after) -> before.atNanos <= after.atNanos })
         assertTrue(phases.all { it.detail == null && it.ms == null && it.attempt == 1 })

@@ -222,13 +222,11 @@ class AppFileChangeWorkflowTest {
 
     // Failure case: the long-decimal check ran only in finish of the loop, so a changed app could show 3.3333333333333335.
     @Test fun aChangeThatShowsALongDecimalChangesNothing() {
-        val third = "app(\"Third\", lang=\"en\")\nneed a = input(\"number\", \"A\", 85, min=0, max=100)\n" +
-            "need b = input(\"number\", \"B\", 4, min=1, max=10)\n\$/r := \$/a / \$/b\nroot = Column([a_field, b_field, Text(text(\$/r))])\n"
-        val before = pressed(created(third, "User request: Divide A by B\nWidget brief: A divides by B"), "a_field", 10)
+        val before = pressed(created(THIRD, THIRD_REQUEST), "a_field", 10)
         // B still has its start value, so it takes the new start value 3: 10 / 3 is a long decimal.
-        val changed = change(before, listOf(Scripted.Text("need b = input(\"number\", \"B\", 3, min=1, max=10)")) + LOOP)
+        val changed = change(before, listOf(Scripted.Text(B_THREE)) + LOOP)
         assertEquals(listOf("ok"), changed.compiles)
-        assertEquals("fallback:host_check", changed.outcome)
+        assertEquals("fallback:host_check:long_decimal", changed.outcome)
         assertRefused(changed, before)
     }
 
@@ -377,6 +375,16 @@ class AppFileChangeWorkflowTest {
         assertTrue(changed.calls.isEmpty())
         assertEquals(before, store.tool(before.id))
         assertEquals(2, store.revisions(before.id).size)
+    }
+
+    // A spoken change that fails the host check keeps the reason change, and its plan outcome names the check.
+    @Test fun aScreenChangeThatFailsTheHostCheckNamesItInItsOutcome() {
+        val before = pressed(created(THIRD, THIRD_REQUEST), "a_field", 10)
+        val changed = change(before, listOf(Scripted.Text(B_THREE)) + LOOP, screen = ScreenRun())
+        assertEquals("fallback:host_check:long_decimal", changed.outcome)
+        assertEquals(AppFileNames.CHANGE, (changed.failure as? ScreenFallback)?.reason)
+        assertTrue(changed.stages.toString(), AGENT !in changed.stages)
+        assertEquals(before, store.tool(before.id))
     }
 
     @Test fun aStopDuringAScreenChangeStaysAStop() {
@@ -722,6 +730,10 @@ class AppFileChangeWorkflowTest {
     }
 
     private companion object {
+        const val THIRD = "app(\"Third\", lang=\"en\")\nneed a = input(\"number\", \"A\", 85, min=0, max=100)\n" +
+            "need b = input(\"number\", \"B\", 4, min=1, max=10)\n\$/r := \$/a / \$/b\nroot = Column([a_field, b_field, Text(text(\$/r))])\n"
+        const val THIRD_REQUEST = "User request: Divide A by B\nWidget brief: A divides by B"
+        const val B_THREE = "need b = input(\"number\", \"B\", 3, min=1, max=10)"
         const val FIX = "The bought items are not counted. Test and fix this app."
         const val NEW ="User request: Make a shopping list by aisle\nWidget brief: A shopping list sorted by aisle"
         const val CHANGE = "User request: Count the bought items too\nWidget brief: Add a count of the bought items"

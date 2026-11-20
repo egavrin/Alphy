@@ -175,8 +175,8 @@ class AutomaticToolWorkflowTest {
             f.send("Create a counter"); f.idle()
             assertEquals("complete", f.last.status)
             val phases = trace.filterIsInstance<ToolGenerationTraceEvent.Phase>()
-            assertEquals(listOf("draft_start", "draft_end", "capability_guidance_start", "capability_guidance_end", "agent_call_start"),
-                phases.map { it.name })
+            assertEquals(listOf("draft_start", "draft_end", "plan_skipped:plan_step", "capability_guidance_start", "capability_guidance_end",
+                "agent_call_start"), phases.map { it.name })
             assertEquals(phases.take(2), trace.take(2))
             assertEquals(listOf(0, 0), phases.take(2).map { it.attempt })
             assertEquals(setOf(f.last.toolOperationId), trace.map { it.operationId.toString() }.toSet())
