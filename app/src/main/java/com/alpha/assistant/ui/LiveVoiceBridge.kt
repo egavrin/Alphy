@@ -2,6 +2,7 @@ package com.alpha.assistant.ui
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -48,6 +49,8 @@ internal class LiveVoiceBridge(
     val handOffs = LinkedHashMap<String, String>()
     /** The assistant message id to the user text of each typed turn (spec 5.7). */
     private val typed = LinkedHashMap<String, String>()
+    /** The assistant message of each hand-off and typed turn, as state, so that [working] is state. The maps above stay ordered maps. */
+    private val tracked = mutableStateListOf<String>()
     private val progressed = HashSet<String>()
     private val done = HashSet<String>()
     /** The assistant message id of each running screen of a hand-off to its show flag (plan D, Db2). */
@@ -73,7 +76,8 @@ internal class LiveVoiceBridge(
         var window: ApprovalWindow? = null
     }
 
-    val working: Boolean get() = (handOffs.values + typed.keys).any { message(it)?.status in unfinishedStatuses }
+    /** A hand-off or typed turn is queued or runs. A reader sees it change when one starts and when it ends. */
+    val working: Boolean get() = tracked.any { message(it)?.status in unfinishedStatuses }
 
     fun start(firstSpeech: Boolean) {
         session.start(this, firstSpeech)
@@ -92,6 +96,7 @@ internal class LiveVoiceBridge(
 
     fun typed(messageId: String, text: String) {
         typed[messageId] = text
+        tracked += messageId
         cardId = messageId
     }
 
@@ -124,6 +129,7 @@ internal class LiveVoiceBridge(
     private fun track(id: String, messageId: String?) {
         if (messageId == null) { session.commentary(id, BUSY); return }
         handOffs[id] = messageId
+        tracked += messageId
         cardId = messageId
     }
 

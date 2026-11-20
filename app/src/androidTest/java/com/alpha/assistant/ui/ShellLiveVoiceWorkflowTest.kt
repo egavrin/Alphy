@@ -8,8 +8,10 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.AlarmClock
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
@@ -56,7 +58,9 @@ import com.alpha.assistant.voice.outputDelta
 import com.alpha.assistant.voice.VoiceSession
 import com.alpha.assistant.voice.VoiceSettings
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -68,6 +72,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 
 /** The hand-off bridge of spec 5.5 to 5.8: a scripted GPT-Live socket and scripted audio drive the real shell model. */
 class ShellLiveVoiceWorkflowTest {
@@ -506,6 +511,42 @@ class ShellLiveVoiceWorkflowTest {
             robot.waitUntil { commentary().isNotEmpty() }
             assertEquals(listOf("d1" to "Alphy не смог выполнить запрос: Сбой"), commentary())
             assertEquals("error", messages(model).last().status)
+        }
+    }
+
+    /** The working state is state: a reader of it alone sees a hand-off and a typed turn start and end, for example the status of the stage. */
+    @Test fun theWorkingStateIsObservable() {
+        val gates = List(2) { CompletableDeferred<Unit>() }
+        val routed = AtomicInteger()
+        install(chat = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                awaitEarlyCancel(request)
+                gates[routed.getAndIncrement()].await()
+                emit(CloudEvent.RoundComplete(chatDecision("answer", "Fixture response"), false))
+            }
+        })
+        live { scenario, model ->
+            val seen = CopyOnWriteArrayList<Boolean>()
+            var reader: Job? = null
+            scenario.onActivity { reader = model.viewModelScope.launch { snapshotFlow { model.liveVoiceWorking }.collect { seen += it } } }
+            robot.waitUntil { seen.isNotEmpty() }
+            socket.say("Какая погода", "d1", 100)
+            robot.waitUntil { routed.get() == 1 }
+            robot.awaitFrames(5)
+            assertEquals(listOf(false, true), seen)
+            gates[0].complete(Unit)
+            robot.waitUntil { commentary().isNotEmpty() }
+            robot.awaitFrames(5)
+            assertEquals(listOf(false, true, false), seen)
+            scenario.onActivity { model.editDraft(Draft("Привет")); model.sendLiveTyped() }
+            robot.waitUntil { routed.get() == 2 }
+            robot.awaitFrames(5)
+            assertEquals(listOf(false, true, false, true), seen)
+            gates[1].complete(Unit)
+            robot.waitUntil { socket.types().contains("session.thinking.append") }
+            robot.awaitFrames(5)
+            assertEquals(listOf(false, true, false, true, false), seen)
+            checkNotNull(reader).cancel()
         }
     }
 
