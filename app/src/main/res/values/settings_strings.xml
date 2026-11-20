@@ -37,4 +37,6 @@
     <string name="semantic_search_unavailable">Поиск недоступен. Очистите запрос, чтобы открыть список.</string>
     <string name="settings_screenshot_review">Проверять вид приложений по снимку экрана</string>
     <string name="settings_screenshot_review_hint">Медленнее: сервис ИИ получает снимок первого экрана и может поправить оформление. Приложения с личными данными так не проверяются.</string>
+    <string name="settings_plan_step">Собирать простые приложения по быстрому плану</string>
+    <string name="settings_plan_step_hint">Быстрее: Alphy собирает простые мини-приложения по одному плану, а остальные создаёт полной генерацией.</string>
 </resources>

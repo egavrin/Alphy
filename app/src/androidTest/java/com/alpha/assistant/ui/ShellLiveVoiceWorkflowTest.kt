@@ -109,7 +109,8 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
-    @Test fun miniAppSendsProgressThenReady() {
+    /** The hand-off of a create request to the agent loop. [miniAppHandOffGetsThePlanStep] is the same hand-off with the plan step. */
+    @Test fun miniAppSendsProgressThenReady() = withPlanStep(fixture.context, AiProvider.OPENAI, false) {
         fixture.provider.createApp = true
         install()
         live { _, model ->

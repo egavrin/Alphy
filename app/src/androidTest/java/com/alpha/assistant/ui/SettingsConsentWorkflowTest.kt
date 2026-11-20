@@ -7,13 +7,23 @@ import androidx.test.core.app.ActivityScenario
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.AiAccount
 import com.alpha.assistant.cloud.AiProvider
+import com.alpha.assistant.cloud.ChatProvider
+import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
+import com.alpha.assistant.cloud.CloudGenerationStage
+import com.alpha.assistant.cloud.CloudRequest
+import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.KeyCheck
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Message
+import com.alpha.assistant.tools.AgentScriptProvider
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolStore
 import com.alpha.assistant.tools.agent.GenerationSettings
+import com.alpha.assistant.tools.appfile.plan
+import com.alpha.assistant.tools.withNoStoredPlanStep
+import com.alpha.assistant.tools.withPlanStep
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -54,6 +64,8 @@ class SettingsConsentWorkflowTest {
     }
     // A password field shows dots, so a check compares the field text with its text before the entry.
     private fun keyText() = robot.field(robot.text(R.string.key_label)).text?.toString()
+    // The text node is not the switch, so the state comes from the checkable ancestor.
+    private fun switchShown(label: String) = generateSequence(robot.find(label)) { it.parent }.firstOrNull { it.isCheckable }?.isChecked
     // The text node is not the button, so the state comes from the clickable ancestor.
     private fun saveEnabled(): Boolean =
         generateSequence(robot.reveal(robot.text(R.string.consent_and_save), forward = null)) { it.parent }.firstOrNull { it.isClickable }?.isEnabled == true
@@ -97,14 +109,68 @@ class SettingsConsentWorkflowTest {
                 robot.reveal(label)
                 robot.waitFor(robot.text(R.string.settings_screenshot_review_hint))
                 // The switch row shows the stored value. A click acts on the shown value, so each check waits for both.
-                fun shown() = generateSequence(robot.find(label)) { it.parent }.firstOrNull { it.isCheckable }?.isChecked
-                robot.waitUntil { shown() == false }
+                robot.waitUntil { switchShown(label) == false }
                 robot.click(label)
-                robot.waitUntil { settings.screenshotReview && shown() == true }
+                robot.waitUntil { settings.screenshotReview && switchShown(label) == true }
                 robot.click(label)
-                robot.waitUntil { !settings.screenshotReview && shown() == false }
+                robot.waitUntil { !settings.screenshotReview && switchShown(label) == false }
             }
         } finally { settings.screenshotReview = before }
+    }
+
+    // The plan step is measured only for OpenAI, so with no stored value it is on for OpenAI alone.
+    @Test fun thePlanStepIsOnByDefaultOnlyForOpenAi() = withNoStoredPlanStep(fixture.context) {
+        val settings = GenerationSettings(fixture.context)
+        for (provider in AiProvider.entries) assertEquals(provider.name, provider == AiProvider.OPENAI, settings.planStep(provider))
+        withPlanStep(fixture.context, AiProvider.OPENAI, false) { assertFalse(settings.planStep(AiProvider.OPENAI)) }
+    }
+
+    // Failure case: the owner cannot stop the plan step on the phone, or the row shows for a provider that has no plan step.
+    @Test fun thePlanStepRowTurnsThePlanCallOffAndOn() = withNoStoredPlanStep(fixture.context) {
+        val stages = CopyOnWriteArrayList<CloudGenerationStage>()
+        val plans = AgentScriptProvider(plan("calc"))
+        fixture.provider.createApp = true
+        fixture.install(chat = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                request.generationStage?.let { stages += it }
+                // The plan call gets a plan of the kit. The chat decision and the loop get the replies of the fixture.
+                if (request.generationStage == CloudGenerationStage.APP_FILE) plans.respond(key, request, session, emit)
+                else fixture.provider.respond(key, request, session, emit)
+            }
+        })
+        val settings = GenerationSettings(fixture.context)
+        fixture.launch().use { scenario ->
+            val model = checkNotNull(fixture.model)
+            fun create() {
+                stages.clear()
+                val before = model.snapshot.selected?.messages?.size ?: 0
+                send("Split a restaurant bill with a tip")
+                robot.waitUntil(60_000) { model.activeConversationId == null && !model.tools.busy &&
+                    model.snapshot.selected?.messages.orEmpty().let { it.size > before && it.last().status in setOf("complete", "error") } }
+                assertEquals("complete", model.snapshot.selected?.messages?.last()?.status)
+            }
+            val label = robot.text(R.string.settings_plan_step)
+            fun pressRow(on: Boolean) {
+                openSettings(scenario)
+                robot.reveal(label)
+                robot.waitFor(robot.text(R.string.settings_plan_step_hint))
+                robot.waitUntil { switchShown(label) == !on }
+                robot.click(label)
+                robot.waitUntil { settings.planStep(AiProvider.OPENAI) == on && switchShown(label) == on }
+            }
+            create()
+            assertEquals(listOf(CloudGenerationStage.APP_FILE), stages.toList())
+            pressRow(on = false)
+            robot.back()
+            robot.back()
+            create()
+            assertTrue(stages.toList().toString(), stages.isNotEmpty() && CloudGenerationStage.APP_FILE !in stages)
+            pressRow(on = true)
+            // OpenRouter offers the same model family, and the plan step stays measured only for OpenAI.
+            saveKey(OPENROUTER_KEY)
+            robot.waitUntil { fixture.keys.account().getOrNull()?.provider == AiProvider.OPENROUTER }
+            robot.waitUntil { !robot.composedText(scenario, label) }
+        }
     }
 
     @Test fun keyEntryRecordsConsentAndEnablesCloud() {
@@ -203,7 +269,8 @@ class SettingsConsentWorkflowTest {
     }
 
     // Failure case: a mini-app generation keeps the key in memory, so it runs to its end after «Удалить ключ».
-    @Test fun deleteKeyStopsRunningGeneration() {
+    // The held call is the first call of the agent loop, so the plan step of the OpenAI account is off for the run.
+    @Test fun deleteKeyStopsRunningGeneration() = withPlanStep(fixture.context, AiProvider.OPENAI, false) {
         fixture.provider.gate = CompletableDeferred()
         fixture.install()
         fixture.launch().use { scenario ->

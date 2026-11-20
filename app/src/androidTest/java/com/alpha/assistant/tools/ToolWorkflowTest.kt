@@ -242,7 +242,8 @@ class ToolWorkflowTest {
             ).forEach { invalid -> assertTrue(runCatching { ToolSpec.parse(invalid.toString()) }.isFailure) }
         } finally { store.close(); context.deleteDatabase(name) }
     }
-    @Test fun nativePreviewAcceptanceAndLocalInteractionAreUsable() {
+    // The draft of a new app takes the agent loop here, so the plan step of the OpenAI account is off for the run.
+    @Test fun nativePreviewAcceptanceAndLocalInteractionAreUsable() = withPlanStep(InstrumentationRegistry.getInstrumentation().targetContext, AiProvider.OPENAI, false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val app = instrumentation.targetContext.applicationContext as android.app.Application
         val name = "tool-ui-${UUID.randomUUID()}"

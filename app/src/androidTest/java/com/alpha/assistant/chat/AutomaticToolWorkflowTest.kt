@@ -26,8 +26,11 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestRule
 import org.junit.runner.RunWith
+import org.junit.runners.model.Statement
 import java.io.Closeable
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
@@ -46,6 +49,10 @@ import com.alpha.assistant.ui.ISOLATED_VOICE
 class AutomaticToolWorkflowTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val app get() = instrumentation.targetContext.applicationContext as Application
+    /** Each test of this class checks the agent loop of a new app, so the plan step of the OpenAI account is off for each run. */
+    @get:Rule val agentLoop = TestRule { base, _ ->
+        object : Statement() { override fun evaluate() = withPlanStep(app, AiProvider.OPENAI, false) { base.evaluate() } }
+    }
     private fun main(action: () -> Unit) = instrumentation.runOnMainSync(action)
     private fun waitUntil(condition: () -> Boolean) {
         val deadline = SystemClock.uptimeMillis() + 15000

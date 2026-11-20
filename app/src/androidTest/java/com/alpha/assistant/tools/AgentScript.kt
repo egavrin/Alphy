@@ -68,3 +68,16 @@ internal inline fun <T> withPlanStep(context: Context, provider: AiProvider, on:
         settings.setPlanStep(provider, before)
     }
 }
+
+/** Runs [block] with no stored plan-step switch for any provider, as after a fresh install, and restores each earlier entry after it, an absent one too. */
+internal inline fun <T> withNoStoredPlanStep(context: Context, block: () -> T): T {
+    // The store of GenerationSettings: the absence of a key is the state that this helper makes.
+    val prefs = context.getSharedPreferences("alpha_generation", Context.MODE_PRIVATE)
+    val before = AiProvider.entries.associate { "plan_step_${it.id}" to prefs.all["plan_step_${it.id}"] as Boolean? }
+    check(prefs.edit().apply { before.keys.forEach { remove(it) } }.commit())
+    try {
+        return block()
+    } finally {
+        check(prefs.edit().apply { before.forEach { (key, on) -> if (on == null) remove(key) else putBoolean(key, on) } }.commit())
+    }
+}

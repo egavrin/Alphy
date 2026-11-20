@@ -339,7 +339,7 @@ private fun AiSettings(model: ShellViewModel) {
     SettingsDetail(SettingsSection.Ai, scroll) {
         AiKeyPanel(model, scroll)
         ModelSettings(model)
-        ScreenshotReviewPanel()
+        GenerationPanel(model.accountProvider)
     }
 }
 
@@ -389,23 +389,36 @@ internal fun <T> SettingsChoice(@StringRes title: Int, options: List<T>, selecte
     }
 }
 
-/** Off by default, because the review adds one model step to each new app. */
+/**
+ * The screenshot review is off by default, because it adds one model step to each new app.
+ * The plan step row shows only for an OpenAI account, the provider that the plan step was measured with.
+ */
 @Composable
-private fun ScreenshotReviewPanel() {
+private fun GenerationPanel(provider: AiProvider?) {
     val context = LocalContext.current
     val settings = remember(context) { GenerationSettings(context) }
-    var enabled by remember(settings) { mutableStateOf(settings.screenshotReview) }
     SettingsPanel {
-        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(enabled, role = Role.Switch) { value ->
-            settings.screenshotReview = value
-            enabled = value
-        }, verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.settings_screenshot_review), Modifier.weight(1f))
-            Switch(checked = enabled, onCheckedChange = null)
+        SettingsSwitch(R.string.settings_screenshot_review, R.string.settings_screenshot_review_hint, settings.screenshotReview) {
+            settings.screenshotReview = it
         }
-        Text(stringResource(R.string.settings_screenshot_review_hint), style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (provider == AiProvider.OPENAI) SettingsSwitch(R.string.settings_plan_step, R.string.settings_plan_step_hint, settings.planStep(AiProvider.OPENAI)) {
+            settings.setPlanStep(AiProvider.OPENAI, it)
+        }
     }
+}
+
+/** A switch row and one line of text under it. The row shows [stored] when it enters the screen, and [store] keeps each change. */
+@Composable
+private fun SettingsSwitch(@StringRes title: Int, @StringRes hint: Int, stored: Boolean, store: (Boolean) -> Unit) {
+    var enabled by remember { mutableStateOf(stored) }
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(enabled, role = Role.Switch) { value ->
+        store(value)
+        enabled = value
+    }, verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(title), Modifier.weight(1f))
+        Switch(checked = enabled, onCheckedChange = null)
+    }
+    Text(stringResource(hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 /** The key status, entry, provider, consent text, functions, and actions. «Настройки» and the first-run flow show the same panel. */
