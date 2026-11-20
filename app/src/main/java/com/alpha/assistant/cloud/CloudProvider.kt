@@ -88,6 +88,8 @@ data class CloudRequest(
     val allowMemoryFact: Boolean = false,
     /** A spoken request of the voice mode with the plan step on. Only such a request is offered the decision kind screen. */
     val voiceScreen: Boolean = false,
+    /** The line of the screen on the stage (ShownScreen.line). Only a request with [voiceScreen] sends it and is offered the kind press. */
+    val shownScreen: String? = null,
     internal val expandedWriterOutput: Boolean = false,
     internal val capabilityDiscovery: (() -> JSONObject)? = null,
 )
@@ -574,7 +576,9 @@ class CloudChatProvider internal constructor(
         val inventory = request.capabilityDiscovery?.takeIf { userTextAvailable && session.canDiscoverCapabilities }
         val canPlanImage = userTextAvailable && request.allowChatImage
         val allowScreen = userTextAvailable && request.voiceScreen
-        val schema = ChatToolReply.decisionSchema(draftChat != null, canLocate, canPlanImage, allowScreen)
+        val shownScreen = request.shownScreen?.takeIf { allowScreen }
+        val allowPress = shownScreen != null
+        val schema = ChatToolReply.decisionSchema(draftChat != null, canLocate, canPlanImage, allowScreen, allowPress)
         val imageInstructions = if (canPlanImage) """
             The ordinary decision schema also has a required image string. Use an empty string for create, refine, and clarify, and put any app image requirements in brief. Use an empty string except for an answer
             that should include one generated image. For a direct image request, use kind answer and put
@@ -726,15 +730,17 @@ The user reviews and approves the plan before any device action.
         fun classificationBody(notice: String = ""): JSONObject {
             val system = listOf(instructions, ChatToolReply.courseInstructions.takeIf { allowCourse }.orEmpty(),
                 ChatToolReply.voiceScreenInstructions.takeIf { allowScreen }.orEmpty(),
+                ChatToolReply.shownScreenInstructions.takeIf { allowPress }.orEmpty(),
                 weatherInstructions, repairInstructions, memoryInstructions, devicePlanInstructions,
                 if (inventory != null) "Call $DISCOVER_CAPABILITIES only for a direct question about what Alphy can do on this phone. Requests to perform an action use their normal tool." else "",
                 classificationInstructions, imageInstructions, screenHint, answerContextHint,
                 "For a local mini-app, limit the brief to $localBriefAllowance characters.".takeIf { localBriefAllowance > 0 }.orEmpty(),
                 requestLanguage, notice)
                 .filter(String::isNotBlank).joinToString("\n")
-            val turns = listOf(current.copy(images = emptyList()))
+            // The shown screen is untrusted data, so it is a user turn before the request and never system text.
+            val turns = listOfNotNull(shownScreen?.let { CloudTurn("user", it) }, current.copy(images = emptyList()))
             validateContext(turns, system)
-            val messages = JSONArray().put(message(CloudTurn("system", system))).put(message(turns.single()))
+            val messages = JSONArray().put(message(CloudTurn("system", system))).apply { turns.forEach { put(message(it)) } }
             return completionBody(messages).put("tools", decisionTools).put("tool_choice", decisionChoice)
         }
         suspend fun clarifyPreparation() {
@@ -826,7 +832,7 @@ The user reviews and approves the plan before any device action.
                     ("kind" to kotlinx.serialization.json.JsonPrimitive(ordinaryKind))), allowScreen).copy(kind = kind)
             }
             return ChatToolReply.decode(if (kind == "create" || kind == "refine" || kind == "screen")
-                kotlinx.serialization.json.JsonObject(json - "image") else json, allowScreen)
+                kotlinx.serialization.json.JsonObject(json - "image") else json, allowScreen, allowPress)
         }
         suspend fun readDecision(body: JSONObject, stage: CompletionStage,
             retryBody: (String) -> JSONObject = { notice ->
@@ -1137,7 +1143,7 @@ The user reviews and approves the plan before any device action.
             readDecision(groundedBody(), CompletionStage.GROUNDED_DECISION, retryBody = ::groundedBody) { completed ->
                 if(completed.calls.isNotEmpty()) throw CloudFailure("tool_invalid","The grounded decision cannot execute more searches.")
                 // With allowScreen a screen decodes here, so requireSameOperation keeps it through a search.
-                val candidate = ChatToolReply.decode(completed.text, allowScreen)
+                val candidate = ChatToolReply.decode(completed.text, allowScreen, allowPress)
                 requireSameOperation(decision, candidate)
                 if (candidate.isMiniApp) ChatToolReply.requireBriefFits(candidate.brief, allowance)
                 accept(candidate)
