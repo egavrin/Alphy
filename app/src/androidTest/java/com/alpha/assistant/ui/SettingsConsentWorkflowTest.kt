@@ -1,5 +1,6 @@
 package com.alpha.assistant.ui
 
+import android.content.Context
 import android.content.IntentFilter
 import android.provider.Settings
 import android.view.View
@@ -123,6 +124,14 @@ class SettingsConsentWorkflowTest {
         val settings = GenerationSettings(fixture.context)
         for (provider in AiProvider.entries) assertEquals(provider.name, provider == AiProvider.OPENAI, settings.planStep(provider))
         withPlanStep(fixture.context, AiProvider.OPENAI, false) { assertFalse(settings.planStep(AiProvider.OPENAI)) }
+    }
+
+    // Failure case: withPlanStep wrote back a stored value where it found none, so each later run lost the default of the provider.
+    @Test fun withPlanStepLeavesNoStoredEntryWhereItFoundNone() = withNoStoredPlanStep(fixture.context) {
+        withPlanStep(fixture.context, AiProvider.OPENAI, false) { assertFalse(GenerationSettings(fixture.context).planStep(AiProvider.OPENAI)) }
+        // The store of GenerationSettings. A stored true and no entry both give planStep true, so the check reads the entry.
+        val prefs = fixture.context.getSharedPreferences("alpha_generation", Context.MODE_PRIVATE)
+        assertFalse(prefs.all.toString(), prefs.contains("plan_step_${AiProvider.OPENAI.id}"))
     }
 
     // Failure case: the owner cannot stop the plan step on the phone, or the row shows for a provider that has no plan step.
@@ -269,23 +278,32 @@ class SettingsConsentWorkflowTest {
     }
 
     // Failure case: a mini-app generation keeps the key in memory, so it runs to its end after «Удалить ключ».
-    // The held call is the first call of the agent loop, so the plan step of the OpenAI account is off for the run.
-    @Test fun deleteKeyStopsRunningGeneration() = withPlanStep(fixture.context, AiProvider.OPENAI, false) {
+    // With the plan step of the OpenAI account off, the held call is the first call of the agent loop.
+    @Test fun deleteKeyStopsRunningGeneration() = deleteKeyStopsTheHeldCall(planStep = false, CloudGenerationStage.AGENT)
+
+    // With the plan step on, the held call is the plan call of a new app.
+    @Test fun deleteKeyStopsRunningPlanCall() = deleteKeyStopsTheHeldCall(planStep = true, CloudGenerationStage.APP_FILE)
+
+    /** Holds the first call of a new app, of the stage [held], deletes the key, and expects no later call and no saved candidate. */
+    private fun deleteKeyStopsTheHeldCall(planStep: Boolean, held: CloudGenerationStage): Unit = withPlanStep(fixture.context, AiProvider.OPENAI, planStep) {
         fixture.provider.gate = CompletableDeferred()
         fixture.install()
         fixture.launch().use { scenario ->
             robot.waitFor(robot.text(R.string.desktop_prompt))
             val tools = startGeneration()
             robot.waitUntil { fixture.provider.calls == 1 }
+            assertEquals(held, fixture.provider.lastRequest?.generationStage)
             openSettings(scenario)
             robot.reveal(robot.text(R.string.key_delete))
             robot.click(robot.text(R.string.key_delete))
+            // A plan call ends at its first-text limit, and the loop then calls. Only a call after the delete is a failure of the delete.
+            assertEquals(1, fixture.provider.calls)
             robot.click(robot.text(R.string.delete))
             robot.waitFor(robot.text(R.string.key_missing))
             fixture.provider.gate!!.complete(Unit)
             robot.waitUntil { !tools.busy }
             robot.instrumentation.waitForIdleSync()
-            assertEquals(1, fixture.provider.calls)
+            assertEquals(fixture.provider.lastRequest?.generationStage.toString(), 1, fixture.provider.calls)
             // The draft row exists before the provider call, so the check is that no generated candidate reached the store.
             ToolStore(fixture.context, "${fixture.name}.db-tools.db").use { store ->
                 assertTrue(store.tools().isEmpty())

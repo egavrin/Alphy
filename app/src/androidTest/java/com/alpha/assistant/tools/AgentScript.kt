@@ -1,13 +1,13 @@
 package com.alpha.assistant.tools
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
-import com.alpha.assistant.tools.agent.GenerationSettings
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.util.concurrent.CopyOnWriteArrayList
@@ -57,27 +57,27 @@ internal open class TracedGeneration(private val calls: List<CloudRequest>, val 
 /** The agent reply that writes [app]. */
 internal fun writeAppReply(app: JSONObject) = JSONObject().put("tool", "write_app").put("app", app).toString()
 
-/** Sets the plan-step switch of [provider] to [on] for [block], and restores the earlier value after it. */
-internal inline fun <T> withPlanStep(context: Context, provider: AiProvider, on: Boolean, block: () -> T): T {
-    val settings = GenerationSettings(context)
-    val before = settings.planStep(provider)
-    settings.setPlanStep(provider, on)
+/** Sets the plan-step switch of [provider] to [on] for [block], and restores the earlier entry exactly after it, an absent one too. */
+internal inline fun <T> withPlanStep(context: Context, provider: AiProvider, on: Boolean, block: () -> T): T =
+    withStoredPlanSteps(context, mapOf(provider to on), block)
+
+/** Runs [block] with no stored plan-step switch for any provider, as after a fresh install, and restores each earlier entry exactly after it. */
+internal inline fun <T> withNoStoredPlanStep(context: Context, block: () -> T): T =
+    withStoredPlanSteps(context, AiProvider.entries.associateWith { null }, block)
+
+/** Stores the switch of each provider of [entries] for [block] (null: no entry), and restores each earlier entry exactly after it, an absent one too. */
+internal inline fun <T> withStoredPlanSteps(context: Context, entries: Map<AiProvider, Boolean?>, block: () -> T): T {
+    // The store of GenerationSettings (tools/agent). With no entry, planStep gives the default of the provider, so a restore keeps an absent entry absent.
+    val prefs = context.getSharedPreferences("alpha_generation", Context.MODE_PRIVATE)
+    val next = entries.mapKeys { "plan_step_${it.key.id}" }
+    val before = next.mapValues { prefs.all[it.key] as Boolean? }
+    storePlanSteps(prefs, next)
     try {
         return block()
     } finally {
-        settings.setPlanStep(provider, before)
+        storePlanSteps(prefs, before)
     }
 }
 
-/** Runs [block] with no stored plan-step switch for any provider, as after a fresh install, and restores each earlier entry after it, an absent one too. */
-internal inline fun <T> withNoStoredPlanStep(context: Context, block: () -> T): T {
-    // The store of GenerationSettings: the absence of a key is the state that this helper makes.
-    val prefs = context.getSharedPreferences("alpha_generation", Context.MODE_PRIVATE)
-    val before = AiProvider.entries.associate { "plan_step_${it.id}" to prefs.all["plan_step_${it.id}"] as Boolean? }
-    check(prefs.edit().apply { before.keys.forEach { remove(it) } }.commit())
-    try {
-        return block()
-    } finally {
-        check(prefs.edit().apply { before.forEach { (key, on) -> if (on == null) remove(key) else putBoolean(key, on) } }.commit())
-    }
-}
+internal fun storePlanSteps(prefs: SharedPreferences, entries: Map<String, Boolean?>) =
+    check(prefs.edit().apply { entries.forEach { (key, on) -> if (on == null) remove(key) else putBoolean(key, on) } }.commit())
