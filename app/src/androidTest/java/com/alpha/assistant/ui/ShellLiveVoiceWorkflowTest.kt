@@ -29,6 +29,7 @@ import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.data.MessageProvenance
 import com.alpha.assistant.data.ScreenContext
+import com.alpha.assistant.data.Source
 import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.surfaces.AssistantCapture
@@ -357,6 +358,48 @@ class ShellLiveVoiceWorkflowTest {
             robot.awaitFrames(5)
             assertEquals(listOf("d1" to SCREEN_ANSWER, "d2" to SCREEN_ANSWER), commentary())
         }
+
+    /**
+     * Plan D, Db5: a screen that needs fresh facts stops the early plan at the first search. Its own plan call starts after the routing call,
+     * with the found facts and the dialogue text, and the voice says the grounded answer once, before the app comes.
+     */
+    @Test fun aScreenWithFreshFactsSearchesBeforeThePlan() {
+        val earlySession = CompletableDeferred<CloudSession>()
+        val stoppedAtSearch = CopyOnWriteArrayList<Boolean>()
+        val plans = CompletableDeferred<Unit>()
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))))
+        early(object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (request.generationStage != null) {
+                    if (EARLY_BRIEF in request.turns.last().text) { earlySession.complete(session); awaitCancellation() }
+                    plans.await()
+                    return script.respond(key, request, session, emit)
+                }
+                val early = earlySession.await()
+                emit(CloudEvent.Search("searching"))
+                // An event reaches the request before emit returns, so this reads the early plan after the search and before the decision.
+                stoppedAtSearch += runCatching { early.check() }.isFailure
+                emit(CloudEvent.Search("found", listOf(FRESH_SOURCE)))
+                emit(CloudEvent.RoundComplete(JSONObject(chatDecision("screen", FRESH_TEXT, SCREEN_BRIEF)).put("search", "required").toString(), false))
+            }
+        }) { _, model, _, phases ->
+            socket.say(SCREEN_REQUEST, "d1", 100)
+            robot.waitUntil(60_000) { commentary().isNotEmpty() }
+            assertEquals(listOf(true), stoppedAtSearch)
+            assertEquals(listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_CANCELED), phases)
+            assertTrue(script.calls.isEmpty())
+            plans.complete(Unit)
+            robot.waitUntil(60_000) { model.stageToolId != null }
+            assertEquals(messages(model).last().toolId, model.stageToolId)
+            val dialogue = AppFilePrompt.load(fixture.context).dialogue
+            val input = script.calls.single().turns.single().text
+            assertTrue(input.startsWith("User request: $SCREEN_REQUEST\n$dialogue\nWidget brief: $SCREEN_BRIEF\n"))
+            assertTrue("\nReply excerpt: $FRESH_TEXT" in input)
+            assertTrue("\nSource [1] excerpt: ${FRESH_SOURCE.title}\n${FRESH_SOURCE.summary}" in input)
+            robot.awaitFrames(5)
+            assertEquals(listOf("d1" to "Ответ Alphy: $FRESH_TEXT"), commentary())
+        }
+    }
 
     /** Plan D, Db2: the voice says the answer of a screen when the routing call ends, before the plan call. The app goes to the stage with no line. */
     @Test fun aScreenSpeaksTheAnswerBeforeTheScreen() = gatedRequest { _, model, gate ->
@@ -957,8 +1000,8 @@ class ShellLiveVoiceWorkflowTest {
      * The voice mode with the plan step on or off and [provider]. [test] gets the early plan phases of the trace in their order:
      * a phase marks the start before the routing call starts, so a test that waits for the routing end reads them with no timing.
      */
-    private fun early(provider: StageProvider, planStep: Boolean = true, press: String? = null,
-        test: (ActivityScenario<CloudTestActivity>, ShellViewModel, StageProvider, MutableList<String>) -> Unit) =
+    private fun <P : ChatProvider> early(provider: P, planStep: Boolean = true, press: String? = null,
+        test: (ActivityScenario<CloudTestActivity>, ShellViewModel, P, MutableList<String>) -> Unit) =
         withPlanStep(fixture.context, AiProvider.OPENAI, planStep) {
             install(chat = provider)
             live(press = press) { scenario, model ->
@@ -1078,6 +1121,9 @@ class ShellLiveVoiceWorkflowTest {
         const val SCREEN_FAILED = "Картинку показать не получилось."
         const val TIMER_REQUEST = "Поставь таймер на 10 минут"
         const val CHANGE_REQUEST = "Покажи ещё половину счёта"
+        /** The grounded answer of a screen that needs fresh facts, and its source. */
+        const val FRESH_TEXT = "Сегодня сердце бьётся 70 раз в минуту."
+        val FRESH_SOURCE = Source("Пульс", "https://example.com/pulse", "Пульс в покое: 70 ударов в минуту")
         /** A change line of the calc plan: a new figure. */
         const val CALC_CHANGE = "need half = figure(\"money\", \"Half bill\", \$/bill / 2, example=[{bill: 80}, 40])"
         /** The plan call beside the routing call starts before a brief exists, so its prompt has an empty brief line. */

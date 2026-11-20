@@ -1772,7 +1772,11 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                                         terminal = event.takeUnless { it.hasToolCalls }
                                         raw.clear()
                                     }
-                                    is CloudEvent.Search -> updateMessage(request, assistant.id) { it.copy(searchStatus = if (event.status == "empty" && it.sources.isNotEmpty()) "found" else event.status, sources = (it.sources + event.sources).distinctBy { source -> source.url }) }
+                                    is CloudEvent.Search -> {
+                                        // A screen with found facts needs them in its plan input, so the early plan cannot serve it.
+                                        stopEarlyPlan(request)
+                                        updateMessage(request, assistant.id) { it.copy(searchStatus = if (event.status == "empty" && it.sources.isNotEmpty()) "found" else event.status, sources = (it.sources + event.sources).distinctBy { source -> source.url }) }
+                                    }
                                 }
                             }
                         }
