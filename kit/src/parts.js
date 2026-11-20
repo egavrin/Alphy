@@ -292,9 +292,13 @@ const PARTS = {
     // each other control keeps the width of its content, and a count group fills a line. The first text field shares its line only with the emoji.
     // A row with values of show= (L1 item 2) has the title and the cells in one group that wraps, so a cell that does not fit beside the title goes
     // under it with the width of its content. The emoji, the check marks, and the remove button stay at the ends of the line.
-    const titled = [...(texts.length > 1 ? [`${name}_main`] : texts.map((field) => `${name}_${field}`)), ...cells];
+    // A row with no value of show= (L2 decision 1) has its value cells in one group with no weight after the title. Alphy gives each text with no weight
+    // in a row of no wrap a share of the row (NativeToolUi.kt rowTextTypes), so beside a title and a number a date got a third of the line and broke inside.
+    // The group keeps the width of its cells, and the title takes the rest of the line. At most 120 dp: a date and a time fit on one line, and more cells
+    // wrap inside the group, so the title keeps room on a phone.
+    const head = texts.length > 1 ? [`${name}_main`] : texts.map((field) => `${name}_${field}`), titled = [...head, ...cells];
     const top = edit ? line([...(first && emoji.length ? [`Row([${name}_emoji, ${first}])`, ...more] : [...emoji, ...typedTexts]), ...cells, ...shut, ...tail, ...counts], ', align="center"')
-      : [...line([...emoji, ...(valued.length ? line(titled, ', align="center", weight=1') : titled), ...shut, ...tail]), ...counts];
+      : [...line([...emoji, ...(valued.length ? line(titled, ', align="center", weight=1') : head.length ? [...head, ...line(cells, ", max=120")] : titled), ...shut, ...tail]), ...counts];
     // A count group, and many check marks, get lines of their own under the other cells. The host draws each row of a list on its own card, so the template has no card.
     const rowLines = [...top, ...(many ? [`Row([${marks.join(", ")}], gap="none")`] : [])];
     lines.push(`${name}_row = ${rowLines.length > 1 ? `Column([${rowLines.join(", ")}])` : rowLines[0]}`);

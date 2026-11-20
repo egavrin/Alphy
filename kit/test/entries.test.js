@@ -111,9 +111,9 @@ test("entries (L1 item 2): in a row with values of show=, the title and the cell
   // The emoji and the remove button stay at the ends of the line. The group takes the rest of it, and each cell in it keeps the width of its content.
   expect(row.children.map((node) => [node.type, node.layout?.weight])).toEqual([["emoji", undefined], ["flowRow", 1], ["icon", undefined]]);
   expect(row.children[1].children.map((node) => [node.type, node.layout?.weight])).toEqual([["text", undefined], ["text", undefined], ["badge", undefined]]);
-  // A row with no value of show= keeps its title, with the rest of the line, beside its cells.
+  // A row with no value of show= keeps its title, with the rest of the line, beside the group of its cells (L2 decision 1).
   const plain = rowOf((await built('app("T", lang="pt")', 'need bikes = entries("Bikes", fields={name: "text", price: "number"})')).definition);
-  expect(plain.children.map((node) => [node.type, node.layout?.weight])).toEqual([["text", 1], ["text", undefined], ["icon", undefined]]);
+  expect(plain.children.map((node) => [node.type, node.layout?.weight])).toEqual([["text", 1], ["flowRow", undefined], ["icon", undefined]]);
   // mock-price-filter: the price wrapped under a title of two lines that had room beside it, because in a column each text of Alphy fills the width.
   // Its texts keep the width of their content, and with no value the column and its texts fill the line as before.
   const two = async (show) => rowOf((await built('app("T", lang="en")', `need bikes = entries("Bikes", fields={name: "text", detail: "text"}${show}, add=false)`)).definition);
@@ -122,13 +122,46 @@ test("entries (L1 item 2): in a row with values of show=, the title and the cell
   expect((await two("")).children[0].children.map((node) => node.layout)).toEqual([undefined, undefined]);
 });
 
+// L2 decision 1 (holdout-study-ja-v5b, showcase-ui-trip-dates-v5): Alphy gives each text with no weight in a row of no wrap a share of the
+// row (NativeToolUi.kt, rowTextTypes). Beside a title of weight 1 a date and a number each got a third of the line, so the date broke inside.
+test("entries (L2 decision 1): the value cells of a row are one group with no weight after the title, so each cell keeps the width of its content and the title takes the rest of the line", async () => {
+  const study = rowOf((await built('app("T", lang="ja")', 'need study = entries("勉強", fields={subject: "text", day: "date", hours: "number"}, icon="📖")')).definition);
+  // At most 120 dp: a date and a time fit on one line, and more cells wrap inside the group, so the title keeps room on a phone.
+  expect(study.children.map((node) => [node.type, node.layout])).toEqual([["emoji", undefined], ["text", { weight: 1 }], ["flowRow", { maxWidth: 120 }], ["icon", undefined]]);
+  expect(study.children[2].children).toEqual([{ type: "text", text: "", bind: "day", style: cell }, { type: "text", text: "", bind: "hours", style: cell }]);
+  // A title of two lines and a single cell: the column takes the rest of the line, and the cell stands at its end.
+  const one = rowOf((await built('app("T", lang="en")', 'need gifts = entries("Gifts", fields={person: "text", gift: "text", price: "money", bought: "check"})')).definition);
+  expect(one.children.map((node) => [node.type, node.layout?.weight, node.children?.map((child) => child.bind)])).toEqual([["column", 1, ["person", "gift"]], ["flowRow", undefined, ["price"]], ["checkbox", undefined, undefined], ["icon", undefined, undefined]]);
+  // With no title the row is one line that wraps, and each cell already keeps the width of its content.
+  expect(rowOf((await built('app("T", lang="es")', 'need costs = entries("Gastos", fields={kind: ["Comida", "Otros"], cost: "money", day: "date"})')).definition).children.map((node) => node.type))
+    .toEqual(["text", "text", "text", "icon"]);
+  // In each model plan and saved plan, no row of no wrap of a list holds a text with no weight: such a text gets a share of the row.
+  const { allPlans } = await import("./helpers.js");
+  const { plansIn } = await import("../build.js");
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const models = plansIn(fileURLToPath(new URL("./fixtures/model", import.meta.url))).map((path) => [path, readFileSync(path, "utf8")]);
+  const shared = [];
+  for (const [path, text] of [...allPlans(), ...models]) {
+    const { definition } = await compileAppFile(text);
+    for (const template of (definition ? every(definition.ui) : []).map((node) => node.rowTemplate).filter(Boolean)) {
+      for (const inner of every(template).filter((node) => node.type === "row" && node.wrap === false)) {
+        const loose = inner.children.filter((child) => ["text", "metric", "badge", "fact"].includes(child.type) && child.layout?.weight === undefined);
+        if (loose.length) shared.push(`${path.replace(/.*kit\//, "")}: ${loose.map((child) => child.bind).join(", ")}`);
+      }
+    }
+  }
+  // Three plans write their own row of a title and a value with components, and the part does not write them.
+  expect(shared).toEqual(["plans/section.plan: streak_text_text", "test/looks.plan: price", "test/fixtures/look-shopping-it.plan: qty"]);
+});
+
 test("entries: the row is a title with a muted second line, then the value cells, the check marks, and the remove button", async () => {
   const { definition } = await built('app("Spesa", lang="it")',
     'need items = entries("Prodotti", fields={name: "text", qty: "text", price: "money", aisle: ["Frutta", "Forno"], done: "check"}, labels={done: "Preso"})');
   expect(rowOf(definition)).toEqual({ type: "row", wrap: false, style: { crossAlign: "center" }, children: [
     { type: "column", style: { gap: "none" }, layout: { weight: 1 }, children: [{ type: "text", text: "", bind: "name" }, { type: "text", text: "", bind: "qty", style: muted }] },
-    // A value that is not text, and a choice that the row does not change, is a small label after the column.
-    { type: "text", text: "", bind: "price", style: cell }, { type: "text", text: "", bind: "aisle", style: cell },
+    // A value that is not text, and a choice that the row does not change, is a small label in the group after the column (L2 decision 1).
+    { type: "flowRow", layout: { maxWidth: 120 }, children: [{ type: "text", text: "", bind: "price", style: cell }, { type: "text", text: "", bind: "aisle", style: cell }] },
     { type: "checkbox", text: "Preso", bind: "done", action: "items_done" },
     { type: "icon", name: "Trash", text: "Rimuovi", action: "items_remove" },
   ] });
@@ -206,7 +239,8 @@ test("entries (L1 item 1): a count in a row is one group of a minus, its number 
   // A row that the person does not edit: the title and the other cells on the first line, and the count group on the line under it.
   const menu = await built('app("T", lang="en")', 'need drinks = entries("Menu", fields={drink: "text", price: "money", qty: "count"}, add=false, remove=false, rows=[{drink: "Tea", price: 2.5, qty: 0}])');
   const [top, counted] = rowOf(menu.definition).children;
-  expect([rowOf(menu.definition).type, top.children.map((node) => node.bind), counted.children.map((node) => node.type)]).toEqual(["column", ["drink", "price"], ["icon", "numberInput", "icon"]]);
+  expect([rowOf(menu.definition).type, top.children[0].bind, top.children[1].children.map((node) => node.bind), counted.children.map((node) => node.type)])
+    .toEqual(["column", "drink", ["price"], ["icon", "numberInput", "icon"]]);
 });
 
 test("entries (L1 item 1): in each model plan and saved plan, a text field of a row shares its line with no control, and no number field of a row has a stepper", async () => {

@@ -7,6 +7,10 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -568,6 +572,33 @@ class AppFileLookTest {
         inShell("appfile-long",mapOf("appfile-long" to spec)) {robot,model,_,_ ->
             open(robot,model,"appfile-long",spec)
             robot.reveal(long,forward=null)
+        }
+    }
+
+    /**
+     * L2 decision 1: a date of a list row stays on one line beside a long title at the phone size, and the title wraps in its own part of the line.
+     * The host gave each text with no weight in a row of no wrap a share of the row, so the date got a third of the line and broke inside its value.
+     */
+    @Test fun aDateOfAListRowStaysOnOneLineBesideALongTitle() {
+        val title="Breakfast at the hotel by the lake"
+        val text="app(\"Log\", lang=\"en\")\nneed log = entries(\"Log\", fields={what: \"text\", day: \"date\", hours: \"number\"}, icon=\"📖\", " +
+            "rows=[{what: \"$title\", day: \"2026-11-21\", hours: 1.5}])\n"
+        val spec=runBlocking {parsedAndSmoked(SandboxClient(instrumentation.targetContext),"log","en",text)}
+        inShell("appfile-date",mapOf("appfile-log" to spec)) {robot,model,_,scenario ->
+            open(robot,model,"appfile-log",spec)
+            robot.reveal("2026-11-21",forward=null)
+            // The line count of each composed text, from the text layout of the host.
+            val lines=mutableMapOf<String,Int>()
+            robot.composedNode(scenario) {config ->
+                val shown=config.getOrNull(SemanticsProperties.Text)?.joinToString("") {it.text}
+                val layouts=mutableListOf<TextLayoutResult>()
+                if(shown != null && config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts) == true) layouts.firstOrNull()?.let {lines[shown]=it.lineCount}
+                false
+            }
+            val (what,day,hours)=listOf(title,"2026-11-21","1.5").map {label -> Rect().also {checkNotNull(robot.find(label)) {label}.getBoundsInScreen(it)}}
+            val seen="lines=${lines.filterKeys {it in setOf(title,"2026-11-21","1.5")}} title=$what day=$day hours=$hours"
+            assertEquals(seen,1,lines["2026-11-21"])
+            assertTrue(seen,lines.getValue(title)>1 && what.right <= day.left && day.right <= hours.left)
         }
     }
 }
