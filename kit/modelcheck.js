@@ -102,7 +102,7 @@ export function barFaults({ compileMs, stateBytes, plan, definition }) {
 // ---- A change case: the stored app of the person and the comparison of its values with the next state.
 
 /** The fields of the person in compiled data: the value of each line, and each object of the inner values of a need (change.js nextState). */
-const ownOf = (data) => [...new Set(data.fields.filter(([root]) => root !== "app:empty").map(([, path]) => path.split(".")[0]))];
+export const ownOf = (data) => [...new Set(data.fields.filter(([root]) => root !== "app:empty").map(([, path]) => path.split(".")[0]))];
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /**

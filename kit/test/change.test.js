@@ -13,6 +13,7 @@ import { T0, fixture, gateEach, plan, valueAt } from "./helpers.js";
 import { settings } from "../src/core.js";
 import { AppFile, show } from "../src/dsl.js";
 import { dataOf } from "../src/emit.js";
+import { ownOf } from "../modelcheck.js";
 
 // After each test the real clock comes back, also after a failure.
 gateEach("smoke");
@@ -28,8 +29,6 @@ async function stored(text, events = [], now = T0) {
   for (const each of events) state = event(state, app, each, now);
   return { appFile: text, stateSchema: definition.stateSchema, state };
 }
-/** The fields of the person in the compiled data: each top-level field of a value of a line and each object of the inner values of a need. */
-const ownFields = (app) => [...new Set(app.fields.filter(([root]) => root !== "app:empty").map(([, path]) => path.split(".")[0]))];
 const lines = (...items) => items.join("\n") + "\n";
 
 const SHOPPING = fixture("shopping");
@@ -580,7 +579,7 @@ async function used(text) {
     state = reply.state;
     if (reply.ui) ui = reply.ui;
   }
-  for (const field of ownFields(app).filter((field) => !timers.has(field))) {
+  for (const field of ownOf(app).filter((field) => !timers.has(field))) {
     const value = state[field];
     if (value && typeof value === "object" && !Array.isArray(value)) state = { ...state, [field]: Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, JSON.stringify(inner) === JSON.stringify(start[field][key]) ? changed(inner) : inner])) };
     else if (JSON.stringify(value) === JSON.stringify(start[field])) state = { ...state, [field]: changed(value) };
@@ -596,7 +595,7 @@ for (const path of plansIn(models)) test(`change: ${basename(path)} gives each s
   const text = readFileSync(path, "utf8"), { previous, app, start } = await used(text);
   // The compile computes the shown values at the clock of the stored state, such as a count of days up to today.
   settings.now = () => LATER;
-  const own = ownFields(app), values = (state) => Object.fromEntries(own.map((field) => [field, state[field]]));
+  const own = ownOf(app), values = (state) => Object.fromEntries(own.map((field) => [field, state[field]]));
   // Each value of the person differs from its start, so the test compares values that a change could lose. The timer test above
   // covers a timer in round 2 and in its rest.
   const timers = timersOf(text), same = own.flatMap((field) => (previous.state[field] && typeof previous.state[field] === "object" && !Array.isArray(previous.state[field])
@@ -649,7 +648,7 @@ for (const path of plansIn(models)) test(`change (rule 3b): ${basename(path)} wi
   if (more === null) { expect(text).not.toMatch(/rows=\[|= (input|counter)\(/); return; }
   const { definition } = await compileAppFile(text), changedStart = await compileAppFile(more);
   expect(changedStart.faults).toEqual([]);
-  const own = ownFields(dataOf(changedStart.definition)), values = (state) => Object.fromEntries(own.map((field) => [field, state[field]]));
+  const own = ownOf(dataOf(changedStart.definition)), values = (state) => Object.fromEntries(own.map((field) => [field, state[field]]));
   // The change moves at least one start value of the person.
   expect(values(changedStart.definition.initialState)).not.toEqual(values(definition.initialState));
   const result = await compileAppFile(more, { appFile: text, stateSchema: definition.stateSchema, state: definition.initialState });
