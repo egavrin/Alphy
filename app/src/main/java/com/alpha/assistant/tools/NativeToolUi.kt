@@ -654,11 +654,11 @@ private fun heroEmojiSide(children: JSONArray): Int {
 }
 
 /** Value pills above the thumbs of a range slider. The track insets its ends by about 10 dp. */
-@Composable private fun SliderValueLabels(values: List<Double>, low: Double, high: Double) {
+@Composable private fun SliderValueLabels(node: JSONObject, values: List<Double>, low: Double, high: Double) {
     Layout(content = {
         values.forEach { value ->
             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.primaryContainer) {
-                Text(BigDecimal.valueOf(value).stripTrailingZeros().toPlainString(), Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                Text(nativeSliderText(node, value), Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.labelMedium)
             }
         }
@@ -1309,8 +1309,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             val original=ToolUiCatalog.value(state,binding) as JSONArray;val (low,high)=ToolUiCatalog.bounds(node)
             var range by remember(original.toString(),binding) {mutableStateOf(original.getDouble(0)..original.getDouble(1))}
             Column(modifier) {
-                Text("$text: ${BigDecimal.valueOf(range.start).stripTrailingZeros().toPlainString()} – ${BigDecimal.valueOf(range.endInclusive).stripTrailingZeros().toPlainString()}")
-                SliderValueLabels(listOf(range.start, range.endInclusive), low, high)
+                Text("$text: ${nativeSliderText(node, range.start)} – ${nativeSliderText(node, range.endInclusive)}")
+                SliderValueLabels(node, listOf(range.start, range.endInclusive), low, high)
                 RangeSlider(value=((range.start-low)/(high-low)).toFloat().coerceIn(0f,1f)..((range.endInclusive-low)/(high-low)).toFloat().coerceIn(0f,1f),
                     onValueChange={range=nativeSliderValue(node,it.start)..nativeSliderValue(node,it.endInclusive)},enabled=enabled,modifier=Modifier.semantics {contentDescription=text})
                 if (range.start!=original.getDouble(0) || range.endInclusive!=original.getDouble(1))
@@ -1353,7 +1353,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             var draft by remember(original,binding) {mutableDoubleStateOf(original)}
             val value = (editor?.shown(original) as? Number)?.toDouble() ?: draft
             Column(modifier) {
-                Text("$text: ${BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()}")
+                Text("$text: ${nativeSliderText(node, value)}")
                 Slider(value=((value-low)/(high-low)).toFloat().coerceIn(0f,1f),onValueChange={ fraction ->
                     val next = nativeSliderValue(node,fraction)
                     if (editor == null) draft = next else editor.change(next)
@@ -1616,6 +1616,13 @@ internal fun nativeSliderValue(node:JSONObject,fraction:Float):Double {
     if(fraction >= 1f)return high
     val proposed=low+fraction.toDouble()*(high-low)
     return (if(node.has("step")) low+round((proposed-low)/node.getDouble("step"))*node.getDouble("step") else proposed).coerceIn(low,high)
+}
+
+/** The shown number of a slider value: with a step, the decimals of the step and the bounds, which each value it sends has; else at most 2. */
+internal fun nativeSliderText(node: JSONObject, value: Double): String {
+    val decimals = if (node.has("step")) ToolUiCatalog.bounds(node).toList().plus(node.getDouble("step"))
+        .maxOf { BigDecimal.valueOf(it).stripTrailingZeros().scale() }.coerceAtLeast(0) else 2
+    return BigDecimal.valueOf(value).setScale(decimals, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
 }
 
 internal fun nativeNumberStep(node: JSONObject, current: Double?, increase: Boolean): Double? {

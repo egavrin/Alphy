@@ -146,6 +146,26 @@ class NativeLookWorkflowTest {
         }
     }
 
+    // Failure case: a slider with no step said «Громкость: 69.9999988079071» after a share of 0.7 of its range.
+    @Test fun aSliderPrintsItsNumberWithTheDecimalsOfItsStep() {
+        val slider = { label: String, min: Double, max: Double, step: Double? -> JSONObject().put("type", "slider").put("text", label)
+            .put("bind", label.lowercase()).put("min", min).put("max", max).put("action", "set$label").apply { step?.let { put("step", it) } } }
+        // No step: at most 2 decimals. A step of 0.1: 1 decimal. A step of 1 from 0.5: the decimal of the bounds. A step of 5: none.
+        val ui = themedColumn(slider("Volume", 0.0, 100.0, null), slider("Weight", 0.0, 10.0, null), slider("Share", 0.0, 1.0, 0.1),
+            slider("Offset", 0.5, 10.5, 1.0), slider("Guests", 0.0, 50.0, 5.0),
+            JSONObject("""{"type":"rangeSlider","text":"Span","bind":"span","min":0,"max":100,"action":"setSpan"}"""),
+            JSONObject("""{"type":"text","text":"End of sliders"}"""))
+        val state = """{"volume":69.9999988079071,"weight":2.5,"share":0.30000000000000004,"offset":2.5,"guests":19.999999,""" +
+            """"span":[12.345678,40.0000001]}"""
+        assertEquals(null, validateNativeUi(ui, JSONObject("""{"volume":"number","weight":"number","share":"number","offset":"number",""" +
+            """"guests":"number","span":{"type":"array","maxItems":2,"items":"number"}}"""), JSONObject(state)))
+        render(ui, "End of sliders", state) {
+            val texts = robot.texts()
+            for (label in listOf("Volume: 70", "Weight: 2.5", "Share: 0.3", "Offset: 2.5", "Guests: 20", "Span: 12.35 – 40", "12.35", "40"))
+                assertTrue("$label in $texts", label in texts)
+        }
+    }
+
     @Test fun aSteppedNumberInputIsOneRowInAHalfWidthCell() {
         val stepper = JSONObject("""{"type":"numberInput","text":"Guests","bind":"guests","min":1,"max":20,"step":1,"action":"setGuests"}""")
         val ui = themedColumn(JSONObject().put("type", "grid").put("columns", 2).put("children", JSONArray().put(stepper)
