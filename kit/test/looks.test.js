@@ -272,7 +272,7 @@ test("look: a fault of a line that a part wrote names the need, and an option th
   expect(await faultsOf("$/n = 0", 'need b = button("Go", inc($/n), varient="filled")')).toEqual(["need b: Button has no property varient"]);
   const faults = await faultsOf('need tasks = entries("Tasks", fields={task: "text"}, colour="red")', 'need cups = counter("Cups", 0, stepp=2)');
   expect(faults).toEqual([
-    'line: need tasks: entries has no option colour. Its options are fields, labels, rows, hidden, add, edit, remove, confirm, yes, no, emptyText, addText, show, reorder, filter, sort, order, group, sheet, icon, countText, icons, tones, total: need tasks = entries("Tasks", fields={task: "text"}, colour="red")',
+    'line: need tasks: entries has no option colour. Its options are fields, labels, rows, hidden, add, edit, remove, confirm, yes, no, emptyText, addText, show, reorder, filter, sort, order, group, sheet, icon, countText, icons, tones, total, max: need tasks = entries("Tasks", fields={task: "text"}, colour="red")',
     'line: need cups: counter has no option stepp. Its options are step, min, max, lessText, moreText, addText, icon, resetText: need cups = counter("Cups", 0, stepp=2)']);
 });
 

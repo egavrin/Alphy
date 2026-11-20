@@ -983,73 +983,73 @@ const WORDS = {
     Add: "Добавить", Yes: "Да", No: "Нет", Back: "Назад", Next: "Далее", Done: "Готово", Start: "Начать", Pause: "Пауза", Reset: "Сбросить", Show: "Показать",
     Again: "Ещё раз", Check: "Проверить", Right: "Верно", Wrong: "Неверно", "Not yet": "Пока нет", Points: "Очки", "Your answer": "Ваш ответ", Rest: "Отдых",
     Work: "Работа", "Time is up": "Время вышло", Step: "Шаг", "Put together": "Собрать", "Take apart": "Разобрать",
-    Remove: "Убрать", Less: "Меньше", More: "Больше", "No records yet": "Записей пока нет",
+    Remove: "Убрать", Less: "Меньше", More: "Больше", "No records yet": "Записей пока нет", "The list is full": "Список заполнен",
   },
   de: {
     Add: "Hinzufügen", Yes: "Ja", No: "Nein", Back: "Zurück", Next: "Weiter", Done: "Fertig", Start: "Starten", Pause: "Pause", Reset: "Zurücksetzen", Show: "Zeigen",
     Again: "Noch einmal", Check: "Prüfen", Right: "Richtig", Wrong: "Falsch", "Not yet": "Noch nicht", Points: "Punkte", "Your answer": "Deine Antwort", Rest: "Erholung",
     Work: "Belastung", "Time is up": "Zeit abgelaufen", Step: "Schritt", "Put together": "Zusammensetzen", "Take apart": "Zerlegen",
-    Remove: "Entfernen", Less: "Weniger", More: "Mehr", "No records yet": "Noch keine Einträge",
+    Remove: "Entfernen", Less: "Weniger", More: "Mehr", "No records yet": "Noch keine Einträge", "The list is full": "Die Liste ist voll",
   },
   es: {
     Add: "Añadir", Yes: "Sí", No: "No", Back: "Atrás", Next: "Siguiente", Done: "Listo", Start: "Empezar", Pause: "Pausa", Reset: "Restablecer", Show: "Mostrar",
     Again: "Otra vez", Check: "Comprobar", Right: "Correcto", Wrong: "Incorrecto", "Not yet": "Todavía no", Points: "Puntos", "Your answer": "Tu respuesta", Rest: "Descanso",
     Work: "Trabajo", "Time is up": "Se acabó el tiempo", Step: "Paso", "Put together": "Montar", "Take apart": "Desmontar",
-    Remove: "Quitar", Less: "Menos", More: "Más", "No records yet": "Aún no hay registros",
+    Remove: "Quitar", Less: "Menos", More: "Más", "No records yet": "Aún no hay registros", "The list is full": "La lista está completa",
   },
   fr: {
     Add: "Ajouter", Yes: "Oui", No: "Non", Back: "Précédent", Next: "Suivant", Done: "Terminé", Start: "Démarrer", Pause: "Pause", Reset: "Réinitialiser", Show: "Afficher",
     Again: "Recommencer", Check: "Vérifier", Right: "Juste", Wrong: "Faux", "Not yet": "Pas encore", Points: "Points", "Your answer": "Ta réponse", Rest: "Repos",
     Work: "Effort", "Time is up": "Temps écoulé", Step: "Étape", "Put together": "Assembler", "Take apart": "Démonter",
-    Remove: "Supprimer", Less: "Moins", More: "Plus", "No records yet": "Aucun enregistrement pour l'instant",
+    Remove: "Supprimer", Less: "Moins", More: "Plus", "No records yet": "Aucun enregistrement pour l'instant", "The list is full": "La liste est pleine",
   },
   it: {
     Add: "Aggiungi", Yes: "Sì", No: "No", Back: "Indietro", Next: "Avanti", Done: "Fatto", Start: "Avvia", Pause: "Pausa", Reset: "Azzera", Show: "Mostra",
     Again: "Di nuovo", Check: "Verifica", Right: "Giusto", Wrong: "Sbagliato", "Not yet": "Non ancora", Points: "Punti", "Your answer": "La tua risposta", Rest: "Riposo",
     Work: "Lavoro", "Time is up": "Tempo scaduto", Step: "Passo", "Put together": "Assembla", "Take apart": "Smonta",
-    Remove: "Rimuovi", Less: "Meno", More: "Più", "No records yet": "Ancora nessun elemento",
+    Remove: "Rimuovi", Less: "Meno", More: "Più", "No records yet": "Ancora nessun elemento", "The list is full": "La lista è piena",
   },
   ja: {
     Add: "追加", Yes: "はい", No: "いいえ", Back: "戻る", Next: "次へ", Done: "完了", Start: "開始", Pause: "一時停止", Reset: "リセット", Show: "表示",
     Again: "もう一度", Check: "確認", Right: "正解", Wrong: "不正解", "Not yet": "まだ", Points: "ポイント", "Your answer": "あなたの答え", Rest: "休憩",
     Work: "運動", "Time is up": "時間になりました", Step: "ステップ", "Put together": "組み立てる", "Take apart": "分解する",
-    Remove: "削除", Less: "減らす", More: "増やす", "No records yet": "記録はまだありません",
+    Remove: "削除", Less: "減らす", More: "増やす", "No records yet": "記録はまだありません", "The list is full": "リストがいっぱいです",
   },
   ko: {
     Add: "추가", Yes: "예", No: "아니요", Back: "뒤로", Next: "다음", Done: "완료", Start: "시작", Pause: "일시정지", Reset: "초기화", Show: "보기",
     Again: "다시", Check: "확인", Right: "정답", Wrong: "오답", "Not yet": "아직", Points: "점수", "Your answer": "내 답", Rest: "휴식",
     Work: "운동", "Time is up": "시간이 종료되었습니다", Step: "단계", "Put together": "조립하기", "Take apart": "분해하기",
-    Remove: "제거", Less: "줄이기", More: "늘리기", "No records yet": "아직 기록이 없습니다",
+    Remove: "제거", Less: "줄이기", More: "늘리기", "No records yet": "아직 기록이 없습니다", "The list is full": "목록이 가득 찼습니다",
   },
   pl: {
     Add: "Dodaj", Yes: "Tak", No: "Nie", Back: "Wstecz", Next: "Dalej", Done: "Gotowe", Start: "Start", Pause: "Pauza", Reset: "Resetuj", Show: "Pokaż",
     Again: "Jeszcze raz", Check: "Sprawdź", Right: "Dobrze", Wrong: "Źle", "Not yet": "Jeszcze nie", Points: "Punkty", "Your answer": "Twoja odpowiedź", Rest: "Odpoczynek",
     Work: "Praca", "Time is up": "Czas minął", Step: "Krok", "Put together": "Złóż", "Take apart": "Rozłóż",
-    Remove: "Usuń", Less: "Mniej", More: "Więcej", "No records yet": "Brak wpisów",
+    Remove: "Usuń", Less: "Mniej", More: "Więcej", "No records yet": "Brak wpisów", "The list is full": "Lista jest pełna",
   },
   pt: {
     Add: "Adicionar", Yes: "Sim", No: "Não", Back: "Voltar", Next: "Próximo", Done: "Concluído", Start: "Iniciar", Pause: "Pausar", Reset: "Redefinir", Show: "Mostrar",
     Again: "De novo", Check: "Verificar", Right: "Certo", Wrong: "Errado", "Not yet": "Ainda não", Points: "Pontos", "Your answer": "Sua resposta", Rest: "Descanso",
     Work: "Trabalho", "Time is up": "O tempo acabou", Step: "Passo", "Put together": "Montar", "Take apart": "Desmontar",
-    Remove: "Remover", Less: "Menos", More: "Mais", "No records yet": "Ainda não há registros",
+    Remove: "Remover", Less: "Menos", More: "Mais", "No records yet": "Ainda não há registros", "The list is full": "A lista está cheia",
   },
   tr: {
     Add: "Ekle", Yes: "Evet", No: "Hayır", Back: "Geri", Next: "İleri", Done: "Tamam", Start: "Başlat", Pause: "Duraklat", Reset: "Sıfırla", Show: "Göster",
     Again: "Tekrar", Check: "Kontrol et", Right: "Doğru", Wrong: "Yanlış", "Not yet": "Henüz değil", Points: "Puan", "Your answer": "Cevabın", Rest: "Dinlenme",
     Work: "Çalışma", "Time is up": "Süre doldu", Step: "Adım", "Put together": "Birleştir", "Take apart": "Parçalara ayır",
-    Remove: "Kaldır", Less: "Azalt", More: "Artır", "No records yet": "Henüz kayıt yok",
+    Remove: "Kaldır", Less: "Azalt", More: "Artır", "No records yet": "Henüz kayıt yok", "The list is full": "Liste dolu",
   },
   uk: {
     Add: "Додати", Yes: "Так", No: "Ні", Back: "Назад", Next: "Далі", Done: "Готово", Start: "Почати", Pause: "Пауза", Reset: "Скинути", Show: "Показати",
     Again: "Ще раз", Check: "Перевірити", Right: "Правильно", Wrong: "Неправильно", "Not yet": "Ще ні", Points: "Бали", "Your answer": "Ваша відповідь", Rest: "Відпочинок",
     Work: "Робота", "Time is up": "Час вийшов", Step: "Крок", "Put together": "Зібрати", "Take apart": "Розібрати",
-    Remove: "Прибрати", Less: "Менше", More: "Більше", "No records yet": "Записів поки немає",
+    Remove: "Прибрати", Less: "Менше", More: "Більше", "No records yet": "Записів поки немає", "The list is full": "Список заповнено",
   },
   zh: {
     Add: "添加", Yes: "是", No: "否", Back: "返回", Next: "下一步", Done: "完成", Start: "开始", Pause: "暂停", Reset: "重置", Show: "显示",
     Again: "再来一次", Check: "检查", Right: "正确", Wrong: "错误", "Not yet": "还没有", Points: "得分", "Your answer": "你的答案", Rest: "休息",
     Work: "训练", "Time is up": "时间到", Step: "步骤", "Put together": "组装", "Take apart": "拆开",
-    Remove: "移除", Less: "减少", More: "增加", "No records yet": "暂无记录",
+    Remove: "移除", Less: "减少", More: "增加", "No records yet": "暂无记录", "The list is full": "列表已满",
   },
 };
 
@@ -1123,6 +1123,8 @@ const label = (id) => id.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ").
 const FIELD_KINDS = { number: "number", money: "number", percent: "number", count: "count", check: "check", switch: "switch", date: "date", time: "time", picture: "picture" };
 /** A name of a line or a field of a plan (dsl.js parseLine). */
 const WORD = /^[\p{L}_][\p{L}\p{N}_]*$/u;
+/** The most rows of a list of Alphy: rows.js MAX_ROWS, which comes after this module in the bundle (build.js MODULES). A test of max= ties the two. */
+const MAX_ROWS = 100;
 /** The lines NAME_X of an entries part that are not a field: the rows, the list, the add form, the remove dialog, the arrows, the emoji, and the hero. */
 const ENTRIES_LINES = new Set(["row", "list", "view", "main", "add", "addRow", "open", "remove", "confirm", "yes", "no", "up", "down", "emoji", "hero"]);
 
@@ -1255,6 +1257,10 @@ const PARTS = {
     if (taken) throw new DslError(`a field named ${taken} has the name of the line ${name}_${taken} of the list part. Give the field a different name`);
     // A Map, so that a field named "constructor" does not read a property of Object.
     const labels = new Map((opt.labels?.entries ?? []).map(([key, tree]) => [key, tree.v])), text = caption;
+    // max=N: the list takes at most N rows (P4). The part reads it once when it builds the screen, so it is a whole number in the line.
+    const max = opt.max?.v, start = opt.rows?.items?.length ?? 0;
+    if (opt.max && !(opt.max.k === "lit" && Number.isInteger(max) && max >= 1 && max <= MAX_ROWS)) throw new DslError(`max= is the most rows of the list, a whole number from 1 to ${MAX_ROWS}, and ${show(opt.max)} is not one`);
+    if (opt.max && start > max) throw new DslError(`the list starts with ${start} rows, and max=${max} takes at most ${max}`);
     const lines = [`$/${name} = ${show(opt.rows ?? { k: "list", items: [] })}`];
     // The rows are data for a deck, a chart, or a figure, and the list is not on the screen.
     if (opt.hidden?.v === true) return { lines, top: [] };
@@ -1365,22 +1371,27 @@ const PARTS = {
     if (opt.remove?.v !== false && opt.confirm) parts.push(`${name}_confirm`);
     if (canAdd) {
       const sheet = opt.sheet?.v === true, adds = `[${[`append($/${name}, {${blank.join(", ")}})`, ...reset, ...(sheet ? [`set($/${name}_adding, false)`] : [])].join(", ")}]`;
-      // The add button is enabled at the start (C.4). A press with an empty first text field changes nothing, and a sheet stays open.
-      lines.push(`${name}_add = Button(${text("addText", "Add")}, action=${firstText ? `when(len(trim($/${name}_new_${firstText})) > 0, ${adds})` : adds}, icon="Plus")`);
+      // The add button is enabled at the start (C.4). A press with an empty first text field, or at the limit of max=, changes nothing, and a sheet stays open.
+      const tests = [firstText && `len(trim($/${name}_new_${firstText})) > 0`, max && `len($/${name}) < ${max}`].filter(Boolean);
+      lines.push(`${name}_add = Button(${text("addText", "Add")}, action=${tests.length ? `when(${tests.join(" && ")}, ${adds})` : adds}, icon="Plus")`);
+      // At the limit of max= the form, or the button that opens its sheet, gives way to a muted text that says that the list is full.
+      const room = max ? `, visible=len($/${name}) < ${max}` : "";
       // With sheet=true the add form is a dialog that a button opens. The add button closes it, and so does the close button that Alphy
       // draws in each sheet with its own word (NativeToolUi.kt, bottomSheet), so the part writes no close button of its own.
-      if (sheet) lines.push(`$/${name}_adding = false`, `${name}_open = Button(${text("addText", "Add")}, action=set($/${name}_adding, true), icon="Plus")`,
+      if (sheet) lines.push(`$/${name}_adding = false`, `${name}_open = Button(${text("addText", "Add")}, action=set($/${name}_adding, true), icon="Plus"${room})`,
         `${name}_addRow = Dialog(${text("addText", "Add")}, [${[...add, `${name}_add`].join(", ")}], visible=$/${name}_adding)`);
       // The fields stand one below the other, and the add button is on its own line under them.
-      else lines.push(`${name}_addRow = Column([${[...add, `${name}_add`].join(", ")}])`);
-      parts.push(...(sheet ? [`${name}_open`] : []), `${name}_addRow`);
+      else lines.push(`${name}_addRow = Column([${[...add, `${name}_add`].join(", ")}]${room})`);
+      parts.push(...(sheet ? [`${name}_open`] : []), `${name}_addRow`, ...(max ? [`Text(${q(word("The list is full"))}, tone="muted", visible=len($/${name}) >= ${max})`] : []));
     }
     lines.push(`${name}_view = Section(${show(title)}, [${parts.join(", ")}])`);
     if (opt.total && !count) notes.push(`need ${name}: total= joins the shown rows and all rows of the hero count, and this list has no hero count, so the kit left it out. A list has one when it is the only main element of the app`);
+    else if (opt.total && max) notes.push(`need ${name}: total= joins the shown rows and all rows of the hero count, and with max= the hero count shows all rows against the limit, so the kit left it out`);
     if (!count) return { lines, top: [`${name}_view`], note: notes };
     // The only main element of the app is this list (C.6): a hero card with the count of its shown rows comes first. A sign of each row gives no emoji there.
-    // total="of" shows all rows too: "12 of 12".
-    const counted = opt.countText ? show(opt.countText) : show(title), value = opt.total ? `text(len(${source})) + " " + ${show(opt.total)} + " " + text(len($/${name}))` : `len(${source})`;
+    // total="of" shows all rows too: "12 of 12". With max= the count is all rows against the limit: "2 / 5", as a ring shows its value and goal.
+    const counted = opt.countText ? show(opt.countText) : show(title);
+    const value = max ? `text(len($/${name})) + " / ${max}"` : opt.total ? `text(len(${source})) + " " + ${show(opt.total)} + " " + text(len($/${name}))` : `len(${source})`;
     lines.push(`${name}_hero = Card([${icon?.k === "lit" ? `Emoji(${show(icon)}, size="large", label=${counted}), ` : ""}Metric(${counted}, ${value}, emphasis="display")], variant="hero")`);
     return { lines, top: [`${name}_view`], lead: [`${name}_hero`], note: notes };
   },
@@ -1656,7 +1667,7 @@ const PARTS = {
  */
 const OPTIONS = {
   input: ["options", "min", "max", "step", "icon"], figure: ["decimals", "example", "icon", "note", "goal", "goalText", "unit"],
-  entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText", "icons", "tones", "total"],
+  entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText", "icons", "tones", "total", "max"],
   chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max", "lessText", "moreText", "addText", "icon", "resetText"],
   timer: ["alert", "rounds", "rest", "cycle", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],

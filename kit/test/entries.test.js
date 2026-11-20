@@ -283,3 +283,63 @@ test("entries: a list that a steps or tabs need groups gets no hero count at the
   expect(counted(both.definition)).toEqual(["More"]);
   expect(both.definition.ui.children[0].children[0]).toMatchObject({ type: "card", variant: "hero" });
 });
+
+// P4 (paired run, showcase-ui-priorities): "top five" got a list with no limit of five. max=N takes at most N rows.
+/** The node of a definition with this action when it has a bound flag, else the node that holds it, and whether a node shows in a state (true with no bound flag). */
+const acting = (definition, action) => {
+  const nodes = every(definition.ui), own = nodes.find((node) => node.action === action);
+  return own.visibleBind ? own : nodes.find((node) => node.children?.includes(own));
+};
+const shows = (state, node) => !node.visibleBind || valueAt(state, node.visibleBind) === true;
+
+test("entries (P4): with max= the add form shows under the limit and not at it, a short text in its place says that the list is full, and the add action adds no row at the limit", async () => {
+  const one = 'fields={name: "text"}, rows=[{name: "Latte"}]', three = 'fields={name: "text", note: "text", place: "text"}, rows=[{name: "Latte", note: "", place: ""}]';
+  for (const [form, options, opener] of [["a form", one, "items_add"], ["sheet=true", one + ", sheet=true", "items_open"], ["the run-time sheet", three, "items_addRow_open"]]) {
+    const { definition, app } = await built('app("Spesa", lang="it")', `need items = entries("Prodotti", ${options}, max=2)`);
+    const full = every(definition.ui).find((node) => node.type === "text" && node.text === "La lista è piena"), form0 = acting(definition, opener);
+    const start = definition.initialState;
+    expect([form, shows(start, form0), Boolean(full) && shows(start, full)]).toEqual([form, true, false]);
+    // A press with a typed name adds the second row. A sheet opens first.
+    const open = (state) => (opener === "items_add" ? state : press(state, app, opener).state);
+    const two = press(live(open(start), app, "items_new_name", "Pane").state, app, "items_add").state;
+    expect([form, two.items.map((row) => row.name), shows(two, form0), shows(two, full)]).toEqual([form, ["Latte", "Pane"], false, true]);
+    // The add action itself adds no row at the limit, also when a press reaches it.
+    expect([form, press(live(open(two), app, "items_new_name", "Uova").state, app, "items_add").state.items.length]).toEqual([form, 2]);
+    // A removed row frees a place, and the form shows again. A press in a row names the row by its id.
+    const freed = press(two, app, "items_remove", { key: two.items[0].id, value: null }).state;
+    expect([form, freed.items.length, shows(freed, form0), shows(freed, full)]).toEqual([form, 1, true, false]);
+  }
+});
+
+test("entries (P4): with max= the hero count shows all rows against the limit with the caption of countText=, and total= beside max= is a note", async () => {
+  const { definition } = await built('app("Top", lang="en")', 'need tasks = entries("Tasks", fields={task: "text", done: "check"}, filter=!$done, countText="Tasks ranked", max=5, rows=[{task: "A", done: false}, {task: "B", done: true}])');
+  const count = every(definition.ui).find((node) => node.type === "metric");
+  expect([count.text, valueAt(definition.initialState, count.bind)]).toEqual(["Tasks ranked", "2 / 5"]);
+  const both = await compileAppFile('app("Top", lang="en")\nneed tasks = entries("Tasks", fields={task: "text"}, max=5, total="of")');
+  expect([both.faults, both.notes]).toEqual([[], ["need tasks: total= joins the shown rows and all rows of the hero count, and with max= the hero count shows all rows against the limit, so the kit left it out"]]);
+});
+
+test("entries (P4): max= is a whole number from 1 to the row cap of the kit, and the start rows fit in it, else a fault of the need", async () => {
+  const { MAX_ROWS } = await import("../src/rows.js");
+  // A fault of a need ends with its line, which these checks leave out.
+  const heads = (result) => result.faults.map((fault) => fault.replace(/: need items = .*$/, ""));
+  const faults = async (max, rows = "[]") => heads(await compileAppFile(`app("T", lang="en")\n$/n = 3\nneed items = entries("Items", fields={name: "text"}, rows=${rows}, max=${max})`));
+  const wrong = `line: need items: max= is the most rows of the list, a whole number from 1 to ${MAX_ROWS}`;
+  for (const max of ["0", '"5"', "2.5", String(MAX_ROWS + 1), "$/n", "true"]) expect([max, await faults(max)]).toEqual([max, [`${wrong}, and ${max} is not one`]]);
+  expect(await faults(String(MAX_ROWS))).toEqual([]);
+  expect(await faults("1", '[{name: "a"}, {name: "b"}]')).toEqual(["line: need items: the list starts with 2 rows, and max=1 takes at most 1"]);
+  // A hidden list is data for a deck, a chart, or a figure, and its max= is checked too.
+  expect(heads(await compileAppFile('app("T", lang="en")\nneed items = entries("Items", fields={name: "text"}, hidden=true, max=0)\nneed d = deck("D", $/items, front=$name, back=$name)'))).toContain(`${wrong}, and 0 is not one`);
+});
+
+test("entries (P4): a list with max= and add=false compiles, and the limit then shows only in the hero count", async () => {
+  const { definition } = await built('app("T", lang="en")', 'need items = entries("Items", fields={name: "text"}, add=false, max=3, rows=[{name: "a"}])');
+  const nodes = every(definition.ui);
+  expect(nodes.filter((node) => node.type === "text" && node.text === "The list is full")).toEqual([]);
+  expect(nodes.filter((node) => node.type === "button")).toEqual([]);
+  expect(valueAt(definition.initialState, nodes.find((node) => node.type === "metric").bind)).toBe("1 / 3");
+  // A list that starts full shows its form after a remove, so the smoke run reaches it. With remove=false its form never shows, which is a fault.
+  const full = (more) => compileAppFile(`app("T", lang="en")\nneed items = entries("Items", fields={name: "text"}, max=2, rows=[{name: "a"}, {name: "b"}]${more})`);
+  expect([(await full("")).faults, (await full("")).notes]).toEqual([[], []]);
+  expect((await full(", remove=false")).faults).toEqual(["smoke run: need items never comes to the screen: it is in a part that stays hidden, or it stays disabled. A control that the person can reach must show it"]);
+});

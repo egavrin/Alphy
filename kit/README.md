@@ -208,6 +208,10 @@ A text that a format function printed is for a person: do not read it back as a 
     The host refuses a press before the finish and shows a notice, and the baseline apps of the agent loop have the same steps. No step adds a row with one press after the typing.
   - A plan with a list and no figure, progress, drawing, timer, or model starts with a hero card of the count of the shown rows of its first list. `countText=` is its caption, else the title of the list. `icon=` with a sign is its large emoji.
     `total="of"` shows all rows too, such as "5 of 12". `total=` on a list with no hero count is a note, and the kit leaves it out.
+  - `max=5` takes at most 5 rows (P4). The value is a whole number from 1 to 100 in the line (the most rows of a list of Alphy, `src/rows.js` `MAX_ROWS`), and the start rows fit in it. Each other value is a fault of the need.
+    At the limit the add form, or the button that opens its sheet, gives way to a muted text in the language of the app ("The list is full"), and the add action adds no row. A remove makes room, and the form shows again.
+    The hero count then shows all rows against the limit, such as "2 / 5", with the caption of `countText=`. `total=` beside `max=` is a note, and the kit leaves it out. With `add=false` the limit shows only in the hero count.
+    A list that starts full with `remove=false` never shows its form, so the smoke run gives a fault.
   - `icons={nome: "Cart"}` gives a field of the add form its icon. A text, number, count, date, or time field shows an icon, and a choice of more than six options does too. Each other field, a name that is not a field, and each name with `add=false` are notes, and the kit leaves the icon out.
   - `tones={streak: "accent"}` gives the badge of a value of `show=` its tone. A name that `show=` does not give, or the sign of the row, is a note, and the kit leaves it out.
   - A value of `show=` prints with `amount(x, 2)`: a number in the language of the app with at most 2 decimals, and a text as it is, such as one that `fixed()` or `money()` of the plan printed. A name of `labels=` stands before the value, such as "Серія днів: 0" (L1 item 2).

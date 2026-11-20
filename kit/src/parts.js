@@ -59,6 +59,8 @@ const label = (id) => id.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ").
 export const FIELD_KINDS = { number: "number", money: "number", percent: "number", count: "count", check: "check", switch: "switch", date: "date", time: "time", picture: "picture" };
 /** A name of a line or a field of a plan (dsl.js parseLine). */
 const WORD = /^[\p{L}_][\p{L}\p{N}_]*$/u;
+/** The most rows of a list of Alphy: rows.js MAX_ROWS, which comes after this module in the bundle (build.js MODULES). A test of max= ties the two. */
+const MAX_ROWS = 100;
 /** The lines NAME_X of an entries part that are not a field: the rows, the list, the add form, the remove dialog, the arrows, the emoji, and the hero. */
 const ENTRIES_LINES = new Set(["row", "list", "view", "main", "add", "addRow", "open", "remove", "confirm", "yes", "no", "up", "down", "emoji", "hero"]);
 
@@ -191,6 +193,10 @@ const PARTS = {
     if (taken) throw new DslError(`a field named ${taken} has the name of the line ${name}_${taken} of the list part. Give the field a different name`);
     // A Map, so that a field named "constructor" does not read a property of Object.
     const labels = new Map((opt.labels?.entries ?? []).map(([key, tree]) => [key, tree.v])), text = caption;
+    // max=N: the list takes at most N rows (P4). The part reads it once when it builds the screen, so it is a whole number in the line.
+    const max = opt.max?.v, start = opt.rows?.items?.length ?? 0;
+    if (opt.max && !(opt.max.k === "lit" && Number.isInteger(max) && max >= 1 && max <= MAX_ROWS)) throw new DslError(`max= is the most rows of the list, a whole number from 1 to ${MAX_ROWS}, and ${show(opt.max)} is not one`);
+    if (opt.max && start > max) throw new DslError(`the list starts with ${start} rows, and max=${max} takes at most ${max}`);
     const lines = [`$/${name} = ${show(opt.rows ?? { k: "list", items: [] })}`];
     // The rows are data for a deck, a chart, or a figure, and the list is not on the screen.
     if (opt.hidden?.v === true) return { lines, top: [] };
@@ -301,22 +307,27 @@ const PARTS = {
     if (opt.remove?.v !== false && opt.confirm) parts.push(`${name}_confirm`);
     if (canAdd) {
       const sheet = opt.sheet?.v === true, adds = `[${[`append($/${name}, {${blank.join(", ")}})`, ...reset, ...(sheet ? [`set($/${name}_adding, false)`] : [])].join(", ")}]`;
-      // The add button is enabled at the start (C.4). A press with an empty first text field changes nothing, and a sheet stays open.
-      lines.push(`${name}_add = Button(${text("addText", "Add")}, action=${firstText ? `when(len(trim($/${name}_new_${firstText})) > 0, ${adds})` : adds}, icon="Plus")`);
+      // The add button is enabled at the start (C.4). A press with an empty first text field, or at the limit of max=, changes nothing, and a sheet stays open.
+      const tests = [firstText && `len(trim($/${name}_new_${firstText})) > 0`, max && `len($/${name}) < ${max}`].filter(Boolean);
+      lines.push(`${name}_add = Button(${text("addText", "Add")}, action=${tests.length ? `when(${tests.join(" && ")}, ${adds})` : adds}, icon="Plus")`);
+      // At the limit of max= the form, or the button that opens its sheet, gives way to a muted text that says that the list is full.
+      const room = max ? `, visible=len($/${name}) < ${max}` : "";
       // With sheet=true the add form is a dialog that a button opens. The add button closes it, and so does the close button that Alphy
       // draws in each sheet with its own word (NativeToolUi.kt, bottomSheet), so the part writes no close button of its own.
-      if (sheet) lines.push(`$/${name}_adding = false`, `${name}_open = Button(${text("addText", "Add")}, action=set($/${name}_adding, true), icon="Plus")`,
+      if (sheet) lines.push(`$/${name}_adding = false`, `${name}_open = Button(${text("addText", "Add")}, action=set($/${name}_adding, true), icon="Plus"${room})`,
         `${name}_addRow = Dialog(${text("addText", "Add")}, [${[...add, `${name}_add`].join(", ")}], visible=$/${name}_adding)`);
       // The fields stand one below the other, and the add button is on its own line under them.
-      else lines.push(`${name}_addRow = Column([${[...add, `${name}_add`].join(", ")}])`);
-      parts.push(...(sheet ? [`${name}_open`] : []), `${name}_addRow`);
+      else lines.push(`${name}_addRow = Column([${[...add, `${name}_add`].join(", ")}]${room})`);
+      parts.push(...(sheet ? [`${name}_open`] : []), `${name}_addRow`, ...(max ? [`Text(${q(word("The list is full"))}, tone="muted", visible=len($/${name}) >= ${max})`] : []));
     }
     lines.push(`${name}_view = Section(${show(title)}, [${parts.join(", ")}])`);
     if (opt.total && !count) notes.push(`need ${name}: total= joins the shown rows and all rows of the hero count, and this list has no hero count, so the kit left it out. A list has one when it is the only main element of the app`);
+    else if (opt.total && max) notes.push(`need ${name}: total= joins the shown rows and all rows of the hero count, and with max= the hero count shows all rows against the limit, so the kit left it out`);
     if (!count) return { lines, top: [`${name}_view`], note: notes };
     // The only main element of the app is this list (C.6): a hero card with the count of its shown rows comes first. A sign of each row gives no emoji there.
-    // total="of" shows all rows too: "12 of 12".
-    const counted = opt.countText ? show(opt.countText) : show(title), value = opt.total ? `text(len(${source})) + " " + ${show(opt.total)} + " " + text(len($/${name}))` : `len(${source})`;
+    // total="of" shows all rows too: "12 of 12". With max= the count is all rows against the limit: "2 / 5", as a ring shows its value and goal.
+    const counted = opt.countText ? show(opt.countText) : show(title);
+    const value = max ? `text(len($/${name})) + " / ${max}"` : opt.total ? `text(len(${source})) + " " + ${show(opt.total)} + " " + text(len($/${name}))` : `len(${source})`;
     lines.push(`${name}_hero = Card([${icon?.k === "lit" ? `Emoji(${show(icon)}, size="large", label=${counted}), ` : ""}Metric(${counted}, ${value}, emphasis="display")], variant="hero")`);
     return { lines, top: [`${name}_view`], lead: [`${name}_hero`], note: notes };
   },
@@ -592,7 +603,7 @@ const PARTS = {
  */
 const OPTIONS = {
   input: ["options", "min", "max", "step", "icon"], figure: ["decimals", "example", "icon", "note", "goal", "goalText", "unit"],
-  entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText", "icons", "tones", "total"],
+  entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText", "icons", "tones", "total", "max"],
   chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max", "lessText", "moreText", "addText", "icon", "resetText"],
   timer: ["alert", "rounds", "rest", "cycle", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],
