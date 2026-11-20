@@ -609,7 +609,7 @@ The file structure, each task with its interfaces and tests, the values table, t
 
 The code differs from this plan on these points. The rulings in the ledger and the commits record each one.
 
-- `waitsForATap` (lines 78, 86, 131, 135, 152) became `showsOnTheStage` in `ui/DialogueStage.kt`. It also shows a finished answer with a generated image (task Da2, ruling 3).
+- `waitsForATap` (lines 86, 131, 135, 152, and the card rule of line 78) became `showsOnTheStage` in `ui/DialogueStage.kt`. It also shows a finished answer with a generated image (task Da2, ruling 3).
 - The current line of speech (line 200) shows two lines, not one line with an ellipsis.
 - The cap of chat calls in one live dialogue (line 72) is 14, not 10 (`DialogueDriver.MAX_CALLS`, `f4daddf`). Basis: the early plan and the new screen after a failed change add calls to a dialogue that works (the ledger, the pre-flight of the paid dialogues).
 - `EarlyPlan` (line 315) also takes a mark function and has `use()` and `stop()` (`tools/ToolController.kt`).
