@@ -60,6 +60,8 @@ internal object AppFileNames {
     const val CLOSED = "closed"
     /** The early plan of the screen run was cancelled, and the request goes on. */
     const val EARLY_CANCELED = "early_canceled"
+    /** The ScreenFallback reason of a change by lines of the shown screen that gave no app. Its plan outcome is on the trace. */
+    const val CHANGE = "change"
 
     // The failure codes of a change by lines that the kit could not make. ToolEngine.testAndFix reads them back as UNREPAIRED.
     /** A failed call or compile made no change, so a retry can work. */
@@ -185,7 +187,7 @@ internal class AppFileSteps(
  * The plan step of a new app and the change step of a saved app with an app file, before the loop of [AppAgent.run].
  * It returns the app of a clean plan that passes the host checks ([kitApp]), throws the failure of a change that the kit cannot make,
  * returns [rebuild] for such a change of an app that holds no data of the person, or returns null: the loop goes on.
- * A screen run with no base never returns null: it returns the app or throws [ScreenFallback] (or the stop of the request).
+ * A screen run never returns null and never calls [rebuild]: it returns the app or throws [ScreenFallback] (or the stop of the request).
  * [previous]: the stored spec of the base, null for a rebuild. [checkActive] stops a cancelled run. [byLines] marks the start of the change step.
  */
 internal suspend fun routeAppFile(
@@ -223,7 +225,9 @@ internal suspend fun routeAppFile(
 
     // The change step of a saved app with an app file, for a change and for test and fix. The report of test and fix is the request.
     // The loop never gets such an app, so no write or edit can drop a saved value.
+    // A screen run with a base (a spoken change of the shown screen) ends at the change step: each other outcome and a closed gate throw ScreenFallback.
     val base = request.base
+    if (request.screen != null && base != null && (previous?.appFile == null || appFileCall == null)) throw ScreenFallback(AppFileNames.CLOSED)
     if (previous?.appFile != null && base != null) {
         val call = checkNotNull(appFileCall) { "An app with an app file changes only through the kit." }
         byLines()
@@ -236,6 +240,7 @@ internal suspend fun routeAppFile(
             is AppFileOutcome.Fallback -> outcome.reason
         }
         request.phase(AppFileNames.PLAN_OUTCOME, "fallback:$reason")
+        if (request.screen != null) throw ScreenFallback(AppFileNames.CHANGE)
         val context = sandbox.context
         // A change that changes no line is not finished. Test and fix then found no line to repair.
         if (reason == AppFileNames.EMPTY) throw CloudFailure("widget_agent_incomplete",

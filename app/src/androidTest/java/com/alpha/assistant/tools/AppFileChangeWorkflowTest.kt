@@ -13,6 +13,9 @@ import com.alpha.assistant.cloud.CloudGenerationStage.APP_FILE_CHANGE
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.agent.AppFileNames
+import com.alpha.assistant.tools.agent.ScreenFallback
+import com.alpha.assistant.tools.agent.ScreenRun
 import com.alpha.assistant.tools.appfile.AppFileCompiler
 import com.alpha.assistant.tools.appfile.AppFilePrevious
 import com.alpha.assistant.tools.appfile.AppFilePrompt
@@ -88,8 +91,9 @@ class AppFileChangeWorkflowTest {
     /** The shopping list after the steps of the kit test: Bread (r2) is gone, and Milk (r1) is bought. */
     private fun shoppingWithData() = pressed(pressed(created(), "items_remove", row("r2", null)), "items_done", row("r1", true))
 
-    /** The change of [base] by [request] with [replies], as the chat sends it: a draft, its generation, and its save. */
-    private fun change(base: ToolRecord, replies: List<Scripted>, request: String = CHANGE, session: CloudSession = CloudSession()): Changed {
+    /** The change of [base] by [request] with [replies], as the chat sends it: a draft, its generation, and its save. [screen]: a spoken change of the shown screen. */
+    private fun change(base: ToolRecord, replies: List<Scripted>, request: String = CHANGE, session: CloudSession = CloudSession(),
+        screen: ScreenRun? = null): Changed {
         script = AgentScriptProvider(replies)
         calls.clear()
         val operation = UUID.randomUUID()
@@ -97,7 +101,8 @@ class AppFileChangeWorkflowTest {
         val result = runBlocking {
             runCatching {
                 engine.createDraft(request, base.id, operationId = operation.toString(), expected = base)
-                engine.generate(operation.toString(), "fixture", emptyList(), session, null, null, ToolGenerationTrace(operation, { events += it }))
+                engine.generate(operation.toString(), "fixture", emptyList(), session, null, null, ToolGenerationTrace(operation, { events += it }),
+                    screen = screen)
                 engine.accept(operation.toString())
             }
         }
@@ -321,6 +326,67 @@ class AppFileChangeWorkflowTest {
         // The store holds the press, and no revision of the change.
         assertEquals(newer(), store.tool(before.id))
         assertEquals(listOf(true, true), items(checkNotNull(store.tool(before.id))).map { it.getBoolean("done") })
+        assertEquals(1, store.revisions(before.id).size)
+    }
+
+    // Failure case (task Dc2, review focus 5): a spoken change of the shown screen lost the value that the person set on its slider.
+    @Test fun aScreenChangeKeepsTheSliderValue() {
+        val level = created(LEVEL, LEVEL_REQUEST)
+        // A slider sends live input, which goes through the real run-time as the drag of the person does.
+        val before = runBlocking { service.evaluate(ToolSpec.parsePersisted(level.spec), level.id, level.revision, level.state,
+            liveInputEvent("level_field", 70), level.ui) }.let { written(level, it.state, it.ui) }
+        val changed = change(before, listOf(Scripted.Text(HALF)) + LOOP, screen = ScreenRun())
+        assertEquals(listOf(APP_FILE_CHANGE), changed.stages)
+        assertEquals("accepted", changed.outcome)
+        val saved = changed.saved
+        assertEquals(2, saved.revision)
+        assertEquals(LEVEL + HALF + "\n", appFile(saved))
+        assertEquals(70, JSONObject(saved.state).getInt("level"))
+        assertEquals("35", JSONObject(saved.state).getJSONObject("d").getString("half_text"))
+        assertEquals(saved, store.tool(saved.id))
+    }
+
+    // Failure case (task Dc2): a spoken change that the kit could not make went on to a rebuild by the loop or to an error, long after the voice had answered.
+    @Test fun aFailedScreenChangeFallsBackAndKeepsTheApp() {
+        val ways = listOf(
+            // An app with no data of the person, which a typed change rebuilds with the loop.
+            Triple(created(), "fallback:faults", listOf(Scripted.Text(BROKEN), Scripted.Text(BROKEN))),
+            Triple(created(), "fallback:call_failed", listOf(Scripted.Fails("pre_headers_io"))),
+            Triple(created(), "fallback:outside", listOf(Scripted.Text("outside(\"game\")"))),
+            Triple(created(), "fallback:empty", listOf(Scripted.Text(shopping.lines()[1]))),
+            // A change that the saved rows block.
+            Triple(shoppingWithData(), "fallback:data_blocks", listOf(Scripted.Text(AISLE_NUMBER))),
+        )
+        for ((before, outcome, replies) in ways) {
+            val changed = change(before, replies + LOOP, screen = ScreenRun())
+            assertEquals("$replies", outcome, changed.outcome)
+            assertEquals("$replies", AppFileNames.CHANGE, (changed.failure as? ScreenFallback)?.reason)
+            assertTrue(changed.stages.toString(), AGENT !in changed.stages)
+            assertTrue(changed.events.none { it is ToolGenerationTraceEvent.AgentStep })
+            assertEquals(before, store.tool(before.id))
+            assertEquals(1, store.revisions(before.id).size)
+        }
+    }
+
+    // A spoken change of an app that the loop built (it has no app file) cannot run by lines, so it makes no call at all.
+    @Test fun aScreenChangeOfAnAppWithNoAppFileMakesNoCall() {
+        val before = change(created(), listOf(Scripted.Text("outside(\"game\")")) + LOOP).saved
+        assertNull(appFile(before))
+        val changed = change(before, LOOP, screen = ScreenRun())
+        assertEquals(AppFileNames.CLOSED, (changed.failure as? ScreenFallback)?.reason)
+        assertTrue(changed.calls.isEmpty())
+        assertEquals(before, store.tool(before.id))
+        assertEquals(2, store.revisions(before.id).size)
+    }
+
+    @Test fun aStopDuringAScreenChangeStaysAStop() {
+        val before = created()
+        val session = CloudSession()
+        duringCall = { if (it.generationStage == APP_FILE_CHANGE) { session.cancel(); session.check() } }
+        val changed = change(before, listOf(Scripted.Text(BOUGHT)) + LOOP, session = session, screen = ScreenRun())
+        assertEquals("cancelled", (changed.failure as? CloudFailure)?.code)
+        assertEquals(listOf(APP_FILE_CHANGE), changed.stages)
+        assertEquals(before, store.tool(before.id))
         assertEquals(1, store.revisions(before.id).size)
     }
 
@@ -677,6 +743,10 @@ class AppFileChangeWorkflowTest {
         const val CHECK_FAILED = "Эта версия не прошла проверку на текущих данных."
         /** The replies of the loop: one write of the fixture app and a finish. */
         val LOOP = listOf(Scripted.Text(agentWrite(FIXTURE_APP)), Scripted.Text(agentFixtureFinish))
+        /** A plan with one slider, its request, and a change line that adds a figure of half its value. */
+        const val LEVEL = "app(\"Level\", lang=\"en\")\nneed level = input(\"slider\", \"Level\", 50, min=0, max=100)\n"
+        const val LEVEL_REQUEST = "User request: Show a level slider\nWidget brief: A slider for a level"
+        const val HALF = "need half = figure(\"count\", \"Half\", \$/level / 2, example=[{level: 60}, 30])"
     }
 }
 
