@@ -38,6 +38,23 @@ class VoiceModeProtocolTest {
         assertTrue("The on-screen rule follows the spoken proposal rule", rule > 0 && lines[rule - 1].startsWith("Когда Alphy предлагает действие"))
     }
 
+    /**
+     * Plan D, Db3 (form J, ruling OD-D5): after the delegation line, the session start gives the choice between a hand-off for a
+     * screen and an own short answer. The examples are not the topics of the live checks.
+     */
+    @Test fun instructionsGiveTheChoiceOfAHandOff() {
+        val sent = JSONObject(LiveProtocol.start(emptyList())).getJSONObject("session").getString("instructions")
+        assertEquals(listOf(
+            "Если ответ станет понятнее с картинкой, схемой или моделью, которую человек может менять (как что-то устроено, " +
+                "как что-то движется, урок с проверкой), передай просьбу Alphy: Alphy покажет экран с материалами и пришлёт ответ, " +
+                "который ты перескажешь. Примеры: «объясни, как образуется радуга», «как устроен атом», «научи меня таблице умножения на семь».",
+            "Простой вопрос с коротким ответом (факт, определение, совет, разговор) отвечай сам сразу и ничего не передавай. " +
+                "Примеры: «сколько планет в Солнечной системе», «кто написал „Войну и мир“», «как дела».",
+            "Просьбу изменить экран, продолжить урок или проверить себя передавай Alphy.",
+        ), sent.lines().subList(2, 5))
+        assertTrue(listOf("сердце", "Луна", "японски").none { it in sent })
+    }
+
     /** Plan D, Da1: the stage shows no text answer, so the voice retells it and does not send the person to the screen. */
     @Test fun instructionsDoNotSayTheFullAnswerIsOnTheScreen() {
         assertFalse("Полный ответ пользователь видит на экране." in LiveProtocol.INSTRUCTIONS)
