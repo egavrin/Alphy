@@ -109,6 +109,29 @@ test("prompt (P4): the section System says what a request implies, and each form
   } finally { settings.now = now; }
 });
 
+test("prompt (B1): the input paragraph names each kind of input of the kit, a slider for a value that changes a drawing or a 3D model, and the section Dialogue names it", async () => {
+  const input = KINDS.find(([kind]) => kind === "input")[1];
+  const named = [.../kind: ((?:"\w+", )*"\w+")\./.exec(input)[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
+  // The fault of an unknown kind lists each kind of the kit.
+  const kit = /Use one of the kinds ((?:\w+, )*\w+)/.exec((await faultsOf('need x = input("nothing", "X", 1)')).find((fault) => fault.includes("is not built")))[1].split(", ");
+  expect([named.toSorted(), named.includes("slider")]).toEqual([kit.toSorted(), true]);
+  expect(input).toContain('"slider" is a number that the person drags from min= to max=, for a value that changes a drawing or a 3D model.');
+  expect(SECTIONS.Dialogue).toContain('A number that changes the main visual is an input of kind "slider".');
+  // A drawing and a 3D model that read the value of a slider: a liveInput of the slider draws each one again at the new value.
+  const { handle } = await import("../src/run.js"), { built } = await import("./helpers.js");
+  const slider = 'need angle = input("slider", "Angle", 0, min=0, max=360, step=30)';
+  const visuals = [['need orbit = drawing("Orbit", 300, 300, [circle(150, 150, 95, "ink", stroke=true), circle(150 + 95 * cos($/angle), 150 - 95 * sin($/angle), 15, "sand")])', "orbit_view"],
+    ['need crane = model3d("Crane", [box("", 0, 0.5, 0, 2, 1, 2, "surface"), box("arm", 1.5 * cos($/angle), 1.5, 1.5 * sin($/angle), 0.4, 0.4, 0.4, "accent")], turn=false, explode=false)', "crane_model"]];
+  for (const [visual, surface] of visuals) {
+    expect([surface, await faultsOf(visual, slider)]).toEqual([surface, []]);
+    const { definition, app } = await built('app("T", lang="en")', visual, slider);
+    const send = (state, event) => handle({ artifactId: "kit-test", revision: 1, state, event }, app);
+    const opened = send(definition.initialState, { type: "open" }), moved = send(opened.state, { type: "liveInput", actionId: "angle_field", value: 90 });
+    const drawn = (reply) => JSON.stringify(reply.surfaces[surface].commands);
+    expect([surface, moved.state.angle, drawn(opened) === drawn(moved)]).toEqual([surface, 90, false]);
+  }
+});
+
 test("prompt: each kind that the prompt names is a part of the kit", async () => {
   for (const [kind] of KINDS) expect((await faultsOf(`need x = ${kind}()`)).filter((fault) => fault.includes("no part for need kind"))).toEqual([]);
 });

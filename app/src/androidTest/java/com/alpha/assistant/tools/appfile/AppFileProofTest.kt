@@ -86,7 +86,7 @@ internal val PICK="app(\"Pick\", lang=\"en\")\nneed people = entries(\"People\",
     "pick = Select(\"Who\", \$/who, map(\$/people, \$name))\nneed k = input(\"choice\", \"K\", \"b\", options=[\"a\", \"b\"])\nreset = Button(\"Reset\", set(\$/k, \"\"))\n" +
     "root = Column([pick, people_view, k_field, reset])\n"
 
-/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, a range, a map of options, and an icon of a field, a hero figure with an emoji, a bar, and a note, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, the time of each saved plan with its lists full, the behavior scenarios of the plans that a model wrote, and the calls of the plan step and the change step: a reply read, merged, and compiled with a stored app, and the prompt texts. */
+/** The kit bundle in the sandbox: the report of a saved plan, the fault of a line, an overlapping call, the time of a compile, compiled apps, each node of the node table, and each look option in Alphy's checks, the numbers of a figure in pl and de, a range, a map of options, and an icon of a field, a hero figure with an emoji, a bar, and a note, events on lists, the quiz, tabs, and a chart, the cards fixture, lists full to the render work limit, the time of an event, the held needs of tabs under an author's root, the timers, the written section, the free forms, the drawings and timed changes, a slider that drives a drawing, the time of each saved plan with its lists full, the behavior scenarios of the plans that a model wrote, and the calls of the plan step and the change step: a reply read, merged, and compiled with a stored app, and the prompt texts. */
 @RunWith(AndroidJUnit4::class)
 class AppFileProofTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
@@ -521,6 +521,8 @@ class AppFileProofTest {
     private fun commands(preview: ToolPreview,surface: String)=checkNotNull(preview.surfaces).getJSONObject(surface).getJSONArray("commands").let {commands ->
         List(commands.length()) {commands.getJSONObject(it)}
     }
+    /** The place of the Moon of the lesson plan and of the slider plan: the Moon is the circle of sand. */
+    private fun moon(preview: ToolPreview)=commands(preview,"orbit_view").single {it.getString("color") == "#e7d3a8"}.let {it.getDouble("x") to it.getDouble("y")}
     @Test fun lessonPassesParseAndSmoke(): Unit=runBlocking {
         // lesson.plan is kit/plans/lesson.plan: a drawing of the Moon on its orbit, a field of its angle, and a button that animates the angle
         // from 0 to 360 in 5 s. The kit tests of lesson.plan have the same plan and steps.
@@ -530,8 +532,6 @@ class AppFileProofTest {
         val spec=parsedAndSmoked(sandbox,"lesson","ru",observeReplay=timerIds(sent))
         assertEquals(listOf("orbit_view"),spec.surfaces.keys.toList())
         assertEquals(setOf("anim"),sent)
-        // The Moon is the circle of sand.
-        fun moon(preview: ToolPreview)=commands(preview,"orbit_view").single {it.getString("color") == "#e7d3a8"}.let {it.getDouble("x") to it.getDouble("y")}
         val app=Host(context,sandbox,spec,"appfile-lesson")
         fun angle(value: Int)=JSONObject().put("type","action").put("actionId","angle_field").put("value",value)
         try {
@@ -553,6 +553,29 @@ class AppFileProofTest {
             }
             assertEquals(360.0,JSONObject(last.state).getDouble("angle"),0.0)
             assertEquals(270.0 to 160.0,moon(last))
+        } finally {app.close()}
+    }
+    @Test fun aSliderPlanDrivesItsDrawing(): Unit=runBlocking {
+        // The plan of the kit test "input (B1): a slider writes a Slider with its bounds, ..." (kit/test/inputs.test.js): a drawing that reads $/angle
+        // and an input of kind slider. The host sends a liveInput while the person drags, and the reply draws the Moon at the new angle.
+        val context=instrumentation.targetContext
+        val sandbox=SandboxClient(context)
+        val text="app(\"Moon\", lang=\"en\")\nneed orbit = drawing(\"Orbit\", 300, 300, [circle(150, 150, 95, \"ink\", stroke=true), " +
+            "circle(150 + 95 * cos(\$/angle), 150 - 95 * sin(\$/angle), 15, \"sand\")])\nneed angle = input(\"slider\", \"Angle\", 0, min=0, max=360, step=30)\n"
+        val spec=parsedAndSmoked(sandbox,"slider",text=text)
+        assertEquals(listOf("orbit_view"),spec.surfaces.keys.toList())
+        val slider=nodes(spec.ui).single {it.optString("type") == "slider"}
+        assertEquals(listOf("angle_field","live"),listOf(slider.getString("action"),slider.getString("inputMode")))
+        assertEquals(listOf(0.0,360.0,30.0),listOf("min","max","step").map {slider.getDouble(it)})
+        val drag=controlEvent(spec.ui,"angle_field",90)
+        assertEquals(SandboxContract.LIVE_INPUT_EVENT,drag.getString("type"))
+        // The Moon is right of the center at 0 degrees, above it at 90 degrees.
+        val app=Host(context,sandbox,spec,"appfile-slider")
+        try {
+            assertEquals(245.0 to 150.0,moon(app.open()))
+            val moved=app.send(drag)
+            assertEquals(90.0,JSONObject(moved.state).getDouble("angle"),0.0)
+            assertEquals(150.0 to 55.0,moon(moved))
         } finally {app.close()}
     }
     @Test fun eachShapeAndColorPassesParseAndSmoke(): Unit=runBlocking {

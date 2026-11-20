@@ -382,7 +382,7 @@ test("compileAppFile: a part id of a 3D model that is not a word still gives its
 test("compileAppFile: a list field that is not a word, an input of an unknown kind, and a color that the kit does not have are each a fault of the need (final review, Minor)", async () => {
   const cases = [
     [['need shop = entries("Shop", fields={"my field": "text"})'], 'need shop: a field named "my field" is not a word'],
-    [['need s = input("slider", "S", 1)'], "need s: an input of kind slider is not built. Use one of the kinds number, money, percent, count, range, choice, choices, toggle, text, date, time"],
+    [['need s = input("dial", "S", 1)'], "need s: an input of kind dial is not built. Use one of the kinds number, money, percent, count, range, slider, choice, choices, toggle, text, date, time"],
     [['need d = drawing("D", 100, 100, [circle(1, 1, 1, "blu")])'], 'need d: shapes: the color "blu" of circle is not a color of the kit. Use one of ink, muted, accent'],
   ];
   for (const [lines, part] of cases) {

@@ -37,8 +37,9 @@ An emoji is one sign in quotes, such as "💧". An icon is one of these names: M
 
 Kinds. Each one is a need line, so it starts with need NAME =
 need NAME = input(kind, label, value, min=, max=, step=, options=, icon=)
-  A value that the person sets. kind: "number", "money", "percent", "count", "range", "text", "toggle", "choice", "choices", "date", "time".
+  A value that the person sets. kind: "number", "money", "percent", "count", "range", "slider", "text", "toggle", "choice", "choices", "date", "time".
   min=, max=, and step= are for the number kinds and "range". icon= is an icon for a number, text, date, or time field, and for a choice of more than six options. A toggle takes no option.
+  "slider" is a number that the person drags from min= to max=, for a value that changes a drawing or a 3D model.
   A choice needs options, and value is one of them. options is a list, or a map of a value to its label: options={asc: "Low to high", desc: "High to low"}. A key of the map is a word, never a number.
   "choices" is more than one option at a time: value is the list of the options that start on, such as [], and max= is the limit. count($/NAME) is how many are on, and has($/NAME, "option") tests one.
   "range" is a low and a high value: value is [low, high], and $/NAME[0] and $/NAME[1] read them. A date is "YYYY-MM-DD", and a time is "HH:MM".
@@ -155,7 +156,7 @@ The kit found faults in your plan. Write again each line that is wrong, and noth
 
 ## Dialogue
 
-This request comes from a talk between a person and a voice assistant. The voice gives the answer in words, and the screen shows the thing itself, with few words. For a thing to understand: a drawing or a 3D model that the person changes with an input or a button, and a card of two or three sentences. When the person asks to explain or to teach, also a lesson in steps and a question. When the person asks to learn a set of things with a check (to count to ten in a language, a multiplication table), the check is a deck with answer= or back= over entries with hidden=true and a row for each thing, not one question. For a thing to practice: a deck, a question, a timer, or an input. For a thing to play: a small game from a drawing, buttons, and values. When the person asks for a toy or a game with a thing that moves by itself, reply outside, as for each request: do not make a version with buttons in its place. Put the main visual first. Keep the screen small: the main visual and at most four more needs, with one control for each value. Plan a form, a list, or a calculator only when the person asks for one.
+This request comes from a talk between a person and a voice assistant. The voice gives the answer in words, and the screen shows the thing itself, with few words. For a thing to understand: a drawing or a 3D model that the person changes with an input or a button, and a card of two or three sentences. A number that changes the main visual is an input of kind "slider". When the person asks to explain or to teach, also a lesson in steps and a question. When the person asks to learn a set of things with a check (to count to ten in a language, a multiplication table), the check is a deck with answer= or back= over entries with hidden=true and a row for each thing, not one question. For a thing to practice: a deck, a question, a timer, or an input. For a thing to play: a small game from a drawing, buttons, and values. When the person asks for a toy or a game with a thing that moves by itself, reply outside, as for each request: do not make a version with buttons in its place. Put the main visual first. Keep the screen small: the main visual and at most four more needs, with one control for each value. Plan a form, a list, or a calculator only when the person asks for one.
 
 ## Change
 

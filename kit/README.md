@@ -234,7 +234,9 @@ A text that a format function printed is for a person: do not read it back as a 
   Each cell shows its label whole on one line, and the selected cell has the colors of a selected segment. The title of the choice stands over the cells, as over a segmented row. So one plan can show cells on a phone and a segmented row on a wide screen.
   The host draws a segmented control with no icon. Each kind of input takes `icon=`: on a segmented control, a slider, a range slider, a multi-choice, or a toggle it is a note, and the kit leaves it out.
   Each other option of an input is only for its own kinds: `min=` on a text field is a fault.
-  The kinds are `number`, `money`, `percent`, `count`, `range`, `choice`, `choices`, `toggle`, `text`, `date`, and `time`. Each other kind, such as `slider`, is a fault of the need.
+  The kinds are `number`, `money`, `percent`, `count`, `range`, `slider`, `choice`, `choices`, `toggle`, `text`, `date`, and `time`. Each other kind, such as `dial`, is a fault of the need.
+  The kind `slider` writes `Slider(label, $/x, min=, max=, step=)` for a number that the person explores, such as an angle that a drawing reads (B1). It needs `min=` and `max=`: without one, the need has the fault `need x: a slider needs min= and max=`.
+  A `percent` input with `min=` and `max=` is a `Slider` too. Each other number kind is a `NumberField`, also with bounds.
   The kind `range` writes `RangeSlider(label, $/x, min=, max=, step=)`: one state value of two numbers in order, the low and the high (`$/price[0]`, `$/price[1]`).
   Each `TextField` and each `Slider` is a live input of the host (`inputMode: "live"`), also in a row and in a bottom sheet. The host sends its value as a `liveInput` event while the person types or drags, and `handle` takes only that event for it.
   A slider finishes its edit when the drag ends. A text field finishes it with the action key of the keyboard or the finish button. Each other control of the kit, the `RangeSlider` and the `NumberField` included, sends an `action`.

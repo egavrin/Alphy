@@ -3,8 +3,9 @@
 
 import { expect, test } from "bun:test";
 import { report, smoke } from "../src/check.js";
+import { compileAppFile } from "../src/compile.js";
 import { handle } from "../src/run.js";
-import { T0, built, every, live, planned, press, valueAt } from "./helpers.js";
+import { T0, built, every, faultsOf, live, planned, press, valueAt } from "./helpers.js";
 
 test("live: each text field is a live input, at the top, in a row template, and in a bottom sheet", async () => {
   const { definition } = await built('app("T", lang="en")', 'need name = input("text", "Name", "")', 'need tasks = entries("Tasks", fields={task: "text"}, sheet=true, rows=[])',
@@ -152,4 +153,42 @@ test("inputs: a range of two numbers is one range slider whose state is the low 
   const file = await planned('app("T", lang="en")\nneed price = input("range", "Price", [100, 1500], min=0, max=2000)');
   expect(smoke(file).trace.some((line) => line.startsWith("set price_field: price [2] -> [2]"))).toBe(true);
   expect(report(file).faults).toEqual([]);
+});
+
+// B1: a number that the person explores is a slider. AppFileProofTest.aSliderPlanDrivesItsDrawing sends the same plan through the host path.
+const MOON = ['app("Moon", lang="en")', 'need orbit = drawing("Orbit", 300, 300, [circle(150, 150, 95, "ink", stroke=true), circle(150 + 95 * cos($/angle), 150 - 95 * sin($/angle), 15, "sand")])',
+  'need angle = input("slider", "Angle", 0, min=0, max=360, step=30)'];
+
+test("input (B1): a slider writes a Slider with its bounds, and a liveInput of 90 moves the drawing that reads it", async () => {
+  expect((await planned(MOON.join("\n"))).get("angle_field").raw).toBe('angle_field = Slider("Angle", $/angle, min=0, max=360, step=30)');
+  const compiled = await compileAppFile(MOON.join("\n"));
+  expect([compiled.faults, compiled.notes]).toEqual([[], []]);
+  const { definition, app } = await built(...MOON);
+  expect(every(definition.ui).filter((node) => node.type === "slider")).toEqual([{ type: "slider", text: "Angle", bind: "angle", action: "angle_field", inputMode: "live", min: 0, max: 360, step: 30 }]);
+  // The Moon is the circle of sand: at 0 degrees right of the center, at 90 degrees above it.
+  const send = (state, event) => handle({ artifactId: "kit-test", revision: 1, state, event }, app);
+  const moon = (reply) => reply.surfaces.orbit_view.commands.filter((command) => command.color === "#e7d3a8").map(({ x, y }) => [x, y]);
+  const opened = send(definition.initialState, { type: "open" }), moved = send(opened.state, { type: "liveInput", actionId: "angle_field", value: 90 });
+  expect([moved.state.angle, moon(opened), moon(moved)]).toEqual([90, [[245, 150]], [[150, 55]]]);
+  // The host sends a liveInput for a slider, so an action changes nothing.
+  expect(send(opened.state, { type: "action", actionId: "angle_field", value: 90 })).toEqual({ state: opened.state });
+});
+
+test("input (B1): a slider without min= or max= is a fault of the need", async () => {
+  for (const bounds of [", max=360", ", min=0", ""]) {
+    const line = `need angle = input("slider", "Angle", 0${bounds})`, faults = (await faultsOf(line)).filter((fault) => fault.includes("need angle:"));
+    expect({ bounds, faults }).toEqual({ bounds, faults: [`line: need angle: a slider needs min= and max=: ${line}`] });
+  }
+});
+
+test("input (B1): a slider drops icon= with a note, as a percent slider does", async () => {
+  const result = await compileAppFile([...MOON.slice(0, 2), 'need angle = input("slider", "Angle", 0, min=0, max=360, step=30, icon="Repeat")'].join("\n"));
+  expect([result.faults, result.notes]).toEqual([[], ['need angle: the part draws a Slider, which shows no icon, so the kit left out icon="Repeat"']]);
+});
+
+test("input (B1): a number input with bounds stays a NumberField, and a percent input is a Slider only with min= and max=", async () => {
+  const file = await planned(['app("T", lang="en")', 'need a = input("number", "A", 0, min=0, max=360, step=30)', 'need b = input("percent", "B", 15, min=0, max=30)', 'need c = input("percent", "C", 15)',
+    'need d = input("money", "D", 5, min=0, max=10)', 'need e = input("count", "E", 1, min=0, max=10)'].join("\n"));
+  expect(["a", "b", "c", "d", "e"].map((name) => file.get(`${name}_field`).raw)).toEqual(['a_field = NumberField("A", $/a, min=0, max=360, step=30)', 'b_field = Slider("B", $/b, min=0, max=30)',
+    'c_field = NumberField("C", $/c)', 'd_field = NumberField("D", $/d, min=0, max=10)', 'e_field = NumberField("E", $/e, min=0, max=10, step=1)']);
 });

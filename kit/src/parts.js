@@ -115,6 +115,7 @@ function readRowFields(file, entry) {
 const PARTS = {
   // need bill = input("money", "Bill", 80, min=0, max=500, icon="Wallet")
   // need kind = input("choice", "Type", "road", options={road: "Road", city: "City"}); need price = input("range", "Price", [100, 1500], min=0, max=2000, step=50)
+  // need angle = input("slider", "Angle", 0, min=0, max=360, step=30): a Slider for a number that the person explores. A percent input with min= and max= is a Slider too.
   input(name, need) {
     const [kind, title, value] = need.args, extras = need.named;
     const k = kind?.v;
@@ -136,7 +137,8 @@ const PARTS = {
     else if (k === "range") widget = `RangeSlider(${show(title)}, $/${name}${named})`;
     else {
       const ranged = extras.min && extras.max;
-      const pick = k === "percent" && ranged ? "Slider" : "NumberField";
+      if (k === "slider" && !ranged) throw new DslError("a slider needs min= and max=");
+      const pick = (k === "percent" && ranged) || k === "slider" ? "Slider" : "NumberField";
       widget = `${pick}(${show(title)}, $/${name}${named}${k === "count" && !extras.step ? ", step=1" : ""})`;
     }
     return { lines: [`$/${name} = ${show(value)}`, `${name}_field = ${widget}`], top: [`${name}_field`] };
@@ -630,7 +632,7 @@ const OPTIONS = {
 };
 /** The options that each kind of input uses. A number kind is a number field or a slider, and a kind that is not here is a fault of the need. */
 const NUMBER_USES = ["min", "max", "step", "icon"];
-const INPUT_USES = { number: NUMBER_USES, money: NUMBER_USES, percent: NUMBER_USES, count: NUMBER_USES, range: NUMBER_USES, choice: ["options", "icon"], choices: ["options", "max"], toggle: [], text: ["icon"], date: ["icon"], time: ["icon"] };
+const INPUT_USES = { number: NUMBER_USES, money: NUMBER_USES, percent: NUMBER_USES, count: NUMBER_USES, range: NUMBER_USES, slider: NUMBER_USES, choice: ["options", "icon"], choices: ["options", "max"], toggle: [], text: ["icon"], date: ["icon"], time: ["icon"] };
 /**
  * The type of the value of an option (G.4). A part reads a flag once when it builds the screen, so a flag is true or false in the line.
  * A number can be a formula, which the kit cannot check here.
