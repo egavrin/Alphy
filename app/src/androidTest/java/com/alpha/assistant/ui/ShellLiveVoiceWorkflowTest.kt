@@ -250,6 +250,38 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
+    /** Plan D, Db2: the voice says the answer of a screen when the routing call ends, before the plan call. The app goes to the stage with no line. */
+    @Test fun aScreenSpeaksTheAnswerBeforeTheScreen() = gatedRequest { _, model, gate ->
+        robot.awaitFrames(5)
+        assertEquals(listOf("d1" to SCREEN_ANSWER), commentary())
+        gate.complete(Unit)
+        robot.waitUntil(60_000) { model.stageToolId != null }
+        assertEquals(messages(model).last().toolId, model.stageToolId)
+        robot.awaitFrames(5)
+        assertEquals(listOf("d1" to SCREEN_ANSWER), commentary())
+    }
+
+    /** Plan D, Db2: a screen with no app makes only the plan calls, keeps the stage, shows no error, and the voice says only the answer. */
+    @Test fun aFallbackScreenRunsNoLoopAndStaysSilent() = fallbackScreen(show = false, SCREEN_ANSWER)
+
+    /** Plan D, Db2: a screen with no app that the person asked to see gets one line after the answer. */
+    @Test fun aFallbackOfAShowRequestSaysOneLine() = fallbackScreen(show = true, SCREEN_ANSWER, SCREEN_FAILED)
+
+    /** Plan D, Db2: a stop of a screen run stays a stop. The voice says the stop after the answer, and the mode goes on. */
+    @Test fun aStopOfAScreenStaysAStop() = gatedRequest(show = true) { scenario, model, gate ->
+        scenario.onActivity { model.cancelRequest() }
+        robot.waitUntil { commentary().size == 2 }
+        val message = messages(model).last()
+        assertEquals("cancelled", message.status)
+        assertNull(message.toolId)
+        assertEquals(listOf("d1" to SCREEN_ANSWER, "d1" to "Alphy не смог выполнить запрос: Запрос остановлен."), commentary())
+        assertTrue(model.liveVoice.active)
+        gate.complete(Unit)
+        robot.awaitFrames(5)
+        assertEquals(2, commentary().size)
+        assertNull(model.stageToolId)
+    }
+
     /** Plan D, Da1: the app of a hand-off fills the stage, with no card around it. */
     @Test fun stageShowsTheMiniAppOfAHandOff() = onStage { scenario, model, app ->
         assertEquals(messages(model).last().toolId, app)
@@ -292,25 +324,17 @@ class ShellLiveVoiceWorkflowTest {
     }
 
     /** Plan D, Da1: an app that a request makes after the end of the mode does not go to the stage of a later session. */
-    @Test fun aRequestThatEndsAfterTheModeSetsNoStage() {
-        val gate = CompletableDeferred<Unit>()
-        withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-            install(chat = stageProvider("calc", gate))
-            live { scenario, model ->
-                socket.say(APP_REQUEST, "d1", 100)
-                robot.waitUntil(60_000) { messages(model).lastOrNull()?.status == "generating" }
-                scenario.onActivity { model.endLiveVoice() }
-                gate.complete(Unit)
-                robot.waitUntil(60_000) { messages(model).last().toolId != null }
-                val app = messages(model).last().toolId
-                // The stage reads only an app of the library list, so the test waits for it there.
-                robot.waitUntil { model.tools.tools.any { it.id == app } }
-                assertNull(model.stageToolId)
-                restart(scenario, model)
-                robot.awaitFrames(5)
-                assertNull(model.stageToolId)
-            }
-        }
+    @Test fun aRequestThatEndsAfterTheModeSetsNoStage() = gatedRequest(APP_REQUEST) { scenario, model, gate ->
+        scenario.onActivity { model.endLiveVoice() }
+        gate.complete(Unit)
+        robot.waitUntil(60_000) { messages(model).last().toolId != null }
+        val app = messages(model).last().toolId
+        // The stage reads only an app of the library list, so the test waits for it there.
+        robot.waitUntil { model.tools.tools.any { it.id == app } }
+        assertNull(model.stageToolId)
+        restart(scenario, model)
+        robot.awaitFrames(5)
+        assertNull(model.stageToolId)
     }
 
     @Test fun failureIsSpoken() {
@@ -730,9 +754,11 @@ class ShellLiveVoiceWorkflowTest {
      * The voice mode with the plan step: the hand-off of [APP_REQUEST] puts the app of [plan] on the stage, and [test] gets its id.
      * Each other request gets the answer «Fixture response».
      */
-    private fun onStage(plan: String = "calc", test: (ActivityScenario<CloudTestActivity>, ShellViewModel, String) -> Unit) =
+    private fun onStage(plan: String = "calc", show: Boolean = false,
+        script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan)))),
+        test: (ActivityScenario<CloudTestActivity>, ShellViewModel, String) -> Unit) =
         withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-            install(chat = stageProvider(plan))
+            install(chat = stageProvider(plan, show = show, script = script))
             live { scenario, model ->
                 socket.say(APP_REQUEST, "d1", 100)
                 robot.waitUntil(60_000) { model.stageToolId != null }
@@ -741,16 +767,57 @@ class ShellLiveVoiceWorkflowTest {
         }
 
     /**
-     * The model calls of an app answer from [script] (the app file [plan]) after [gate]. The routing call creates an app for
-     * [APP_REQUEST], gives a screen for [SCREEN_REQUEST], and answers each other request.
+     * The voice mode with the plan step: the plan call of the hand-off [request] (a screen with [show] for [SCREEN_REQUEST]) waits for
+     * the gate that [test] gets. [test] starts when the message generates and the voice has its first line.
      */
-    private fun stageProvider(plan: String, gate: CompletableDeferred<Unit>? = null,
+    private fun gatedRequest(request: String = SCREEN_REQUEST, show: Boolean = false,
+        test: (ActivityScenario<CloudTestActivity>, ShellViewModel, CompletableDeferred<Unit>) -> Unit) {
+        val gate = CompletableDeferred<Unit>()
+        withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+            install(chat = stageProvider("calc", gate, show = show))
+            live { scenario, model ->
+                socket.say(request, "d1", 100)
+                robot.waitUntil(60_000) { messages(model).lastOrNull()?.status == "generating" && commentary().isNotEmpty() }
+                test(scenario, model, gate)
+            }
+        }
+    }
+
+    /** The calc app is on the stage. Then the plan and the repair of [SCREEN_REQUEST] have faults, and the voice says [lines] for it. */
+    private fun fallbackScreen(show: Boolean, vararg lines: String) {
+        val broken = appFilePlan("calc").replace("/ \$/people, example", "/ , example")
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc")), Scripted.Text(broken)))
+        onStage(show = show, script = script) { _, model, app ->
+            val before = messages(model).size
+            socket.say(SCREEN_REQUEST, "d2", 2_000)
+            robot.waitUntil(60_000) { messages(model).size == before + 2 && messages(model).last().status !in unfinishedStatuses }
+            val message = messages(model).last()
+            assertEquals("complete", message.status)
+            assertEquals(SCREEN_TEXT, message.text)
+            assertNull(message.toolId)
+            assertEquals("" to "", message.errorCode to message.error)
+            assertEquals(List(3) { CloudGenerationStage.APP_FILE }, script.calls.map { it.generationStage })
+            robot.waitUntil { commentary().count { it.first == "d2" } == lines.size }
+            robot.awaitFrames(5)
+            assertEquals(lines.map { "d2" to it }, commentary().filter { it.first == "d2" })
+            assertEquals(app, model.stageToolId)
+            assertTrue(model.liveVoice.active)
+            assertTrue(model.tools.drafts.none { it.id == message.toolOperationId })
+            assertNull(model.tools.error)
+        }
+    }
+
+    /**
+     * The model calls of an app answer from [script] (the app file [plan]) after [gate]. The routing call creates an app for
+     * [APP_REQUEST], gives a screen with [show] for [SCREEN_REQUEST], and answers each other request.
+     */
+    private fun stageProvider(plan: String, gate: CompletableDeferred<Unit>? = null, show: Boolean = false,
         script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan))))): ChatProvider = object : ChatProvider {
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) = when {
             request.generationStage != null -> { gate?.await(); script.respond(key, request, session, emit) }
             else -> emit(CloudEvent.RoundComplete(when (request.decisionContext?.originalUserTurn?.text) {
                 APP_REQUEST -> chatDecision("create", "Готово.", "Make the app")
-                SCREEN_REQUEST -> chatDecision("screen", SCREEN_TEXT, SCREEN_BRIEF)
+                SCREEN_REQUEST -> JSONObject(chatDecision("screen", SCREEN_TEXT, SCREEN_BRIEF)).put("show", show).toString()
                 else -> chatDecision("answer", "Fixture response")
             }, false))
         }
@@ -803,6 +870,8 @@ class ShellLiveVoiceWorkflowTest {
         const val SCREEN_REQUEST = "Объясни, как работает сердце"
         const val SCREEN_TEXT = "Сердце — насос."
         const val SCREEN_BRIEF = "A heart that pumps blood"
+        const val SCREEN_ANSWER = "Ответ Alphy: $SCREEN_TEXT"
+        const val SCREEN_FAILED = "Картинку показать не получилось."
         const val TIMER_REQUEST = "Поставь таймер на 10 минут"
         /** A figure label of the calc app. */
         const val CALC_LABEL = "Per person"

@@ -48,6 +48,8 @@ import com.alpha.assistant.memory.MemoryStore
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.TestFixStatus
 import com.alpha.assistant.tools.appfile.AppFilePrompt
+import com.alpha.assistant.tools.agent.ScreenFallback
+import com.alpha.assistant.tools.agent.ScreenRun
 import com.alpha.assistant.tools.ToolGenerationService
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
@@ -1966,15 +1968,22 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     val host = if (decoded.isScreen) withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue else ""
                     val prompt = ChatToolReply.generationPrompt(
                         user.text,decoded.brief,decoded.text,sources,selectedText,host)
-                    tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
-                        cancelRequest = ::cancelRequest, sceneAttachments = sceneAttachments,
-                        prepared = { prepareToolOperation() },
-                        onPublicUpdate = { note -> if (canCommit()) publicGenerationUpdate = note },
-                        canCommit = canCommit,
-                        committed = { tool -> updateMessage(request,assistant.id) {
-                            it.copy(text = decoded.text,status = "complete",toolId = tool.id,toolRevision = tool.revision,
-                                provenance = replyProvenance)
-                        } })
+                    // The voice says the answer of a screen now: the screen comes later, or not at all (plan D, Db2).
+                    if (decoded.isScreen) liveBridge?.takeIf { liveVoice.active }?.screenStarted(assistant.id, decoded.text, decoded.show)
+                    try {
+                        tools.generateAutomatic(prompt,target.takeIf { decoded.kind == "refine" },conversationId,operationId,key,images,request.session,
+                            cancelRequest = ::cancelRequest, sceneAttachments = sceneAttachments,
+                            prepared = { prepareToolOperation() },
+                            onPublicUpdate = { note -> if (canCommit()) publicGenerationUpdate = note },
+                            canCommit = canCommit,
+                            committed = { tool -> updateMessage(request,assistant.id) {
+                                it.copy(text = decoded.text,status = "complete",toolId = tool.id,toolRevision = tool.revision,
+                                    provenance = replyProvenance)
+                            } }, screen = ScreenRun().takeIf { decoded.isScreen })
+                    } catch (_: ScreenFallback) {
+                        // The answer is complete without its screen, so the stage stays as it was and no error shows.
+                        updateMessage(request, assistant.id) { it.copy(text = decoded.text, status = "complete", provenance = replyProvenance) }
+                    }
                 }
                 if (isActive(request) && voiceBelongsTo(null)) {
                     snapshot.conversations.find { it.id == conversationId }?.messages

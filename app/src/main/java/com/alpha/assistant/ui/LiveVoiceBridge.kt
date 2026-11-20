@@ -50,6 +50,8 @@ internal class LiveVoiceBridge(
     private val typed = LinkedHashMap<String, String>()
     private val progressed = HashSet<String>()
     private val done = HashSet<String>()
+    /** The assistant message id of each running screen of a hand-off to its show flag (plan D, Db2). */
+    private val screens = HashMap<String, Boolean>()
     /** The assistant message of the latest hand-off or typed turn (spec 5.2.3). */
     var cardId by mutableStateOf<String?>(null); private set
     /** The app of the latest tracked message that made or changed one, for the stage (plan D, Da1). The end of the mode clears it. */
@@ -91,6 +93,16 @@ internal class LiveVoiceBridge(
     fun typed(messageId: String, text: String) {
         typed[messageId] = text
         cardId = messageId
+    }
+
+    /**
+     * The screen of the hand-off of [messageId] starts: the voice says [answer] now, and the screen run ends with no line, or with
+     * [SCREEN_FAILED] when it gives no app for a request that asked to see one ([show]). A message of no hand-off gets nothing.
+     */
+    fun screenStarted(messageId: String, answer: String, show: Boolean) {
+        val delegation = handOffs.entries.firstOrNull { it.value == messageId }?.key ?: return
+        screens[messageId] = show
+        session.commentary(delegation, spoken(ANSWER, answer))
     }
 
     /** The capture of the press for the first request, spoken or typed. Later requests get null (spec 5.11.4). */
@@ -155,6 +167,15 @@ internal class LiveVoiceBridge(
         for ((delegation, id) in handOffs) {
             val message = changed(id) ?: continue
             if (message.status == "complete") message.toolId?.let { stageToolId = it }
+            // The voice said the answer of a screen at its start. A stop or a failure still goes on to the failure text.
+            if (id in screens) {
+                if (message.status == "generating") continue
+                val show = screens.remove(id) == true
+                if (message.status == "complete") {
+                    if (show && message.toolId == null) session.commentary(delegation, SCREEN_FAILED)
+                    continue
+                }
+            }
             // The chat agent sets the plan in the same main-thread pass as this notice, so the plan is the one of this hand-off.
             if (message.status == "complete" && message.text == planReady) {
                 planHandOff = model.agent.plan?.let { delegation to it.id }
@@ -242,6 +263,7 @@ internal class LiveVoiceBridge(
         const val ANSWER = "Ответ Alphy: "
         const val MINI_APP_STARTED = "Alphy готовит мини-приложение, оно появится на экране."
         const val MINI_APP_READY = "Мини-приложение готово. Ответ Alphy: "
+        const val SCREEN_FAILED = "Картинку показать не получилось."
         const val FAILED = "Alphy не смог выполнить запрос: "
         const val ON_SCREEN = "Нужно подтверждение на экране."
         const val PROPOSE = "Alphy предлагает: "
