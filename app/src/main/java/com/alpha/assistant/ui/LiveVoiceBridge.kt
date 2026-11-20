@@ -197,7 +197,7 @@ internal class LiveVoiceBridge(
 
     override fun ended(status: String, settingsRequired: Boolean) { watch?.cancel(); watch = null; capture = null; stageToolId = null }
 
-    /** Sends the mini-app progress and the result of each tracked message once (spec 5.5.5 to 5.5.8, 5.7.2). */
+    /** Sends the mini-app progress and the result of each tracked message once (spec 5.5.5 to 5.5.8, 5.7.2), and puts the app of each complete one on the stage. */
     private fun report() {
         val planReady = string(R.string.agent_plan_ready)
         for ((delegation, id) in handOffs) {

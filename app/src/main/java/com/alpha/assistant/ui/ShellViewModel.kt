@@ -1735,11 +1735,11 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         selectedText.isEmpty() && knownTools != null
                 }
                 val operationId = assistant.toolOperationId ?: assistant.id
+                suspend fun dialogue() = withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue
                 // A screen does not wait for the routing call: its plan call starts now, with no brief yet (plan D, Db4, ruling OD-4).
                 if (voiceScreen && stageToolId == null) {
-                    val dialogue = withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue
                     // A request too long for a plan prompt gets no early plan, and its routing decides as before.
-                    val prompt = try { ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = dialogue) } catch (_: CloudFailure) { null }
+                    val prompt = try { ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = dialogue()) } catch (_: CloudFailure) { null }
                     request.earlyPlan = prompt?.let { tools.startEarlyPlan(it, key, operationId) }
                 }
                 withContext(Dispatchers.IO) {
@@ -2013,7 +2013,6 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     // The voice says the answer of a screen now: the screen comes later, or not at all (plan D, Db2).
                     if (decoded.isScreen) bridge?.screenStarted(assistant.id, decoded.text, decoded.show)
                     if (screenChange) bridge?.changeStarted(assistant.id)
-                    suspend fun dialogue() = withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue
                     fun prompt(host: String) = try {
                         ChatToolReply.generationPrompt(user.text,decoded.brief,decoded.text,sources,selectedText,host)
                     } catch (failure: CloudFailure) {
