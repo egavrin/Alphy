@@ -23,18 +23,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
 import com.alpha.assistant.agent.AgentPlanCard
 import com.alpha.assistant.data.Conversation
 import com.alpha.assistant.data.Message
+import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.tools.ArtifactSnapshot
 import com.alpha.assistant.tools.CoveredToolSurface
 import com.alpha.assistant.tools.MiniAppActions
@@ -46,11 +46,18 @@ import com.alpha.assistant.tools.three.ThreeScenePane
 import com.alpha.assistant.voice.LivePhase
 
 /**
- * A card of the voice mode that waits for a tap: an error or an unsent request with its retry, or the refinement choices. The voice
- * speaks each other result, and the stage shows the app of a hand-off, so the stage shows no other card (plan D, Da1, Step 0).
+ * A card of the voice mode that the stage shows: a card that waits for a tap (an error or an unsent request with its retry, or the
+ * refinement choices), or a finished answer with a generated image, which the voice cannot speak. The voice speaks each other result, and
+ * the stage shows the app of a hand-off, so the stage shows no other card (plan D, Da1 Step 0, Da2 ruling 3).
  */
-internal fun waitsForATap(message: Message): Boolean =
-    message.status !in unfinishedStatuses && (message.status != "complete" || message.refinementChoices.isNotEmpty())
+internal fun showsOnTheStage(message: Message): Boolean = message.status !in unfinishedStatuses &&
+    (message.status != "complete" || message.refinementChoices.isNotEmpty() || message.attachments.any { it.mime == GeneratedImage.ATTACHMENT })
+
+/**
+ * The stage height around the drawing of an app: the padding, the kind label, the title, the first control, and the gaps (Da2 ruling 1).
+ * The label and the title take about 120 dp, and a slider with its label, the tallest first control, about 125 dp.
+ */
+private val STAGE_TEXT_HEIGHT = 256.dp
 
 /** What the voice mode does now (spec 5.2.4). A mute has no status of its own, because the microphone state of the strip shows it. */
 @StringRes private fun liveStatus(model: ShellViewModel): Int? = when {
@@ -63,25 +70,26 @@ internal fun waitsForATap(message: Message): Boolean =
 
 /**
  * The stage of the voice mode (plan D, Da1): all the space above the strip. It shows a card that waits for a tap and the plan of the
- * chat, then the app of the latest hand-off. Before the first app, it shows the Alphy character and the status.
+ * chat, then the app of the latest hand-off. Before the first app, it shows only the Alphy character, and the strip shows the status.
  */
 @Composable internal fun DialogueStage(model: ShellViewModel, chat: Conversation?, cardActions: MiniAppActions, openTool: (String) -> Unit,
     openAutomation: (String) -> Unit, settings: () -> Unit, modifier: Modifier) {
     var shareText by rememberSaveable { mutableStateOf<String?>(null) }
     var linkError by remember { mutableStateOf(false) }
     val tool = model.stageToolId?.let { id -> model.tools.tools.find { it.id == id } }
+    val fold = LocalConfiguration.current.smallestScreenWidthDp >= 600
     BoxWithConstraints(modifier.fillMaxWidth().testTag("dialogue_stage")) {
         // The gutter of an open mini-app (FocusedToolPane).
         val gutter = if (maxWidth >= 600.dp) 28.dp else 20.dp
         // In a short space, such as landscape with the keyboard, the decorative character goes.
         val character = minOf(160.dp, maxHeight / 4).takeIf { it >= 48.dp }
-        // The canvas height of an open mini-app (FocusedToolPane).
-        val canvasHeight = (maxHeight * 0.65f).coerceIn(120.dp, 560.dp)
+        // The canvas height of an open mini-app (FocusedToolPane), less at the fold size so the first control fits above the strip (Da2 ruling 1).
+        val canvasHeight = (if (fold) maxHeight - STAGE_TEXT_HEIGHT else maxHeight * 0.65f).coerceIn(120.dp, 560.dp)
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight)
             .padding(horizontal = gutter, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(15.dp, if (tool == null) Alignment.CenterVertically else Alignment.Top)) {
             if (chat != null) {
-                chat.messages.find { it.id == model.liveVoiceCardId }?.takeIf(::waitsForATap)?.let { message ->
+                chat.messages.find { it.id == model.liveVoiceCardId }?.takeIf(::showsOnTheStage)?.let { message ->
                     ChatMessageItem(model, chat, message, cardActions, openTool, openAutomation, showLivePreviews = true,
                         pairedToolId = null, pairedDraftId = null, share = { shareText = it }, settings = settings,
                         linkError = { linkError = true })
@@ -90,24 +98,20 @@ internal fun waitsForATap(message: Message): Boolean =
                 model.agent.plan?.takeIf { it.conversationId == chat.id }?.let { AgentPlanCard(model.agent, it) }
             }
             if (tool != null) StageApp(model.tools, tool, cardActions, canvasHeight)
-            else {
-                character?.let { AlphyCharacter(model.liveVoice, it, Modifier.testTag("live_voice_character")) }
-                // The strip reads the same status to a screen reader.
-                liveStatus(model)?.let {
-                    Text(stringResource(it), Modifier.semantics { hideFromAccessibility() }, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-                }
-            }
+            else character?.let { AlphyCharacter(model.liveVoice, it, Modifier.testTag("live_voice_character")) }
         }
     }
     shareText?.let { ShareTextToNotes(it) { shareText = null } }
     if (linkError) ChatLinkErrorDialog { linkError = false }
 }
 
-/** The app of the stage with its title, drawn as an open mini-app draws it (FocusedToolPane): a 3D scene, a drawing with its host, or the app. */
+/**
+ * The app of the stage, drawn as an open mini-app draws it (FocusedToolPane): a 3D scene, a drawing with its host, or the app. The app draws
+ * its title after its kind label. A 3D scene and a closed app draw no app, so the stage gives them the title.
+ */
 @Composable private fun StageApp(controller: ToolController, tool: ToolRecord, actions: MiniAppActions, canvasHeight: Dp) {
     val spec = remember(tool.spec, tool.ui, tool.state) { ToolSpec.availablePersisted(tool) }
-    Text(spec?.title ?: ToolSpec.storedTitle(tool.spec), Modifier.fillMaxWidth().semantics { heading() },
+    if (spec == null || spec.threeScene) Text(spec?.title ?: ToolSpec.storedTitle(tool.spec), Modifier.fillMaxWidth().semantics { heading() },
         style = MaterialTheme.typography.headlineSmall)
     if (spec == null) { Text(stringResource(R.string.tool_closed_format)); return }
     val enabled = !controller.busy && !actions.covers(tool.id)
@@ -116,7 +120,7 @@ internal fun waitsForATap(message: Message): Boolean =
     var snapshot by remember(host) { mutableStateOf<ArtifactSnapshot?>(null) }
     val content: @Composable () -> Unit = {
         MiniAppContent(controller, tool, tool, spec.title, enabled, graphicsHost = host, graphicsSnapshot = snapshot,
-            liveAllowed = !actions.covers(tool.id), allowVideo = true)
+            liveAllowed = !actions.covers(tool.id), allowVideo = true, dialogueTitle = spec.title)
     }
     when {
         spec.threeScene -> ThreeScenePane(controller, tool, spec, canvasHeight, null, enabled)
@@ -126,19 +130,23 @@ internal fun waitsForATap(message: Message): Boolean =
 }
 
 /**
- * The strip of the voice mode (plan D, Da1): the status with the voice indicator and the microphone state, then the composer row with
- * «+», the field, send, mute, and end (spec 5.7.1). [compact] makes the composer one row for the assistant sheet (spec 5.11.3).
+ * The strip of the voice mode (plan D, Da1): the status with the microphone state, then the composer row with «+», the field, send, mute,
+ * and end (spec 5.7.1). [compact] makes the composer one row for the assistant sheet (spec 5.11.3).
  */
 @Composable internal fun DialogueStrip(model: ShellViewModel, compact: Boolean, onEnd: () -> Unit, openContext: () -> Unit,
     settings: () -> Unit, onContextAnchorChanged: (ContextMenuAnchor?) -> Unit) {
     val voice = model.liveVoice
+    // shortcut: the card id read stands in for the hand-offs of the bridge, which are not state, until LiveVoiceBridge.working is state.
+    val status = model.liveVoiceCardId.let { liveStatus(model) }
     Column(Modifier.fillMaxWidth().testTag("dialogue_strip")) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            AlphyCharacter(voice, 28.dp)
+        // The row keeps the height of the small character, so the strip does not move when the first app comes.
+        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp).heightIn(min = 28.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // An empty stage shows the large character, so the strip shows the voice indicator only beside an app (Da2 ruling 2).
+            if (model.stageToolId != null) AlphyCharacter(voice, 28.dp, Modifier.testTag("live_voice_character"))
             // Each text is a polite live region, so a screen reader hears a new status and a new microphone state (spec 5.2.4).
-            Text(liveStatus(model)?.let { stringResource(it) }.orEmpty(), Modifier.weight(1f).then(PoliteLiveRegion),
+            Text(status?.let { stringResource(it) }.orEmpty(), Modifier.weight(1f).then(PoliteLiveRegion),
                 color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall)
             // While the mode connects, the phase is CONNECTING even with the microphone button off.
             Text(stringResource(if (voice.userMuted || voice.phase == LivePhase.MUTED) R.string.live_voice_mic_off else R.string.live_voice_mic_on),

@@ -499,12 +499,15 @@ private val miniAppOtherLanguage = mapOf(
     timerHost: com.alpha.assistant.timer.ForegroundTimerUiHost? = null,
     appLanguage: String? = null,
     courseSceneLayout: Boolean = false,
+    // Non-null lays the app out for the dialogue stage with this title (plan D, Da2).
+    dialogueTitle: String? = null,
     event: (String,Any?) -> Unit) {
     val root=remember(ui) {JSONObject(ui)}
     val values=remember(state) {JSONObject(state)}
     val withinLimits=remember(ui,state) {runCatching {ToolUiCatalog.validateRenderedWork(root,values)}.isSuccess}
     if(!withinLimits) {Text(stringResource(R.string.tool_render_limit)); return}
     val sceneSlot = remember(root, courseSceneLayout) { if (courseSceneLayout) courseSceneSlot(root) else null }
+    val split = remember(root, dialogueTitle) { dialogueTitle?.let { dialogueSplit(root) } }
     // A recreation can report interrupted input without restoring or sending any draft value.
     val notice = rememberSaveable { mutableStateOf<Int?>(null) }
     val reportLiveInput by rememberUpdatedState(onLiveInputState)
@@ -558,7 +561,10 @@ private val miniAppOtherLanguage = mapOf(
             LocalMiniAppControlsLanguage provides appLanguage) {
             Column(Modifier.fillMaxWidth()) {
                 edits.notice?.let { NativeLiveMessage(it) }
-                NativeNode(root,values,enabled,imageVersion,imageLoader,imageAvailable,guardedCalendar,false,heading,courseSceneSlot=sceneSlot) { id,payload ->
+                // A root with no split gets the title above it.
+                if (dialogueTitle != null && split == null) DialogueTitle(dialogueTitle, Modifier.padding(bottom = 12.dp))
+                NativeNode(root,values,enabled,imageVersion,imageLoader,imageAvailable,guardedCalendar,false,heading,courseSceneSlot=sceneSlot,
+                    dialogueSplit=split,dialogueTitle=dialogueTitle) { id,payload ->
                     if(enabled && runCatching {ToolUiCatalog.validateAction(root,id,payload,values)}.isSuccess && edits.allowAction()) event(id,payload)
                 }
             }
@@ -765,6 +771,66 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
     }
     if(selectable) SelectionContainer(modifier=modifier) {content()} else content()
 }
+/** The parts of an app on the dialogue stage by their role (plan D, Da2): indices of the children of the column under the theme root. */
+internal data class DialogueSplit(val leading: List<Int>, val main: List<Int>, val side: List<Int>)
+
+/**
+ * The split of a theme over one column, or of a column. The kind label leads. The main visual (a drawing, a 3D model, or a deck) and each
+ * next part up to the first card or list go to [DialogueSplit.main], and each other part goes to [DialogueSplit.side]. Null for another
+ * root, and for a column whose style or children place the parts themselves.
+ */
+internal fun dialogueSplit(root: JSONObject): DialogueSplit? {
+    val column = when (root.optString("type")) {
+        "column" -> root
+        "theme" -> root.optJSONArray("children")?.takeIf { it.length() == 1 }?.getJSONObject(0)?.takeIf { it.optString("type") == "column" }
+        else -> null
+    } ?: return null
+    if (column.has("layout") || column.optJSONObject("style")?.let { it.has("align") || it.has("arrangement") } == true) return null
+    val items = column.optJSONArray("children")?.let { List(it.length(), it::getJSONObject) } ?: return null
+    if (items.any { it.has("layout") }) return null
+    val label = items.firstOrNull()?.let { it.optString("type") == "text" && it.optJSONObject("style")?.optString("emphasis") == "label" } == true
+    val leading = if (label) listOf(0) else emptyList()
+    val main = (leading.size until items.size).firstOrNull { mainVisual(items[it]) }?.let { start ->
+        (start until items.size).takeWhile { it == start || items[it].optString("type") !in setOf("card", "list") }
+    }.orEmpty()
+    return DialogueSplit(leading, main, (leading.size until items.size).filter { it !in main })
+}
+
+/** A drawing or a 3D model is a card that holds only a canvas, so a timer card with its bar is not one. A deck is a section with a hero card. */
+private fun mainVisual(node: JSONObject): Boolean {
+    val children = node.optJSONArray("children")?.let { List(it.length(), it::getJSONObject) }.orEmpty()
+    return when (node.optString("type")) {
+        "canvas" -> true
+        "card" -> children.isNotEmpty() && children.all { it.optString("type") == "canvas" }
+        "section" -> children.any { it.optString("type") == "card" && it.optString("variant") == "hero" }
+        else -> false
+    }
+}
+
+/** The title of an app on the dialogue stage. The stage draws no title of its own. */
+@Composable private fun DialogueTitle(text: String, modifier: Modifier = Modifier) =
+    Text(text, modifier.fillMaxWidth().semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
+
+/**
+ * The column of an app on the dialogue stage: the kind label, the title, then the main visual with its controls at the left (3/5) and the
+ * other parts at the right (2/5) at the fold and the tablet size (plan D, values table), or each part in its order in one column.
+ */
+@Composable private fun DialogueColumns(modifier: Modifier, split: DialogueSplit, title: String?, gap: Dp,
+    renderChild: @Composable (Int, Modifier) -> Unit) {
+    BoxWithConstraints(modifier) {
+        val pair = split.main.isNotEmpty() && split.side.isNotEmpty() && maxWidth >= 600.dp &&
+            LocalConfiguration.current.smallestScreenWidthDp >= 600 && LocalDensity.current.fontScale <= 1.3f
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+            split.leading.forEach { renderChild(it, Modifier) }
+            title?.let { DialogueTitle(it) }
+            if (pair) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                Column(Modifier.weight(3f), verticalArrangement = Arrangement.spacedBy(gap)) { split.main.forEach { renderChild(it, Modifier) } }
+                Column(Modifier.weight(2f), verticalArrangement = Arrangement.spacedBy(gap)) { split.side.forEach { renderChild(it, Modifier) } }
+            } else (split.main + split.side).sorted().forEach { renderChild(it, Modifier) }
+        }
+    }
+}
+
 private val courseSceneControls = setOf("slider", "numberInput", "toggle", "checkbox", "button", "select", "segmented")
 
 private fun courseSceneSlot(root: JSONObject): Int? {
@@ -820,7 +886,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
 @OptIn(ExperimentalLayoutApi::class,ExperimentalMaterial3Api::class)
 @Composable private fun NativeNode(node: JSONObject, state: JSONObject, parentEnabled: Boolean, imageVersion: Any?,
     imageLoader: suspend (String) -> Bitmap?, imageAvailable: suspend (String) -> Boolean, calendarHost: OwnedCalendarUiHost?, compact: Boolean, heading: String?, placement: Modifier = Modifier,
-    secondaryButton: Boolean = false, namedByTitle: Boolean = false, courseSceneSlot: Int? = null, event: (String,Any?) -> Unit) {
+    secondaryButton: Boolean = false, namedByTitle: Boolean = false, courseSceneSlot: Int? = null, dialogueSplit: DialogueSplit? = null,
+    dialogueTitle: String? = null, event: (String,Any?) -> Unit) {
     if(!ToolUiCatalog.visible(node,state)) return
     val type=node.getString("type")
     val definition=ToolUiCatalog.component(type)
@@ -889,7 +956,12 @@ private fun courseSceneSlot(root: JSONObject): Int? {
         }
         "theme" -> NativePreset(node.getString("preset"), node.optInt("cornerRadius", -1).takeIf { it >= 0 }, node.optDouble("typeScale",1.0),
             node.optString("palette").ifEmpty { null }, node.optBoolean("dark")) {
-            Column(modifier,verticalArrangement=verticalArrangement(style,gap),horizontalAlignment=alignment(style),content={content()})
+            Column(modifier,verticalArrangement=verticalArrangement(style,gap),horizontalAlignment=alignment(style)) {
+                // A split of the dialogue stage is the split of the single column of the theme.
+                if (dialogueSplit == null) content()
+                else NativeNode(checkNotNull(children).getJSONObject(0),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,
+                    dialogueSplit=dialogueSplit,dialogueTitle=dialogueTitle,event=event)
+            }
         }
         // Motion animates its children as one group. A Box would draw them on top of each other.
         "motion" -> NativeMotion(node,state,modifier) {
@@ -923,8 +995,11 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 if (weighted) BoxWithConstraints(position, propagateMinConstraints = true) { body(Modifier, constraints.hasBoundedHeight) }
                 else body(position, false)
             }
-            if (courseSceneSlot == null) column(containerModifier)
-            else CourseSceneSlots(containerModifier, courseSceneSlot, items.length(), gap, renderChild)
+            when {
+                dialogueSplit != null -> DialogueColumns(containerModifier, dialogueSplit, dialogueTitle, gap, renderChild)
+                courseSceneSlot == null -> column(containerModifier)
+                else -> CourseSceneSlots(containerModifier, courseSceneSlot, items.length(), gap, renderChild)
+            }
         }
         "box" -> Box(modifier,contentAlignment=boxAlignment(style?.optString("align"))) {
             repeat(checkNotNull(children).length()) {index ->

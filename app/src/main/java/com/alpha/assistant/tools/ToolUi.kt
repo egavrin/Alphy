@@ -965,7 +965,8 @@ private fun hasLiveControl(node: JSONObject): Boolean {
 @Composable internal fun MiniAppContent(controller: ToolController, tool: ToolRecord, displayed: ToolRecord?, heading: String,
     enabled: Boolean, embedded: Boolean = false, routeSystemBackEnabled: Boolean = true,
     graphicsHost: ArtifactUiHost? = null, graphicsSnapshot: ArtifactSnapshot? = null, openNonGraphics: Boolean = false,
-    liveAllowed: Boolean = true, allowVideo: Boolean = false, onLiveInputState: (Boolean, Boolean) -> Unit = { _, _ -> }) {
+    liveAllowed: Boolean = true, allowVideo: Boolean = false, onLiveInputState: (Boolean, Boolean) -> Unit = { _, _ -> },
+    dialogueTitle: String? = null) {
     val navigationContext = LocalContext.current
     val navigationLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     val navigationForeground = {
@@ -1066,7 +1067,7 @@ private fun hasLiveControl(node: JSONObject): Boolean {
                 else controller.nativeImageAvailable(tool.id, handle)
             },
             routeSystemBackEnabled = routeSystemBackEnabled, liveInput = liveInput, videoHost = videoHost, timerHost = timerHost,
-            onLiveInputState = onLiveInputState, appLanguage = spec?.appLanguage) {id,value ->
+            onLiveInputState = onLiveInputState, appLanguage = spec?.appLanguage, dialogueTitle = dialogueTitle) {id,value ->
             if (value == null && visibleUi?.let { ToolUiCatalog.action(it, id)?.optString("type") } == "button") {
                 controller.queueLocalButton(current, id, buttonHost) { buttonHost.get() && currentVisibility && navigationForeground() }
             } else controller.interact(current,id,value,deviceHost,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}

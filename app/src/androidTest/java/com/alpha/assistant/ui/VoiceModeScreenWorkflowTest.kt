@@ -160,12 +160,14 @@ class VoiceModeScreenWorkflowTest {
         }
     }
 
-    /** Plan D, Da1: before the first hand-off, the stage holds the character and the status, and no app. */
+    /** Plan D, Da1 and Da2 ruling 2: before the first hand-off, the stage holds the character and no app, and only the strip holds the status. */
     @Test fun stageShowsTheCharacterBeforeTheFirstScreen() {
         install()
         voiceMode { scenario, model ->
-            robot.waitUntil { inStage(scenario, robot.text(R.string.live_voice_listening)) }
+            robot.waitUntil { inStrip(scenario, robot.text(R.string.live_voice_listening)) }
             assertTrue(robot.composedIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.TestTag) == CHARACTER })
+            assertFalse(inStage(scenario, robot.text(R.string.live_voice_listening)))
+            assertFalse(robot.composedIn(scenario, STRIP) { it.getOrNull(SemanticsProperties.TestTag) == CHARACTER })
             assertNull(model.stageToolId)
         }
     }

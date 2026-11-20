@@ -92,7 +92,7 @@ The dialogue mode is one full screen with two zones.
 
 **The stage** takes all the space above the strip.
 
-- Before the first screen, the stage shows the Alphy character and the status text, as the voice screen does today.
+- Before the first screen, the stage shows only the Alphy character, and the strip shows the status and the microphone state with no small character. With a screen, the strip also shows the small character beside the status.
 - With a screen, the stage shows the app: its kind label, its title, and its parts. The stage scrolls when the app is taller than its space.
 - At the phone size the parts stand in one column, as in the four phone mocks.
 - At the fold and the tablet size the stage has two columns, as in the wide mocks: the main visual with its controls at the left, and the cards (the focus card, the lesson step, the question) at the right. The host places the parts by their role, and the role comes from the kind of the part. The main visual is the first drawing, 3D model, picture, or deck, and the inputs and buttons that change it stay under it. A card, a lesson, a question, a text, a figure, and a list go to the second column. A screen with no main visual stays one column. A plan does not name columns.
