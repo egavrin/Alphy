@@ -1747,6 +1747,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         chatDecision = true,selectedText = selectedText,weatherLocation = { resolveWeatherPlace(request) },
                         validateOperation = ::validateOperation, allowCourseDecision = courseHost != null && !next.voice,
                         voiceScreen = voiceScreen, shownScreen = shownScreen,
+                        spokenContext = if (next.voice) ChatToolReply.spokenContext(before) else null,
                         allowChatImage = !assistant.requiresRefinement, chatImageEnabled = chatImageSelection != null,
                         decisionContext = ChatDecisionContext(originalTurn, turns(cleanHistory), toolInstructions, inputProvenance, memoryStore),
                         automationDraftChatId = draftChat, screenContext = user.screenContext, screenImages = screenImages,
