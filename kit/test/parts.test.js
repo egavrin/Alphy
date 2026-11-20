@@ -104,8 +104,8 @@ test("entries: a time field and a switch in the row, and a delete that asks firs
 test("entries: a date field, the add form in a dialog, and rows in groups by day", async () => {
   const trip = await planned('app("T")\nneed acts = entries("Plan", fields={what: "text", day: ["Sat", "Sun"], time: "time", date: "date"}, sheet=true, group=$day, sort=[$day, $time], rows=[{what: "Hike", day: "Sun", time: "09:00", date: "2026-11-22"}, {what: "Dinner", day: "Sat", time: "19:00", date: "2026-11-21"}, {what: "Museum", day: "Sat", time: "10:00", date: "2026-11-21"}])');
   const tr = new App(trip);
-  // A heading of a group, or the title of a row: the first text of the column at the start of the row.
-  const shown = (children) => children.map((child) => (child.type === "Heading" ? "# " + child.props.text : child.children[0].children[0].props.text));
+  // A heading of a group, or the title of a row: the text at the start of the row. The row leaves out the day of its group (L2 decision 2).
+  const shown = (children) => children.map((child) => (child.type === "Heading" ? "# " + child.props.text : child.children[0].props.text));
   same(shown(tr.find("acts_list").children), ["# Sat", "Museum", "Dinner", "# Sun", "Hike"], "a heading for each day, and time order inside a day");
   same([tr.find("acts_addRow").type, tr.find("acts_addRow").props.visible, tr.find("acts_new_date").type, /^\d{4}-\d{2}-\d{2}$/.test(tr.find("acts_new_date").props.value), tr.press("acts_open"), tr.find("acts_addRow").props.visible],
     ["Dialog", false, "DateField", true, "", true], "the add form opens in a dialog, and a new date starts at today");

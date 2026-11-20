@@ -155,6 +155,39 @@ test("entries (L2 decision 1): the value cells of a row are one group with no we
   expect(shared).toEqual(["plans/section.plan: streak_text_text", "test/looks.plan: price", "test/fixtures/look-shopping-it.plan: qty"]);
 });
 
+// L2 decision 2 (showcase-ui-trip-dates-v5): under the heading "2026-11-21" of a grouped list each row showed "2026-11-21" again.
+test("entries (L2 decision 2): a row of a list with group=$field leaves that field out when the row cannot change it, and the add form and the data keep it", async () => {
+  const trip = await built('app("T", lang="en")',
+    'need trip = entries("Trip", fields={day: "date", time: "time", activity: "text"}, group=$day, sort=[$day, $time], icon="📍", rows=[{day: "2026-11-21", time: "09:00", activity: "Breakfast"}])');
+  const list = every(trip.definition.ui).find((node) => node.rowTemplate);
+  expect([list.groupBy, every(list.rowTemplate).map((node) => node.bind).filter(Boolean)]).toEqual(["day", ["activity", "trip_time_text"]]);
+  // The add form keeps its day field, and the row keeps its day in the data.
+  expect([every(trip.definition.ui).filter((node) => node.action === "trip_new_day").length, trip.definition.initialState.trip[0].day]).toEqual([1, "2026-11-21"]);
+  // A choice that was the line under the title goes, and a check mark stays: a person changes it in the row.
+  const fields = 'fields={name: "text", kind: ["Clothes", "Tools"], packed: "check"}';
+  const pack = rowOf((await built('app("T", lang="en")', `need pack = entries("Pack", ${fields}, group=$kind)`)).definition);
+  expect(pack.children.map((node) => [node.type, node.bind])).toEqual([["text", "name"], ["checkbox", "packed"], ["icon", undefined]]);
+  const marked = rowOf((await built('app("T", lang="en")', `need pack = entries("Pack", ${fields}, group=$packed)`)).definition);
+  expect(every(marked).filter((node) => node.bind === "packed").map((node) => node.type)).toEqual(["checkbox"]);
+  // With edit=true the row keeps the control of its group field (holdout-reading-es).
+  const edit = rowOf((await built('app("T", lang="en")', `need pack = entries("Pack", ${fields}, group=$kind, edit=true)`)).definition);
+  expect(every(edit).filter((node) => node.bind === "kind").map((node) => node.type)).toEqual(["segmented"]);
+  // In each model plan and saved plan, the row of a grouped list shows its group field only when the person edits the row.
+  const { allPlans } = await import("./helpers.js");
+  const { plansIn } = await import("../build.js");
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const models = plansIn(fileURLToPath(new URL("./fixtures/model", import.meta.url))).map((path) => [path, readFileSync(path, "utf8")]);
+  const shown = [];
+  for (const [path, text] of [...allPlans(), ...models]) {
+    const { definition } = await compileAppFile(text);
+    for (const node of (definition ? every(definition.ui) : []).filter((inner) => inner.groupBy)) {
+      if (every(node.rowTemplate).some((inner) => inner.bind === node.groupBy)) shown.push(`${path.replace(/.*kit\//, "")}: ${node.groupBy}`);
+    }
+  }
+  expect(shown).toEqual(["test/fixtures/model/holdout-reading-es.plan: estado"]);
+});
+
 test("entries: the row is a title with a muted second line, then the value cells, the check marks, and the remove button", async () => {
   const { definition } = await built('app("Spesa", lang="it")',
     'need items = entries("Prodotti", fields={name: "text", qty: "text", price: "money", aisle: ["Frutta", "Forno"], done: "check"}, labels={done: "Preso"})');

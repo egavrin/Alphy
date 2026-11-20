@@ -283,8 +283,9 @@ test("emit: each list, modal, and new input of the lists fixture becomes its Alp
   expect(definition.initialState.acts.map((row) => row.at)).toEqual([540, 1140, 600]);
   // A list and a row control announce the captions of their need: its title and its labels=. An icon button announces a word of the kit.
   expect(acts.children[0]).toEqual({ type: "groupedList", text: "Plan", bind: "acts_list", groupBy: "day", rowTemplate: { type: "row", wrap: false, style: { crossAlign: "center" }, children: [
-    // A choice that the row does not change (no edit=true) is the muted line under the one text of the row, and a time is a small label after them (C.1).
-    { type: "column", style: { gap: "none" }, layout: { weight: 1 }, children: [{ type: "text", text: "", bind: "what" }, { type: "text", text: "", bind: "day", style: { tone: "muted" } }] },
+    // L2 decision 2: the list has group=$day and the row does not change the day, so the heading of the group shows the day and the row leaves it out.
+    // The one text of the row takes the rest of the line, and a time is a small label after it (C.1).
+    { type: "text", text: "", bind: "what", layout: { weight: 1 } },
     // L2 decision 1: the value cells are one group with no weight, so the time keeps the width of its text.
     { type: "flowRow", layout: { maxWidth: 120 }, children: [{ type: "text", text: "", bind: "acts_at_text", style: { emphasis: "label" } }] },
     { type: "icon", name: "Trash", text: "Remove", action: "acts_remove" },
@@ -388,8 +389,8 @@ test("emit: each list holds the most rows that keep the full screen inside the r
     counts.push(count);
   }
   // rich.plan starts with each list full to its count, and one start row more is a fault of its need. The count group of a row of lists.plan is one node more (L1 item 1),
-  // and so is the group of the value cells of its grouped row (L2 decision 1).
-  expect(counts).toEqual([100, 77, 91, 100, 100]);
+  // and so is the group of the value cells of its grouped row (L2 decision 1). That grouped row has no day and no column for it (L2 decision 2).
+  expect(counts).toEqual([100, 83, 91, 100, 100]);
   const over = emit(await planned(rich.replace("rows=[", 'rows=[{name: "Extra", size: "M", done: false}, ')));
   expect(over.definition).toBeNull();
   expect(over.faults).toEqual([expect.stringMatching(/^need shirts: \$\/shirts starts with 92 rows, .*91/)]);

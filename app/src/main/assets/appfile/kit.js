@@ -1278,7 +1278,11 @@ const PARTS = {
     // More than 2 check marks are circles of one weight in a second row (C.3).
     const many = fields.filter(([, kindTree]) => kindTree.v === "check").length > 2;
     const kindOf = (kindTree) => (kindTree.k === "list" ? "choice" : own(FIELD_KINDS, kindTree.v) ?? "text");
-    const others = fields.filter(([field]) => field !== sign);
+    // group=$field: Alphy shows the value of the field as the heading of each group, so a row that cannot change the field leaves it out (L2 decision 2).
+    // A check mark, a switch, and a count change in the row, so they stay. The add form and the data keep the field.
+    const grouped = opt.group?.k === "path" && !opt.group.abs && opt.group.segs.length === 1 ? fields.find(([field]) => field === opt.group.segs[0]) : undefined;
+    const heading = !edit && grouped && !["check", "switch", "count", "picture"].includes(kindOf(grouped[1])) ? grouped[0] : null;
+    const others = fields.filter(([field]) => field !== sign && field !== heading);
     // In a row with one text, a choice that the row does not change is the muted line under the title: as a label beside it, "Frutta e verdura" broke into two lines.
     const under = !edit && others.filter(([, kindTree]) => kindOf(kindTree) === "text").length === 1 ? others.find(([, kindTree]) => kindOf(kindTree) === "choice")?.[0] : undefined;
     let firstText = null;
@@ -1290,7 +1294,7 @@ const PARTS = {
       const named = q(labels.get(field) ?? label(field));
       const pick = (text, bind, more = "") => `${choice && kindTree.items.length <= 4 ? "Segmented" : "Select"}(${text}, ${bind}, ${choice}${more})`;
       // The cell of the row: a check mark, a choice, a field that the person can change, a text of the title column, or a small label of a value.
-      if (field === sign || field === under) /* the emoji of the row, or the line under its title */;
+      if (field === sign || field === under || field === heading) /* the emoji of the row, the line under its title, or the heading of its group */;
       else if (kind === "check") lines.push(`${name}_${field} = CheckBox(${named}, $${field}${many ? ', variant="circle", weight=1' : ""})`);
       else if (kind === "switch") lines.push(`${name}_${field} = Toggle(${named}, $${field})`);
       else if (kind === "count") {
@@ -1308,7 +1312,7 @@ const PARTS = {
       else if (kind !== "text") lines.push(`${name}_${field} = Text($${field}, emphasis="label")`);
       else texts.push(field);
       if (kind === "text" && field !== sign) firstText ??= field;
-      if (field !== sign && field !== under && kind !== "count" && !(kind === "text" && !edit)) (kind === "check" ? marks : kind === "text" ? typedTexts : cells).push(`${name}_${field}`);
+      if (field !== sign && field !== under && field !== heading && kind !== "count" && !(kind === "text" && !edit)) (kind === "check" ? marks : kind === "text" ? typedTexts : cells).push(`${name}_${field}`);
       if (!canAdd) continue;
       // A new row starts with no check mark, with its switch on, and with no picture.
       if (["check", "switch", "picture"].includes(kind)) { blank.push(`${field}: ${{ check: "false", switch: "true", picture: '""' }[kind]}`); continue; }
