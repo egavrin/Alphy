@@ -1,5 +1,5 @@
-// The sandbox entry of the kit: an app file in, the report of the host and the app definition out. kit/build.js makes compileAppFile,
-// patchAppFile, readPlanReply, and compileStep (one step of the host with the other three) the globals of the bundle.
+// The compile of the kit: an app file in, the report of the host and the app definition out. kit/build.js makes compileStep (one step of
+// the host with compileAppFile, patchAppFile, and readPlanReply) the one global of the bundle: the sandbox entry.
 
 import { AppFile, HEADS } from "./dsl.js";
 import { expand } from "./parts.js";
@@ -26,7 +26,7 @@ function build(text) {
 /**
  * The faults hold the line faults and the report faults, or, when the report is clean, what the emitter cannot build yet.
  * A definition comes only with no fault. A throw inside the kit is the one fault "kit: <message>".
- * The host reads the result as a promise (AppFileCompiler.kt: compileAppFile(...).then(JSON.stringify)), so the entry stays async.
+ * The host reads the result through compileStep as a promise (AppFileCompiler.kt: compileStep(...).then(JSON.stringify)).
  * hole is true when the file has a need of kind hole, also with faults: the plan step of the app gives such a plan to its loop.
  * previous is the stored app {appFile, stateSchema, state} of a change: then state is the next state of the stored one (nextState), else null.
  * blockedBySavedData is true when a saved value of the person blocks the change (each fault holds BLOCKS), and savedDataMismatch is true for

@@ -1,4 +1,4 @@
-// The sandbox entry: compileAppFile from the sources, the built bundle in a context with only the language's globals, and the build's own rules.
+// The compile of the kit from the sources, the sandbox entry compileStep of the built bundle in a context with only the language's globals, and the build's own rules.
 
 import { expect, test } from "bun:test";
 import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -213,21 +213,19 @@ test("compileStep (U-K item 2): a change merges the reply into the stored app fi
   await expect(step({ text: reply, plan: shopping, previous: { ...previous, state: "{" } })).rejects.toThrow();
 });
 
-test("bundle: it defines only compileAppFile, patchAppFile, readPlanReply, and compileStep, and the sandbox expression compiles calc.plan, patches a plan, reads a reply, and runs a step through them", async () => {
+test("bundle: it defines only compileStep, and the script of the host compiles calc.plan, reads a reply, and merges a repair reply through it", async () => {
   // The sandbox has no structuredClone and no host API: a fresh context of the language is closer to it than Bun's own.
   const context = createContext();
   const names = () => [...runInContext("Object.getOwnPropertyNames(globalThis)", context)];
   const before = names();
-  const text = await runInContext(`${await bundle()}\ncompileAppFile(${JSON.stringify(plan("calc"))}).then(JSON.stringify)`, context);
-  expect(names().filter((name) => !before.includes(name))).toEqual(["compileAppFile", "patchAppFile", "readPlanReply", "compileStep"]);
-  const input = { text: 'need tip = input("percent", "Tip", 20)', plan: plan("calc"), read: true, previous: null, cap: 65536 };
-  expect(JSON.parse(await runInContext(`compileStep(${JSON.stringify(input)}).then(JSON.stringify)`, context))).toEqual(JSON.parse(JSON.stringify(await compileStep(input))));
-  for (const reply of ["```\noutside(\"game\")\n```", "```\n" + plan("calc") + "```"]) {
-    expect(JSON.parse(runInContext(`JSON.stringify(readPlanReply(${JSON.stringify(reply)}))`, context))).toEqual(readPlanReply(reply));
+  runInContext(await bundle(), context);
+  expect(names().filter((name) => !before.includes(name))).toEqual(["compileStep"]);
+  // The script of the host (AppFileCompiler.kt): compileStep(...).then(JSON.stringify).
+  const calc = plan("calc"), reply = 'need tip = input("percent", "Tip", 20)\ndelete people';
+  for (const input of [{ text: calc, plan: null, read: false }, { text: '```\noutside("game")\n```', plan: null, read: true }, { text: "```\n" + calc + "```", plan: null, read: true }, { text: reply, plan: calc, read: true }]) {
+    const step = { ...input, previous: null, cap: 65536 }, text = await runInContext(`compileStep(${JSON.stringify(step)}).then(JSON.stringify)`, context);
+    expect(JSON.parse(text)).toEqual(JSON.parse(JSON.stringify(await compileStep(step))));
   }
-  expect(JSON.parse(text)).toEqual(JSON.parse(JSON.stringify(await compileAppFile(plan("calc")))));
-  const reply = 'need tip = input("percent", "Tip", 20)\ndelete people';
-  expect(runInContext(`patchAppFile(${JSON.stringify(plan("calc"))}, ${JSON.stringify(reply)})`, context)).toBe(patchAppFile(plan("calc"), reply));
 });
 
 test("bundle: an import that the build cannot keep is an error of the build", () => {
