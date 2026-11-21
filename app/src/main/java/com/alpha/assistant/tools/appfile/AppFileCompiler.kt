@@ -2,12 +2,15 @@ package com.alpha.assistant.tools.appfile
 
 import android.content.Context
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.StagePreviewFrame
 import com.alpha.assistant.tools.ToolSpec
 import org.json.JSONException
 import org.json.JSONObject
 
 internal const val APP_FILE_COMPILE_MS=3000L
 internal const val APP_FILE_RETURN_BYTES=384*1024
+/** The deadline of one stage preview update in its new transient isolate (gate 1a: 65 ms median at the phone size, 93 ms at the fold size). */
+internal const val APP_FILE_PREVIEW_MS=1000L
 /** The longest plan that the compile step reads. The longest saved plan of the kit has 2314 characters. */
 internal const val APP_FILE_MAX_CHARS=65536
 private const val KIT_ASSET="appfile/kit.js"
@@ -21,10 +24,14 @@ private const val TOO_LONG="the plan has "
  * savedDataMismatch when the stored state does not fit its stored app file.
  * A template file (kit/src/template.js) also gives template (its word), kept (the text to store), expanded (the app file of kept), and leftOut
  * (the names of the lines that it left out). Its definition also comes with the faults of those lines, so its status is then faults.
+ * frameJson is the frame of a compile with a definition (kit frameOf): {ui, state, drawing, holds} with no definition.
  */
 internal data class AppFileCompilation(val status: String,val faults: List<String>,val notes: List<String>,val definition: String?,val language: String?,
     val hole: Boolean=false,val state: String?=null,val blockedBySavedData: Boolean=false,val savedDataMismatch: Boolean=false,
-    val template: String?=null,val kept: String?=null,val expanded: String?=null,val leftOut: List<String> = emptyList()) {
+    val template: String?=null,val kept: String?=null,val expanded: String?=null,val leftOut: List<String> = emptyList(),
+    val frameJson: String?=null) {
+    /** The frame that the stage shows while the host check runs, read only when a caller needs it. Null with no definition. */
+    val frame: StagePreviewFrame? get()=frameJson?.let {stagePreviewFrame(JSONObject(it),definition)}
     /** The text is longer than the compile step reads. A repair call cannot shorten it in a useful way. */
     val tooLong get()=faults.any {it.startsWith(TOO_LONG)}
     /** The saved data of the person stops the compile: one of the two flags of the kit. No reader tells the two apart. */
@@ -53,6 +60,25 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
     suspend fun compileReply(reply: String): AppFileRead=evaluate(reply,null,true,null)
     /** A repair reply or a change reply merged into plan. Plan.text is the merged plan, or plan when no merge ran. */
     suspend fun patch(plan: String,reply: String,previous: AppFilePrevious?=null): AppFileRead=evaluate(reply,plan,true,previous)
+
+    /**
+     * The frame of the complete lines [text] of a streamed reply (kit previewStep), merged into [plan] with the stored app [previous] of a
+     * change. It runs in a new transient isolate with the deadline [APP_FILE_PREVIEW_MS]. A busy slot, a deadline, and a step with no frame
+     * give null, so the stream skips this update.
+     */
+    suspend fun preview(text: String,plan: String?,previous: AppFilePrevious?): StagePreviewFrame? {
+        if(listOfNotNull(text,plan,previous?.appFile).any {it.length>APP_FILE_MAX_CHARS}) return null
+        val input=JSONObject().put("text",text).put("plan",plan ?: JSONObject.NULL)
+            .put("previous",previous?.let {JSONObject().put("appFile",it.appFile).put("stateSchema",it.stateSchema).put("state",it.state)} ?: JSONObject.NULL)
+        val hold=previewHoldMs.takeIf {it>0}?.let {"(()=>{const end=Date.now()+$it;while(Date.now()<end){}})();\n"}.orEmpty()
+        val result=sandbox.evaluateScript(kit,"${hold}Promise.resolve(previewStep(JSON.parse(${JSONObject.quote(input.toString())}))).then(JSON.stringify)",
+            APP_FILE_PREVIEW_MS,APP_FILE_RETURN_BYTES)
+        if(result.status!="OK") return null
+        return try {
+            val json=JSONObject(checkNotNull(result.json))
+            if(json.getString("kind")!="preview") null else json.getJSONObject("frame").let {stagePreviewFrame(it,it.get("definition").toString())}
+        } catch(_: JSONException) {null} catch(_: IllegalStateException) {null} catch(_: IllegalArgumentException) {null}
+    }
 
     private suspend fun evaluate(text: String,plan: String?,read: Boolean,previous: AppFilePrevious?): AppFileRead {
         val given=plan ?: text
@@ -91,6 +117,18 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
         return AppFileCompilation(if(definition!=null && faults.isEmpty()) "ok" else "faults",faults,texts("notes"),definition,
             text("language"),json.getBoolean("hole"),objectText("state"),
             blockedBySavedData=json.getBoolean("blockedBySavedData"),savedDataMismatch=json.getBoolean("savedDataMismatch"),
-            template=text("template"),kept=text("kept"),expanded=text("expanded"),leftOut=textsOrEmpty("leftOut"))
+            template=text("template"),kept=text("kept"),expanded=text("expanded"),leftOut=textsOrEmpty("leftOut"),frameJson=objectText("frame"))
     }
+
+    companion object {
+        /** Test seam (Tasks 17 and 20): a value above 0 adds a busy wait of that many milliseconds inside each preview script, so the transient slot stays held. */
+        @Volatile internal var previewHoldMs=0L
+    }
+}
+
+/** The frame of a kit frame object with [definition], or null with no definition or with a definition that the host does not take. */
+private fun stagePreviewFrame(frame: JSONObject,definition: String?): StagePreviewFrame?=definition?.let {
+    try {
+        StagePreviewFrame(ToolSpec.parse(it),frame.get("ui").toString(),frame.get("state").toString(),frame.optJSONObject("drawing")?.toString(),frame.getString("holds"))
+    } catch(_: JSONException) {null} catch(_: IllegalArgumentException) {null}
 }

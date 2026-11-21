@@ -6,6 +6,7 @@ import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.AppFileLimits
 import com.alpha.assistant.tools.AppFileReply
+import com.alpha.assistant.tools.StagePreviewFrame
 import com.alpha.assistant.tools.ToolGenerationProgress
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.holdsDataOfThePerson
@@ -17,7 +18,9 @@ import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.AppFileRead
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.util.Locale
 
@@ -87,9 +90,16 @@ internal object AppFileNames {
     enum class PlanSkip { PLAN_STEP, PLAN_CALL, LESSON, IMAGES, SCENE_ASSETS, TEST_FIX;
         val phase get() = "plan_skipped:" + name.lowercase(Locale.ROOT)
     }
+    // The stage previews of a screen run (stage templates, Task 16): a frame that the stage shows, with a detail of PREVIEW_HOLDS, a
+    // shown frame that went away with no app, and the end of busy after an accepted screen run.
+    const val STAGE_PREVIEW = "stage_preview"
+    const val STAGE_PREVIEW_GONE = "stage_preview_gone"
+    const val CONTROLS_ON = "controls_on"
+    /** The holds value of a frame (kit previewStep): the first line, parts, the card, or a whole compiled plan. */
+    val PREVIEW_HOLDS = setOf("frame", "parts", "card", "whole")
     val PHASES = setOf(PLAN_CALL_START, PLAN_FIRST_TEXT, PLAN_REPLY_END, COMPILE, REPAIR_CALL_START, CHANGE_CALL_START, PLAN_OUTCOME,
-        EARLY_PLAN_START, EARLY_PLAN_USED, EARLY_PLAN_CANCELED, TEMPLATE_CALL_START, TEMPLATE_OUTCOME) +
-        HOST_CHECK_RETRIES.map { HOST_CHECK_RETRY + it } + PlanSkip.entries.map { it.phase }
+        EARLY_PLAN_START, EARLY_PLAN_USED, EARLY_PLAN_CANCELED, TEMPLATE_CALL_START, TEMPLATE_OUTCOME, STAGE_PREVIEW, STAGE_PREVIEW_GONE,
+        CONTROLS_ON) + HOST_CHECK_RETRIES.map { HOST_CHECK_RETRY + it } + PlanSkip.entries.map { it.phase }
 
     // The reasons of a ScreenFallback that has no plan outcome. They are not on the trace.
     /** The plan step cannot run for this screen run, for example because the switch is off. */
@@ -114,8 +124,10 @@ internal sealed interface AppFileOutcome {
     /**
      * [definition] holds the key language of the compile, as a model definition does. [calls] counts the model calls.
      * [state]: the next state that the kit computed from the stored state of a change. Null for a new app.
+     * [frame]: the frame of the compile, which the stage shows while the host check runs.
      */
-    class Clean(val appFile: String, val definition: JSONObject, val calls: Int, val state: String? = null) : AppFileOutcome
+    class Clean(val appFile: String, val definition: JSONObject, val calls: Int, val state: String? = null,
+        val frame: StagePreviewFrame? = null) : AppFileOutcome
     class Outside(val word: String) : AppFileOutcome
     /** [reason] is a reason of the trace detail fallback:<reason>. */
     class Fallback(val reason: String) : AppFileOutcome
@@ -125,8 +137,14 @@ internal sealed interface AppFileOutcome {
  * A screen of a spoken talk. Only the plan step builds it, never the loop: the voice has answered, and a screen from the loop comes too late.
  * [early]: the outcome of the plan call that started beside the routing call (ToolController.startEarlyPlan). Null: the run makes its own plan call.
  * [template]: the task of the template call of a new screen (AppFileSteps.screen). Null: the run sends only the plan call.
+ * [preview]: shows a frame on the stage (ToolController sets it). It gets the frame of each complete line of a template call and the frame
+ * of a clean plan before its host check. It never blocks. Null: the run shows no frame.
  */
-internal class ScreenRun(val early: Deferred<AppFileOutcome>? = null, val template: String? = null)
+internal class ScreenRun(val early: Deferred<AppFileOutcome>? = null, val template: String? = null,
+    val preview: ((StagePreviewFrame) -> Unit)? = null)
+
+/** The app-file call of the plan step and the change step: stage, instructions, input, limits, and a consumer of each text delta. */
+internal typealias AppFileCall = suspend (CloudGenerationStage, String, String, AppFileLimits, ((String) -> Unit)?) -> AppFileReply
 
 /**
  * A screen run that gave no app. [reason] is a name of [AppFileNames], such as faults. [inner]: the plan outcome behind
@@ -153,13 +171,12 @@ internal const val SANDBOX_RETRY_MS = 500L
 internal class AppFileSteps(
     private val compiler: AppFileCompiler,
     val prompt: AppFilePrompt,
-    private val call: suspend (CloudGenerationStage, String, String, AppFileLimits) -> AppFileReply,
+    private val call: AppFileCall,
     private val phase: (String, String?, Long?) -> Unit,
     private val progress: (ToolGenerationProgress) -> Unit,
 ) {
     /** The steps with the compiler and the prompt of [sandbox]. */
-    constructor(sandbox: SandboxClient, call: suspend (CloudGenerationStage, String, String, AppFileLimits) -> AppFileReply,
-        phase: (String, String?, Long?) -> Unit, progress: (ToolGenerationProgress) -> Unit) :
+    constructor(sandbox: SandboxClient, call: AppFileCall, phase: (String, String?, Long?) -> Unit, progress: (ToolGenerationProgress) -> Unit) :
         this(AppFileCompiler(sandbox.context, sandbox), AppFilePrompt.load(sandbox.context), call, phase, progress)
 
     /** Sends [task] (the generation prompt of the request) to the plan call. */
@@ -171,10 +188,12 @@ internal class AppFileSteps(
     /**
      * A new screen of a spoken talk: sends [templateTask] to the template call. A reply outside sends [planTask] to the plan call ([plan]).
      * A template with a definition is the app with its kept text, also with lines that the kit left out after the repair.
+     * [preview] gets the frame of the complete lines of the first template call while it streams (stage templates, Task 17).
      */
-    suspend fun screen(templateTask: String, planTask: String, limits: AppFileLimits): AppFileOutcome {
+    suspend fun screen(templateTask: String, planTask: String, limits: AppFileLimits,
+        preview: ((StagePreviewFrame) -> Unit)? = null): AppFileOutcome {
         phase(AppFileNames.TEMPLATE_CALL_START, null, null)
-        val outcome = templateSteps(templateTask, null, limits) { compiler.compileReply(it) }
+        val outcome = templateSteps(templateTask, null, limits, preview) { compiler.compileReply(it) }
         return if (outcome is AppFileOutcome.Outside) plan(planTask, limits) else outcome
     }
 
@@ -183,10 +202,12 @@ internal class AppFileSteps(
      * into the stored plan and computes the next state from the stored state. A merged plan equal to the stored plan is Fallback("empty").
      * With [template] (a spoken change of a stored template file), the template change call goes first, and its reply outside goes on with
      * the change call. The change call gets the app file of the expansion of a stored template file, so the app then has a free app file.
+     * [preview] gets the frame of the complete changed lines of the template change call over the stored file and state (Task 18).
      */
-    suspend fun change(request: String, stored: AppFilePrevious, limits: AppFileLimits, template: Boolean): AppFileOutcome {
+    suspend fun change(request: String, stored: AppFilePrevious, limits: AppFileLimits, template: Boolean,
+        preview: ((StagePreviewFrame) -> Unit)? = null): AppFileOutcome {
         phase(AppFileNames.CHANGE_CALL_START, null, null)
-        if (template) templateSteps(prompt.templateChangeText(request, stored.appFile), stored, limits) {
+        if (template) templateSteps(prompt.templateChangeText(request, stored.appFile), stored, limits, preview) {
             compiler.patch(stored.appFile, it, stored)
         }.let { if (it !is AppFileOutcome.Outside) return it }
         val free = if (!prompt.isTemplate(stored.appFile)) stored else {
@@ -202,39 +223,68 @@ internal class AppFileSteps(
     /**
      * The template call with [task], the compile of its reply by [read], and at most one repair call that merges its lines by name.
      * [stored]: the stored template of a change. A new screen marks its outcome on the trace.
+     * The first call streams its complete lines to [preview] ([streamed]). When the first call of a new screen stops after a complete first
+     * line, one call asks for the missing lines, and the kit merges its reply by name (design section 2, case 3).
      */
-    private suspend fun templateSteps(task: String, stored: AppFilePrevious?, limits: AppFileLimits,
+    private suspend fun templateSteps(task: String, stored: AppFilePrevious?, limits: AppFileLimits, preview: ((StagePreviewFrame) -> Unit)?,
         read: suspend (String) -> AppFileRead): AppFileOutcome {
         fun end(detail: String, outcome: AppFileOutcome) = outcome.also { if (stored == null) phase(AppFileNames.TEMPLATE_OUTCOME, detail, null) }
-        val first = when (val reply = templateCall(task, limits)) {
-            is AppFileReply.Failed -> return end("failed", AppFileOutcome.Fallback(reply.reason))
+        var calls = 1
+        val (reply, arrived) = streamed(task, limits, stored, preview)
+        val first = when (reply) {
             is AppFileReply.Text -> compiled { read(reply.text) }
+            is AppFileReply.Failed -> {
+                if (stored != null || !prompt.isTemplate(arrived)) return end("failed", AppFileOutcome.Fallback(reply.reason))
+                calls++
+                when (val rest = templateCall(prompt.templateRestText(task, arrived), limits)) {
+                    is AppFileReply.Failed -> return end("failed", AppFileOutcome.Fallback(rest.reason))
+                    is AppFileReply.Text -> compiled { compiler.patch(arrived, rest.text, null) }
+                }
+            }
         }
-        if (first is AppFileRead.Outside) return end("outside", AppFileOutcome.Outside(first.word))
+        // A rest reply outside cannot finish a screen that the stage already shows.
+        if (first is AppFileRead.Outside) return if (calls == 1) end("outside", AppFileOutcome.Outside(first.word))
+            else end("whole", AppFileOutcome.Fallback(AppFileNames.TEMPLATE_WHOLE))
         first as AppFileRead.Plan
-        templateOutcome(first, false, stored)?.let { return end(templateDetail(it, first, false), it) }
+        templateOutcome(first, false, stored, calls)?.let { return end(templateDetail(it, first, false), it) }
         // A reply that is no template file gets the repair too. The kit merges a repair into a plan of its own kind.
         phase(AppFileNames.REPAIR_CALL_START, null, null)
-        val repaired = when (val reply = templateCall(prompt.templateRepairText(task, first.text, first.compilation.faults), limits)) {
-            is AppFileReply.Failed -> return end("failed", AppFileOutcome.Fallback(reply.reason))
-            is AppFileReply.Text -> compiled { compiler.patch(first.text, reply.text, stored) }
+        val repaired = when (val repair = templateCall(prompt.templateRepairText(task, first.text, first.compilation.faults), limits)) {
+            is AppFileReply.Failed -> return end("failed", AppFileOutcome.Fallback(repair.reason))
+            is AppFileReply.Text -> compiled { compiler.patch(first.text, repair.text, stored) }
         }
         if (repaired is AppFileRead.Outside) return end("whole", AppFileOutcome.Fallback(AppFileNames.TEMPLATE_WHOLE))
         repaired as AppFileRead.Plan
-        val outcome = checkNotNull(templateOutcome(repaired, true, stored))
+        val outcome = checkNotNull(templateOutcome(repaired, true, stored, calls + 1))
         return end(templateDetail(outcome, repaired, true), outcome)
     }
 
-    private suspend fun templateCall(input: String, limits: AppFileLimits): AppFileReply {
+    /**
+     * The first template call with the stream of its text (stage templates, Task 17). The buffer always takes the text, so a stopped call
+     * keeps its complete lines. With [preview], a loop shows the frame of the newest complete lines when it is free, over [stored] for a
+     * change. The loop closes when the call ends, and the join waits only for the update in flight, so the compile after it meets no busy
+     * slot. Gives the reply and the complete lines that arrived.
+     */
+    private suspend fun streamed(input: String, limits: AppFileLimits, stored: AppFilePrevious?,
+        preview: ((StagePreviewFrame) -> Unit)?): Pair<AppFileReply, String> = coroutineScope {
+        val stream = TemplateStream()
+        val loop = preview?.let { show -> launch { stream.collect { lines -> compiler.preview(lines, stored?.appFile, stored)?.let(show) } } }
+        val reply = try { templateCall(input, limits, stream::append) } finally { stream.close() }
+        loop?.join()
+        reply to stream.completeLines()
+    }
+
+    private suspend fun templateCall(input: String, limits: AppFileLimits, onText: ((String) -> Unit)? = null): AppFileReply {
         progress(ToolGenerationProgress.COMPLETING)
-        return call(CloudGenerationStage.APP_FILE_TEMPLATE, prompt.template, input, limits)
+        return call(CloudGenerationStage.APP_FILE_TEMPLATE, prompt.template, input, limits, onText)
     }
 
     /**
      * The outcome of a compiled template, or null for faults that a repair call can fix ([repaired] false). A template with a definition is
      * Clean with its kept text: after the repair also with faults, because the kit left out each faulty line. A model cannot fix the saved data.
+     * [calls] counts the model calls so far.
      */
-    private fun templateOutcome(plan: AppFileRead.Plan, repaired: Boolean, stored: AppFilePrevious?): AppFileOutcome? {
+    private fun templateOutcome(plan: AppFileRead.Plan, repaired: Boolean, stored: AppFilePrevious?, calls: Int): AppFileOutcome? {
         val compilation = plan.compilation
         val kept = compilation.kept.takeIf { compilation.template != null && compilation.definition != null }
         return when {
@@ -242,7 +292,7 @@ internal class AppFileSteps(
             compilation.status != "ok" && compilation.status != "faults" -> AppFileOutcome.Fallback(AppFileNames.COMPILE_STATUS + compilation.status)
             kept != null && (repaired || compilation.faults.isEmpty()) ->
                 if (kept == stored?.appFile) AppFileOutcome.Fallback(AppFileNames.EMPTY)
-                else AppFileOutcome.Clean(kept, definitionOf(compilation), if (repaired) 2 else 1, compilation.state)
+                else AppFileOutcome.Clean(kept, definitionOf(compilation), calls, compilation.state, compilation.frame)
             repaired || compilation.tooLong -> AppFileOutcome.Fallback(AppFileNames.TEMPLATE_WHOLE)
             else -> null
         }
@@ -276,7 +326,7 @@ internal class AppFileSteps(
 
     private suspend fun modelCall(stage: CloudGenerationStage, input: String, limits: AppFileLimits): AppFileReply {
         progress(ToolGenerationProgress.COMPLETING)
-        return call(stage, prompt.system, input, limits)
+        return call(stage, prompt.system, input, limits, null)
     }
 
     /** The outcome of a compiled plan, or null for faults that a repair call can fix. A model cannot fix the saved data, so it gets no repair call. */
@@ -286,7 +336,7 @@ internal class AppFileSteps(
             compilation.savedDataFault -> AppFileOutcome.Fallback(AppFileNames.DATA_BLOCKS)
             compilation.hole -> AppFileOutcome.Fallback(AppFileNames.HOLE)
             compilation.status == "ok" && plan.text == stored?.appFile -> AppFileOutcome.Fallback(AppFileNames.EMPTY)
-            compilation.status == "ok" -> AppFileOutcome.Clean(plan.text, definitionOf(compilation), calls, compilation.state)
+            compilation.status == "ok" -> AppFileOutcome.Clean(plan.text, definitionOf(compilation), calls, compilation.state, compilation.frame)
             compilation.status != "faults" -> AppFileOutcome.Fallback(AppFileNames.COMPILE_STATUS + compilation.status)
             compilation.tooLong -> AppFileOutcome.Fallback(AppFileNames.FAULTS)
             else -> null
@@ -323,14 +373,13 @@ internal suspend fun routeAppFile(
     request: AppAgentRequest,
     previous: ToolSpec?,
     sandbox: SandboxClient,
-    appFileCall: (suspend (CloudGenerationStage, String, String, AppFileLimits) -> AppFileReply)?,
+    appFileCall: AppFileCall?,
     checkActive: suspend () -> Unit,
     kitApp: suspend (AppFileOutcome.Clean) -> KitCheck,
     byLines: () -> Unit,
     rebuild: suspend () -> AppAgentResult,
 ): AppAgentResult? {
-    fun appFileSteps(call: suspend (CloudGenerationStage, String, String, AppFileLimits) -> AppFileReply) =
-        AppFileSteps(sandbox, call, request::phase) { request.progress?.invoke(it) }
+    fun appFileSteps(call: AppFileCall) = AppFileSteps(sandbox, call, request::phase) { request.progress?.invoke(it) }
 
     // The plan step of a new app. A clean plan that passes the host checks is the app.
     // Each other outcome goes on with the loop of today, and the loop gets nothing of the plan.
@@ -353,9 +402,11 @@ internal suspend fun routeAppFile(
     if (gate) {
         val steps = appFileSteps(checkNotNull(appFileCall))
         val outcome = screen?.early?.let { earlyOutcome(it, checkActive) }
-            ?: screen?.template?.let { steps.screen(it, request.prompt, checkNotNull(planStep)) }
+            ?: screen?.template?.let { steps.screen(it, request.prompt, checkNotNull(planStep), screen.preview) }
             ?: steps.plan(request.prompt, checkNotNull(planStep))
         checkActive()
+        // The stage shows the compiled plan while the host check runs, a template and a free plan alike (design section 3).
+        if (outcome is AppFileOutcome.Clean) outcome.frame?.let { screen?.preview?.invoke(it) }
         var check: String? = null
         val reason = when (outcome) {
             is AppFileOutcome.Outside -> AppFileNames.OUTSIDE
@@ -382,9 +433,12 @@ internal suspend fun routeAppFile(
         byLines()
         val steps = appFileSteps(call)
         // Only a spoken change sends a template change call. Each other change makes the app a free app file.
+        val template = request.screen != null && steps.prompt.isTemplate(previous.appFile)
         val outcome = steps.change(request.prompt, AppFilePrevious(previous.appFile, previous.schema.toString(), base.state),
-            AppFileLimits(), template = request.screen != null && steps.prompt.isTemplate(previous.appFile))
+            AppFileLimits(), template, request.screen?.preview)
         checkActive()
+        // A change by template lines shows its compiled file while the host check runs. A change outside a template has no preview (Task 18).
+        if (template && outcome is AppFileOutcome.Clean && steps.prompt.isTemplate(outcome.appFile)) outcome.frame?.let { request.screen.preview?.invoke(it) }
         val reason = when (outcome) {
             is AppFileOutcome.Clean -> when (val check = kitApp(outcome)) {
                 is KitCheck.App -> return check.result

@@ -13,7 +13,7 @@ private val PLACEHOLDER=Regex("""\{\{(\w+)\}\}""")
 internal class AppFilePrompt(val system: String,
     /** The voice path puts it in the plan prompt of a new screen. */ val dialogue: String,
     private val repairTask: String,private val changeTask: String,val template: String,
-    private val templateRepairTask: String,private val templateChangeTask: String,templateHead: String) {
+    private val templateRepairTask: String,private val templateChangeTask: String,private val templateRestTask: String,templateHead: String) {
     /** TEMPLATE_HEAD of kit/src/template.js. */
     private val head=Regex(templateHead)
     /** The text of a repair call, as repairText of kit/prompt.js builds it. */
@@ -25,6 +25,8 @@ internal class AppFilePrompt(val system: String,
         fill(templateRepairTask,mapOf("task" to task,"plan" to plan.trimEnd(),"faults" to faults.joinToString("\n- ")))
     /** The text of a template change call, as templateChangeText of kit/prompt.js builds it. */
     fun templateChangeText(request: String,plan: String)=fill(templateChangeTask,mapOf("request" to request,"plan" to plan.trimEnd()))
+    /** The text of the call for the missing lines of a template call that stopped, as templateRestText of kit/prompt.js builds it. */
+    fun templateRestText(task: String,plan: String)=fill(templateRestTask,mapOf("task" to task,"plan" to plan.trimEnd()))
     /** True for a template file, as isTemplateFile of kit/src/template.js tests it: on the first line that is not empty. */
     fun isTemplate(appFile: String)=head.containsMatchIn(appFile.lineSequence().firstOrNull {it.isNotBlank()}.orEmpty())
 
@@ -33,7 +35,7 @@ internal class AppFilePrompt(val system: String,
         /** The asset, read once. */
         fun load(context: Context): AppFilePrompt=loaded ?: JSONObject(context.assets.open(PROMPT_ASSET).use {it.readBytes().decodeToString()}).let {
             AppFilePrompt(it.getString("system"),it.getString("dialogue"),it.getString("repairTask"),it.getString("changeTask"),it.getString("template"),
-                it.getString("templateRepairTask"),it.getString("templateChangeTask"),it.getString("templateHead"))
+                it.getString("templateRepairTask"),it.getString("templateChangeTask"),it.getString("templateRestTask"),it.getString("templateHead"))
         }.also {loaded=it}
         // One pass, so a placeholder text inside a request or a plan is not filled again. The text of the lambda is no replacement pattern, so $/x stays.
         private fun fill(template: String,values: Map<String,String>)=PLACEHOLDER.replace(template) {values[it.groupValues[1]] ?: it.value}

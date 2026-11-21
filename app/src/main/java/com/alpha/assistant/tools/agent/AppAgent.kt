@@ -2,7 +2,6 @@ package com.alpha.assistant.tools.agent
 
 import com.alpha.assistant.capabilities.CapabilityCatalog
 import com.alpha.assistant.cloud.CloudFailure
-import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.CloudTurn
 import com.alpha.assistant.images.GeneratedImage
@@ -14,7 +13,6 @@ import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.semantic.SemanticRuntime
 import com.alpha.assistant.semantic.SemanticUnavailable
 import com.alpha.assistant.tools.AppFileLimits
-import com.alpha.assistant.tools.AppFileReply
 import com.alpha.assistant.tools.AppLanguage
 import com.alpha.assistant.tools.GenerationLanguage
 import com.alpha.assistant.tools.ToolGenerationProgress
@@ -100,7 +98,7 @@ internal class AppAgent(
     private val service: ToolGenerationService,
     private val sandbox: SandboxClient,
     /** The plan call of the plan step. Null: no plan step. */
-    private val appFileCall: (suspend (stage: CloudGenerationStage, instructions: String, input: String, limits: AppFileLimits) -> AppFileReply)? = null,
+    private val appFileCall: AppFileCall? = null,
     /** Runs the smoke step of each host check. A test replaces it to fail as the sandbox does. */
     private val runSmoke: suspend (ToolGenerationSmoke) -> ToolPreview = { it.run() },
     private val complete: suspend (turns: List<CloudTurn>, instructions: String) -> String,

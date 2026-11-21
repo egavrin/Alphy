@@ -1,5 +1,6 @@
 package com.alpha.assistant.ui
 
+import android.os.SystemClock
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.ChatToolReply
@@ -28,6 +29,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -157,23 +159,123 @@ class StageChangeWorkflowTest {
         assertEquals(listOf(before.revision, before.state), stored(model, before.id).let { listOf(it.revision, it.state) })
     }
 
+    // Plan of stage templates, Task 18: each changed line draws when it is complete, over the shown screen.
+    @Test fun aSpokenChangeDrawsEachChangedLineOverTheShownScreen() {
+        var samples = emptyList<ChangeSample>()
+        templateChange(Scripted.Deltas(halves("$S4_TEXT\n$CARD_CHANGE").map { 300L to it }), nail = false,
+            watch = { model, before -> samples = watchChange(model, before) }) { model, _, before, _ ->
+            val over = samples.filter { it.preview }
+            // The ship keeps s1 to s3 (a rect, a polygon, and the text of s3) and gets the text of s4.
+            assertTrue(samples.toString(), over.any { it.texts == listOf(AIR, NAIL_SINKS) && it.drawing == listOf("rect", "polygon", "text", "text") })
+            assertTrue("the control was on during the change: $samples", over.none { it.controlOn })
+            assertTrue("the voice spoke before the change was stored: $samples", samples.none { it.spoken })
+            robot.waitUntil { socket.commentary().any { it.first == "d2" } }
+            assertEquals(listOf("d2" to "Ответ Alphy: Готово."), socket.commentary().filter { it.first == "d2" })
+            assertEquals(ship.replace("card = ", "$S4_TEXT\ncard = ").lines().joinToString("\n") { if (it.startsWith("card = ")) CARD_CHANGE else it },
+                appFileOf(saved(model, before)))
+        }
+    }
+
+    @Test fun theChangePreviewKeepsTheMovedValue() {
+        var state: String? = null
+        templateChange(Scripted.Deltas(halves(SHIP_S4).map { 300L to it }), watch = { model, before ->
+            robot.waitUntil(30_000) { changePreview(model, before)?.frame?.state?.also { state = it } != null }
+        }) { model, _, before, _ ->
+            // The choice is the one text value of the state, as shipSubject reads it.
+            assertEquals(listOf(NAIL), JSONObject(checkNotNull(state)).let { s -> s.keys().asSequence().map(s::get).filterIsInstance<String>().toList() })
+            assertEquals(listOf(shipWithS4(), NAIL), saved(model, before).let { listOf(appFileOf(it), shipSubject(it)) })
+        }
+    }
+
+    @Test fun aDeleteLineRemovesThePartInThePreview() {
+        var samples = emptyList<ChangeSample>()
+        templateChange(Scripted.Deltas(listOf(300L to "delete ", 300L to "s3\n")), nail = false,
+            watch = { model, before -> samples = watchChange(model, before) }) { model, _, before, _ ->
+            assertTrue(samples.toString(), samples.first().texts == listOf(AIR))
+            assertTrue(samples.toString(), samples.any { it.preview && it.texts == emptyList<String>() && it.drawing == listOf("rect", "polygon") })
+            assertEquals(ship.lines().filterNot { it.startsWith("s3 = ") }.joinToString("\n"), appFileOf(saved(model, before)))
+        }
+    }
+
+    // The stream shows s4, then a first line of another template kind leaves no part: the preview goes, and the app stays.
+    @Test fun aWholeFailureOfAChangeKeepsTheApp() {
+        val plans = AgentScriptProvider(List(2) { Scripted.Text(BROKEN_PLAN) } + Scripted.Text(OUTSIDE) + Scripted.Fails("provider"))
+        var shown = false
+        templateChange(Scripted.Deltas(halves("$S4_TEXT\n$ITEMS_HEAD\n").map { 300L to it }), Scripted.Text(ITEMS_HEAD), plans = plans,
+            watch = { model, before ->
+                robot.waitUntil(30_000) { changePreview(model, before) != null }
+                shown = true
+            }) { model, _, before, phases ->
+            assertTrue(shown)
+            assertTrue(phases.toString(), "plan_outcome:fallback:template_whole" in phases && "stage_preview_gone" in phases)
+            assertNull(model.tools.stagePreviews.current)
+            assertEquals(listOf(before.revision, before.state), stored(model, before.id).let { listOf(it.revision, it.state) })
+            robot.waitUntil { socket.commentary().count { it.first == "d2" } == 2 }
+            robot.awaitFrames(5)
+            assertEquals(listOf("d2" to FULL_WAIT, "d2" to FULL_NO_ANSWER), socket.commentary().filter { it.first == "d2" })
+        }
+    }
+
+    @Test fun anOutsideChangeShowsNoStream() =
+        templateChange(Scripted.Deltas(listOf(300L to NO_TEMPLATE.take(4), 300L to NO_TEMPLATE.drop(4) + "\n")),
+            plans = AgentScriptProvider(SHIP_CARD_CHANGE)) { model, talk, before, phases ->
+            assertEquals(List(2) { APP_FILE_TEMPLATE } + APP_FILE_CHANGE, talk.stages)
+            assertTrue(phases.toString(), phases.none { it.startsWith("stage_preview") })
+            assertEquals(2, saved(model, before).revision)
+        }
+
+    /** One read of the stage while a change runs: the canvas texts, the drawing of a change preview of the tool, and what is on. */
+    private data class ChangeSample(val texts: List<String>?, val preview: Boolean, val drawing: List<String>?, val controlOn: Boolean, val spoken: Boolean)
+
+    /** The stage every 30 ms until the change of [before] is stored as revision 2. */
+    private fun watchChange(model: ShellViewModel, before: ToolRecord): List<ChangeSample> {
+        val samples = mutableListOf<ChangeSample>()
+        val end = SystemClock.uptimeMillis() + 60_000
+        while (true) {
+            // The voice is read before the revision, so a sample with a spoken answer and no stored change is a true early answer.
+            val spoken = socket.commentary().any { it.first == "d2" }
+            if (stored(model, before.id).revision != before.revision) break
+            check(SystemClock.uptimeMillis() < end) { "the change was not stored within 60 s" }
+            val preview = changePreview(model, before)
+            samples += ChangeSample(shipCanvasTexts(robot), preview != null, preview?.frame?.drawing?.let(::drawingTypes),
+                stageControlOn(robot), spoken)
+            SystemClock.sleep(30)
+        }
+        return samples
+    }
+
+    /** The uncommitted preview of a change of [before] that the stage shows, or null. */
+    private fun changePreview(model: ShellViewModel, before: ToolRecord) =
+        model.tools.stagePreviews.current?.takeIf { it.toolId == before.id && it.revision == null }
+
+    /** The type of each drawing command of a frame drawing, in order. */
+    private fun drawingTypes(drawing: String) = JSONObject(drawing).let { surfaces ->
+        surfaces.keys().asSequence().flatMap { id -> surfaces.getJSONObject(id).getJSONArray("commands").let { list -> List(list.length()) { list.getJSONObject(it).getString("type") } } }.toList()
+    }
+
     /**
-     * The voice mode puts the ship template on the stage, and the person sets its choice to [NAIL]. Then a spoken change gets [changes] as
-     * the replies of its template calls and [plans] as the replies of each other generation call. [check] gets the model, the provider,
-     * the stored app before the change, and the trace phases, after the answer of the change.
+     * The voice mode puts the ship template on the stage, and with [nail] the person sets its choice to [NAIL]. Then a spoken change gets
+     * [changes] as the replies of its template calls and [plans] as the replies of each other generation call. [watch] reads the stage while
+     * the change runs. [check] gets the model, the provider, the stored app before the change, and the trace phases of the change, after its
+     * answer.
      */
     private fun templateChange(vararg changes: Scripted, plans: AgentScriptProvider = AgentScriptProvider(appFilePlan("calc")),
+        nail: Boolean = true, watch: (ShellViewModel, ToolRecord) -> Unit = { _, _ -> },
         check: (ShellViewModel, TemplateTalk, ToolRecord, List<String>) -> Unit) {
         val talk = TemplateTalk(AgentScriptProvider(listOf(Scripted.Text(ship)) + changes), plans)
         shell.live(talk) { _, model, phases ->
             val app = shell.screen(model)
-            robot.instrumentation.runOnMainSync { model.tools.interact(app, SHIP_CONTROL, NAIL) }
-            robot.waitUntil { shipSubject(stored(model, app.id)) == NAIL && !model.tools.busy }
+            if (nail) {
+                robot.instrumentation.runOnMainSync { model.tools.interact(app, SHIP_CONTROL, NAIL) }
+                robot.waitUntil { shipSubject(stored(model, app.id)) == NAIL && !model.tools.busy }
+            }
             val before = stored(model, app.id)
             val count = messages(model).size
+            val start = phases.size
             socket.say(TemplateTalk.CHANGE_REQUEST, "d2", 2_000)
+            watch(model, before)
             shell.waitForTheAnswer(model, count)
-            check(model, talk, before, phases)
+            check(model, talk, before, phases.drop(start))
         }
     }
 
@@ -224,5 +326,9 @@ class StageChangeWorkflowTest {
         const val FULL_NO_ANSWER = "Экран не собран: сервис ИИ не ответил. Скажите запрос полностью, одной фразой."
         /** The calc plan with a fault in the line of perPerson. */
         val BROKEN_PLAN get() = appFilePlan("calc").replace("/ \$/people, example", "/ , example")
+        const val NAIL_SINKS = "Гвоздь тонет"
+        /** A new text part of the ship template that shows for each choice. */
+        const val S4_TEXT = "s4 = text(150, 190, \"$NAIL_SINKS\", \"ink\", 14)"
+        const val CARD_CHANGE = "card = card(\"Вытеснение воды\", \"Гвоздь тонет, корабль плывёт.\")"
     }
 }

@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class ToolController internal constructor(private val app: Application, private val scope: CoroutineScope, private val provider: ChatProvider,
@@ -315,9 +316,13 @@ class ToolController internal constructor(private val app: Application, private 
         var created = false
         val assetLease = if (sceneAttachments.any { it.mime == ThreeSceneAssets.ATTACHMENT_MIME })
             ThreeSceneAssetCleanup(app).lease() else null
+        // The trace starts before the draft, so the time between the routing decision and the first model call has marks.
+        val trace = traceFor(operationId)
+        // The stage previews of a screen run have the key of its early plan, whose frames it goes on with, else a key of their own: the end of
+        // a key drops each later frame of it, and a later run of this operation (the new screen after a change fallback) shows its own frames.
+        val previewKey = if (screen?.early != null) operationId else "$operationId:${previewRuns.incrementAndGet()}"
+        val run = screen?.let { ScreenRun(it.early, it.template, previewSink(previewKey, target?.id, trace).takeIf { previewStream }) }
         try {
-            // The trace starts before the draft, so the time between the routing decision and the first model call has marks.
-            val trace = traceFor(operationId)
             prepared()
             trace?.phase("draft_start")
             withContext(Dispatchers.IO) {
@@ -337,16 +342,20 @@ class ToolController internal constructor(private val app: Application, private 
                         withContext(Dispatchers.Main.immediate) {
                             if (!canCommit()) throw CancellationException("The mini-app operation is no longer active.")
                         }
-                    }, screen = screen)
+                    }, screen = run)
             }
             currentCoroutineContext().ensureActive(); call.check()
             previews.clear(operationId)
             val result = engine.accept(operationId,retainReceipt = true,canCommit = canCommit)
             accepted = true
+            // The last preview seeds the drawing of the stored revision on the stage (StagePreviews.committed).
+            if (screen != null) stagePreviews.committed(previewKey, result.id, result.revision)
             committed(result)
             if(target!=null && store.primaryLibrary) AutomationRuntime.refresh(app)
         } finally {
             previews.clear(operationId)
+            // A fallback, a cancel, or a failure of a screen run removes its frame.
+            if (screen != null && !accepted) endPreview(previewKey, trace)
             automaticCancel = null
             try {
                 withContext(NonCancellable) {
@@ -363,6 +372,8 @@ class ToolController internal constructor(private val app: Application, private 
                 assetLease?.close()
                 busy = false
                 automaticJob = null
+                // The stage holds the stored app with its control on from now (stage templates, decision 11).
+                if (accepted && screen != null) trace?.phase(AppFileNames.CONTROLS_ON)
             }
         }
     }
@@ -474,11 +485,36 @@ class ToolController internal constructor(private val app: Application, private 
         val limits = planStep() ?: return null
         val session = CloudSession()
         // Only phases: the generation run of the request marks the end of the operation.
-        val run = traceFor(operationId)?.Run()
+        val trace = traceFor(operationId)
+        val run = trace?.Run()
         run?.phase(AppFileNames.EARLY_PLAN_START)
+        // Its frames have the key of the operation, which the screen run that uses the plan keeps (generateAutomatic).
+        val frames = EarlyFrames(!previewBeforeRouting, { showPreview(operationId, it, null, trace) }) { endPreview(operationId, trace) }
+        val sink = { frame: StagePreviewFrame -> scope.launch(Dispatchers.Main) { frames.offer(frame) }; Unit }.takeIf { previewStream }
         // The scope of the shell is a supervisor (viewModelScope), so a failed or cancelled plan does not end it.
-        val result = scope.async(Dispatchers.IO) { generationService.earlyPlan(key, template, prompt, session, limits, run?.let { it::phase }) }
-        return EarlyPlan(result, session) { name -> run?.phase(name) }
+        val result = scope.async(Dispatchers.IO) { generationService.earlyPlan(key, template, prompt, session, limits, run?.let { it::phase }, sink) }
+        return EarlyPlan(result, session, { name -> run?.phase(name) }, frames)
+    }
+
+    // The number of the last screen run with a preview key of its own (generateAutomatic).
+    private val previewRuns = AtomicInteger()
+
+    /** Shows each frame of [key] on the stage from the main thread, over the tool [toolId] of a change, and marks it on [trace] when it shows. */
+    private fun previewSink(key: String, toolId: String?, trace: ToolGenerationTrace?): (StagePreviewFrame) -> Unit = { frame ->
+        scope.launch(Dispatchers.Main) { showPreview(key, frame, toolId, trace) }
+    }
+
+    /** Call on the main thread. A frame of an ended key does not show and gets no mark. */
+    private fun showPreview(key: String, frame: StagePreviewFrame, toolId: String?, trace: ToolGenerationTrace?) {
+        stagePreviews.show(key, frame, toolId)
+        if (stagePreviews.current?.frame === frame) trace?.phase(AppFileNames.STAGE_PREVIEW, frame.holds)
+    }
+
+    /** Call on the main thread. Ends [key], and marks on [trace] a shown frame that goes away with no app. */
+    private fun endPreview(key: String, trace: ToolGenerationTrace?) {
+        val shown = stagePreviews.current?.let { it.operationId == key && it.revision == null } == true
+        stagePreviews.gone(key)
+        if (shown) trace?.phase(AppFileNames.STAGE_PREVIEW_GONE)
     }
     internal class ManualChatSave(val canCommit: () -> Boolean, val finish: suspend (ToolRecord?) -> Unit)
 
@@ -1468,16 +1504,22 @@ private fun ToolDraftPreview.matchesDraft(draft: ToolDraft,allowPending: Boolean
 /**
  * The plan call of a spoken request that started beside its routing call (ToolController.startEarlyPlan). A cancel of [session] stops the call.
  * [phase] marks a phase on the trace of the request. The trace gets one end mark: used when a screen run takes the call, else canceled.
+ * [frames]: its frames on the stage. Call [use] and [stop] on the main thread.
  */
-internal class EarlyPlan(val result: Deferred<AppFileOutcome>, val session: CloudSession, private val phase: (String) -> Unit) {
+internal class EarlyPlan(val result: Deferred<AppFileOutcome>, val session: CloudSession, private val phase: (String) -> Unit,
+    private val frames: EarlyFrames? = null) {
     private var ended = false
 
-    /** The outcome of the call for a screen run, marked used. */
-    fun use(): Deferred<AppFileOutcome> = result.also { end(AppFileNames.EARLY_PLAN_USED) }
+    /** The outcome of the call for a screen run, marked used. A held frame shows now. */
+    fun use(): Deferred<AppFileOutcome> = result.also {
+        end(AppFileNames.EARLY_PLAN_USED)
+        frames?.use()
+    }
 
-    /** Stops the call. A plan that no screen run used is marked canceled, also when its call had ended. */
+    /** Stops the call and removes its frame. A plan that no screen run used is marked canceled, also when its call had ended. */
     fun stop() {
         end(AppFileNames.EARLY_PLAN_CANCELED)
+        frames?.stop()
         session.cancel()
         result.cancel()
     }
@@ -1486,6 +1528,32 @@ internal class EarlyPlan(val result: Deferred<AppFileOutcome>, val session: Clou
         if (ended) return
         ended = true
         phase(mark)
+    }
+}
+
+/**
+ * The frames of an early plan (stage templates, decision 10). Call each function on the main thread. With [held] (the gate
+ * ToolController.previewBeforeRouting is off), only the newest frame waits for [use]. After [stop] no frame shows, and [gone] ends the key.
+ */
+internal class EarlyFrames(private var held: Boolean, private val show: (StagePreviewFrame) -> Unit, private val gone: () -> Unit) {
+    private var newest: StagePreviewFrame? = null
+    private var stopped = false
+
+    fun offer(frame: StagePreviewFrame) {
+        if (stopped) return
+        if (held) newest = frame else show(frame)
+    }
+
+    fun use() {
+        held = false
+        newest?.takeUnless { stopped }?.let(show)
+        newest = null
+    }
+
+    fun stop() {
+        stopped = true
+        newest = null
+        gone()
     }
 }
 

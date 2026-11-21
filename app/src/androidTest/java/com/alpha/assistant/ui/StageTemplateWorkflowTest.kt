@@ -331,9 +331,9 @@ internal class TemplateShell(private val fixture: ShellFixture, private val robo
 
     /**
      * Launches the shell with the plan step on and [talk], starts the voice mode, and answers `session.started`. [test] gets the trace phases
-     * of each operation in their order, each as name or name:detail.
+     * of each operation in their order, each as name or name:detail. [observe] gets each phase after the list, on the thread that marks it.
      */
-    fun live(talk: TemplateTalk, test: (ActivityScenario<CloudTestActivity>, ShellViewModel, List<String>) -> Unit) =
+    fun live(talk: ChatProvider, observe: (String) -> Unit = {}, test: (ActivityScenario<CloudTestActivity>, ShellViewModel, List<String>) -> Unit) =
         withPlanStep(fixture.context, AiProvider.OPENAI, true) {
             fixture.install(chat = talk, liveVoice = fixture.liveVoice(socket, FakeLiveAudio()))
             fixture.launch().use { scenario ->
@@ -342,7 +342,11 @@ internal class TemplateShell(private val fixture: ShellFixture, private val robo
                 val phases = CopyOnWriteArrayList<String>()
                 scenario.onActivity {
                     model.tools.generationTraceObserver = { event ->
-                        if (event is ToolGenerationTraceEvent.Phase) phases += event.name + event.detail?.let { ":$it" }.orEmpty()
+                        if (event is ToolGenerationTraceEvent.Phase) {
+                            val phase = event.name + event.detail?.let { ":$it" }.orEmpty()
+                            phases += phase
+                            observe(phase)
+                        }
                     }
                     model.startLiveVoice(voiceApproval = false)
                 }
@@ -361,6 +365,11 @@ internal class TemplateShell(private val fixture: ShellFixture, private val robo
 
     private fun spoken(model: ShellViewModel, request: String): ToolRecord {
         socket.say(request, "d1", 100)
+        return shown(model)
+    }
+
+    /** The record of the app that the stage shows after the operation of the request ends. */
+    fun shown(model: ShellViewModel): ToolRecord {
         // The controller refuses a press while the operation of the request still runs.
         robot.waitUntil(60_000) { model.stageToolId != null && !model.tools.busy }
         return stored(model, checkNotNull(model.stageToolId))

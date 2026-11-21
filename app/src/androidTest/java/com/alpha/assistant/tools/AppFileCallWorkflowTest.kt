@@ -17,11 +17,13 @@ import com.alpha.assistant.cloud.LoopbackServer
 import com.alpha.assistant.cloud.responsesStart
 import com.alpha.assistant.cloud.stallingResponses
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.agent.TemplateStream
 import java.io.IOException
 import java.io.OutputStream
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -29,6 +31,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -52,14 +55,72 @@ class AppFileCallWorkflowTest {
 
     private class Timed(val reply: AppFileReply, val millis: Long, val timings: List<ModelCompletionTiming>)
 
-    /** Runs one plan call in the thread of the caller, as a blocked HTTP read would hold it. */
-    private fun ToolGenerationService.timedCall(session: CloudSession, limits: AppFileLimits): Timed {
+    /** Runs one plan call in the thread of the caller, as a blocked HTTP read would hold it. [onText] gets each text delta. */
+    private fun ToolGenerationService.timedCall(session: CloudSession, limits: AppFileLimits, onText: ((String) -> Unit)? = null): Timed {
         val timings = CopyOnWriteArrayList<ModelCompletionTiming>()
         val started = System.nanoTime()
         val reply = runBlocking {
-            appFileCall(key, session, CloudGenerationStage.APP_FILE, "PLAN SYSTEM", "A tip calculator.", limits) { timings += it }
+            appFileCall(key, session, CloudGenerationStage.APP_FILE, "PLAN SYSTEM", "A tip calculator.", limits, onText) { timings += it }
         }
         return Timed(reply, (System.nanoTime() - started) / 1_000_000, timings)
+    }
+
+    // Plan of stage templates, Task 15: the text hand-off of a streamed call.
+    @Test fun eachDeltaReachesTheConsumerInOrder() {
+        val parts = List(12) { "s$it = line $it\n" }
+        val deltas = CopyOnWriteArrayList<String>()
+        val call = service(AgentScriptProvider(listOf(Scripted.Deltas(parts.map { 10L to it })))).timedCall(CloudSession(), AppFileLimits()) { deltas += it }
+        assertEquals(parts, deltas.toList())
+        assertEquals(parts.joinToString(""), deltas.joinToString(""))
+        assertEquals(AppFileReply.Text(parts.joinToString("")), call.reply)
+    }
+
+    /** The collector suspends 2 s for each run. The read thread never waits for it, and the end of the stream waits only for the run in flight. */
+    @Test fun aSlowCollectorDoesNotDelayTheReplyEnd(): Unit = runBlocking {
+        val parts = List(12) { "s$it = line $it\n" }
+        var lastPart = 0L
+        val provider = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                parts.forEach { delay(50); emit(CloudEvent.Text(it)) }
+                lastPart = System.nanoTime()
+                emit(CloudEvent.RoundComplete(parts.joinToString(""), false))
+            }
+        }
+        val stream = TemplateStream()
+        val runs = AtomicInteger()
+        val ended = AtomicInteger()
+        val collector = launch(Dispatchers.Default) { stream.collect { runs.incrementAndGet(); delay(2_000); ended.incrementAndGet() } }
+        var replyEnd = 0L
+        val reply = withContext(Dispatchers.IO) {
+            service(provider).appFileCall(key, CloudSession(), CloudGenerationStage.APP_FILE, "PLAN SYSTEM", "A tip calculator.",
+                AppFileLimits(), stream::append) { replyEnd = System.nanoTime() }
+        }
+        assertEquals(AppFileReply.Text(parts.joinToString("")), reply)
+        val endMs = (replyEnd - lastPart) / 1_000_000
+        assertTrue("plan_reply_end came $endMs ms after the last part", endMs < 100)
+        stream.close()
+        val atClose = runs.get()
+        assertTrue("a run is in flight at the close", atClose == ended.get() + 1)
+        withTimeout(2_500) { collector.join() }
+        assertEquals("a run started after the close", atClose, runs.get())
+        assertEquals("the join returned before the run in flight ended", runs.get(), ended.get())
+        assertTrue("${runs.get()} runs for ${parts.size} lines", runs.get() < parts.size)
+    }
+
+    @Test fun anUnfinishedLastLineIsNotComplete() {
+        val stream = TemplateStream()
+        stream.append("a\nb")
+        assertEquals("a\n", stream.completeLines())
+        assertEquals("a\nb", stream.text)
+    }
+
+    @Test fun theLimitsStayWithAConsumer() {
+        val deltas = CopyOnWriteArrayList<String>()
+        val stalled = service(AgentScriptProvider(listOf(Scripted.Stalls("PLAN\n", 10_000))))
+            .timedCall(CloudSession(), AppFileLimits(firstTextMs = 1_000, totalMs = 2_000)) { deltas += it }
+        assertEquals(AppFileReply.Failed("total_timeout"), stalled.reply)
+        assertTrue("${stalled.millis} ms", stalled.millis in 2_000L..3_000L)
+        assertEquals(listOf("PLAN\n"), deltas.toList())
     }
 
     /**

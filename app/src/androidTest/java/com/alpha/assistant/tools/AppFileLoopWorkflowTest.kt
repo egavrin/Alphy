@@ -102,7 +102,7 @@ class AppFileLoopWorkflowTest {
         val run = ToolGenerationTrace(UUID.randomUUID(), { events += it }).Run()
         val sandbox = SandboxClient(context)
         val service = ToolGenerationService(script, sandbox)
-        val agent = AppAgent(service, sandbox, appFileCall = { _, _, _, _ -> AppFileReply.Text(calc) }, runSmoke = smoke) { turns, instructions ->
+        val agent = AppAgent(service, sandbox, appFileCall = { _, _, _, _, _ -> AppFileReply.Text(calc) }, runSmoke = smoke) { turns, instructions ->
             service.response("fixture", turns, session, AGENT, instructions, expandedWriterOutput = true)
         }
         val request = AppAgentRequest(PROMPT, null, emptyList(), "appfile-loop", privateState = false, onPhase = run::phase,
@@ -422,7 +422,7 @@ class AppFileLoopWorkflowTest {
     // Failure case (task Db4): the screen paid a second plan call after the plan call beside the routing call had given the app.
     @Test fun anEarlyPlanReplacesThePlanCall() {
         val clean = runBlocking {
-            AppFileSteps(SandboxClient(context), { _, _, _, _ -> AppFileReply.Text(calc) }, { _, _, _ -> }, {}).plan(PROMPT, AppFileLimits())
+            AppFileSteps(SandboxClient(context), { _, _, _, _, _ -> AppFileReply.Text(calc) }, { _, _, _ -> }, {}).plan(PROMPT, AppFileLimits())
         }
         assertTrue(clean is AppFileOutcome.Clean)
         val run = generate(loop, screen = ScreenRun(early = CompletableDeferred(clean)))

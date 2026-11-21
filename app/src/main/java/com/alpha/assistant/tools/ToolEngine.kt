@@ -21,6 +21,7 @@ import com.alpha.assistant.tools.agent.AppAgent
 import com.alpha.assistant.tools.agent.AppAgentGuide
 import com.alpha.assistant.tools.agent.AppAgentRequest
 import com.alpha.assistant.tools.agent.AppAgentResult
+import com.alpha.assistant.tools.agent.AppFileCall
 import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.tools.agent.AppFileOutcome
 import com.alpha.assistant.tools.agent.AppFileSteps
@@ -172,27 +173,29 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
         }
 
     /** The app-file call of the plan step and the change step. It marks the first text and the end of each reply as phases. */
-    private fun planCall(key: String, session: CloudSession, onPhase: ((String, String?, Long?) -> Unit)?):
-        suspend (CloudGenerationStage, String, String, AppFileLimits) -> AppFileReply = { stage, instructions, input, limits ->
-        appFileCall(key, session, stage, instructions, input, limits) { timing ->
-            timing.firstTextNanos?.let { onPhase?.invoke(AppFileNames.PLAN_FIRST_TEXT, null, it / 1_000_000) }
-            onPhase?.invoke(AppFileNames.PLAN_REPLY_END, null, timing.endNanos / 1_000_000)
+    private fun planCall(key: String, session: CloudSession, onPhase: ((String, String?, Long?) -> Unit)?): AppFileCall =
+        { stage, instructions, input, limits, onText ->
+            appFileCall(key, session, stage, instructions, input, limits, onText) { timing ->
+                timing.firstTextNanos?.let { onPhase?.invoke(AppFileNames.PLAN_FIRST_TEXT, null, it / 1_000_000) }
+                onPhase?.invoke(AppFileNames.PLAN_REPLY_END, null, timing.endNanos / 1_000_000)
+            }
         }
-    }
 
     /**
      * The plan step alone, with the sandbox and the call of a generation, for the plan call of a spoken request that starts
      * beside its routing call (ToolController.startEarlyPlan). A cancel of [session] stops the call.
      * The template call with [template] goes first, and its reply outside sends [prompt] to the plan call (AppFileSteps.screen).
+     * [preview] gets the frame of each complete line of the template call.
      */
     internal suspend fun earlyPlan(key: String, template: String, prompt: String, session: CloudSession, limits: AppFileLimits,
-        onPhase: ((String, String?, Long?) -> Unit)?): AppFileOutcome =
-        AppFileSteps(sandbox, planCall(key, session, onPhase), onPhase ?: { _, _, _ -> }, {}).screen(template, prompt, limits)
+        onPhase: ((String, String?, Long?) -> Unit)?, preview: ((StagePreviewFrame) -> Unit)? = null): AppFileOutcome =
+        AppFileSteps(sandbox, planCall(key, session, onPhase), onPhase ?: { _, _, _ -> }, {}).screen(template, prompt, limits, preview)
 
+    /** [onText] gets each text delta on the thread that reads the reply, after the size check. It must not block. */
     internal suspend fun response(key: String, turns: List<CloudTurn>, session: CloudSession, stage: CloudGenerationStage?,
         instructions: String = "", expandedWriterOutput: Boolean = false,
         onCompletion: ((ModelCompletionTiming) -> Unit)? = null, jsonObject: Boolean = true,
-        onFirstText: (() -> Unit)? = null): String {
+        onFirstText: (() -> Unit)? = null, onText: ((String) -> Unit)? = null): String {
         val maxBytes = if (expandedWriterOutput) ToolSpec.MAX_DEFINITION_BYTES else SandboxContract.MAX_BYTES
         val output = StringBuilder()
         fun tooLarge() = CloudFailure("widget_response_size", "The generator response exceeds the allowed size. Request a smaller tool.")
@@ -210,6 +213,7 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
                         onFirstText?.invoke()
                     }
                     output.append(event.value)
+                    onText?.invoke(event.value)
                 }
             }
             completed = true
@@ -383,17 +387,18 @@ internal class AppFileLimits(val firstTextMs: Long = 20_000, val totalMs: Long =
 
 /**
  * Sends one app-file call with no JSON mode. A slow call ends at its limit and leaves [session] open for the loop.
- * A cancel of the person or of the caller goes up unchanged.
+ * A cancel of the person or of the caller goes up unchanged. [onText] gets each text delta on the read thread (response).
  */
 internal suspend fun ToolGenerationService.appFileCall(key: String, session: CloudSession, stage: CloudGenerationStage,
-    instructions: String, input: String, limits: AppFileLimits, onTiming: (ModelCompletionTiming) -> Unit): AppFileReply {
+    instructions: String, input: String, limits: AppFileLimits, onText: ((String) -> Unit)? = null,
+    onTiming: (ModelCompletionTiming) -> Unit): AppFileReply {
     val textStarted = CompletableDeferred<Unit>()
     val reason = AtomicReference<String?>()
     return try {
         coroutineScope {
             val call = async {
                 response(key, listOf(CloudTurn("user", input)), session, stage, instructions, onCompletion = onTiming,
-                    jsonObject = false, onFirstText = { textStarted.complete(Unit) })
+                    jsonObject = false, onFirstText = { textStarted.complete(Unit) }, onText = onText)
             }
             // A blocked HTTP read holds the thread of the call, so the watcher runs on a different thread.
             val watcher = launch(Dispatchers.Default) {
