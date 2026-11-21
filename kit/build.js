@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { PROMPT, changeText, repairText } from "./prompt.js";
 
 /** The modules of the bundle in dependency order: each one imports only modules before it. */
-const MODULES = ["icons", "dsl", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "change", "compile"];
+const MODULES = ["icons", "dsl", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "change", "template", "compile"];
 const at = (path) => fileURLToPath(new URL(path, import.meta.url));
 /** The host's sources of its icon names (ToolUiCatalog.icons): the shell glyphs and the domain icons. */
 const HOST_SOURCES = ["ToolUiCatalog", "ToolIcons"].map((name) => at(`../app/src/main/java/com/alpha/assistant/tools/${name}.kt`));

@@ -6,6 +6,7 @@ import { expand } from "./parts.js";
 import { report } from "./check.js";
 import { emit } from "./emit.js";
 import { nextState } from "./change.js";
+import { buildTemplate, expandTemplate, isTemplateFile, mergeTemplate, readTemplate } from "./template.js";
 
 /** The compile of an app file, and with no fault the expanded file and what the emitter gives. */
 function build(text) {
@@ -31,14 +32,21 @@ function build(text) {
  * previous is the stored app {appFile, stateSchema, state} of a change: then state is the next state of the stored one (nextState), else null.
  * blockedBySavedData is true when a saved value of the person blocks the change (each fault holds BLOCKS), and savedDataMismatch is true for
  * the one fault MISMATCH. nextState sets them where it makes these faults, so the host reads the two flags and never the texts of the faults.
+ * A template file (template.js) also gives template (its word), kept (the text to store), expanded (the app file of kept, null on a whole fault), and leftOut (the names
+ * of the lines that it left out). Its definition comes also with the faults of the lines that it left out, and is null only on a whole fault.
+ * A template file as previous.appFile is the app file of its expansion for the change rules.
  */
 export async function compileAppFile(text, previous) {
-  const { file, emitted, ...built } = build(text), result = { ...built, blockedBySavedData: false, savedDataMismatch: false };
-  if (!previous || !result.definition) return { ...result, state: null };
+  const storedTemplate = isTemplateFile(previous?.appFile), template = isTemplateFile(text) && buildTemplate(text, storedTemplate ? previous.appFile : null, build);
+  const stored = storedTemplate ? { ...previous, appFile: expandTemplate(readTemplate(previous.appFile), new Set()) } : previous;
+  const { file, emitted, ...built } = template ? template.built : build(text), result = { ...built, blockedBySavedData: false, savedDataMismatch: false };
+  if (template) Object.assign(result, { template: template.word, kept: template.kept, expanded: template.expanded, leftOut: template.leftOut });
+  if (!stored || !result.definition) return { ...result, state: null };
   try {
     // A change adds its own notes to the notes of the report.
-    const { notes = [], ...change } = nextState(file, emitted, previous, build);
-    return { ...result, ...change, notes: [...result.notes, ...notes] };
+    // A template keeps the faults of the lines that it left out beside the faults of the change.
+    const { notes = [], ...change } = nextState(file, emitted, stored, build);
+    return { ...result, ...change, faults: [...result.faults, ...change.faults], notes: [...result.notes, ...notes] };
   } catch (failure) {
     return { ...result, faults: [`kit: ${failure?.message ?? failure}`], definition: null, state: null };
   }
@@ -89,13 +97,14 @@ export function patchAppFile(plan, reply) {
  * One step of the host (AppFileCompiler.kt) in one call: the reply text as readPlanReply reads it when read is true, where an outside
  * reply returns at once; then the reply merged into plan by patchAppFile when plan is not null; then compileAppFile of the merged text
  * with the stored app previous. A merged text of more than cap characters gives result null and no compile.
+ * A template plan (template.js) takes the reply by mergeTemplate in place of patchAppFile.
  * previous is {appFile, stateSchema, state} with stateSchema and state as JSON text, as the host sends them, or null. A text that is no
  * JSON makes the step reject. The result is {kind: "outside", word} or {kind: "plan", text, result}, where text is the merged text.
  */
 export async function compileStep({ text, plan, read, previous, cap }) {
   const reply = read ? readPlanReply(text) : { kind: "plan", text };
   if (reply.kind !== "plan") return reply;
-  const merged = plan === null ? reply.text : patchAppFile(plan, reply.text);
+  const merged = plan === null ? reply.text : isTemplateFile(plan) ? mergeTemplate(plan, reply.text) : patchAppFile(plan, reply.text);
   const stored = previous && { appFile: previous.appFile, stateSchema: JSON.parse(previous.stateSchema), state: JSON.parse(previous.state) };
   return { kind: "plan", text: merged, result: merged.length > cap ? null : await compileAppFile(merged, stored) };
 }
