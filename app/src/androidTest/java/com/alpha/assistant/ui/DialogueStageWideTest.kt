@@ -112,11 +112,12 @@ internal class StageShell(prefix: String) {
         fixture.context.deleteDatabase("${fixture.store.databaseName}-agent.db")
     }
 
-    /** The plan call answers with [plan]. The routing call creates an app for [APP_REQUEST] only. */
+    /** The plan call answers with [plan], and a template call with [NO_TEMPLATE]. The routing call creates an app for [APP_REQUEST] only. */
     fun provider(plan: String): ChatProvider {
         val script = AgentScriptProvider(listOf(Scripted.Text(plan)))
         return object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) = when {
+                answerNoTemplate(request, emit) -> Unit
                 request.generationStage != null -> script.respond(key, request, session, emit)
                 request.decisionContext?.originalUserTurn?.text == APP_REQUEST ->
                     emit(CloudEvent.RoundComplete(chatDecision("create", "Готово.", "Make the app"), false))

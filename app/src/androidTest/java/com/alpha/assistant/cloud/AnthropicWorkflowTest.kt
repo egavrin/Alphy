@@ -262,7 +262,7 @@ class AnthropicWorkflowTest {
 
     // The change stage uses the effort of a new plan: a change call is as short as a new plan.
     @Test fun appFileStageUsesOutputEffortLow() {
-        for (stage in listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE)) {
+        for (stage in listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE, CloudGenerationStage.APP_FILE_TEMPLATE)) {
             val json = firstRequest(appFileRequest(stage)).json
             assertEquals("PLAN SYSTEM", json.getString("system"))
             assertEquals("$stage", "low", json.getJSONObject("output_config").getString("effort"))

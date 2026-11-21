@@ -10,6 +10,7 @@ import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudGenerationStage.AGENT
 import com.alpha.assistant.cloud.CloudGenerationStage.APP_FILE
 import com.alpha.assistant.cloud.CloudGenerationStage.APP_FILE_CHANGE
+import com.alpha.assistant.cloud.CloudGenerationStage.APP_FILE_TEMPLATE
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.sandbox.SandboxClient
@@ -22,6 +23,15 @@ import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.plan
 import com.alpha.assistant.tools.appfile.row
 import com.alpha.assistant.ui.FIXTURE_APP
+import com.alpha.assistant.ui.NAIL
+import com.alpha.assistant.ui.SHIP_CARD_CHANGE
+import com.alpha.assistant.ui.SHIP_CONTROL
+import com.alpha.assistant.ui.SHIP_S4
+import com.alpha.assistant.ui.shipCardChanged
+import com.alpha.assistant.ui.shipExpansion
+import com.alpha.assistant.ui.shipSubject
+import com.alpha.assistant.ui.shipTemplate
+import com.alpha.assistant.ui.shipWithS4
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -876,7 +886,54 @@ class AppFileChangeWorkflowTest {
         assertEquals(1, store.revisions(before.id).size)
     }
 
+    /** The ship template as a spoken screen makes it (one template call), with the choice of the person on [NAIL]. */
+    private fun voiceShip(): ToolRecord {
+        val record = runBlocking {
+            script = AgentScriptProvider(listOf(Scripted.Text(shipTemplate())))
+            calls.clear()
+            val draft = engine.createDraft(SHIP_REQUEST, null)
+            engine.generate(draft.id, "fixture", emptyList(), CloudSession(), null, null, trace = null, planStep = AppFileLimits(),
+                screen = ScreenRun(template = SHIP_REQUEST))
+            engine.accept(draft.id)
+        }
+        assertEquals(listOf(APP_FILE_TEMPLATE), calls.map { it.generationStage })
+        assertEquals(shipTemplate(), appFile(record))
+        return pressed(record, SHIP_CONTROL, NAIL).also { assertEquals(NAIL, shipSubject(it)) }
+    }
+
+    // Plan of stage templates, Task 5: only a spoken change sends a template change call. A typed change changes the expansion.
+    @Test fun aTypedChangeOfAVoiceTemplateAppBecomesAFreePlan() {
+        val before = voiceShip()
+        val expanded = shipExpansion(context)
+        val changed = change(before, listOf(Scripted.Text(SHIP_CARD_CHANGE)) + LOOP)
+        assertEquals(listOf(APP_FILE_CHANGE), changed.stages)
+        assertEquals(listOf(prompt.changeText(CHANGE, expanded)), changed.calls.single().turns.map { it.text })
+        val saved = changed.saved
+        assertEquals(listOf(2, shipCardChanged(expanded), NAIL), listOf(saved.revision, appFile(saved), shipSubject(saved)))
+        assertFalse(prompt.isTemplate(checkNotNull(appFile(saved))))
+        assertEquals(saved, store.tool(before.id))
+    }
+
+    @Test fun aRestoreOfAnOlderTemplateRevisionKeepsTheMovedValue() {
+        val before = voiceShip()
+        val changed = change(before, listOf(Scripted.Text(SHIP_S4)) + LOOP, screen = ScreenRun())
+        assertEquals(listOf(APP_FILE_TEMPLATE), changed.stages)
+        val second = changed.saved
+        assertEquals(listOf(2, shipWithS4(), NAIL), listOf(second.revision, appFile(second), shipSubject(second)))
+        val restored = restore(second, 1).getOrThrow()
+        assertEquals(listOf(3, shipTemplate(), NAIL), listOf(restored.revision, appFile(restored), shipSubject(restored)))
+        assertEquals(restored, store.tool(before.id))
+    }
+
+    @Test fun aManualEditOfATemplateFileCompilesIt() {
+        val before = voiceShip()
+        val saved = edited(before, JSONObject(before.spec).put("appFile", shipWithS4()).toString()).getOrThrow()
+        assertEquals(listOf(2, shipWithS4(), NAIL), listOf(saved.revision, appFile(saved), shipSubject(saved)))
+        assertEquals(saved, store.tool(before.id))
+    }
+
     private companion object {
+        const val SHIP_REQUEST = "User request: Explain why a ship floats\nWidget brief: Why a ship floats and a nail sinks"
         const val THIRD = "app(\"Third\", lang=\"en\")\nneed a = input(\"number\", \"A\", 85, min=0, max=100)\n" +
             "need b = input(\"number\", \"B\", 4, min=1, max=10)\n\$/r := \$/a / \$/b\nroot = Column([a_field, b_field, Text(text(\$/r))])\n"
         const val THIRD_REQUEST = "User request: Divide A by B\nWidget brief: A divides by B"

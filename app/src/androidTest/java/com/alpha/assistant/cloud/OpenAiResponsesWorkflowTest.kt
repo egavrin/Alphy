@@ -373,7 +373,7 @@ class OpenAiResponsesWorkflowTest {
 
     // Failure case: the change call reasoned at medium with no output limit, so a change took longer than a new plan.
     @Test fun appFileStageSendsTheInstructionsAloneAtEffortLow() {
-        for (stage in listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE)) {
+        for (stage in listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE, CloudGenerationStage.APP_FILE_TEMPLATE)) {
             val request = firstRequest(appFileRequest(stage))
             assertEquals("PLAN SYSTEM", request.json.getString("instructions"))
             assertEquals("$stage", "low", request.json.getJSONObject("reasoning").getString("effort"))

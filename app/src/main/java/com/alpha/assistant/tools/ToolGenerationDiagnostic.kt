@@ -128,12 +128,13 @@ private val compileStatus = Regex("ok|faults|[A-Z_]{1,32}")
 private val outsideWord = Regex("[a-z0-9]{1,16}")
 
 /**
- * Only listed values leave the device: the status of a compile, and the outcome of a plan step. The word of an outside
+ * Only listed values leave the device: the status of a compile, and the outcome of a template call and of a plan step. The word of an outside
  * reply is model text, so only a short plain word passes. Any other value becomes "other". The other phases have no detail.
  */
 internal fun safePhaseDetail(name: String, detail: String?): String? = when {
     detail == null -> null
     name == AppFileNames.COMPILE -> detail.takeIf { it.matches(compileStatus) } ?: "other"
+    name == AppFileNames.TEMPLATE_OUTCOME -> detail.takeIf { it in AppFileNames.TEMPLATE_OUTCOMES } ?: "other"
     name != AppFileNames.PLAN_OUTCOME -> null
     detail == "accepted" -> detail
     detail.startsWith("outside:") -> "outside:" + (detail.removePrefix("outside:").takeIf { it.matches(outsideWord) } ?: "other")

@@ -468,15 +468,16 @@ class ToolController internal constructor(private val app: Application, private 
      * Starts the plan call of a spoken request beside its routing call, so that a screen does not wait for the routing.
      * Null when the plan step is off. It runs on the scope of the controller and marks its phases on the trace of [operationId].
      * The caller passes [EarlyPlan.use] to a screen run (ScreenRun), and calls [EarlyPlan.stop] when its request ends.
+     * The template call with [template] goes first, and its reply outside sends [prompt] to the plan call.
      */
-    internal fun startEarlyPlan(prompt: String, key: String, operationId: String): EarlyPlan? {
+    internal fun startEarlyPlan(template: String, prompt: String, key: String, operationId: String): EarlyPlan? {
         val limits = planStep() ?: return null
         val session = CloudSession()
         // Only phases: the generation run of the request marks the end of the operation.
         val run = traceFor(operationId)?.Run()
         run?.phase(AppFileNames.EARLY_PLAN_START)
         // The scope of the shell is a supervisor (viewModelScope), so a failed or cancelled plan does not end it.
-        val result = scope.async(Dispatchers.IO) { generationService.earlyPlan(key, prompt, session, limits, run?.let { it::phase }) }
+        val result = scope.async(Dispatchers.IO) { generationService.earlyPlan(key, template, prompt, session, limits, run?.let { it::phase }) }
         return EarlyPlan(result, session) { name -> run?.phase(name) }
     }
     internal class ManualChatSave(val canCommit: () -> Boolean, val finish: suspend (ToolRecord?) -> Unit)

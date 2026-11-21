@@ -93,6 +93,18 @@ internal fun chatDecision(kind: String, text: String, brief: String = "") =
 /** The mini-app that [FixtureProvider] generates. */
 internal const val FIXTURE_APP = """{"formatVersion":3,"title":"Fixture","description":"","capabilities":[],"stateSchema":{"count":"number"},"initialState":{"count":0},"ui":{"type":"text","text":"Count","bind":"count"},"source":"return {state:input.state};"}"""
 
+/** The reply of a template call of a scripted provider whose script has no template reply: the screen goes on with its plan call. */
+internal const val NO_TEMPLATE = "outside(\"other\")"
+
+/** Answers a template call ([CloudGenerationStage.APP_FILE_TEMPLATE]) with [NO_TEMPLATE] and gives true. Each other request gives false. */
+internal suspend fun answerNoTemplate(request: CloudRequest, emit: suspend (CloudEvent) -> Unit): Boolean {
+    if (request.generationStage != CloudGenerationStage.APP_FILE_TEMPLATE) return false
+    emit(CloudEvent.Text(NO_TEMPLATE))
+    emit(CloudEvent.RoundComplete(NO_TEMPLATE, false))
+    return true
+}
+
+/** A template call gets [NO_TEMPLATE] before the count, so [calls] counts no template call. */
 internal class FixtureProvider(private val reply: String = "Fixture response") : ChatProvider {
     @Volatile var calls = 0
     @Volatile var lastRequest: CloudRequest? = null
@@ -106,6 +118,7 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
     /** The chat decision creates the fixture app, so the request goes through the mini-app generation. */
     @Volatile var createApp = false
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+        if (answerNoTemplate(request, emit)) return
         synchronized(this) { calls++; lastRequest = request }
         failure?.let { throw it }
         gate?.await()

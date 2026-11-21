@@ -298,7 +298,7 @@ class ShellLiveVoiceWorkflowTest {
     /** Plan D, Db4: the plan call of a spoken request starts while its routing call waits. */
     @Test fun theVoicePlanStartsBesideTheRouting() = early(StageProvider(routing = CompletableDeferred())) { _, model, provider, phases ->
         socket.say(SCREEN_REQUEST, "d1", 100)
-        robot.waitUntil { provider.planCalls.isNotEmpty() }
+        robot.waitUntil(30_000) { provider.planCalls.isNotEmpty() }
         assertEquals(listOf(AppFileNames.EARLY_PLAN_START), phases)
         provider.routing.complete(Unit)
         robot.waitUntil(60_000) { model.stageToolId != null }
@@ -316,7 +316,7 @@ class ShellLiveVoiceWorkflowTest {
     /** Plan D, Db4: an answer stops the plan call beside its routing call. The voice says the answer, and no app comes. */
     @Test fun anAnswerCancelsTheEarlyPlan() = early(StageProvider(routing = CompletableDeferred())) { _, model, provider, phases ->
         socket.say("Какая погода", "d1", 100)
-        robot.waitUntil { provider.planCalls.isNotEmpty() }
+        robot.waitUntil(30_000) { provider.planCalls.isNotEmpty() }
         provider.routing.complete(Unit)
         robot.waitUntil { commentary().isNotEmpty() }
         assertTrue(runCatching { provider.planCalls.single().second.check() }.isFailure)
@@ -329,7 +329,7 @@ class ShellLiveVoiceWorkflowTest {
     @Test fun aStopCancelsBothCalls() =
         early(StageProvider(plans = CompletableDeferred(), routing = CompletableDeferred())) { scenario, model, provider, phases ->
             socket.say(SCREEN_REQUEST, "d1", 100)
-            robot.waitUntil { provider.planCalls.isNotEmpty() && provider.calls.size == 2 }
+            robot.waitUntil(30_000) { provider.planCalls.isNotEmpty() && provider.calls.size == 2 }
             scenario.onActivity { model.cancelRequest() }
             assertTrue(provider.calls.all { (_, session) -> runCatching { session.check() }.isFailure })
             assertEquals(listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_CANCELED), phases)
@@ -345,7 +345,10 @@ class ShellLiveVoiceWorkflowTest {
     /** Plan D, Db4: each early plan gets one end mark. A stop while the screen waits for the plan call that it used stops that call with no second mark. */
     @Test fun aStopAfterTheUseKeepsOneEndMark() = early(StageProvider(plans = CompletableDeferred())) { scenario, model, provider, phases ->
         socket.say(SCREEN_REQUEST, "d1", 100)
-        robot.waitUntil(60_000) { AppFileNames.EARLY_PLAN_USED in phases && messages(model).last().status == "generating" }
+        // The plan call starts after the template call and its compile.
+        robot.waitUntil(60_000) {
+            provider.planCalls.isNotEmpty() && AppFileNames.EARLY_PLAN_USED in phases && messages(model).last().status == "generating"
+        }
         scenario.onActivity { model.cancelRequest() }
         assertTrue(runCatching { provider.planCalls.single().second.check() }.isFailure)
         provider.plans.complete(Unit)
@@ -361,6 +364,7 @@ class ShellLiveVoiceWorkflowTest {
         val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))))
         early(object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (answerNoTemplate(request, emit)) return
                 if (request.generationStage != null) return script.respond(key, request, session, emit)
                 routing.await()
                 emit(CloudEvent.RoundComplete(chatDecision("answer", "Fixture response"), false))
@@ -369,9 +373,13 @@ class ShellLiveVoiceWorkflowTest {
             val compiled = CompletableDeferred<Unit>()
             scenario.onActivity {
                 val marks = model.tools.generationTraceObserver
+                // The template call has its own compile before the plan call starts, so only a compile after the plan call start counts.
+                var planned = false
                 model.tools.generationTraceObserver = { event ->
                     marks?.invoke(event)
-                    if ((event as? ToolGenerationTraceEvent.Phase)?.name == AppFileNames.COMPILE) compiled.complete(Unit)
+                    val name = (event as? ToolGenerationTraceEvent.Phase)?.name
+                    if (name == AppFileNames.PLAN_CALL_START) planned = true
+                    if (planned && name == AppFileNames.COMPILE) compiled.complete(Unit)
                 }
             }
             socket.say("Какая погода", "d1", 100)
@@ -434,6 +442,7 @@ class ShellLiveVoiceWorkflowTest {
         val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))))
         early(object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                if (answerNoTemplate(request, emit)) return
                 if (request.generationStage != null) {
                     if (EARLY_BRIEF in request.turns.last().text) { earlySession.complete(session); awaitCancellation() }
                     plans.await()
@@ -1683,7 +1692,8 @@ class ShellLiveVoiceWorkflowTest {
      * [SCREEN_REQUEST], presses the control [press] for [PRESS_REQUEST], and answers each other request. A plan call waits for [plans] and
      * a change call for [changes], and both answer from [script] (the app file [plan]). A change call throws [fault] when it is set, and
      * the call of [script] with the index of [hold] waits for its gate. The early plan call of a request that gets no screen waits for its
-     * cancel, so it takes no reply of [script] and no test depends on when the cancel comes.
+     * cancel, so it takes no reply of [script] and no test depends on when the cancel comes. A template call gets [NO_TEMPLATE] and goes
+     * to no list, so [calls] and [planCalls] hold no template call.
      */
     private class StageProvider(plan: String = "calc", val plans: CompletableDeferred<Unit> = CompletableDeferred(Unit),
         private val show: Boolean = false, private val brief: String = SCREEN_BRIEF,
@@ -1694,6 +1704,7 @@ class ShellLiveVoiceWorkflowTest {
         val calls = CopyOnWriteArrayList<Pair<CloudRequest, CloudSession>>()
         val planCalls get() = calls.filter { it.first.generationStage != null }
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+            if (answerNoTemplate(request, emit)) return
             calls += request to session
             if (request.generationStage != null) {
                 val input = request.turns.last().text

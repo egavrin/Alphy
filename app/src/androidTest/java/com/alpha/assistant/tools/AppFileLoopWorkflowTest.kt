@@ -26,7 +26,9 @@ import com.alpha.assistant.tools.agent.ScreenRun
 import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.plan
 import com.alpha.assistant.ui.FIXTURE_APP
+import com.alpha.assistant.ui.NO_TEMPLATE
 import com.alpha.assistant.ui.ShellFixture
+import com.alpha.assistant.ui.answerNoTemplate
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -451,13 +453,17 @@ class AppFileLoopWorkflowTest {
         assertEquals(ToolGenerationTraceOutcome.CANCELED, run.events.filterIsInstance<ToolGenerationTraceEvent.Finished>().single().outcome)
     }
 
-    /** The tool controller of a launched shell with the plan step on. Only the generation calls reach [chat]. */
+    /**
+     * The tool controller of a launched shell with the plan step on. Only the generation calls reach [chat]: a template call gets
+     * [NO_TEMPLATE] here, so the early plan goes on with its plan call.
+     */
     private fun withController(chat: ChatProvider, test: (ToolController) -> Unit) {
         val fixture = ShellFixture("appfile-loop")
         try {
             withPlanStep(fixture.context, AiProvider.OPENAI, true) {
                 fixture.install(chat = object : ChatProvider {
                     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+                        if (answerNoTemplate(request, emit)) return
                         if (request.generationStage != null) chat.respond(key, request, session, emit)
                     }
                 })
@@ -521,7 +527,7 @@ class AppFileLoopWorkflowTest {
         val operation = UUID.randomUUID().toString()
         withController(script) { tools ->
             tools.generationTraceObserver = { events += it }
-            val early = checkNotNull(tools.startEarlyPlan(PROMPT, "fixture", operation))
+            val early = checkNotNull(tools.startEarlyPlan(PROMPT, PROMPT, "fixture", operation))
             assertEquals(calc, (runBlocking { early.result.await() } as? AppFileOutcome.Clean)?.appFile)
         }
         val call = script.calls.single()
@@ -530,7 +536,10 @@ class AppFileLoopWorkflowTest {
         assertEquals(AppFilePrompt.load(context).system, call.systemInstructions)
         val phases = events.filterIsInstance<ToolGenerationTraceEvent.Phase>()
         assertTrue(phases.all { it.operationId.toString() == operation })
-        assertEquals(listOf("early_plan_start", "plan_call_start", "plan_first_text", "plan_reply_end", "compile"), phases.map { it.name })
+        // The template call goes first. Its reply outside starts the plan call.
+        assertEquals(listOf("early_plan_start", "template_call_start", "plan_first_text", "plan_reply_end", "compile", "template_outcome",
+            "plan_call_start", "plan_first_text", "plan_reply_end", "compile"), phases.map { it.name })
+        assertEquals("outside", phases.single { it.name == "template_outcome" }.detail)
         assertTrue(events.none { it is ToolGenerationTraceEvent.Finished })
     }
 
@@ -553,7 +562,7 @@ class AppFileLoopWorkflowTest {
     @Test fun aCancelOfTheEarlyPlanSessionStopsItsCall() {
         val provider = UntilCancelled()
         withController(provider) { tools ->
-            val early = checkNotNull(tools.startEarlyPlan(PROMPT, "fixture", UUID.randomUUID().toString()))
+            val early = checkNotNull(tools.startEarlyPlan(PROMPT, PROMPT, "fixture", UUID.randomUUID().toString()))
             runBlocking { withTimeout(5000) { provider.started.await() } }
             val cancelled = SystemClock.elapsedRealtime()
             early.session.cancel()
@@ -561,7 +570,7 @@ class AppFileLoopWorkflowTest {
             assertEquals("cancelled", (failure as? CloudFailure)?.code)
             assertTrue(SystemClock.elapsedRealtime() - cancelled < 1000)
             // The failed plan does not end the scope of the controller: a later early plan still gives its plan.
-            val next = checkNotNull(tools.startEarlyPlan(PROMPT, "fixture", UUID.randomUUID().toString()))
+            val next = checkNotNull(tools.startEarlyPlan(PROMPT, PROMPT, "fixture", UUID.randomUUID().toString()))
             assertTrue(runBlocking { withTimeout(10_000) { next.result.await() } } is AppFileOutcome.Clean)
         }
         assertEquals(listOf(APP_FILE, APP_FILE), provider.calls.map { it.generationStage })
@@ -574,7 +583,7 @@ class AppFileLoopWorkflowTest {
         val operation = UUID.randomUUID().toString()
         withController(provider) { tools ->
             tools.generationTraceObserver = { events += it }
-            val early = checkNotNull(tools.startEarlyPlan(PROMPT, "fixture", operation))
+            val early = checkNotNull(tools.startEarlyPlan(PROMPT, PROMPT, "fixture", operation))
             var failure: Throwable? = null
             val screen = Thread { failure = tools.screenRun(ScreenRun(early.result), operation) }.apply { start() }
             // The draft is ready just before the run waits for the early plan.

@@ -149,7 +149,7 @@ class OpenAiCompatibleProfileTest {
         fun body(provider: AiProvider, stage: CloudGenerationStage) =
             JSONObject(respond(provider, appFileRequest(stage)) { _, output -> json(output) }.single().body)
         // The change stage turns thinking off too: a change call is as short as a new plan.
-        for (stage in listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE)) {
+        for (stage in listOf(CloudGenerationStage.APP_FILE, CloudGenerationStage.APP_FILE_CHANGE, CloudGenerationStage.APP_FILE_TEMPLATE)) {
             val deepSeek = body(AiProvider.DEEPSEEK, stage)
             assertEquals("$stage", "disabled", deepSeek.getJSONObject("thinking").getString("type"))
             val openRouter = body(AiProvider.OPENROUTER, stage)

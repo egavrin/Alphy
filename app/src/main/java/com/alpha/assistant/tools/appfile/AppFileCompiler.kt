@@ -19,9 +19,12 @@ private const val TOO_LONG="the plan has "
  * hole is true when the plan has a need of kind hole. state is the next state of the stored app as JSON text: only with a previous and no fault.
  * The kit sets the two flags of a change (kit/src/change.js): blockedBySavedData when a saved value of the person blocks the change, and
  * savedDataMismatch when the stored state does not fit its stored app file.
+ * A template file (kit/src/template.js) also gives template (its word), kept (the text to store), expanded (the app file of kept), and leftOut
+ * (the names of the lines that it left out). Its definition also comes with the faults of those lines, so its status is then faults.
  */
 internal data class AppFileCompilation(val status: String,val faults: List<String>,val notes: List<String>,val definition: String?,val language: String?,
-    val hole: Boolean=false,val state: String?=null,val blockedBySavedData: Boolean=false,val savedDataMismatch: Boolean=false) {
+    val hole: Boolean=false,val state: String?=null,val blockedBySavedData: Boolean=false,val savedDataMismatch: Boolean=false,
+    val template: String?=null,val kept: String?=null,val expanded: String?=null,val leftOut: List<String> = emptyList()) {
     /** The text is longer than the compile step reads. A repair call cannot shorten it in a useful way. */
     val tooLong get()=faults.any {it.startsWith(TOO_LONG)}
     /** The saved data of the person stops the compile: one of the two flags of the kit. No reader tells the two apart. */
@@ -79,11 +82,15 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
 
     private fun read(json: JSONObject): AppFileCompilation {
         fun texts(key: String)=json.getJSONArray(key).let {list -> List(list.length()) {list.getString(it)}}
+        fun textsOrEmpty(key: String)=if(json.isNull(key)) emptyList() else texts(key)
         fun objectText(key: String)=if(json.isNull(key)) null else json.getJSONObject(key).toString()
+        // A free app file has no template fields.
+        fun text(key: String)=if(json.isNull(key)) null else json.getString(key)
         val faults=texts("faults")
         val definition=objectText("definition")
         return AppFileCompilation(if(definition!=null && faults.isEmpty()) "ok" else "faults",faults,texts("notes"),definition,
-            if(json.isNull("language")) null else json.getString("language"),json.getBoolean("hole"),objectText("state"),
-            blockedBySavedData=json.getBoolean("blockedBySavedData"),savedDataMismatch=json.getBoolean("savedDataMismatch"))
+            text("language"),json.getBoolean("hole"),objectText("state"),
+            blockedBySavedData=json.getBoolean("blockedBySavedData"),savedDataMismatch=json.getBoolean("savedDataMismatch"),
+            template=text("template"),kept=text("kept"),expanded=text("expanded"),leftOut=textsOrEmpty("leftOut"))
     }
 }

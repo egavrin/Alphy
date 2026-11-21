@@ -1740,7 +1740,10 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 if (voiceScreen && stageToolId == null) {
                     // A request too long for a plan prompt gets no early plan, and its routing decides as before.
                     val prompt = try { ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = dialogue()) } catch (_: CloudFailure) { null }
-                    request.earlyPlan = prompt?.let { tools.startEarlyPlan(it, key, operationId) }
+                    // Its template call goes first, with no dialogue line: that task is shorter than the plan prompt.
+                    request.earlyPlan = prompt?.let {
+                        tools.startEarlyPlan(ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = ""), it, key, operationId)
+                    }
                 }
                 withContext(Dispatchers.IO) {
                     val cloudRequest = CloudRequest(turns(history) + originalTurn,assistant.search,toolInstructions,
@@ -2044,7 +2047,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                             val input = prompt(if (decoded.isScreen) dialogue() else "")
                             // Only a screen with no search keeps it. It stays on the request, so a stop or the end can still cancel it.
                             val early = request.earlyPlan?.use()
-                            generate(input, changed, if (decoded.isScreen) ScreenRun(early) else ScreenRun().takeIf { screenChange })
+                            // A new screen sends its template task first: the request with no dialogue line.
+                            generate(input, changed, if (decoded.isScreen) ScreenRun(early, prompt("")) else ScreenRun().takeIf { screenChange })
                         }
                     } catch (_: ScreenFallback) {
                         // A change that the kit cannot make becomes a new screen with the plan prompt of a screen, and the old app stays (ruling OD-5).

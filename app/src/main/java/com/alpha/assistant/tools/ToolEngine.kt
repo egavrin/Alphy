@@ -183,10 +183,11 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
     /**
      * The plan step alone, with the sandbox and the call of a generation, for the plan call of a spoken request that starts
      * beside its routing call (ToolController.startEarlyPlan). A cancel of [session] stops the call.
+     * The template call with [template] goes first, and its reply outside sends [prompt] to the plan call (AppFileSteps.screen).
      */
-    internal suspend fun earlyPlan(key: String, prompt: String, session: CloudSession, limits: AppFileLimits,
+    internal suspend fun earlyPlan(key: String, template: String, prompt: String, session: CloudSession, limits: AppFileLimits,
         onPhase: ((String, String?, Long?) -> Unit)?): AppFileOutcome =
-        AppFileSteps(sandbox, planCall(key, session, onPhase), onPhase ?: { _, _, _ -> }, {}).plan(prompt, limits)
+        AppFileSteps(sandbox, planCall(key, session, onPhase), onPhase ?: { _, _, _ -> }, {}).screen(template, prompt, limits)
 
     internal suspend fun response(key: String, turns: List<CloudTurn>, session: CloudSession, stage: CloudGenerationStage?,
         instructions: String = "", expandedWriterOutput: Boolean = false,
