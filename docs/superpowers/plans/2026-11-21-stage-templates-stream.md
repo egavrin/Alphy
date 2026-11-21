@@ -33,7 +33,8 @@ Paths: `app/…/` is `app/src/main/java/com/alpha/assistant/`, and `test/…/` i
 - Gate 2: 15 of 16 explain requests clean after at most one repair; 7 of 8 refusals; at most 2 of 16 explain requests refused; median first call of the 16 explain requests at most 5.75 s; 13 of 16 changes right by the controller's reading; 12 of 16 with only changed lines.
 - Gate 3: each template at its caps, and at 1.25 times its text caps, shows with no scroll on the stage at the phone and the fold size.
 - Gate 4: for each saved template file, each longer prefix keeps the drawing commands of the shorter one.
-- Gate 5: the live marks `first_part_visible`, `picture_complete`, `controls_on`, `preview_updates`, `previews_gone`, with no anti-goal seen.
+- Gate 2c: the host check of the app passes for at least 22 of the 24 model-made template files (the 8 change bases and the 16 explain outputs of the final run), on a device, with no paid call.
+- Gate 5: the live marks `first_line_visible`, `first_part_visible`, `picture_complete`, `controls_on`, `preview_updates`, `previews_gone`, with no anti-goal seen.
 - A failed gate goes to the owner before the work that depends on it.
 - Model check budget: at most 150 calls of `gpt-6.1-terra` at the effort low. Each label starts with `tpl-`. `LIMIT` in `kit/modelcheck.js` goes from 539 to 689, and a second cap stops the 151st `tpl-` call. `evidence/modelcheck/spend.json` held 525 calls on 2026-11-21.
 - Split of the 150 calls: tuning at most 56, change pilot at most 12, final run at most 80, 2 in reserve. The final run happens once.
@@ -125,6 +126,7 @@ Design section 6 changes two anti-goals of `docs/superpowers/specs/2026-11-20-di
 | `test/…/ui/StageChangeWorkflowTest.kt` | Template change, change stream | 4, 5, 18 |
 | `test/…/tools/AppFileChangeWorkflowTest.kt` | Typed change, restore, manual edit of a template app | 5 |
 | `test/…/ui/StageTemplateFitTest.kt` (new) | Gate 3 | 9 |
+| `test/…/ui/StageTemplateHostCheckTest.kt` (new) | Gate 2c | 8b |
 | `kit/README.md`, `docs/voice-integration.md`, `docs/tool-integration.md` | Documentation | 10, then 22 |
 | `test/…/tools/StagePreviewCostTest.kt` (new) | Gate 1a | 14 |
 | `test/…/tools/AgentScript.kt` | `Scripted.Deltas` | 15 |
@@ -146,11 +148,11 @@ Phase 1 (templates). It works alone and can go to `main` after the owner's yes.
 | --- | --- | --- |
 | K (kit) | 1, 2, 3 | — |
 | A (app, `emulator-5592`) | 4, 5, 10 | 2 |
-| D (device gate, `emulator-5596`) | 9 | 4 |
+| D (device gate, `emulator-5596`) | 9, then 8b | 9 after 4; 8b after 8 |
 | P (paid, controller) | 6, then 8 | 6 after 3; 8 after 7 |
 | H (held-out author) | 7 | 6 |
-| B (`emulator-5594`) | 10b | 4 |
-| Controller | 11, 12 | 5, 8, 9, 10, 10b |
+| B (`emulator-5594`) | 10b | 5 |
+| Controller | 11, 12 | 5, 8, 8b, 9, 10, 10b |
 
 Phase 2 (stream). Tasks 13 and 14 (the device cost, gate 1a) run beside phase 1. Each other task starts after Task 12.
 
@@ -250,7 +252,7 @@ Step forms:
 
 **Files:**
 - Modify: `kit/modelcheck.js`.
-- Create: `kit/test/fixtures/template-tuning.json` (the 14 requests of `evidence/templatecheck/requests.json`, with `expect` `template` for type explain and `outside` for type learn), `kit/test/modelcheck-template.test.js`.
+- Create: `kit/test/fixtures/template-tuning.json` (the 14 requests of `evidence/templatecheck/requests.json`), `kit/test/modelcheck-template.test.js`. The `expect` of each tuning item follows the owner's rule (a check, a timer, a list, a form, or a game is refused): `template` for each item of type explain; `outside` for `t-notes`, `t-stress`, and `t-minus`, which ask for a check or for tasks; `any` for `t-morse`, which asks for steps with no check. An item with `any` counts in no bar.
 
 **Interfaces:**
 - Consumes: `compileStep`, `TEMPLATE_HASH`, `PROMPT`, `taskText`, `templateRepairText`, `templateChangeText`, and in `kit/modelcheck.js` `openai(body, label)`, `count(label)`, `numbers`, `faultTable`.
@@ -265,7 +267,7 @@ Step forms:
   - `aCleanFirstReplyIsClean0`; `aRepairedReplyIsClean1` (two calls, the second reply holds only the faulty line); `aLeftOutLineIsPartial1`; `aWholeFaultIsNot`.
   - `outsideOnALearnRequestIsRight` and `outsideOnAnExplainRequestCountsAsRefused`.
   - `aChangeThatRepeatsAStoredLineCountsIt`: a change reply with one unchanged stored line gives `repeated` 1.
-  - `templateNumbersReadTheBars`: 16 explain and 8 learn records give the five numbers, and the median first call uses the 16 explain records only.
+  - `templateNumbersReadTheBars`: 16 explain and 8 learn records give the five numbers, and the median first call uses the 16 explain records only. A record of an item with `expect` `any` changes none of the five numbers.
   - `overLimitHoldsBothCaps`: a log of 689 entries is over for each label. A log of 150 `tpl-` entries is over for a `tpl-` label and not over for another label.
 - [ ] **Step 2: Run** `bun test kit/test/modelcheck-template.test.js` and see it fail.
 - [ ] **Step 3: Implement.** The template call sends `PROMPT["Template"]` as instructions and `taskText({ request, brief: "" })` as input. `firstCallMs` runs from the send to the reply end. One repair uses `templateRepairText`. A change sends `templateChangeText` of its base file. `count` calls `overLimit`. The CLI and `table` take the new sets.
@@ -382,6 +384,25 @@ The agent must not read `kit/prompt.md`, `kit/prompt.js`, `kit/test/prompt.test.
 - [ ] **Step 4: Failure path.** One missed bar: stop, and report the numbers and the faults to the owner. No new tuning on this set, and no Task 11.
 - [ ] **Step 5: Record** the table, the calls, and the `TEMPLATE_HASH` value. That value goes into the test of Task 13.
 
+### Task 8b: Gate 2c, the host check of model-made template files
+
+**Lane:** D · **Waits for:** 4, 8, 9 · **Who:** agent (`emulator-5596`) for the run, controller for the decision
+
+Gate 2 runs in Bun, so it shows only the faults of the kit. The app also runs its own host check on the complete screen (the smoke test of the host, the language of the texts, a long decimal number, the presentation). A fault there sends the whole template to the full generation. This gate measures how often that happens, with no paid call.
+
+**Files:**
+- Create: `test/…/ui/StageTemplateHostCheckTest.kt`.
+
+**Interfaces:**
+- Consumes: the voice path with a scripted template reply (the form of `StageTemplateWorkflowTest`), and the fallback reason `TEMPLATE_CHECK` of Task 4.
+- Input files (read-only): the 8 files of `kit/test/fixtures/template-bases/`, and the `kept` text of each clean explain record of `/Users/egavrin/Documents/alphy/.claude/worktrees/app-file-parts/evidence/modelcheck/tpl-final-terra-low/`. The agent pushes them with `adb -s <emulator> push` to the folder `tpl-hostcheck/` in the external files directory of the app. They do not go into the patch.
+
+- [ ] **Step 1: Write the test** `eachModelMadeTemplatePassesTheHostCheck`. It is skipped when the folder is absent, so the full suite stays green. For each file: the scripted template reply is the file. Assert that the app is stored with that `appFile` and that no `TEMPLATE_CHECK` fallback ran. Print one line for each file with the outcome, and for a miss the host check reason.
+- [ ] **Step 2: Prove that it detects a miss.** Run it once with one more file whose card text is in a different language than its `lang`, and see that file reported as a miss.
+- [ ] **Step 3: Run** the class at the phone size.
+- [ ] **Step 4: Judge.** The bar: at most 2 files miss. Failure path: the controller reports each reason to the owner before Task 11. A reason that one line owns becomes a fix task in lane K (the fault gets its line, so a repair or a left-out line serves it).
+- [ ] **Step 5: Hand back** the patch, the lines of the run, and the `lastUpdateTime` values. No commit.
+
 ### Task 9: Gate 3, fit on the stage
 
 **Lane:** D · **Waits for:** 4 · **Who:** agent (`emulator-5596`)
@@ -410,14 +431,15 @@ The agent must not read `kit/prompt.md`, `kit/prompt.js`, `kit/test/prompt.test.
 
 ### Task 10b: New subjects of the phase 1 live check
 
-**Lane:** B · **Waits for:** 4 · **Who:** agent (`emulator-5594`)
+**Lane:** B · **Waits for:** 5 · **Who:** agent (`emulator-5594`)
 
 **Files:**
-- Modify: `test/…/ui/DialogueDriver.kt` (the list of dialogues and the goals), `test/…/ui/LiveDialogueStageTest.kt` (one method for each new dialogue), `test/…/ui/DialogueStageRehearsalTest.kt`.
+- Modify: `test/…/ui/DialogueDriver.kt` (the list of dialogues, and the `evidence` map of the goals), `test/…/ui/LiveDialogueStageTest.kt` (one method for each new dialogue), `test/…/ui/DialogueStageRehearsalTest.kt`.
 
 **Interfaces:**
-- Consumes: `Dialogue(name, steps)`, `ask(fixture, said, goal)`, and the goals of `DialogueDriver.kt` (the list that starts with `Dialogue("pendulum", …)`).
-- Produces: three dialogues `tpl-a`, `tpl-b`, `tpl-c` on subjects that no earlier run used (absent from `kit/test/fixtures/`, `kit/prompt.md`, and each earlier dialogue of the driver). Each has these steps in this order: a first request to explain a thing (goal `screen`), a spoken change of that screen (goal `change`), a request to learn a thing with a check (the new goal `learn`: the stage changed, and the stored `appFile` is no template file), and a request to explain a different thing (goal `screen`: the new screen replaces the shown one). In `tpl-b` the change asks for fresh facts (goal `search`). `tpl-c` runs at the fold size. The methods are `LiveDialogueStageTest#tplA`, `#tplB`, `#tplC`.
+- Consumes: `Dialogue(name, steps, calls, adaptive)`, `ask(fixture, said, goal)`, and the `evidence` map in `DialogueDriver.kt` (near the list that starts with `Dialogue("pendulum", …)`). A goal is a free word. The goals `screen` and `search` exist. The goals `change` and `learn` are new.
+- Produces: the goal `change` with its evidence (the step record says that the stored `appFile` of the stage app changed and is still a template file), and the goal `learn` with its evidence (the stage changed, and the stored `appFile` is no template file). The step record gets the field that each evidence reads.
+- Produces: three dialogues `tpl-a`, `tpl-b`, `tpl-c` on subjects that no earlier run used (absent from `kit/test/fixtures/`, `kit/prompt.md`, and each earlier dialogue of the driver). Each has these steps in this order: a first request to explain a thing (goal `screen`), a spoken change of that screen (goal `change`), a request to learn a thing with a check (goal `learn`), and a request to explain a different thing (goal `screen`: the new screen replaces the shown one). In `tpl-b` the change asks for fresh facts (goal `search`). The methods are `LiveDialogueStageTest#tplA`, `#tplB`, `#tplC`. A dialogue holds no screen size: the controller sets the size before a run.
 
 - [ ] **Step 1: Write the failing test** `eachTemplateDialoguePassesTheRehearsal` in `DialogueStageRehearsalTest`: each of the three dialogues runs with scripted voice and scripted chat (a template reply for each explain step, `outside("learn")` and a free plan for the learn step, changed lines for the change step) and passes the bar of the driver for each step.
 - [ ] **Step 2: Run** the class and see it fail (no dialogue with these names).
@@ -427,9 +449,9 @@ The agent must not read `kit/prompt.md`, `kit/prompt.js`, `kit/test/prompt.test.
 
 ### Task 11: Phase 1 live check
 
-**Lane:** controller · **Waits for:** 5, 8, 9, 10b · **Who:** controller
+**Lane:** controller · **Waits for:** 5, 8, 8b, 9, 10b · **Who:** controller
 
-- [ ] **Step 1: Prepare.** One free emulator. Budget: 180 s of voice and 60 chat calls.
+- [ ] **Step 1: Prepare.** One free emulator. Budget: 180 s of voice and 60 chat calls. `#tplC` runs at the fold size: set it before that run and reset it after (Global Constraints).
 - [ ] **Step 2: Run** the free rehearsal (`DialogueStageRehearsalTest`, `StageTemplateWorkflowTest`), then the paid dialogues `LiveDialogueStageTest#tplA`, `#tplB`, and `#tplC` with the label `tpl-live1` (the form of Global Constraints).
 - [ ] **Step 3: Judge.** Look at each picture. Report speech end to screen against today's 8.4 to 12.3 s, the template outcomes, the refusals, and the fit.
 - [ ] **Step 4: Failure path.** An anti-goal seen, a screen that scrolls, or an explain request refused: report to the owner before Task 12.
@@ -636,9 +658,9 @@ The agent must not read `kit/prompt.md`, `kit/prompt.js`, `kit/test/prompt.test.
 - Modify: `test/…/ui/DialogueRecorder.kt`, `test/…/ui/DialogueDriver.kt` (`ScriptedChat`, the list of dialogues), `test/…/ui/DialogueStageRehearsalTest.kt`, `test/…/ui/DialogueRecorderTest.kt`, `test/…/ui/LiveDialogueStageTest.kt`.
 
 **Interfaces:**
-- Produces: in `report()` for each request, `first_part_visible` (speech end to the first `stage_preview` with the detail `parts`, `card`, or `whole`), `picture_complete` (the first `card` or `whole`, else `controls_on`), `controls_on`, `preview_updates` (count of `stage_preview`), `previews_gone` (count of `stage_preview_gone`). A `ScriptedChat` step reply can be `Deltas`.
-- Produces: three more dialogues `tpl-d`, `tpl-e`, `tpl-f` on subjects that no earlier dialogue and no fixture used, with the steps of Task 10b (`tpl-f` at the fold size), and the methods `LiveDialogueStageTest#tplD`, `#tplE`, `#tplF`.
-- Produces: the dialogue `no-screen` and the method `LiveDialogueStageTest#noScreen`: six first turns that need no screen (two greetings, two short facts, two questions about the assistant), each in a new talk, with the goal `answer` (a spoken answer, and no app on the stage at the end). Its report counts `previews_gone` for each turn.
+- Produces: in `report()` for each request, `first_line_visible` (speech end to the first `stage_preview` of any detail: the owner's moment of requirement 1), `first_part_visible` (the first `stage_preview` with the detail `parts`, `card`, or `whole`), `picture_complete` (the first `card` or `whole`, else `controls_on`), `controls_on`, `preview_updates` (count of `stage_preview`), `previews_gone` (count of `stage_preview_gone`). A `ScriptedChat` step reply can be `Deltas`.
+- Produces: three more dialogues `tpl-d`, `tpl-e`, `tpl-f` on subjects that no earlier dialogue and no fixture used, with the steps and the goals of Task 10b, and the methods `LiveDialogueStageTest#tplD`, `#tplE`, `#tplF`. A dialogue holds no screen size.
+- Produces: the new goal `answer` with its evidence (a spoken answer, and no app on the stage at the end of the step), the dialogue `no-screen`, and the method `LiveDialogueStageTest#noScreen`: six first turns that need no screen (two greetings, two short facts, two questions about the assistant), each in a new talk. Its report counts `previews_gone` for each turn.
 
 - [ ] **Step 1: Write the failing tests:** `theStreamMarksComeFromTheTracePhases` (DialogueRecorderTest, a synthetic trace with known times and counts); `shipStreams`, `aNoScreenTurnCountsAGonePreview`, and `eachStreamDialoguePassesTheRehearsal` (DialogueStageRehearsalTest, with `Deltas` replies).
 - [ ] **Step 2: Run** both classes and see the new tests fail.
@@ -693,9 +715,9 @@ The agent must not read `kit/prompt.md`, `kit/prompt.js`, `kit/test/prompt.test.
 
 **Lane:** controller · **Waits for:** 18, 19, 20, 21, 22 · **Who:** controller
 
-- [ ] **Step 1: Prepare.** One free emulator. Budget: 300 s of voice and 100 chat calls.
+- [ ] **Step 1: Prepare.** One free emulator. Budget: 300 s of voice and 100 chat calls. `#tplF` runs at the fold size: set it before that run and reset it after (Global Constraints).
 - [ ] **Step 2: Run** the free rehearsal (Task 19 cases), then the paid dialogues `LiveDialogueStageTest#tplD`, `#tplE`, and `#tplF` with the label `tpl-live2`, then the paid probe `LiveDialogueStageTest#noScreen` in the same budget (the form of Global Constraints).
-- [ ] **Step 3: Judge.** Look at each picture. Report `first_part_visible`, `picture_complete`, and `controls_on` for each screen against the estimates (frame about 3.1 s, first shape about 3.5 s, picture about 5.0 s, controls on 6.4 to 7.8 s) and today's 8.4 to 12.3 s. Report `preview_updates`, and the count of frames that went away in the probe (design section 6).
+- [ ] **Step 3: Judge.** Look at each picture. Report `first_line_visible`, `first_part_visible`, `picture_complete`, and `controls_on` for each screen against the estimates (frame about 3.1 s, first shape about 3.5 s, picture about 5.0 s, controls on 6.4 to 7.8 s) and today's 8.4 to 12.3 s. Report `preview_updates`, and the count of frames that went away in the probe (design section 6).
 - [ ] **Step 4: Failure path.** An anti-goal seen (a part that moves, a screen that starts again, a control on before the app is live, a frame with no end), or controls on later than today: report to the owner before Task 24.
 - [ ] **Step 5: Record** the marks, the voice seconds, and the calls in the ledger.
 

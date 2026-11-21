@@ -28,7 +28,7 @@ Goals:
 2. The screen shows at its first complete line. Each later line draws when it is complete: the control, each part of the picture, the card.
 3. A fault belongs to one line. A repair draws that line again. The other lines stay on the screen.
 4. A spoken change of a template screen draws the same way: each changed line when it is complete.
-5. Three times of each screen are measured on one clock and reported: first part visible, picture complete, controls on.
+5. Four times of each screen are measured on one clock and reported: first line visible (the frame), first part of the picture visible, picture complete, controls on.
 
 Non-goals of this design:
 
@@ -165,10 +165,10 @@ Each gate is a task of the plan. A gate that fails goes to the owner before the 
 1. **Device cost of one preview update**, in two parts, because the second part needs the stream:
    - 1a, as early as the kit can make a preview, beside the template phase: the time of one update on an emulator at the phone and the fold size, with the compile, the drawing, and the redraw. One update above 1 s goes to the owner before more stream work.
    - 1b, after the stream of a new screen exists: the stream never makes "controls on" later than a run with the stream off by more than 0.3 s (paired, scripted deltas).
-2. **Model check of the template prompt** (paid). Tuning uses the 14 requests of the template check. The final run uses a new held-out set from an agent that does not see the prompt: 24 screen requests (16 to explain or show, 8 that the model must refuse) and 16 change requests on 8 template files. Bars: 15 of 16 explain requests clean after at most one repair; 7 of 8 refusals; at most 2 of 16 explain requests refused; the median first call not above 5.75 s (4.25 s plus the noise of 1.5 s); 13 of 16 changes right by the controller's reading, and 12 of 16 with only changed lines.
+2. **Model check of the template prompt** (paid). Tuning uses the 14 requests of the template check. The final run uses a new held-out set from an agent that does not see the prompt: 24 screen requests (16 to explain or show, 8 that the model must refuse) and 16 change requests on 8 template files. Bars: 15 of 16 explain requests clean after at most one repair; 7 of 8 refusals; at most 2 of 16 explain requests refused; the median first call not above 5.75 s (4.25 s plus the noise of 1.5 s); 13 of 16 changes right by the controller's reading, and 12 of 16 with only changed lines. This check runs outside the app, so it shows only the faults of the kit. A device test then runs the host check of the app over the template files that the model made, with no paid call: at most 2 of 24 miss.
 3. **Fit on the stage**: each template at its caps, and at 1.25 times its text caps, shows with no scroll on the stage at the phone and the fold size (a device test).
 4. **The picture only grows**: for each saved template file, each longer prefix keeps the drawing commands of the shorter one (a kit test).
-5. **Live check** (the method of 2026-11-21): a free rehearsal with a scripted stream of deltas, then paid dialogues on new subjects, then a paid probe of first turns that are no screen. The recorder gets the marks `first_part_visible`, `picture_complete`, `controls_on`, the count of preview updates, and the count of previews that went away.
+5. **Live check** (the method of 2026-11-21): a free rehearsal with a scripted stream of deltas, then paid dialogues on new subjects, then a paid probe of first turns that are no screen. The recorder gets the marks `first_line_visible`, `first_part_visible`, `picture_complete`, `controls_on`, the count of preview updates, and the count of previews that went away.
 
 Estimates for the first screen of a talk, after speech end (from fills of one line and one rate, not a promise): frame about 3.1 s, first shape about 3.5 s, picture complete about 5.0 s, controls on 6.4 to 7.8 s. Today each of the three is 8.4 to 12.3 s. No figure exists for a change.
 
