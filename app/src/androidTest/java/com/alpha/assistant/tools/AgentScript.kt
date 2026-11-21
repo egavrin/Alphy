@@ -21,6 +21,8 @@ internal sealed interface Scripted {
     data class Waits(val firstTextMs: Long, val text: String) : Scripted
     /** [firstLine] at once, then no text for [stallMs]. */
     data class Stalls(val firstLine: String, val stallMs: Long) : Scripted
+    /** For each part: no text for its delay in ms, then the part as one text delta. Then the round ends with the joined text. */
+    data class Deltas(val parts: List<Pair<Long, String>>) : Scripted
 }
 
 /** A scripted model for agent loop tests. It gives the replies in order and then repeats the last one. */
@@ -39,6 +41,10 @@ internal class AgentScriptProvider(private val replies: List<Scripted>) : ChatPr
             is Scripted.Fails -> throw CloudFailure(reply.code, "The scripted call failed.")
             is Scripted.Waits -> { delay(reply.firstTextMs); text(reply.text) }
             is Scripted.Stalls -> { emit(CloudEvent.Text(reply.firstLine)); delay(reply.stallMs); emit(CloudEvent.RoundComplete(reply.firstLine, false)) }
+            is Scripted.Deltas -> {
+                reply.parts.forEach { (ms, part) -> delay(ms); emit(CloudEvent.Text(part)) }
+                emit(CloudEvent.RoundComplete(reply.parts.joinToString("") { it.second }, false))
+            }
         }
     }
     fun feedback(call: Int) = calls[call].turns.last().text

@@ -206,6 +206,9 @@ class ToolController internal constructor(private val app: Application, private 
     var error by mutableStateOf<String?>(null); private set
     var errorCode by mutableStateOf<String?>(null); private set // the CloudFailure code of error
     internal var storageUnavailable by mutableStateOf(false); private set
+    internal val stagePreviews = StagePreviews()
+    internal var previewBeforeRouting: Boolean = true
+    internal var previewStream: Boolean = true
     @Volatile private var closing = false
     private var job: Job? = null
     private data class LocalButton(val tool: ToolRecord, val action: String, val host: Any, val active: () -> Boolean)
