@@ -23,7 +23,12 @@ Paths: `app/…/` is `app/src/main/java/com/alpha/assistant/`, and `test/…/` i
   - Example files: `kit/test/fixtures/template/ship.plan` (the example of design section 1), `word-parts.plan`, `majority.plan`. Task 1 writes them.
 - Drawing size: 300 × 220 for each template, fixed from the first line.
 - Content budget: title 30, control label 28, card title 32, card text 140, option 12, sign 14, shape text 28 characters; 6 options, 6 items, 12 shapes, 100 cells.
-- 1.25 rule: a text up to floor(1.25 × cap) has no fault: 37, 35, 40, 175, 15, 17, 35. List caps get no factor. A text fault names the cap.
+- Strict text limits (the owner's decision of 2026-11-21 after gate 3 missed its bar: «Строгие лимиты нужны.»). This replaces the first 1.25 rule.
+  - A text inside the picture keeps the factor 1.25, because it cannot change the height of the screen: a text in quotes of a shape (cap 28, up to 35) and the sign of an item (cap 14, up to 17).
+  - A text outside the picture has a hard cap with no factor: the title 30, the label of the control 28, an option and the label of an item 12, the card title 32, the card text and the text of an item 140.
+  - A card text or an item text past its cap is cut at the end of its last whole sentence inside the cap, with no fault and no call. The cut text is shown and stored. With no sentence end inside the cap it is a fault of its line.
+  - Each other text outside the picture past its cap is a fault of its line. List caps get no factor. A text fault names the cap.
+  - At the fold size the picture of the stage is 8 dp lower.
 - Color names with no call (case does not matter): red #dc2626, orange #ea580c, yellow #facc15, green #16a34a, blue #2563eb, purple #9333ea, violet #7c3aed, pink #db2777, brown #a16207, gray and grey #64748b, cyan #0891b2, teal #0d9488, indigo #4f46e5, black `ink`, white `surface`. Kit tones and `#RRGGBB` stay valid.
 - Fault form: `NAME: message`. NAME is the line name, or the template word for the first line.
 - Each template call uses `CloudGenerationStage.APP_FILE_TEMPLATE`. The free plan keeps `APP_FILE`, and today's change keeps `APP_FILE_CHANGE`.
@@ -31,7 +36,7 @@ Paths: `app/…/` is `app/src/main/java/com/alpha/assistant/`, and `test/…/` i
 - Gate 1a: no preview update above 1 s on an emulator at the phone or the fold size.
 - Gate 1b: for each paired run with scripted deltas, controls on with the stream is at most 0.3 s later than with the stream off.
 - Gate 2: 15 of 16 explain requests clean after at most one repair; 7 of 8 refusals; at most 2 of 16 explain requests refused; median first call of the 16 explain requests at most 5.75 s; 13 of 16 changes right by the controller's reading; 12 of 16 with only changed lines.
-- Gate 3: each template at its caps, and at 1.25 times its text caps, shows with no scroll on the stage at the phone and the fold size.
+- Gate 3: each template at its caps shows with no scroll on the stage at the phone and the fold size. The six files are `*-caps.plan` and `*-caps125.plan`; in the second three, only the texts inside the picture are at 1.25 times their cap. (First run, with each text at 1.25 times: 6 of 12, a miss, which led to the strict text limits.)
 - Gate 4: for each saved template file, each longer prefix keeps the drawing commands of the shorter one.
 - Gate 2c: the host check of the app passes for at least 22 of the 24 model-made template files (the 8 change bases and the 16 explain outputs of the final run), on a device, with no paid call.
 - Gate 5: the live marks `first_line_visible`, `first_part_visible`, `picture_complete`, `controls_on`, `preview_updates`, `previews_gone`, with no anti-goal seen.
