@@ -43,9 +43,11 @@ Non-goals of this design:
 Anti-goals (a result that works by its letter and fails the owner):
 
 - A screen for each question. A short fact gets a spoken answer and nothing else.
+  Changed on 2026-11-21 (`2026-11-21-stage-templates-stream-design.md`, section 6): this holds for the result of the turn. A frame can show while the routing call runs, and it goes away when that call gives no screen.
 - A fixed rule in code that picks the requests that get a screen.
 - A conversation that stops or loses its screen because an answer came.
 - A spoken answer that does not agree with the picture beside it.
+  Changed on 2026-11-21 (the same section): this holds for a complete picture. A picture that draws while the voice speaks is normal (the owner's words: "то, что картинка будет генериться под голос. Нормально.").
 
 ## Facts that limit the design
 
