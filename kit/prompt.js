@@ -6,8 +6,15 @@ import { readFileSync } from "node:fs";
 /** The text under each level-2 heading of kit/prompt.md, by the heading. */
 export const PROMPT = Object.fromEntries(readFileSync(new URL("./prompt.md", import.meta.url), "utf8").split(/^## /m).slice(1)
   .map((part) => [part.slice(0, part.indexOf("\n")), part.slice(part.indexOf("\n") + 1).trim()]));
-/** The first 12 hex digits of the SHA-256 of the sections of the prompt, so that each record names the prompt that made it. */
-export const PROMPT_HASH = new Bun.CryptoHasher("sha256").update(JSON.stringify(PROMPT)).digest("hex").slice(0, 12);
+/** The first 12 hex digits of the SHA-256 of the named sections of sections, in the order of names. */
+export const hashOf = (names, sections = PROMPT) => new Bun.CryptoHasher("sha256").update(JSON.stringify(Object.fromEntries(names.map((name) => [name, sections[name]])))).digest("hex").slice(0, 12);
+/**
+ * The first 12 hex digits of the SHA-256 of the sections of the prompt, so that each record names the prompt that made it.
+ * PROMPT_HASH covers the four sections of the free plan, so the free records and fixtures keep their hash. TEMPLATE_HASH covers the three
+ * template sections. A section that comes later, such as "Template rest", is in neither.
+ */
+export const PROMPT_HASH = hashOf(["System", "Repair", "Dialogue", "Change"]);
+export const TEMPLATE_HASH = hashOf(["Template", "Template repair", "Template change"]);
 
 /**
  * The task text as ChatToolReply.generationPrompt builds it: the request, the widget brief, the fixed line, and the reply excerpt.
@@ -21,3 +28,9 @@ export const repairText = ({ task, plan, faults }) => `${task}\n\nYour plan:\n${
 
 /** The text of a change call: the request of the person, the app file, and the change rule of the prompt. */
 export const changeText = ({ request, plan }) => `${request}\n\nYour app file:\n${plan.trimEnd()}\n\n${PROMPT.Change}`;
+
+/** The text of a repair call of a template file: the task, the lines, the faults of the kit, and the repair rule of the template prompt. */
+export const templateRepairText = ({ task, plan, faults }) => `${task}\n\nYour lines:\n${plan.trimEnd()}\n\nFaults of the kit:\n${faults.map((fault) => "- " + fault).join("\n")}\n\n${PROMPT["Template repair"]}`;
+
+/** The text of a change call of a template file: the request of the person, the stored template file, and the change rule of the template prompt. */
+export const templateChangeText = ({ request, plan }) => `${request}\n\nYour lines:\n${plan.trimEnd()}\n\n${PROMPT["Template change"]}`;

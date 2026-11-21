@@ -8,7 +8,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PROMPT, changeText, repairText } from "./prompt.js";
+import { PROMPT, changeText, repairText, templateChangeText, templateRepairText } from "./prompt.js";
+import { TEMPLATE_HEAD } from "./src/template.js";
 
 /** The modules of the bundle in dependency order: each one imports only modules before it. */
 const MODULES = ["icons", "dsl", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "change", "template", "compile"];
@@ -98,9 +99,13 @@ export async function bundle() {
  * The prompt asset of the app (prompt.json): the four sections of kit/prompt.md, and the task texts of a repair call and a change call
  * with the placeholders {{task}}, {{plan}}, {{faults}}, and {{request}}. The host puts the plan with no newline at its end, and the faults
  * joined by "\n- ", so a filled template is the text of repairText and changeText (prompt.js). No prompt text is typed in Kotlin.
+ * The template prompt adds its section (template), the task texts of its repair and change calls with the same placeholders
+ * (templateRepairTask, templateChangeTask), and templateHead, the source of the pattern that tells a template file from an app file (src/template.js).
  */
 export const promptAsset = () => ({ system: PROMPT.System, repair: PROMPT.Repair, dialogue: PROMPT.Dialogue, change: PROMPT.Change,
-  repairTask: repairText({ task: "{{task}}", plan: "{{plan}}", faults: ["{{faults}}"] }), changeTask: changeText({ request: "{{request}}", plan: "{{plan}}" }) });
+  repairTask: repairText({ task: "{{task}}", plan: "{{plan}}", faults: ["{{faults}}"] }), changeTask: changeText({ request: "{{request}}", plan: "{{plan}}" }),
+  template: PROMPT.Template, templateRepairTask: templateRepairText({ task: "{{task}}", plan: "{{plan}}", faults: ["{{faults}}"] }),
+  templateChangeTask: templateChangeText({ request: "{{request}}", plan: "{{plan}}" }), templateHead: TEMPLATE_HEAD.source });
 
 /** The plan files of a directory. */
 export const plansIn = (directory) => readdirSync(directory).filter((name) => name.endsWith(".plan")).map((name) => join(directory, name));
@@ -118,12 +123,14 @@ export const LOOK_FIXTURES = ["water-ko", "units-pl", "shopping", "habits", "pri
 /**
  * Each file that the build writes, with its text. The device tests also read the test plans of the node table, the lists, the render work limit, the cards, the free forms, the shapes, the reply at the byte limit, and a model beside a drawing, and the look fixtures.
  * The plans that a model wrote (test/fixtures/model) go to a directory of their own, appfile/model, with their index: the device test reads the request of each plan.
+ * The template files (test/fixtures/template: the examples and the cap files) go to appfile/template.
  */
 export const outputs = async () => [[at("src/icons.js"), iconModule()], [at("../app/src/main/assets/appfile/kit.js"), await bundle()],
   [at("../app/src/main/assets/appfile/prompt.json"), JSON.stringify(promptAsset(), null, 2) + "\n"],
   ...planCopies([...plansIn(at("plans")), ...["nodes", "looks", "lists", "rich", "cards", "free", "shapes", "bytes", "model"].map((name) => at(`test/${name}.plan`)), ...LOOK_FIXTURES],
     at("../app/src/androidTest/assets/appfile")),
   ...planCopies(plansIn(at("test/fixtures/model")), at("../app/src/androidTest/assets/appfile/model")),
+  ...planCopies(plansIn(at("test/fixtures/template")), at("../app/src/androidTest/assets/appfile/template")),
   [at("../app/src/androidTest/assets/appfile/model/index.json"), readFileSync(at("test/fixtures/model/index.json"), "utf8")]];
 
 if (import.meta.main) {

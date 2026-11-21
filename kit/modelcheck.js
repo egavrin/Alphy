@@ -6,9 +6,13 @@
 //                                                              or a combination such as CD. STOP_AT (default 600) refuses a run whose worst case passes it.
 //                                                              REPAIRS is the count of repair calls. A change case of set F gets one repair call,
 //                                                              and none after a fault that the saved data blocks or the mismatch fault.
-//   bun kit/modelcheck.js table LABEL...                       the numbers of each label, from its records
+//                                                              SET T (template tuning), U (held-out screens), V (held-out changes), W (change pilot),
+//                                                              or a combination of these four, is the template check: PROMPT.Template, one repair call,
+//                                                              and a LABEL that starts with tpl-. A template set runs with no set of the free prompt.
+//   bun kit/modelcheck.js table LABEL...                       the numbers of each label, from its records; one line for a label of the template check
 // The key is OPENAI_API_KEY, else its line in ~/.env. The script sends it only to api.openai.com, and writes it nowhere.
-// Each call is counted in evidence/modelcheck/spend.json before it is sent. The count never passes LIMIT.
+// Each call is counted in evidence/modelcheck/spend.json before it is sent. The count never passes LIMIT, and the calls of the labels
+// that start with tpl- never pass TEMPLATE_LIMIT.
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -17,12 +21,17 @@ import { LINE, compileAppFile, compileStep, linesOf, needsIn, patchAppFile, read
 import { dataOf, runtime } from "./src/emit.js";
 import { MAX_STATE_BYTES, handle } from "./src/run.js";
 import { runtimeText } from "./build.js";
-import { PROMPT, PROMPT_HASH, changeText, repairText, taskText } from "./prompt.js";
+import { PROMPT, PROMPT_HASH, TEMPLATE_HASH, changeText, repairText, taskText, templateChangeText, templateRepairText } from "./prompt.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const EVIDENCE = ROOT + "evidence/modelcheck/";
-/** The calls that the owner approved for the model checks: 491 before task P4 (A0, H1, P2, task 2b, and P3), P4 adds at most 32 (its decision 4), and task B1b adds at most 28. */
-const LIMIT = 539;
+/**
+ * The calls that the owner approved for the model checks: 491 before task P4 (A0, H1, P2, task 2b, and P3), P4 adds at most 32 (its decision 4), and task B1b adds at most 28.
+ * The approval of the design of 2026-11-21 (docs/superpowers/specs/2026-11-21-stage-templates-stream-design.md, section 7) adds at most 150 calls of the template check.
+ */
+export const LIMIT = 689;
+/** The calls of the template check, the labels that start with tpl-: at most 150, whatever the calls of the other labels are. */
+export const TEMPLATE_LIMIT = 150;
 /** The saved reports of today's agent loop: final-30d43aa, and for the 11 cases that it lacks, the first showcase run of 2026-11-16. */
 const REPORTS = ["/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-17/final-30d43aa/", "/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-16/showcase1/"];
 /** The output limit of the agent call of the app (ToolEngine.kt 131072, capped by OpenAiProfile.maxOutputTokens). */
@@ -57,6 +66,21 @@ export const SET_F = JSON.parse(readFileSync(new URL("./test/fixtures/change-req
     plan: readFileSync(new URL(`./test/fixtures/model/${fixture}.plan`, import.meta.url), "utf8") })));
 /** The repair calls of a change case: the change call of the app sends one (task 2b, decision 1). */
 const CHANGE_REPAIRS = 1;
+
+/** The files of the sets of the template check (stage templates plan, decision 7): T tuning, U held-out screens, V held-out changes, W the change pilot. */
+const TEMPLATE_SETS = { T: "template-tuning.json", U: "template-holdout.json", V: "template-changes.json", W: "template-pilot.json" };
+const isChangeSet = (set) => set === "V" || set === "W";
+/**
+ * The items of a template set. A screen item is {id, request, expect: "template" | "outside" | "any"}, and a change item of V or W is
+ * {id, base, request, expect: "lines" | "outside"}, which gets the text of its base file of test/fixtures/template-bases/ as plan.
+ * The read is lazy: a set whose file is missing stops only the run that names it.
+ */
+export function templateSet(name) {
+  const at = (path) => new URL(`./test/fixtures/${path}`, import.meta.url);
+  if (!existsSync(at(TEMPLATE_SETS[name]))) throw new Error(`set ${name}: kit/test/fixtures/${TEMPLATE_SETS[name]} is missing`);
+  return JSON.parse(readFileSync(at(TEMPLATE_SETS[name]), "utf8"))
+    .map((item) => ({ ...item, set: name, ...(isChangeSet(name) && { plan: readFileSync(at(`template-bases/${item.base}`), "utf8") }) }));
+}
 
 /** The cases of set C: each request of the corpus, the reply text of its saved report, and the path of its baseline app. */
 export function corpus() {
@@ -267,6 +291,64 @@ function finish(record) {
   return record;
 }
 
+// ---- The template check: a template file for a voice screen (stage templates plan, decision 7).
+
+/**
+ * One request of the template check: the call with PROMPT.Template as instructions and input as its input, the compile of the reply (merged
+ * into plan for a change, against the stored app previous), and one repair call at the effort low over the faults (templateRepairText).
+ * A reply that is no template file, such as a free app file, is a whole fault. An outside repair reply ends the request, and the lines stay.
+ * The outcome is clean0 or clean1, partial1 (a line is left out or keeps its stored version after the repair), not (no screen after the repair),
+ * outside, or the status of a first call that did not complete. firstCallMs runs from the send of the first call to the end of its reply.
+ * replied is the first reply as the kit reads it: {kind: "outside", word}, or {kind: "lines", lines} with the count of its lines, and repeated
+ * counts its lines that a line of plan already has. steps holds the faults of each compile, as faultTable reads them.
+ */
+async function templateRecord(item, { ask, model, effort }, input, plan, previous) {
+  runtime.text ||= await runtimeText();
+  const calls = [], steps = [], send = async (step, level, text) => {
+    const call = await ask(bodyOf({ model, effort: level, system: PROMPT.Template, input: text }));
+    calls.push({ step, effort: level, ...call });
+    return call;
+  };
+  const started = performance.now(), first = await send(0, effort, input);
+  const record = { id: item.id, set: item.set, expect: item.expect, prompt: TEMPLATE_HASH, outcome: first.status, firstCallMs: Math.round(performance.now() - started), calls,
+    replied: { kind: first.status }, kept: null, faults: [], leftOut: [], repeated: 0, steps };
+  if (first.status !== "completed") return record;
+  const stepOf = async (text, on) => {
+    const step = await compile({ text, plan: on, read: true, previous });
+    if (step.result) steps.push({ faults: step.result.faults });
+    return step;
+  };
+  let next = await stepOf(first.text, plan);
+  if (next.outside) return Object.assign(record, { outcome: "outside", replied: { kind: "outside", word: next.outside } });
+  const lines = linesOf(first.text), stored = plan === null ? [] : linesOf(plan).map((one) => one.trim());
+  Object.assign(record, { replied: { kind: "lines", lines: lines.length }, repeated: lines.filter((one) => stored.includes(one.trim())).length });
+  const clean = ({ result }) => Boolean(result.template) && !result.faults.length;
+  if (!clean(next)) {
+    const call = await send(1, "low", templateRepairText({ task: input, plan: next.plan, faults: next.result.faults }));
+    const repaired = call.status === "completed" ? await stepOf(call.text, next.plan) : null;
+    if (repaired?.outside) calls.at(-1).outside = repaired.outside;
+    else if (repaired) next = repaired;
+  }
+  const { result } = next;
+  return Object.assign(record, { outcome: clean(next) ? `clean${calls.length - 1}` : result.template && result.definition ? "partial1" : "not",
+    kept: result.kept ?? null, faults: result.faults, leftOut: result.leftOut ?? [] });
+}
+
+/** A screen request of the template check: taskText of its request with no brief, as the early plan of a first screen sends it. */
+export const checkTemplate = (item, options) => templateRecord(item, options, taskText({ request: item.request, brief: "" }), null, null);
+
+/**
+ * A change request of the template check: templateChangeText of the request and the base file. Each reply compiles against the base at its
+ * start state, as the host sends a stored app, so a faulty changed line keeps its stored version.
+ */
+export async function checkTemplateChange(item, options) {
+  runtime.text ||= await runtimeText();
+  const { definition, faults } = await compileAppFile(item.plan);
+  if (faults.length) throw new Error(`the base ${item.base} of ${item.id} has a fault: ${faults[0]}`);
+  const previous = { appFile: item.plan, stateSchema: JSON.stringify(definition.stateSchema), state: JSON.stringify(definition.initialState) };
+  return templateRecord(item, options, templateChangeText(item), item.plan, previous);
+}
+
 // ---- The API call: the only place that sends a request to an outside service.
 
 function key() {
@@ -279,10 +361,13 @@ function key() {
 }
 const SPEND = EVIDENCE + "spend.json";
 const spent = () => (existsSync(SPEND) ? JSON.parse(readFileSync(SPEND, "utf8")) : { calls: 0, log: [] });
+const isTemplateLabel = (label) => label.startsWith("tpl-");
+/** True when the log of spend.json leaves no call for label: it holds LIMIT calls, or label is of the template check and the log holds TEMPLATE_LIMIT of its calls. */
+export const overLimit = (log, label) => log.length >= LIMIT || (isTemplateLabel(label) && log.filter(([one]) => isTemplateLabel(one)).length >= TEMPLATE_LIMIT);
 /** Counts one call before it is sent. JavaScript runs one worker at a time, so the read and the write of the count do not interleave. */
 function count(label) {
   const state = spent();
-  if (state.calls >= LIMIT) throw new Error(`the limit of ${LIMIT} calls is reached`);
+  if (overLimit(state.log, label)) throw new Error(`the limit of ${LIMIT} calls, or of ${TEMPLATE_LIMIT} calls with a label that starts with tpl-, is reached`);
   state.calls++;
   state.log.push([label, new Date().toISOString()]);
   mkdirSync(EVIDENCE, { recursive: true });
@@ -389,6 +474,27 @@ export function changeNumbers(records) {
   `faults with BLOCKS: ${ids(steps("blocks"), String)}; with MISMATCH: ${ids(steps("mismatch"), String)}; needs and list columns that the final plan lacks: ${ids(records.filter((record) => record.gone?.length), (record) => `${record.id} ${record.gone.join(" ")}`)}`];
 }
 
+/** The groups of the template records: screens to explain, screens to refuse, and changes. A screen of expect any is in no group. */
+const TEMPLATE_GROUPS = { explain: (record) => !isChangeSet(record.set) && record.expect === "template", refusal: (record) => !isChangeSet(record.set) && record.expect === "outside",
+  change: (record) => isChangeSet(record.set) };
+/**
+ * The numbers of the bars of gate 2 (stage templates plan, Global Constraints) as counts: the explain screens clean after at most one repair, the
+ * refusals that got outside, the explain screens that got outside, the median first call of the explain screens in ms, and the changes whose
+ * first reply is lines that repeat no stored line.
+ */
+export function templateNumbers(records) {
+  const explain = records.filter(TEMPLATE_GROUPS.explain), outcome = (list, test) => list.filter((record) => test.test(record.outcome)).length;
+  return { explainClean: outcome(explain, /^clean[01]$/), refusalsRight: outcome(records.filter(TEMPLATE_GROUPS.refusal), /^outside$/), explainRefused: outcome(explain, /^outside$/),
+    medianFirstCallMs: median(explain.map((record) => record.firstCallMs)),
+    changesOnlyChanged: records.filter((record) => TEMPLATE_GROUPS.change(record) && record.replied.kind === "lines" && !record.repeated).length };
+}
+/** The one line of a label of the template check: the five numbers with the size of each group. */
+function templateRow(label, records) {
+  const numbers = templateNumbers(records), size = (group) => records.filter(TEMPLATE_GROUPS[group]).length;
+  return `${label} (${records[0]?.prompt}, ${records.length} records): explain clean ${share(numbers.explainClean, size("explain"))}, refusals right ${share(numbers.refusalsRight, size("refusal"))},`
+    + ` explain refused ${share(numbers.explainRefused, size("explain"))}, median first call ${numbers.medianFirstCallMs} ms, changes with only changed lines ${share(numbers.changesOnlyChanged, size("change"))}`;
+}
+
 /** A fault with its names, texts, and numbers taken out, so that one kind of fault is one key. */
 const faultKind = (fault) => fault.replace(/"(?:[^"\\]|\\.)*"/g, '"…"').replace(/: (need \S+ =|\$\/\S+ :?=|app\(|[\p{L}_][\p{L}\p{N}_]* =) .*$/u, "").replace(/(need|hole) [\p{L}_][\p{L}\p{N}_]*/gu, "$1 X")
   .replace(/\$\/[\p{L}\p{N}_/]+/gu, "$/X").replace(/\b\d+(\.\d+)?\b/g, "N").slice(0, 160);
@@ -426,28 +532,42 @@ if (import.meta.main) {
     console.log(JSON.stringify({ ...call, text: call.text.slice(0, 1500) }, null, 1));
   } else if (phase === "run") {
     const [label, set, model, effort, ...ids] = rest, stopAt = Number(process.env.STOP_AT ?? 600), repairs = repairsOf(process.env.REPAIRS);
-    const items = [...(set.includes("C") ? corpus() : []), ...(set.includes("D") ? SET_D : []), ...(set.includes("E") ? SET_E : []), ...(set.includes("F") ? SET_F : [])]
+    // A template run counts under its own cap only with a label that starts with tpl-, and a run of the free prompt never takes that cap.
+    const template = [...set].filter((name) => Object.hasOwn(TEMPLATE_SETS, name));
+    if (template.length ? template.length !== set.length || !isTemplateLabel(label) : isTemplateLabel(label)) {
+      console.log("refused: the sets T, U, V, and W run alone, with a label that starts with tpl-, and only they take such a label"); process.exit(2);
+    }
+    const items = (template.length ? template.flatMap(templateSet) : [...(set.includes("C") ? corpus() : []), ...(set.includes("D") ? SET_D : []), ...(set.includes("E") ? SET_E : []), ...(set.includes("F") ? SET_F : [])])
       .filter((item) => !ids.length || ids.includes(item.id))
       .filter((item) => !existsSync(`${EVIDENCE}${label}/${item.id}.json`));
-    const worst = worstCase(items, repairs), before = spent().calls;
-    console.log(`${label}: ${items.length} requests, up to ${repairs} repairs each, worst case ${worst} calls, spent ${before}, stop at ${stopAt}`);
+    // A template request takes at most two calls: the template call and one repair call.
+    const worst = template.length ? items.length * 2 : worstCase(items, repairs), before = spent().calls, templates = spent().log.filter(([one]) => isTemplateLabel(one)).length;
+    console.log(`${label}: ${items.length} requests, up to ${template.length ? 1 : repairs} repairs each, worst case ${worst} calls, spent ${before}${template.length ? ` (${templates} of the template check)` : ""}, stop at ${stopAt}`);
     if (before + worst > stopAt) { console.log("refused: the worst case passes the stop mark"); process.exit(2); }
+    if (template.length && templates + worst > TEMPLATE_LIMIT) { console.log(`refused: the worst case passes the ${TEMPLATE_LIMIT} calls of the template check`); process.exit(2); }
     mkdirSync(`${EVIDENCE}${label}`, { recursive: true });
     runtime.text = await runtimeText();
     await pool(items, 4, async (item) => {
-      const record = await checkOne(item, { ask: (body) => openai(body, `${label} ${item.id} ${body.reasoning.effort}`), model, effort, repairs });
+      const options = { ask: (body) => openai(body, `${label} ${item.id} ${body.reasoning.effort}`), model, effort, repairs };
+      const record = await (!template.length ? checkOne : isChangeSet(item.set) ? checkTemplateChange : checkTemplate)(item, options);
       // A first call that the transport lost leaves no record, so that the next run of the label tries the request again.
       if (/^(http|failed)/.test(record.outcome)) { console.log(item.id, record.outcome, record.calls[0].error); return; }
       record.calls.forEach((call, index) => writeFileSync(`${EVIDENCE}${label}/${item.id}.${index}.txt`, call.text));
       if (record.definition) record.look = looksOf({ x: record.definition }).x;
       writeFileSync(`${EVIDENCE}${label}/${item.id}.json`, JSON.stringify(record, null, 1));
-      console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.calls[0].wallS}s`, `path ${record.pathS}s`, record.first.word ?? "", (record.steps.at(-1)?.faults ?? []).slice(0, 2).join(" | ").slice(0, 200));
+      if (template.length) console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.firstCallMs} ms`, record.replied.kind === "lines" ? `${record.replied.lines} lines, ${record.repeated} repeated` : record.replied.word ?? "", record.faults.slice(0, 2).join(" | ").slice(0, 200));
+      else console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.calls[0].wallS}s`, `path ${record.pathS}s`, record.first.word ?? "", (record.steps.at(-1)?.faults ?? []).slice(0, 2).join(" | ").slice(0, 200));
     });
     console.log(`spent ${spent().calls}`);
   } else if (phase === "table") {
     const detail = rest.includes("--detail"), labels = rest.filter((label) => label !== "--detail");
     for (const label of labels) {
       const records = recordsOf(label);
+      if (records.some((record) => Object.hasOwn(TEMPLATE_SETS, record.set))) {
+        console.log(templateRow(label, records));
+        if (detail) for (const [fault, row] of faultTable(records)) console.log(`  ${row.count} ${row.repaired} ${row.kept} ${row.last} | ${fault} | ${row.ids.join(" ")}`);
+        continue;
+      }
       console.log(`## ${label} (${records[0]?.model} ${records[0]?.effort}, ${records.length} records)`);
       const changes = records.filter((record) => record.set === "F");
       for (const row of [...(changes.length ? changeNumbers(changes) : []), ...numbers(records)]) console.log("- " + row);

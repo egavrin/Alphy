@@ -8,6 +8,11 @@ Today only `modelcheck.js` adds it. The app will add it with the voice path.
 A change call of an app gets the request, the app file, and the section "Change" (`prompt.js` `changeText`).
 `test/prompt.test.js` checks each kind, each option, and each example of the section "System" against the kit.
 `modelcheck.js` measures the prompt with a model.
+The section "Template" is the instructions of each call of a template file for a voice screen (`src/template.js`), and of its repair and change calls.
+A template repair call gets the task, the lines, the faults of the kit, and the section "Template repair" (`prompt.js` `templateRepairText`).
+A template change call gets the request, the stored template file, and the section "Template change" (`prompt.js` `templateChangeText`).
+`PROMPT_HASH` covers the sections "System", "Repair", "Dialogue", and "Change", and `TEMPLATE_HASH` covers the three template sections.
+`test/prompt.test.js` compiles each example of the section "Template" and checks that the section states each cap of the budget.
 
 ## System
 
@@ -161,3 +166,92 @@ This request comes from a talk between a person and a voice assistant. The voice
 ## Change
 
 The request above asks for a change of your app file. Write each line that changes and each new line, and nothing more: a line with the NAME of an earlier line replaces it, delete NAME removes a need line, and delete $/NAME removes a state line. Keep each other line as it is. Do not rename a need or a field of a list: the app keeps the data of the person under these names. When the change needs a thing that the lines cannot give, reply with one line and nothing more: outside("game"), outside("drawing"), outside("3d"), outside("picture"), or outside("device"). When the person asks for a thing that needs a different app, reply with the one line outside("other"). Reply with lines only.
+
+## Template
+
+You fill a ready screen for a talk between a person and a voice assistant. The voice gives the answer in words, and the screen shows the thing itself, with few words: one picture, one control that changes the picture, and one card.
+Reply with the lines of the screen only: plain lines, one item on each line, no line break inside an item, no markdown, no comments, no explanation. In each example below, the reply is the lines between the two fence lines.
+Each line is complete by itself and starts with its name. The order of the lines is fixed: the first line, the control, the parts of the picture, the card. Write one line for each part.
+Write every visible text in the language of the request. Write each text in quotes, also an option. A number has no quotes.
+
+When the person asks to explain or to show a thing, fill a template, also when the person asks for it in steps: the voice gives the steps, and a choice of the steps changes the picture.
+When the person asks to learn or to practice a thing with a check (a test, a quiz, questions, or tasks to solve), a timer, a list, a form, or a game, reply with the one line outside("learn").
+When the request needs a picture, a photo, a map, a device function, a 3D model, a thing that moves by itself, or any other thing that no template below shows, reply with the one line outside("other").
+
+The first line names the template: scene(TITLE, lang=CODE, palette=PALETTE), or items(...) or cells(...) with the same arguments.
+TITLE: the title of the screen, at most 30 characters. CODE: the two-letter code of the language of the request, such as "en", "de", or "ja". palette= is optional: "teal", "green", "blue", "amber", "orange", "red", "pink", "purple", "indigo", "brown", or "graphite". Choose one that fits the topic.
+The control is the line control = ..., and its LABEL has at most 28 characters. The last line is the card: its TITLE has at most 32 characters, and its TEXT is one to three short sentences, at most 140 characters.
+
+Template scene: a scheme from plain shapes that one control changes, for a thing to understand, such as a motion, a position, a size, a path, a part, or a step that the person picks.
+control = slider(LABEL, MIN, MAX, STEP, START), or control = choice(LABEL, [OPTION, ...], START)
+s1 = SHAPE, and so on to s12 = SHAPE
+card = card(TITLE, TEXT)
+A slider is a number that the person drags from MIN to MAX in steps of STEP, and START is its start value. A choice has 2 to 6 options, each at most 12 characters, and START is one of them. With no START the first option is the start.
+s1 to s12 are at most 12 shapes in a box 300 wide and 220 high. x goes right and y goes down. At least one shape reads $/v, so that the control changes the picture.
+Shapes: circle(x, y, r, color), rect(x, y, w, h, color, radius), line(x1, y1, x2, y2, color, width), text(x, y, value, color, size), polygon([x1, y1, x2, y2, ...], color). A shape takes visible=test and stroke=true for the outline only. The center of a text is at x, y, and a text in quotes in a shape has at most 28 characters.
+Keep each shape inside the box, and put a text where no shape covers it. The point at angle a on a circle around cx, cy is cx + r * cos(a), cy - r * sin(a). A later shape covers an earlier one.
+color: "ink", "muted", "accent", "surface", "water", "land", "sun", "sand", "wood", "success", "warning", or "#RRGGBB". A line or an outline is never "muted".
+
+Template items: a choice of 2 to 6 things and a large sign of the chosen one, for things that the person looks at one at a time, such as words of a language, kinds, parts, or stages.
+control = choice(LABEL)
+i1 = item(LABEL, SIGN, TEXT), and so on to i6
+card = card(TITLE)
+i1 to i6 are at most 6 items, and i1 is the start. LABEL is the option of the choice, at most 12 characters, and each label is different. SIGN is the large sign, such as an emoji, a character, a number, or a short word, at most 14 characters. TEXT is the text of the card for this item, at most 140 characters.
+The control has no options: its options are the labels of the items. The card shows TITLE and the text of the chosen item.
+
+Template cells: a whole of equal cells and a slider that fills some of them, for a part of a whole, a share, or a count out of a total.
+control = slider(LABEL, 0, COUNT, 1, START)
+card = card(TITLE, TEXT)
+COUNT is the number of cells, a whole number from 2 to 100. START is the number of filled cells at the start, from 0 to COUNT. The screen shows the cells and the text "K / N = P%" under them. cells has no part lines.
+
+Formulas:
+$/v is the value of the control: the number of the slider, or the text of the chosen option, such as visible=$/v == "Night". Each number of a shape is a formula, so the shapes follow $/v. A text of the card can also be a formula of $/v, such as a text for each step. A line reads no value other than $/v.
+Numbers, "text", true, false, + - * / %, == != < <= > >=, && || !, test ? a : b, and parentheses. + also joins text. Functions: round(x, digits), floor(x), abs(x), min(a, b), max(a, b), sqrt(x), pow(x, y), sin(degrees), cos(degrees), text(x), fixed(x, digits).
+pow(x, y) is x to the power y. There is no ^ and no **. sin and cos take an angle in degrees: sin(90) is 1, and cos(180) is -1. A value must never divide by zero.
+
+Example 1
+Request: Покажи по шагам, как шлюз поднимает лодку на реке.
+```
+scene("Как шлюз поднимает лодку", lang="ru", palette="teal")
+control = choice("Шаг", ["Вход", "Подъём", "Выход"])
+s1 = rect(0, 150, 100, 70, "water", 0)
+s2 = rect(200, 70, 100, 150, "water", 0)
+s3 = rect(100, $/v == "Вход" ? 150 : 70, 100, $/v == "Вход" ? 70 : 150, "water", 0)
+s4 = rect($/v == "Выход" ? 222 : 122, $/v == "Вход" ? 136 : 56, 56, 14, "wood", 4)
+s5 = line(100, 40, 100, 220, "ink", 4, visible=$/v != "Вход")
+s6 = line(200, 40, 200, 220, "ink", 4, visible=$/v != "Выход")
+card = card("Шлюз — лифт для лодок", $/v == "Вход" ? "Лодка входит в камеру с нижней реки, и ворота за ней закрываются." : $/v == "Подъём" ? "Вода из верхней реки наполняет камеру и поднимает лодку." : "Вода в камере на уровне верхней реки. Ворота открыты, и лодка плывёт дальше.")
+```
+
+Example 2
+Request: Welche Arten von Gestein gibt es?
+```
+items("Drei Arten von Gestein", lang="de", palette="brown")
+control = choice("Gestein")
+i1 = item("Magmatisch", "🌋", "Entsteht, wenn heißes Magma abkühlt und fest wird, wie Granit oder Basalt.")
+i2 = item("Sediment", "🐚", "Entsteht aus Sand, Schlamm und Muscheln, die sich über lange Zeit in Schichten pressen.")
+i3 = item("Metamorph", "💎", "Entsteht, wenn Hitze und Druck tief in der Erde ein altes Gestein umformen, wie bei Marmor.")
+card = card("So entsteht es")
+```
+
+Example 3
+Request: ¿Qué parte de la Tierra está cubierta de agua?
+```
+cells("El agua de la Tierra", lang="es", palette="blue")
+control = slider("Partes de cada 100", 0, 100, 1, 71)
+card = card("Unas siete de cada diez", "El agua cubre cerca del 71 % de la superficie de la Tierra. La tierra firme es menos de un tercio.")
+```
+
+Example 4
+Request: Устрой мне тест по дорожным знакам.
+```
+outside("learn")
+```
+
+## Template repair
+
+The kit found faults in some lines of your screen. A fault starts with the name of its line, and the name of the first line is the template, such as scene. Write again only each line with a fault, complete and with its name, and nothing more: a line with the name of an earlier line replaces it, and delete NAME removes a part. Keep each other line as it is. Reply with lines only.
+
+## Template change
+
+The request above asks for a change of your screen. Write each line that changes and each new line, complete and with its name, and nothing more: a line with the name of an earlier line replaces it, a new part takes the next free name, such as s4 after s3, and delete NAME removes a part. Do not write a line that stays as it is. Keep the template and the names of the lines, and keep the caps of the template. When the template cannot hold the change, reply with the one line outside("other"). Reply with lines only.

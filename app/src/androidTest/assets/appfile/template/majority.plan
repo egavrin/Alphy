@@ -1,0 +1,3 @@
+cells("What is a majority?", lang="en", palette="teal")
+control = slider("Votes for", 0, 20, 1, 11)
+card = card("More than half", "A majority is more than half of all votes: 11 of 20 is a majority, and 10 of 20 is only half.")
