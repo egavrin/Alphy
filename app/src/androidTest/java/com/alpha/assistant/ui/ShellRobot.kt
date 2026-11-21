@@ -698,7 +698,8 @@ internal class ShellRobot(fixture: String) {
         scenario.onActivity { activity -> composed = nodes(activity).any { match(it.config) } }
         return composed
     }
-    private fun nodes(activity: Activity, merged: Boolean = false): List<SemanticsNode> {
+    /** Main thread only: each composed node of the activity. */
+    fun nodes(activity: Activity, merged: Boolean = false): List<SemanticsNode> {
         fun root(view: View): ViewRootForTest? = view as? ViewRootForTest
             ?: (view as? ViewGroup)?.let { group -> (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) } }
         return root(activity.window.decorView)!!.semanticsOwner.getAllSemanticsNodes(mergingEnabled = merged)

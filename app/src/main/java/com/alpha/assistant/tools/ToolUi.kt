@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.boundsInWindow
@@ -321,7 +322,9 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
  * A preview frame of the dialogue stage in the layout of the live stage app (the Column of NativeToolSurface around MiniAppContent), with
  * the control off. So the live app takes the bounds of the last preview.
  */
-@Composable internal fun StagePreviewContent(frame: StagePreviewFrame, canvasHeight: Dp) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+// Its own layer: a redraw around the preview, such as each frame of the pulse of the character, does not draw the commands of its canvas again.
+@Composable internal fun StagePreviewContent(frame: StagePreviewFrame, canvasHeight: Dp) =
+    Column(Modifier.graphicsLayer(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
     DraftPreviewContent(frame.spec, frame.ui, frame.state, frame.drawing).Render(canvasHeight, dialogueTitle = frame.spec.title)
 }
 
