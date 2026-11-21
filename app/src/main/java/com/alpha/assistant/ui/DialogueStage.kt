@@ -18,6 +18,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +47,8 @@ import com.alpha.assistant.tools.CoveredToolSurface
 import com.alpha.assistant.tools.DIALOGUE_WIDE_DP
 import com.alpha.assistant.tools.MiniAppActions
 import com.alpha.assistant.tools.MiniAppContent
+import com.alpha.assistant.tools.StagePreview
+import com.alpha.assistant.tools.StagePreviewContent
 import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolRecord
@@ -54,6 +58,7 @@ import com.alpha.assistant.voice.LivePhase
 import com.alpha.assistant.voice.LiveVoiceSession
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
+import org.json.JSONObject
 
 /**
  * A card of the voice mode that the stage shows: a card that waits for a tap (an error or an unsent request with its retry, or the
@@ -68,6 +73,18 @@ internal fun showsOnTheStage(message: Message): Boolean = message.status !in unf
  * The label and the title take about 120 dp, and a slider with its label, the tallest first control, about 105 dp.
  */
 private val STAGE_TEXT_HEIGHT = 256.dp
+
+/** The canvas height of an app on a stage of [maxHeight]. The stage preview and its cost test use the same height. */
+internal fun stageCanvasHeight(maxHeight: Dp, fold: Boolean): Dp = (if (fold) maxHeight - STAGE_TEXT_HEIGHT else maxHeight * 0.65f).coerceIn(120.dp, 560.dp)
+
+/**
+ * The preview that the stage draws in place of [tool] (Task 16): an uncommitted one, or a committed one until the stage holds its stored
+ * revision, because the stage tool and the tool list change after the commit.
+ */
+private fun StagePreview.covers(tool: ToolRecord?): Boolean = revision == null || tool == null || tool.id != toolId || tool.revision < revision
+
+/** True when the stage shows an app or a preview, and not the large character. */
+private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId != null || model.tools.stagePreviews.current != null
 
 /** What the voice mode does now (spec 5.2.4). A mute has no status of its own, because the microphone state of the strip shows it. */
 @StringRes private fun liveStatus(model: ShellViewModel): Int? = when {
@@ -87,6 +104,12 @@ private val STAGE_TEXT_HEIGHT = 256.dp
     var shareText by rememberSaveable { mutableStateOf<String?>(null) }
     var linkError by remember { mutableStateOf(false) }
     val tool = model.stageToolId?.let { id -> model.tools.tools.find { it.id == id } }
+    val previews = model.tools.stagePreviews
+    val preview = previews.current?.takeIf { it.covers(tool) }
+    // A committed preview seeds the drawing of its stored revision, which the stage now holds.
+    val seed = previews.current?.takeIf { tool != null && it.toolId == tool.id && it.revision == tool.revision }
+    // A committed preview whose app never reached the stage, such as at the end of the mode, seeds no later stage.
+    DisposableEffect(previews) { onDispose { previews.current?.toolId?.let(previews::drawn) } }
     val fold = LocalConfiguration.current.smallestScreenWidthDp >= DIALOGUE_WIDE_DP
     BoxWithConstraints(modifier.fillMaxWidth().testTag("dialogue_stage")) {
         // The gutter of an open mini-app (FocusedToolPane).
@@ -94,10 +117,10 @@ private val STAGE_TEXT_HEIGHT = 256.dp
         // In a short space, such as landscape with the keyboard, the decorative character goes.
         val character = minOf(160.dp, maxHeight / 4).takeIf { it >= 48.dp }
         // The canvas height of an open mini-app (FocusedToolPane), less at the fold size so the first control fits above the strip (Da2 ruling 1).
-        val canvasHeight = (if (fold) maxHeight - STAGE_TEXT_HEIGHT else maxHeight * 0.65f).coerceIn(120.dp, 560.dp)
+        val canvasHeight = stageCanvasHeight(maxHeight, fold)
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight)
             .padding(horizontal = gutter, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(15.dp, if (tool == null) Alignment.CenterVertically else Alignment.Top)) {
+            verticalArrangement = Arrangement.spacedBy(15.dp, if (stageShowsApp(model)) Alignment.Top else Alignment.CenterVertically)) {
             if (chat != null) {
                 chat.messages.find { it.id == model.liveVoiceCardId }?.takeIf(::showsOnTheStage)?.let { message ->
                     ChatMessageItem(model, chat, message, cardActions, openTool, openAutomation, showLivePreviews = true,
@@ -107,8 +130,11 @@ private val STAGE_TEXT_HEIGHT = 256.dp
                 // The plan of the chat, as the chat list shows it. A later hand-off keeps it while it waits for a tap.
                 model.agent.plan?.takeIf { it.conversationId == chat.id }?.let { AgentPlanCard(model.agent, it) }
             }
-            if (tool != null) StageApp(model.tools, tool, cardActions, canvasHeight, model.livePresses)
-            else character?.let { AlphyCharacter(model.liveVoice, it, Modifier.testTag("live_voice_character")) }
+            when {
+                preview != null -> StagePreviewContent(preview.frame, canvasHeight)
+                tool != null -> StageApp(model.tools, tool, cardActions, canvasHeight, model.livePresses, seed)
+                else -> character?.let { AlphyCharacter(model.liveVoice, it, Modifier.testTag("live_voice_character")) }
+            }
         }
     }
     shareText?.let { ShareTextToNotes(it) { shareText = null } }
@@ -120,7 +146,7 @@ private val STAGE_TEXT_HEIGHT = 256.dp
  * its title after its kind label. A 3D scene and a closed app draw no app, so the stage gives them the title.
  */
 @Composable private fun StageApp(controller: ToolController, tool: ToolRecord, actions: MiniAppActions, canvasHeight: Dp,
-    presses: Flow<VoicePress>?) {
+    presses: Flow<VoicePress>?, seed: StagePreview?) {
     val spec = remember(tool.spec, tool.ui, tool.state) { ToolSpec.availablePersisted(tool) }
     val voicePresses = remember(presses, tool.id) { presses?.filter { it.toolId == tool.id } }
     if (spec == null || spec.threeScene) Text(spec?.title ?: ToolSpec.storedTitle(tool.spec), Modifier.fillMaxWidth().semantics { heading() },
@@ -129,6 +155,9 @@ private val STAGE_TEXT_HEIGHT = 256.dp
     val enabled = !controller.busy && !actions.covers(tool.id)
     val host = if (!spec.threeScene && spec.surfaces.isNotEmpty()) remember(controller, tool.id, tool.revision) { controller.artifactHost(tool) }
         else null
+    // An app with no drawing of its own takes no seed, so its committed preview ends at once.
+    if (seed != null && host == null) LaunchedEffect(seed) { controller.stagePreviews.drawn(tool.id) }
+    val drawingSeed = remember(seed) { seed?.frame?.drawing?.let { ArtifactSnapshot(tool, 0, JSONObject(it)) } }
     var snapshot by remember(host) { mutableStateOf<ArtifactSnapshot?>(null) }
     val content: @Composable () -> Unit = {
         MiniAppContent(controller, tool, tool, spec.title, enabled, graphicsHost = host, graphicsSnapshot = snapshot,
@@ -137,7 +166,11 @@ private val STAGE_TEXT_HEIGHT = 256.dp
     when {
         spec.threeScene -> ThreeScenePane(controller, tool, spec, canvasHeight, null, enabled)
         // The drawing keeps its frames and timers while a change of its app runs: the save of the change takes the newest state (ToolEngine.acceptDraft).
-        host != null -> CoveredToolSurface(tool, spec, true, canvasHeight, host, actions, content = content) { snapshot = it }
+        host != null -> CoveredToolSurface(tool, spec, true, canvasHeight, host, actions, drawingSeed = drawingSeed, content = content) {
+            snapshot = it
+            // Only a live snapshot of the committed revision ends the seed: a late one of the old revision would leave an empty frame.
+            if (seed != null && it.tool.revision == seed.revision) controller.stagePreviews.drawn(tool.id)
+        }
         else -> content()
     }
 }
@@ -170,7 +203,7 @@ private val EndInView = Alignment.Vertical { size, space -> minOf(0, space - siz
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp).heightIn(min = 28.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             // An empty stage shows the large character, so the strip shows the voice indicator only beside an app (Da2 ruling 2).
-            if (model.stageToolId != null) AlphyCharacter(voice, 28.dp, Modifier.testTag("live_voice_character"))
+            if (stageShowsApp(model)) AlphyCharacter(voice, 28.dp, Modifier.testTag("live_voice_character"))
             // Each text is a polite live region, so a screen reader hears a new status and a new microphone state (spec 5.2.4).
             Text(status?.let { stringResource(it) }.orEmpty(), Modifier.weight(1f).then(PoliteLiveRegion),
                 color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall)

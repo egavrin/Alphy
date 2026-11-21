@@ -230,7 +230,7 @@ internal val InlineToolViewportCornerRadius = 16.dp
     tool: ToolRecord, spec: ToolSpec, enabled: Boolean, maxCanvasHeight: Dp, host: ArtifactUiHost,
     actions: MiniAppActions, immersive: Boolean = false, covered: Boolean = false,
     onCoverReady: (Boolean) -> Unit = {}, topControls: @Composable () -> Unit = {},
-    stageAvailableHeight: Dp? = null, content: @Composable () -> Unit = {},
+    stageAvailableHeight: Dp? = null, drawingSeed: ArtifactSnapshot? = null, content: @Composable () -> Unit = {},
     onSnapshot: (ArtifactSnapshot) -> Unit = {},
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -238,6 +238,8 @@ internal val InlineToolViewportCornerRadius = 16.dp
     var latestSnapshot by remember(handle) { mutableStateOf<ArtifactSnapshot?>(null) }
     // The last drawing of the tool outlives its host, so an accepted change goes from the old drawing to the new one.
     val lastDrawing = remember(tool.id) { mutableStateOf<ArtifactSnapshot?>(null) }
+    // A new seed, such as the last preview of the dialogue stage, is the last drawing in this composition: an effect would leave one empty frame.
+    if (drawingSeed != null) remember(drawingSeed) { lastDrawing.value = drawingSeed }
     DisposableEffect(host, enabled) {
         onDispose { if (enabled) (host as? LiveArtifactUiHost)?.cancelLiveInput() }
     }
@@ -296,7 +298,8 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
         }
     }
 
-@Composable private fun DraftPreviewContent.Render(drawingHeight: Dp) {
+/** [dialogueTitle] not null lays the preview out as the live app of the dialogue stage (MiniAppContent): not embedded, with that title. */
+@Composable private fun DraftPreviewContent.Render(drawingHeight: Dp, dialogueTitle: String? = null) {
     if (canvasSurfaceIds(spec.ui).isEmpty()) StaticDraftDrawing(spec, drawing, drawingHeight)
     val canvas: @Composable (List<String>, String, Modifier, Boolean) -> Unit = { ids, label, modifier, _ ->
         StaticDraftDrawing(spec, drawing, drawingHeight, ids, label, modifier)
@@ -305,13 +308,21 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
     val assets = remember(context) { com.alpha.assistant.tools.three.ThreeSceneAssets(context) }
     val generated = spec.generatedImages.associateBy { "slot:" + it.slot }
     CompositionLocalProvider(LocalToolCanvas provides canvas) {
-        ToolContent(ui, state, false, heading = spec.title, embedded = true,
+        ToolContent(ui, state, false, heading = spec.title, embedded = dialogueTitle == null, routeSystemBackEnabled = false,
             imageVersion = spec.generatedImages.map { it.asset.id },
             imageLoader = { handle -> generated[handle]?.let { image ->
                 withContext(kotlinx.coroutines.Dispatchers.IO) { assets.generatedBitmap(image.asset) }
             } }, imageAvailable = generated::containsKey,
-            appLanguage = spec.appLanguage) { _, _ -> }
+            appLanguage = spec.appLanguage, dialogueTitle = dialogueTitle) { _, _ -> }
     }
+}
+
+/**
+ * A preview frame of the dialogue stage in the layout of the live stage app (the Column of NativeToolSurface around MiniAppContent), with
+ * the control off. So the live app takes the bounds of the last preview.
+ */
+@Composable internal fun StagePreviewContent(frame: StagePreviewFrame, canvasHeight: Dp) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    DraftPreviewContent(frame.spec, frame.ui, frame.state, frame.drawing).Render(canvasHeight, dialogueTitle = frame.spec.title)
 }
 
 @Composable internal fun GeneratedToolPreview(draft: ToolDraft?, snapshot: ToolDraftPreview?) {
