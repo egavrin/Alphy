@@ -1,0 +1,18 @@
+[
+  {"id": "v-fridge-green", "base": "fridge.plan", "request": "Пусть активный этап подсвечивается зелёным, а не синим.", "expect": "lines"},
+  {"id": "v-fridge-timer", "base": "fridge.plan", "request": "Поставь ещё таймер на две минуты, чтобы я успел запомнить все этапы.", "expect": "outside"},
+  {"id": "v-glasses-eye", "base": "glasses.plan", "request": "Нарисуй вокруг сетчатки сам глаз, хотя бы простым кружком.", "expect": "lines"},
+  {"id": "v-glasses-lens", "base": "glasses.plan", "request": "Подпиши линзу точнее: не просто линза, а рассеивающая линза.", "expect": "lines"},
+  {"id": "v-guitar-range", "base": "guitar.plan", "request": "Пусть палец можно двигать по всей струне, от самого края до корпуса.", "expect": "lines"},
+  {"id": "v-guitar-frets", "base": "guitar.plan", "request": "Нарисуй на грифе несколько ладов тонкими линиями поперёк струны.", "expect": "lines"},
+  {"id": "v-pi-title", "base": "pi.plan", "request": "Убери надпись сверху про длину окружности, она лишняя.", "expect": "lines"},
+  {"id": "v-pi-orange", "base": "pi.plan", "request": "Сделай круг оранжевым, а линию диаметра потолще.", "expect": "lines"},
+  {"id": "v-prices-weather", "base": "prices.plan", "request": "Добавь ещё один фактор: погоду, ведь заморозки могут погубить урожай.", "expect": "lines"},
+  {"id": "v-prices-quiz", "base": "prices.plan", "request": "А теперь задай мне три вопроса про цены и проверь мои ответы.", "expect": "outside"},
+  {"id": "v-roots-ending", "base": "roots.plan", "request": "Добавь ещё окончание, в слове подводный это ый.", "expect": "lines"},
+  {"id": "v-roots-word", "base": "roots.plan", "request": "Давай вместо слова подводный разберём другое, например переходный.", "expect": "lines"},
+  {"id": "v-ship-nail", "base": "ship.plan", "request": "Гвоздь совсем маленький, нарисуй его покрупнее.", "expect": "lines"},
+  {"id": "v-ship-cargo", "base": "ship.plan", "request": "Кроме выбора предмета, добавь ещё ползунок, чтобы менять вес груза на корабле.", "expect": "outside"},
+  {"id": "v-snow-line", "base": "snow.plan", "request": "Проведи на горе черту, выше которой снег не тает даже летом.", "expect": "lines"},
+  {"id": "v-snow-simple", "base": "snow.plan", "request": "Перепиши текст в карточке попроще, чтобы понял первоклассник.", "expect": "lines"}
+]
