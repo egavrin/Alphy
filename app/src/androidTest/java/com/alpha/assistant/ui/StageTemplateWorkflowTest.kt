@@ -361,7 +361,8 @@ internal class TemplateShell(private val fixture: ShellFixture, private val robo
 
     private fun spoken(model: ShellViewModel, request: String): ToolRecord {
         socket.say(request, "d1", 100)
-        robot.waitUntil(60_000) { model.stageToolId != null }
+        // The controller refuses a press while the operation of the request still runs.
+        robot.waitUntil(60_000) { model.stageToolId != null && !model.tools.busy }
         return stored(model, checkNotNull(model.stageToolId))
     }
 

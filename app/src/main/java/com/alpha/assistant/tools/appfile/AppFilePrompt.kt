@@ -11,7 +11,7 @@ private val PLACEHOLDER=Regex("""\{\{(\w+)\}\}""")
  * [template] is the section Template, the instructions of each template call, with the templates of its repair call and its change call.
  */
 internal class AppFilePrompt(val system: String,
-    /** No code reads it yet: the voice path will use it. */ val dialogue: String,
+    /** The voice path puts it in the plan prompt of a new screen. */ val dialogue: String,
     private val repairTask: String,private val changeTask: String,val template: String,
     private val templateRepairTask: String,private val templateChangeTask: String,templateHead: String) {
     /** TEMPLATE_HEAD of kit/src/template.js. */
