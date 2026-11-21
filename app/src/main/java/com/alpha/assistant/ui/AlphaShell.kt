@@ -398,7 +398,8 @@ private data class MiniAppOrigin(
                                         actions = miniAppActions, openAutomation = ::openAutomation,
                                         pairedToolId = model.tools.selectedId.takeIf { paired },
                                         pairedDraftId = model.tools.selectedDraftId.takeIf { paired },
-                                        showLivePreviews = paired || currentChatVisible,
+                                        // The voice layer covers the chat, so its cards run no app and the stage gets the one drawing slot.
+                                        showLivePreviews = (paired || currentChatVisible) && !(model.liveVoice.active && model.ownsLiveVoice(shellActivity)),
                                         resumeCourse = if (destination == null) model::resumeChatCourse else null)
                                     if (paired) Composer(model, { contextSheet = true }, Modifier.widthIn(max = 620.dp).testTag("composer"),
                                         compact = compactComposer, onContextAnchorChanged = { contextAnchor = it },

@@ -34,6 +34,7 @@ import com.alpha.assistant.data.MessageProvenance
 import com.alpha.assistant.data.ScreenContext
 import com.alpha.assistant.data.Source
 import com.alpha.assistant.memory.MemoryStore
+import com.alpha.assistant.sandbox.GraphicsSession
 import com.alpha.assistant.surfaces.AssistContext
 import com.alpha.assistant.surfaces.AssistantCapture
 import com.alpha.assistant.tools.AgentScriptProvider
@@ -67,6 +68,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -959,6 +961,49 @@ class ShellLiveVoiceWorkflowTest {
             robot.waitUntil { model.stageToolId == fresh }
         }
 
+    /**
+     * A new drawing app takes the stage while the card of the old drawing app stays in the chat under the voice layer (live check
+     * `pendulum`, step 2). The new app draws on the stage, so a card under the layer holds no drawing slot. The end of the voice mode
+     * brings the chat cards back with a drawing and no stopped line.
+     */
+    @Test fun aNewDrawingOnTheStageDrawsWhileTheOldCardIsUnderTheLayer() =
+        onStage(script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("lesson")), Scripted.Text(appFilePlan("shapes"))))) { scenario, model, app ->
+            robot.waitUntil(15_000) { drew(scenario, STAGE, LESSON_DRAWING) }
+            val before = messages(model).size
+            socket.say(SCREEN_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            val fresh = checkNotNull(messages(model).last().toolId)
+            assertNotEquals(app, fresh)
+            robot.waitUntil { model.stageToolId == fresh }
+            val end = SystemClock.uptimeMillis() + 15_000
+            var drawn = false
+            while (!drawn && SystemClock.uptimeMillis() < end) { drawn = drew(scenario, STAGE, SHAPES_DRAWING); SystemClock.sleep(50) }
+            val waits = robot.shell("logcat -d -s AlphyGeneration").lines().count { it.endsWith("surface CloudFailure javascript_busy wait") }
+            assertTrue("the new app drew on the stage: $drawn, the old card draws in the chat under the layer: " +
+                "${drew(scenario, "chat", LESSON_DRAWING)}, busy waits in the log: $waits", drawn)
+            scenario.onActivity { model.endLiveVoice() }
+            robot.waitUntil { !robot.composed(scenario, "live_voice_layer") }
+            robot.waitUntil(15_000) { drew(scenario, "chat", SHAPES_DRAWING) || drew(scenario, "chat", LESSON_DRAWING) }
+            // The card that did not get the slot waits for it, so a stopped line would show after its first try of about 4 s.
+            SystemClock.sleep(6_000)
+            assertNull(robot.find(robot.text(R.string.tool_session_stopped)))
+        }
+
+    /** The stage app waits while another session holds the one drawing slot: the stage says why, and it draws when the slot frees. */
+    @Test fun aStageAppThatWaitsForTheSlotSaysWhy() {
+        val holder = GraphicsSession(fixture.context)
+        try {
+            assertEquals("OK", runBlocking { holder.open("return {state:input.state};", "{}") }.status)
+            onStage(plan = "lesson") { scenario, _, _ ->
+                robot.waitUntil(15_000) { inStage(scenario, robot.text(R.string.tool_session_waiting)) }
+                holder.close()
+                robot.waitUntil(15_000) { drew(scenario, STAGE, LESSON_DRAWING) }
+                assertFalse(inStage(scenario, robot.text(R.string.tool_session_waiting)))
+                assertFalse(inStage(scenario, robot.text(R.string.tool_session_stopped)))
+            }
+        } finally { holder.close() }
+    }
+
     /** Plan D, Da1: the app of the stage is a stored app of the chat, so the chat shows it after the end. */
     @Test fun theStageScreenIsInTheChatAfterTheEnd() = onStage { scenario, model, app ->
         scenario.onActivity { model.endLiveVoice() }
@@ -1692,6 +1737,11 @@ class ShellLiveVoiceWorkflowTest {
 
     private fun inStage(scenario: ActivityScenario<CloudTestActivity>, text: String) = robot.composedTextIn(scenario, STAGE, text)
 
+    /** A canvas under the tag [tag] draws text in the drawing [title]: its label is longer than the title and the dot. */
+    private fun drew(scenario: ActivityScenario<CloudTestActivity>, tag: String, title: String) = robot.composedIn(scenario, tag) { config ->
+        config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.startsWith("$title. ") && it.length > title.length + 2 } == true
+    }
+
     private fun install(chat: ChatProvider = fixture.provider, voice: VoiceFactory? = null) = fixture.install(chat = chat, voice = voice,
         liveVoice = fixture.liveVoice(socket, audio))
 
@@ -1724,6 +1774,9 @@ class ShellLiveVoiceWorkflowTest {
         const val SCREEN_REQUEST = "Объясни, как работает сердце"
         const val SCREEN_TEXT = "Сердце — насос."
         const val SCREEN_BRIEF = "A heart that pumps blood"
+        /** The titles of the drawings of the fixture plans `lesson` and `shapes`, the start of the labels of their canvases. */
+        const val LESSON_DRAWING = "Земля в центре, Луна на орбите и метка её стороны"
+        const val SHAPES_DRAWING = "Each shape and color"
         const val SCREEN_ANSWER = "Ответ Alphy: $SCREEN_TEXT"
         const val TIMER_REQUEST = "Поставь таймер на 10 минут"
         const val CHANGE_REQUEST = "Покажи ещё половину счёта"

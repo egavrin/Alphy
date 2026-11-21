@@ -322,10 +322,13 @@ private fun CompactAssistant(
                         }
                     }
                 }
+                val voiceCovers = model.liveVoice.active && model.ownsLiveVoice(LocalActivity.current)
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    // The voice layer covers the chat, so its cards run no app and the stage gets the one drawing slot.
                     ChatPane(
                         model, model.snapshot.selected, tools = openTool,
                         settings = providerSettings, modifier = Modifier.weight(1f), openAutomation = openAutomation,
+                        showLivePreviews = !voiceCovers,
                     )
                     ContextRows()
                     Composer(
@@ -336,7 +339,7 @@ private fun CompactAssistant(
                     )
                 }
                 // The voice view covers the chat, which stays composed for the agent host of phone actions. ✕ returns to the sheet.
-                if (model.liveVoice.active && model.ownsLiveVoice(LocalActivity.current)) LiveVoiceLayer(model, model.snapshot.selected,
+                if (voiceCovers) LiveVoiceLayer(model, model.snapshot.selected,
                     compact = true, openTool = { id -> model.tools.select(id); openTool() }, openAutomation = openAutomation,
                     settings = providerSettings, onEnd = { model.endLiveVoice() }) { ContextRows() }
             }
