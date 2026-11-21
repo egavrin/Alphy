@@ -4,6 +4,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { compileAppFile, compileStep, previewStep } from "../src/compile.js";
 import { settings } from "../src/core.js";
+import { runtime } from "../src/emit.js";
 import { every, plan } from "./helpers.js";
 
 const template = (name) => readFileSync(new URL(`./fixtures/template/${name}.plan`, import.meta.url), "utf8");
@@ -99,9 +100,16 @@ test("anUnusableFirstLineGivesNone", async () => {
 test("theCompileResultCarriesTheFrame", async () => {
   const step = await compileStep({ text: ship, plan: null, read: true, previous: null, cap: 65536 });
   expect(step.result.frame.holds).toBe("whole");
-  expect(step.result.frame.definition).toEqual(step.result.definition);
   expect(step.result.frame.drawing).toEqual((await frameOf(ship)).drawing);
   // A free plan too.
   const free = await compileStep({ text: plan("calc"), plan: null, read: false, previous: null, cap: 65536 });
   expect([free.result.faults, free.result.frame.holds]).toEqual([[], "whole"]);
+});
+
+test("theCompileFrameHoldsNoSecondDefinition", async () => {
+  // The host takes the definition of a compile from result.definition, so the reply holds the source of the run-time once.
+  const step = await compileStep({ text: ship, plan: null, read: true, previous: null, cap: 65536 });
+  expect(step.result.frame.definition).toBeUndefined();
+  expect(step.result.definition).not.toBeNull();
+  expect(JSON.stringify(step).split(JSON.stringify(runtime.text).slice(1, -1)).length - 1).toBe(1);
 });

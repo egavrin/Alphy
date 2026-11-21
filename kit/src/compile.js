@@ -28,13 +28,13 @@ function build(text) {
 }
 
 /**
- * The frame that the stage draws for a definition on a state: {definition, ui, state, drawing, holds}. The definition holds no drawing commands,
- * so an open event of the run-time on its compiled data gives the state and the drawing (the surfaces of the reply, {} with no surface), and the
- * screen of that state gives the ui.
+ * The frame that the stage draws for a definition on a state: {ui, state, drawing, holds}. The definition holds no drawing commands, so an open
+ * event of the run-time on its compiled data gives the state and the drawing (the surfaces of the reply, {} with no surface), and the screen of
+ * that state gives the ui. The frame holds no copy of the definition: the result beside it has it, so a reply of the host holds its source once.
  */
 function frameOf(definition, state, holds) {
   const app = dataOf(definition), reply = handle({ artifactId: "preview", revision: 0, state, event: { type: "open" } }, app);
-  return { definition, ui: screen(kitOf(app, reply.state), app).ui, state: reply.state, drawing: reply.surfaces ?? {}, holds };
+  return { ui: screen(kitOf(app, reply.state), app).ui, state: reply.state, drawing: reply.surfaces ?? {}, holds };
 }
 
 /**
@@ -129,8 +129,8 @@ const mergedOf = (plan, text) => (plan === null ? text : isTemplateFile(plan) ? 
 const storedOf = (previous) => previous && { appFile: previous.appFile, stateSchema: JSON.parse(previous.stateSchema), state: JSON.parse(previous.state) };
 
 /**
- * The preview step of the host (stage templates design, section 3): {kind: "preview", frame} for the complete lines so far of a reply, or
- * {kind: "none"}. text is read as readPlanReply reads it and merged into plan as compileStep merges it, and previous is the stored app of a change
+ * The preview step of the host (stage templates design, section 3): {kind: "preview", frame} for the complete lines so far of a reply, with
+ * frame {definition, ui, state, drawing, holds}, or {kind: "none"}. text is read as readPlanReply reads it and merged into plan as compileStep merges it, and previous is the stored app of a change
  * as compileStep takes it, so a value that the person moved stays. The compile runs with no check run (settings.gate off) and keeps the lines so far
  * of a template: a line with a fault is left out with no repair (a change keeps its stored version), and the first line alone gives the frame with
  * the picture card at its final size. A free plan gives holds "whole". An outside reply, a text with no usable first line, and each throw give none.
@@ -139,8 +139,9 @@ export async function previewStep({ text, plan = null, previous = null }) {
   const gate = settings.gate;
   settings.gate = "off";
   try {
-    const reply = readPlanReply(text), { frame } = reply.kind === "plan" ? await compileAppFile(mergedOf(plan, reply.text), storedOf(previous), true) : {};
-    return frame ? { kind: "preview", frame } : { kind: "none" };
+    const reply = readPlanReply(text), { definition, frame } = reply.kind === "plan" ? await compileAppFile(mergedOf(plan, reply.text), storedOf(previous), true) : {};
+    // A preview has no result beside its frame, so the frame holds the definition.
+    return frame ? { kind: "preview", frame: { definition, ...frame } } : { kind: "none" };
   } catch {
     return { kind: "none" };
   } finally {
