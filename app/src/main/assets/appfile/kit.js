@@ -3785,7 +3785,11 @@ const { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, isTemplateFile, readTemplate, mergeT
 
 /** The first line of a template file, with the template word as group 1. */
 const TEMPLATE_HEAD = /^\s*(scene|items|cells)\s*\(/;
-/** The content budget of each template: texts in characters, lists in items. A text up to floor(1.25 × cap) has no fault (the 1.25 rule). */
+/**
+ * The content budget of each template: texts in characters, lists in items. A text inside the picture (a shape text, a sign) has no fault up to
+ * floor(1.25 × cap), because it cannot change the height of the screen. A card text or an item text past its cap is cut after its last whole
+ * sentence inside the cap (cut). Each other text past its cap, a long text with no sentence end inside its cap, and a list past its cap are faults.
+ */
 const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, sign: 14, text: 28, options: 6, items: 6, shapes: 12, cells: 100 };
 /** The common color names that the kit takes with no call, by their small letters: the template check had one repair for a color name. */
 const COLOR_NAMES = { red: "#dc2626", orange: "#ea580c", yellow: "#facc15", green: "#16a34a", blue: "#2563eb", purple: "#9333ea", violet: "#7c3aed", pink: "#db2777",
@@ -3808,12 +3812,41 @@ const numberOf = (node) => (node?.k === "lit" && typeof node.v === "number" ? no
 const nodesIn = (node, test) => (!node || typeof node !== "object" ? [] : [...(test(node) ? [node] : []), ...Object.values(node).flatMap((inner) => nodesIn(inner, test))]);
 const readsV = (node) => node.k === "path" && node.abs && node.segs.length === 1 && node.segs[0] === "v";
 
-/** The fault of a text of a line: a text in quotes, or a formula of texts where formula is true, with no text past 1.25 times its cap. */
-function textFault(what, node, cap, formula = false) {
+/** The factor of the cap of a text inside the picture (BUDGET). */
+const INSIDE = 1.25;
+/** The fault of a text of a line: a text in quotes, or a formula of texts where formula is true, with no text past floor(factor × cap). */
+function textFault(what, node, cap, formula = false, factor = 1) {
   if (!node || (!formula && !isText(node))) return `${what} is a text in quotes`;
   if (isText(node) && !node.v.trim()) return `${what} is empty`;
-  const long = nodesIn(node, isText).find((text) => [...text.v].length > Math.floor(cap * 1.25));
+  const long = nodesIn(node, isText).find((text) => [...text.v].length > Math.floor(cap * factor));
   return long ? `${what} has ${[...long.v].length} characters, and its cap is ${cap}. Write it shorter` : null;
+}
+
+/** A sentence end: . ! ? or …, or 。！？ of Chinese and Japanese, with the closing quote marks and brackets after it. */
+const SENTENCE_END = /[.!?…。！？]["'»”’)\]}」』）]*$/u;
+/**
+ * A text past its cap cut after its last whole sentence inside the cap, or the text itself when it fits or no sentence ends inside the cap.
+ * A sentence end counts only before a space, so 3.5 ends no sentence, except 。！？, which no space follows. The space after the cut goes.
+ */
+function cut(text, cap) {
+  const chars = [...text];
+  for (let end = chars.length > cap ? cap : 0; end > 0; end--) {
+    const head = chars.slice(0, end).join(""), mark = SENTENCE_END.exec(head)?.[0];
+    if (mark && (/\s/u.test(chars[end]) || /[。！？]/u.test(mark))) return head;
+  }
+  return text;
+}
+/** The node with each text in it given again by map. */
+const textsMapped = (node, map) => (!node || typeof node !== "object" ? node : isText(node) ? map(node)
+  : Array.isArray(node) ? node.map((inner) => textsMapped(inner, map)) : Object.fromEntries(Object.entries(node).map(([key, inner]) => [key, textsMapped(inner, map)])));
+/**
+ * The tree of a card line of scene and cells, or of an item line, with each text of its card text or item text cut to the cap (cut). Each
+ * text of a formula is cut by itself. The same tree when no text changes.
+ */
+function cutLong(tree, name, word) {
+  const at = name === "card" ? (word === "items" ? -1 : 1) : word === "items" ? 2 : -1, long = tree.k === "call" && tree.name === (name === "card" ? "card" : "item") ? tree.args[at] : undefined;
+  const short = long && textsMapped(long, (node) => ({ ...node, v: cut(node.v, BUDGET.cardText) }));
+  return !long || show(short) === show(long) ? tree : { ...tree, args: tree.args.map((arg, index) => (index === at ? short : arg)) };
 }
 
 function headFault(tree, word) {
@@ -3850,12 +3883,12 @@ function controlFault(tree, word) {
 function partFault(tree, word) {
   if (word === "items") {
     if (tree.k !== "call" || tree.name !== "item" || tree.args.length !== 3 || Object.keys(tree.named).length) return "an item is item(LABEL, SIGN, TEXT)";
-    return textFault("the label", tree.args[0], BUDGET.option) ?? textFault("the sign", tree.args[1], BUDGET.sign) ?? textFault("the text", tree.args[2], BUDGET.cardText);
+    return textFault("the label", tree.args[0], BUDGET.option) ?? textFault("the sign", tree.args[1], BUDGET.sign, false, INSIDE) ?? textFault("the text", tree.args[2], BUDGET.cardText);
   }
   if (tree.k !== "call" || !Object.hasOwn(SHAPES, tree.name)) return "a shape is circle, rect, line, text, or polygon";
   const other = Object.keys(tree.named).find((key) => key !== "visible" && key !== "stroke");
   if (other) return `a shape takes only visible= and stroke= by name, and ${other}= is not one`;
-  if (tree.name === "text") return textFault("the text", tree.args[2], BUDGET.text, true);
+  if (tree.name === "text") return textFault("the text", tree.args[2], BUDGET.text, true, INSIDE);
   // The kit compiles a shorter or an odd list clean: it draws nothing for two points and drops the last number of an odd list.
   const points = tree.name === "polygon" && tree.args[0]?.k === "list" ? tree.args[0].items.length : 6;
   if (points < 6 || points % 2) return `the points of a polygon are a list of x and y numbers for at least 3 points (6 numbers), and this list has ${points} numbers`;
@@ -3911,9 +3944,12 @@ function readTemplate(text) {
     if (name !== "control" && name !== "card" && !PART[word].test(name)) { fault(name, `the template ${word} has no line ${name}. Its lines are ${LINES[word]}`); continue; }
     if (lines.some((line) => line.name === name)) { fault(name, `this is a second line ${name}. Each line has its own name`); continue; }
     const entry = read(raw, parseLine);
-    let tree = entry instanceof DslError ? null : entry.tree, message = entry instanceof DslError ? entry.message : null;
+    let tree = entry instanceof DslError ? null : entry.tree, message = entry instanceof DslError ? entry.message : null, source = raw.trim();
     if (tree && name === "control") message = entry.kind === "state" ? (isText(tree) || numberOf(tree) !== undefined ? null : "$/v = VALUE takes a number or a text in quotes") : controlFault(tree, word);
     else if (tree) {
+      // The kept line has the cut text, so the stored file and a later change have it too.
+      const short = cutLong(tree, name, word);
+      if (short !== tree) { tree = short; source = `${name} = ${show(tree)}`; }
       const shape = name !== "card" && word === "scene", path = nodesIn(tree, (node) => node.k === "path" && !readsV(node))[0];
       message = (name === "card" ? cardFault(tree, word) : partFault(tree, word)) ?? (path ? `a line reads only $/v, the value of the control, and this line reads ${show(path)}` : null);
       if (shape && !message) message = colorFault(tree = colored(tree));
@@ -3922,7 +3958,7 @@ function readTemplate(text) {
       if (twin) message = `the label ${show(tree.args[0])} is the label of ${twin.name} too. Each item needs a label of its own: the choice shows the labels`;
     }
     if (message) fault(name, message);
-    lines.push({ name, raw: raw.trim(), tree: message ? null : tree });
+    lines.push({ name, raw: source, tree: message ? null : tree });
   }
   lines.sort((a, b) => rank(a.name, word) - rank(b.name, word));
   return { word, lines, faults };

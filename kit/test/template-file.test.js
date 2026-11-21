@@ -19,6 +19,11 @@ const named = (faults, name) => faults.filter((fault) => fault.startsWith(`${nam
 const step = (input) => compileStep({ read: true, previous: null, cap: 65536, ...input });
 /** A text of n characters. */
 const chars = (n) => "Ш".repeat(n);
+/** A text of n characters that ends a sentence. */
+const sentence = (n) => chars(n - 1) + ".";
+/** A card text of 200 characters with a sentence end at character 120, and the 120 characters that the kit keeps of it. */
+const LONG = `${sentence(120)} ${chars(79)}`, CUT = sentence(120);
+const shipCard = (text) => put(ship, "card", `card = card("Вытеснение воды", "${text}")`);
 /** The lines of a merged text by their names: the template word for the first line. */
 const order = (text) => text.trim().split("\n").map((line) => /^([\w$/]+)\s*[=(]/.exec(line)[1]);
 /** The value of a stored app as the host sends it to compileStep. */
@@ -59,10 +64,11 @@ test("aControlThatChangesNothingIsLeftOut", async () => {
 });
 
 test("keptCompilesCleanAgain", async () => {
-  const cases = { shape: put(ship, "s2", "s2 = polygon(45, 75, 255)"), card: put(ship, "card", `card = card("Вытеснение воды", "${chars(176)}")`), control: STILL };
-  for (const [name, text] of Object.entries(cases)) {
+  // A cut text has no fault: the kept text is the cut one.
+  const cases = { shape: [put(ship, "s2", "s2 = polygon(45, 75, 255)"), true], card: [shipCard(chars(176)), true], control: [STILL, true], cut: [shipCard(LONG), false] };
+  for (const [name, [text, faulty]] of Object.entries(cases)) {
     const first = await compileAppFile(text), again = await compileAppFile(first.kept);
-    expect([name, first.faults.length > 0, first.definition !== null, again.faults]).toEqual([name, true, true, []]);
+    expect([name, first.faults.length > 0, first.definition !== null, again.faults]).toEqual([name, faulty, true, []]);
     expect(again.definition).toEqual(first.definition);
   }
 });
@@ -111,13 +117,16 @@ test("colorNamesNeedNoCall", async () => {
   expect(sky.faults[0]).toContain(Object.keys(TONES).join(", "));
 });
 
-test("textsUpToOneAndAQuarterOfTheirCaps", async () => {
+test("hardCapsOutsideThePictureAndOneAndAQuarterInside", async () => {
   const items = template("word-parts"), cells = template("majority");
   const head = (title) => ship.replace(/^scene\(.*$/m, `scene("${title}", lang="ru", palette="blue")`);
+  // A text outside the picture changes the height of the screen, so its cap has no factor.
   const pairs = [
-    ["scene", 30, (n) => head(chars(n)), 37],
-    ["card", 140, (n) => put(ship, "card", `card = card("Вытеснение воды", "${chars(n)}")`), 175],
-    ["control", 12, (n) => put(ship, "control", `control = choice("Предмет", ["Корабль", "${chars(n)}"])`), 15],
+    ["scene", 30, (n) => head(chars(n)), 30],
+    ["control", 28, (n) => put(ship, "control", `control = choice("${chars(n)}", ["Корабль", "Гвоздь"])`), 28],
+    ["control", 12, (n) => put(ship, "control", `control = choice("Предмет", ["Корабль", "${chars(n)}"])`), 12],
+    ["i1", 12, (n) => put(items, "i1", `i1 = item("${chars(n)}", "пере-", "Стоит перед корнем.")`), 12],
+    ["card", 32, (n) => put(ship, "card", `card = card("${chars(n)}", "Вода держит корабль.")`), 32],
     ["i1", 14, (n) => put(items, "i1", `i1 = item("Приставка", "${chars(n)}", "Стоит перед корнем.")`), 17],
     ["s3", 28, (n) => put(ship, "s3", `s3 = text(150, 50, "${chars(n)}", "ink", 12, visible=$/v == "Корабль")`), 35],
   ];
@@ -136,6 +145,50 @@ test("textsUpToOneAndAQuarterOfTheirCaps", async () => {
   for (let index = 4; index <= 13; index++) thirteen = put(thirteen, `s${index}`, `s${index} = circle(${index * 20}, 200, 5, "ink")`);
   expect(named((await compileAppFile(thirteen)).faults, "s13")).toHaveLength(1);
   expect(named((await compileAppFile(put(cells, "control", 'control = slider("Votes for", 0, 101, 1, 11)'))).faults, "control")).toHaveLength(1);
+});
+
+test("aLongCardTextIsCutAfterItsLastWholeSentence", async () => {
+  expect([...LONG].length).toBe(200);
+  const result = await compileAppFile(shipCard(LONG));
+  expect([result.faults, result.leftOut, result.kept]).toEqual([[], [], shipCard(CUT)]);
+  // The screen shows the cut text.
+  expect(every(result.definition.ui).some((node) => Object.values(node).includes(CUT))).toBe(true);
+  expect(JSON.stringify(result.definition)).not.toContain(LONG);
+  // A closing quote mark stays with its sentence, and a full stop that no space follows (3.5) ends no sentence.
+  const quoted = `«${chars(117)}!»`, odd = await compileAppFile(shipCard(`${quoted} ${chars(10)}3.5${chars(66)}`));
+  expect([odd.faults, odd.kept]).toEqual([[], shipCard(quoted)]);
+});
+
+test("aLongItemTextIsCutAfterItsLastWholeSentence", async () => {
+  const item = (text) => put(template("word-parts"), "i1", `i1 = item("Приставка", "пере-", "${text}")`), result = await compileAppFile(item(LONG));
+  expect([result.faults, result.leftOut, result.kept]).toEqual([[], [], item(CUT)]);
+  expect(result.expanded).toContain(`text: "${CUT}"`);
+  expect(result.expanded).not.toContain(LONG);
+});
+
+test("eachTextOfACardFormulaIsCutByItself", async () => {
+  const other = `${sentence(100)} ${chars(79)}`, result = await compileAppFile(put(ship, "card", `card = card("Вытеснение воды", $/v == "Корабль" ? "${LONG}" : "${other}")`));
+  expect(result.faults).toEqual([]);
+  const text = parseLine(result.kept.split("\n").find((line) => line.startsWith("card = "))).tree.args[1];
+  expect([text.test.right.v, text.yes.v, text.no.v]).toEqual(["Корабль", CUT, sentence(100)]);
+});
+
+test("aLongCardTextOrItemTextWithNoSentenceEndInsideItsCapIsAFaultOfItsLine", async () => {
+  // A sentence end past the cap does not count.
+  for (const text of [chars(200), `${sentence(150)} ${chars(49)}`]) {
+    const card = await compileAppFile(shipCard(text)), item = await compileAppFile(put(template("word-parts"), "i1", `i1 = item("Приставка", "пере-", "${text}")`));
+    for (const [name, result] of [["card", card], ["i1", item]]) {
+      expect([name, result.faults.length, result.leftOut]).toEqual([name, 1, [name]]);
+      expect(result.faults[0]).toStartWith(`${name}: `);
+      expect(result.faults[0]).toMatch(/\b140\b/);
+    }
+  }
+});
+
+test("aCardTextAtItsCapIsNotCut", async () => {
+  const text = `${sentence(100)} ${chars(39)}`, result = await compileAppFile(shipCard(text));
+  expect([...text].length).toBe(140);
+  expect([result.faults, result.kept]).toEqual([[], shipCard(text)]);
 });
 
 test("twoOptionsOrItemsWithTheSameTextAreAFaultOfTheirLine", async () => {
@@ -219,21 +272,22 @@ test("outsideStillReads", async () => {
 const len = (node) => [...node.v].length;
 test("theCapFixturesCompileClean", async () => {
   for (const [name, factor] of [["scene-caps", 1], ["items-caps", 1], ["cells-caps", 1], ["scene-caps125", 1.25], ["items-caps125", 1.25], ["cells-caps125", 1.25]]) {
-    const text = template(name), cap = (n) => Math.floor(n * factor), result = await compileAppFile(text);
-    expect([name, result.faults]).toEqual([name, []]);
+    // A text inside the picture (a shape text, a sign) is at floor(1.25 × cap) in a caps125 file. Each other text is at its cap in each file.
+    const text = template(name), inside = (n) => Math.floor(n * factor), result = await compileAppFile(text);
+    expect([name, result.faults, result.kept]).toEqual([name, [], text]);
     const [first, ...rest] = text.trim().split("\n"), head = parseExpression(first), lines = Object.fromEntries(rest.map((line) => [parseLine(line).key, parseLine(line).tree]));
     const parts = Object.keys(lines).filter((key) => /^[si]\d+$/.test(key)).map((key) => lines[key]), control = lines.control, card = lines.card;
-    const seen = { title: len(head.args[0]), control: len(control.args[0]), cardTitle: len(card.args[0]) }, want = { title: cap(30), control: cap(28), cardTitle: cap(32) };
+    const seen = { title: len(head.args[0]), control: len(control.args[0]), cardTitle: len(card.args[0]) }, want = { title: 30, control: 28, cardTitle: 32 };
     if (head.name === "scene") {
       Object.assign(seen, { options: control.args[1].items.map(len), shapes: parts.length, texts: parts.filter((part) => part.name === "text").map((part) => len(part.args[2])), cardText: len(card.args[1]) });
-      Object.assign(want, { options: Array(6).fill(cap(12)), shapes: 12, texts: Array(seen.texts.length).fill(cap(28)), cardText: cap(140) });
+      Object.assign(want, { options: Array(6).fill(12), shapes: 12, texts: Array(seen.texts.length).fill(inside(28)), cardText: 140 });
       expect(seen.texts.length).toBeGreaterThan(0);
     } else if (head.name === "items") {
       Object.assign(seen, { items: parts.map((part) => part.args.map(len)) });
-      Object.assign(want, { items: Array(6).fill([cap(12), cap(14), cap(140)]) });
+      Object.assign(want, { items: Array(6).fill([12, inside(14), 140]) });
     } else {
       Object.assign(seen, { count: control.args[2].v, cardText: len(card.args[1]) });
-      Object.assign(want, { count: 100, cardText: cap(140) });
+      Object.assign(want, { count: 100, cardText: 140 });
     }
     expect([name, seen]).toEqual([name, want]);
   }
