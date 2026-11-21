@@ -52,6 +52,8 @@ Paths: `app/…/` is `app/src/main/java/com/alpha/assistant/`, and `test/…/` i
 - Fold size: `adb -s <emulator> shell wm size 2480x2248` and `adb -s <emulator> shell wm density 520`. Reset both with `wm size reset` and `wm density reset` after the run. The phone size is the emulator default (width 411 dp).
 - Kit checks: `bun test kit` shows `0 fail`. After a change of kit source or `kit/prompt.md`, run `bun kit/build.js` and hand back its outputs. `bun kit/build.js --check` exits 0.
 - Tests come first. Prefer black-box tests: the voice path with scripted providers, and the kit through `compileStep` and `previewStep`. Do not write a unit test after the production code. Do not weaken an assertion.
+- Second order of the owner, 2026-11-21 ("написать сразу, а потом разом все оттестировать и исправить"): the app code is written in batches, and its tests run after the batches are joined (section "Batches"). For an app task, "Step 2: run it and see it fail" is replaced: the agent writes the tests of the task with the assertions of the plan in the same pass as the code, and checks only that both compile. A kit task keeps its red run, because a kit test takes seconds. This is the owner's decision for this build: his standing policy says tests before code.
+- In a fix round, an agent changes no assertion of a test without a reason that it reports to the controller. The controller reads the diff of each test file of each fix patch.
 - AGENTS.md: no compatibility with earlier development versions. No migration of stored apps, and no reader of the spike fill form. Never delete stored user data silently.
 - AGENTS.md behavior checks: the host keeps expected results and acceptance. Named requests and scenario presets stay in regression fixtures (`kit/test/fixtures/template*`). The template path stays on the shared generation path, whose app workflow and game workflow tests keep passing.
 - No task adds a user string. The wait line and the reasons exist. A task that needs a new string stops and reports.
@@ -167,6 +169,27 @@ Phase 2 (stream). Tasks 13 and 14 (the device cost, gate 1a) run beside phase 1.
 Task 13 and Task 6 both lead to new generated assets (`kit.js`, `prompt.json`). The controller runs `bun kit/build.js` after it applies each of them.
 
 Shared files go in the order of the File map. Two parallel tasks never own the same file: Tasks 15 and 16, and Tasks 18 and 19, have disjoint file lists.
+
+### Batches
+
+The owner's second order of 2026-11-21 groups the writing. The tasks stay the specification: their interfaces, their tests, and their bars. The "Waits for" lines now give the order of the test runs and of the gates, not of the writing. Each batch is one Opus agent in its own worktree, and each file has one writer.
+
+| Batch | Tasks | Files it owns | Emulator |
+| --- | --- | --- | --- |
+| C (shared names, first) | the names that batches A, B, and T share | the enum value `APP_FILE_TEMPLATE` in `app/…/cloud/CloudProvider.kt`; `app/…/tools/StagePreview.kt` (whole); `stagePreviews`, `previewBeforeRouting`, and `previewStream` in `app/…/tools/ToolController.kt`; `Scripted.Deltas` in `test/…/tools/AgentScript.kt` | none (compile only) |
+| K (kit) | 1 alone (it runs), then 2, 3, 13, 21 in one pass with their red runs; 13b after gate 2b | `kit/**` and the generated assets | none |
+| A (app) | 4 and 5 first (hand back), then 15, 17, 18, and the host half of 16 (`AppFileCompiler.preview`, the trace phases, `controls_on`) | each production file of the File map that is not in batch B or C, `TemplateStream.kt`, and the tests `StageTemplateWorkflowTest`, `StageStreamWorkflowTest`, `StageChangeWorkflowTest`, `AppFileChangeWorkflowTest`, `AppFileCallWorkflowTest`, `AppFileLoopWorkflowTest`, and the template default of the providers in `ShellLiveVoiceWorkflowTest`, `DialogueStageWideTest`, `ShellRobot`, `SettingsConsentWorkflowTest` | `emulator-5592` |
+| B (stage) | the stage half of 16, and the gate tests of 9, 8b, 14, 20 | `app/…/ui/DialogueStage.kt`, `app/…/tools/ToolUi.kt`, and the tests `StagePreviewWorkflowTest`, `StageTemplateFitTest`, `StageTemplateHostCheckTest`, `StagePreviewCostTest`, `StageStreamCostTest` | `emulator-5594` |
+| T (test harness) | 10b, 19, and the template default of `ScriptedChat` | `test/…/ui/DialogueDriver.kt`, `DialogueRecorder.kt`, `DialogueRecorderTest.kt`, `DialogueStageRehearsalTest.kt`, `LiveDialogueStageTest.kt`, and the rest of `test/…/tools/AgentScript.kt` | `emulator-5596` |
+
+Order:
+
+1. Batch C lands first as one small patch that compiles for the app and for the tests. The controller commits it, and batches A, B, and T start from that commit.
+2. Batch K does not wait for batch C. The paid tuning (Task 6) and gate 1a (Task 14) need only the kit, so they start when the kit is in.
+3. Batch A hands back after Tasks 4 and 5. The controller tests the template path on a device while the same agent writes the stream tasks. So phase 1 is proved alone before the stream is on top of it.
+4. The controller applies the batches, runs the kit tests and each device class, and runs each failure alone before it sends it back. A fix goes to the agent that wrote the batch, with its context. That agent first moves its worktree to the joined commit that the controller names.
+5. For each test that pins a requirement of the owner (`theFirstCompleteLineShowsAFrame`, `aFaultyLineAppearsAfterItsRepairAndTheOthersStay`, `aFrameBeforeRoutingGoesAwayWhenTheTurnIsNoScreen`), the agent shows one deliberate break of the code that makes the test fail, then removes the break.
+6. Then the gates, the paid checks, the documents (Tasks 10 and 22), and Tasks 12, 23, 24, and 25, as written.
 
 Step forms:
 - Agent build tasks: write the failing test, run it and see it fail, implement, run it and see it pass, hand back.
