@@ -71,8 +71,10 @@ internal fun showsOnTheStage(message: Message): Boolean = message.status !in unf
 /**
  * The stage height around the drawing of an app: the padding, the kind label, the title, the first control, and the gaps (Da2 ruling 1).
  * The label and the title take about 120 dp, and a slider with its label, the tallest first control, about 105 dp.
+ * Gate 3 (2026-11-21): at the fold size a template at its caps scrolled 5.8 dp, with a 266 dp drawing that its width limits on a 534 dp
+ * stage, and its title, its control label, and two rows of options took about 274 dp.
  */
-private val STAGE_TEXT_HEIGHT = 256.dp
+private val STAGE_TEXT_HEIGHT = 276.dp
 
 /** The canvas height of an app on a stage of [maxHeight]. The stage preview and its cost test use the same height. */
 internal fun stageCanvasHeight(maxHeight: Dp, fold: Boolean): Dp = (if (fold) maxHeight - STAGE_TEXT_HEIGHT else maxHeight * 0.65f).coerceIn(120.dp, 560.dp)

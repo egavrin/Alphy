@@ -21,7 +21,7 @@ import org.junit.Test
 import kotlin.math.roundToInt
 
 /**
- * Gate 3 (Task 9): a template file at its text caps, and at 1.25 times its text caps, fits the dialogue stage with no scroll. For each cap
+ * Gate 3 (Task 9): a template file at its text caps, also with each text inside the picture at 1.25 times its cap, fits the dialogue stage with no scroll. For each cap
  * file, the scripted template reply is the file and the voice path stores it. Then the stage has no vertical scroll, and the canvas, the
  * control, and each text, also the whole card text, are shown above the strip. Each file prints one JSON line with the file and the size
  * class. The controller runs the class at the phone and the fold size.
@@ -125,7 +125,7 @@ class StageTemplateFitTest {
     private companion object {
         const val STAGE = "dialogue_stage"
         const val STRIP = "dialogue_strip"
-        /** The cap files of the three templates (kit/test/fixtures/template), at the caps and at 1.25 times the text caps. */
+        /** The cap files of the three templates (kit/test/fixtures/template), at the caps, and with each text inside the picture at 1.25 times its cap (a text outside the picture has a hard cap). */
         val FILES = listOf("scene-caps", "scene-caps125", "items-caps", "items-caps125", "cells-caps", "cells-caps125")
     }
 }
