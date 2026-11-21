@@ -1,7 +1,6 @@
 package com.alpha.assistant.ui
 
 import android.graphics.Rect
-import android.os.SystemClock
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsConfiguration
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -60,9 +59,9 @@ class StagePreviewWorkflowTest {
             robot.waitUntil(30_000) { provider.routed.isCompleted && robot.composedTextIn(scenario, STRIP, robot.text(R.string.live_voice_working)) }
             show(model, frame)
             // The whole preview, with its control, so the check of the control below is not empty.
-            robot.waitUntil { robot.composedTextIn(scenario, STAGE, SHIP_TITLE) && canvasLabels(scenario) == SHIP_LABELS &&
+            robot.waitUntil { robot.composedTextIn(scenario, STAGE, SHIP_TITLE) && canvasLabels() == SHIP_LABELS &&
                 robot.composedIn(scenario, STAGE) { SemanticsActions.OnClick in it } }
-            assertFalse("the control of the preview is off", controlOn(scenario))
+            assertFalse("the control of the preview is off", controlOn())
             assertTrue("the strip keeps its working status", robot.composedTextIn(scenario, STRIP, robot.text(R.string.live_voice_working)))
             ToolStore(context, "${stage.fixture.name}.db-tools.db").use { store ->
                 assertEquals("store rows and draft rows", 0 to 0, store.tools().size to store.drafts().size)
@@ -77,7 +76,7 @@ class StagePreviewWorkflowTest {
             robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, CALC_LABEL) }
             show(model, frame)
             robot.waitUntil { robot.composedTextIn(scenario, STAGE, SHIP_TITLE) && !robot.composedTextIn(scenario, STAGE, CALC_LABEL) }
-            assertFalse("the control of the preview is off", controlOn(scenario))
+            assertFalse("the control of the preview is off", controlOn())
         }
     }
 
@@ -102,14 +101,16 @@ class StagePreviewWorkflowTest {
     @Test fun theLiveAppTakesTheBoundsAndTheDrawingOfTheLastPreview() {
         val frame = frame(SHIP)
         live(Screens(SHIP)) { scenario, model ->
+            // This test drives the previews by hand, so the run streams none of its own.
+            main { model.tools.previewStream = false }
             show(model, frame)
-            robot.waitUntil { canvasLabels(scenario) == SHIP_LABELS }
+            robot.waitUntil { canvasLabels() == SHIP_LABELS }
             val preview = layout(scenario)
             stage.socket.say(APP_REQUEST, "d1", 100)
             val seen = linkedSetOf<String?>()
             // The uncommitted preview keeps the stage while the app is stored.
-            robot.waitUntil(60_000) { seen += canvasLabels(scenario); model.stageToolId != null && !model.tools.busy }
-            seen += commitAndWatch(scenario, model, stored(model, checkNotNull(model.stageToolId)))
+            robot.waitUntil(60_000) { seen += canvasLabels(); model.stageToolId != null && !model.tools.busy }
+            seen += commitAndWatch(model, stored(model, checkNotNull(model.stageToolId)))
             assertEquals("the canvas from the preview to the live drawing", setOf(SHIP_LABELS), seen)
             val live = layout(scenario)
             val px = ceil(context.resources.displayMetrics.density).toInt()
@@ -123,19 +124,21 @@ class StagePreviewWorkflowTest {
     @Test fun aChangeOfTheSameToolSeedsTheLastPreviewDrawing() {
         val changed = frame(SHIP_CHANGED)
         val provider = Screens(SHIP)
-        live(provider) { scenario, model ->
+        live(provider) { _, model ->
+            // This test drives the previews by hand, so the run streams none of its own.
+            main { model.tools.previewStream = false }
             stage.socket.say(APP_REQUEST, "d1", 100)
-            robot.waitUntil(60_000) { model.stageToolId != null && !model.tools.busy && canvasLabels(scenario) == SHIP_LABELS }
+            robot.waitUntil(60_000) { model.stageToolId != null && !model.tools.busy && canvasLabels() == SHIP_LABELS }
             val before = stored(model, checkNotNull(model.stageToolId))
             stage.socket.say(CHANGE_REQUEST, "d2", 2_000)
             robot.waitUntil(30_000) { provider.changeCalled.isCompleted }
             show(model, changed, before.id)
-            robot.waitUntil { canvasLabels(scenario) == CHANGED_LABELS }
+            robot.waitUntil { canvasLabels() == CHANGED_LABELS }
             val seen = linkedSetOf<String?>()
             provider.changeGo.complete(Unit)
             // The uncommitted change preview keeps the stage while the change is stored.
-            robot.waitUntil(60_000) { seen += canvasLabels(scenario); stored(model, before.id).revision == before.revision + 1 && !model.tools.busy }
-            seen += commitAndWatch(scenario, model, stored(model, before.id))
+            robot.waitUntil(60_000) { seen += canvasLabels(); stored(model, before.id).revision == before.revision + 1 && !model.tools.busy }
+            seen += commitAndWatch(model, stored(model, before.id))
             assertEquals("the canvas from the change preview to the new live drawing", setOf(CHANGED_LABELS), seen)
         }
     }
@@ -144,17 +147,17 @@ class StagePreviewWorkflowTest {
     @Test fun aChangePreviewKeepsTheValueThatThePersonMoved() {
         val changed = frame(SHIP_CHANGED)
         val provider = Screens(SHIP)
-        live(provider) { scenario, model ->
+        live(provider) { _, model ->
             stage.socket.say(APP_REQUEST, "d1", 100)
-            robot.waitUntil(60_000) { model.stageToolId != null && !model.tools.busy && canvasLabels(scenario) == SHIP_LABELS }
+            robot.waitUntil(60_000) { model.stageToolId != null && !model.tools.busy && canvasLabels() == SHIP_LABELS }
             val before = stored(model, checkNotNull(model.stageToolId))
             robot.click(OPTION)
             // s3 shows for the ship only, so the canvas has no text after the press.
-            robot.waitUntil { canvasLabels(scenario) == "" }
+            robot.waitUntil { canvasLabels() == "" }
             stage.socket.say(CHANGE_REQUEST, "d2", 2_000)
             robot.waitUntil(30_000) { provider.changeCalled.isCompleted }
             show(model, changed, before.id)
-            robot.waitUntil { canvasLabels(scenario) == CHANGED_LABELS }
+            robot.waitUntil { canvasLabels() == CHANGED_LABELS }
             provider.changeGo.complete(Unit)
             robot.waitUntil(60_000) { stored(model, before.id).revision == before.revision + 1 && !model.tools.busy }
             // The state of the ship holds the value of its control only, under a generated key.
@@ -165,7 +168,8 @@ class StagePreviewWorkflowTest {
 
     /** The trace has controls_on after the accept, busy has ended at that mark, and the control of the stage is on from then, never before. */
     @Test fun controlsOnComesAfterBusyEnds() {
-        live(Screens(SHIP)) { scenario, model ->
+        // controls_on marks a screen run only, so the routing gives a screen.
+        live(Screens(SHIP, screen = true)) { _, model ->
             val phases = CopyOnWriteArrayList<Pair<String, String?>>()
             val busyAtMark = AtomicReference<Boolean?>(null)
             main {
@@ -181,10 +185,10 @@ class StagePreviewWorkflowTest {
             val early = mutableListOf<List<Pair<String, String?>>>()
             robot.waitUntil(60_000) {
                 // A read of the stage runs on the main thread, so it comes after the whole main-thread pass that ends busy and marks controls_on.
-                if (controlOn(scenario) && marked() < 0) early += phases.toList()
+                if (controlOn() && marked() < 0) early += phases.toList()
                 marked() >= 0
             }
-            robot.waitUntil { controlOn(scenario) }
+            robot.waitUntil { controlOn() }
             val accepted = phases.indexOf(AppFileNames.PLAN_OUTCOME to "accepted")
             assertTrue("controls_on after the accept: $phases", accepted >= 0 && accepted < marked())
             assertEquals("busy at the mark controls_on", false, busyAtMark.get())
@@ -196,7 +200,7 @@ class StagePreviewWorkflowTest {
      * Commits the preview as [tool] while a second session holds the drawing slot, so the stage shows the seed for a while, then frees the
      * slot. Gives each canvas text that the stage showed from the commit to the first live drawing, and null for a frame with no canvas.
      */
-    private fun commitAndWatch(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel, tool: ToolRecord): Set<String?> {
+    private fun commitAndWatch(model: ShellViewModel, tool: ToolRecord): Set<String?> {
         val seen = linkedSetOf<String?>()
         var holder: GraphicsSession? = null
         robot.waitUntil {
@@ -207,11 +211,11 @@ class StagePreviewWorkflowTest {
         }
         try {
             main { model.tools.stagePreviews.committed(operation, tool.id, tool.revision) }
-            during(1_500) { seen += canvasLabels(scenario) }
+            during(1_500) { seen += canvasLabels() }
         } finally { holder?.close() }
         // The first live snapshot of the committed revision ends the preview.
-        robot.waitUntil(30_000) { seen += canvasLabels(scenario); model.tools.stagePreviews.current == null }
-        seen += canvasLabels(scenario)
+        robot.waitUntil(30_000) { seen += canvasLabels(); model.tools.stagePreviews.current == null }
+        seen += canvasLabels()
         return seen
     }
 
@@ -232,34 +236,19 @@ class StagePreviewWorkflowTest {
 
     private fun stored(model: ShellViewModel, id: String) = model.tools.tools.first { it.id == id }
 
-    /** Runs [check] every 30 ms for [ms]. */
-    private fun during(ms: Long, check: () -> Unit) {
-        val end = SystemClock.uptimeMillis() + ms
-        while (SystemClock.uptimeMillis() < end) { check(); SystemClock.sleep(30) }
-    }
-
     private fun isCharacter(config: SemanticsConfiguration) = config.getOrNull(SemanticsProperties.TestTag) == CHARACTER
 
     private fun isShipCanvas(config: SemanticsConfiguration) =
         config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.startsWith(SHIP_TITLE) } == true
 
     /**
-     * The texts of the ship drawing on the stage after its label, or null when the stage shows no such canvas. The preview canvas has
-     * "label. A. B." or the label alone, and the live canvas has "label. A. B. ", so both give "A. B" here.
+     * The texts of the ship drawing on the stage after its label as "A. B", "" for the label alone, or null when the stage shows no such
+     * canvas. It reads with no wait for an idle main thread (readStage).
      */
-    private fun canvasLabels(scenario: ActivityScenario<CloudTestActivity>): String? {
-        var labels: String? = null
-        robot.composedIn(scenario, STAGE) { config ->
-            labels = config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull { it.startsWith(SHIP_TITLE) }
-                ?.removePrefix(SHIP_TITLE)?.trim('.', ' ')
-            labels != null
-        }
-        return labels
-    }
+    private fun canvasLabels() = shipCanvasTexts(robot)?.joinToString(". ")
 
     /** True when the stage shows a control that a tap can press. The stage of these tests has no other tap target. */
-    private fun controlOn(scenario: ActivityScenario<CloudTestActivity>) =
-        robot.composedIn(scenario, STAGE) { SemanticsActions.OnClick in it && SemanticsProperties.Disabled !in it }
+    private fun controlOn() = stageControlOn(robot)
 
     private data class Layout(val title: Rect, val control: Rect, val canvas: Rect)
 
@@ -269,11 +258,11 @@ class StagePreviewWorkflowTest {
         checkNotNull(robot.composedBoundsIn(scenario, STAGE, ::isShipCanvas)) { "the canvas" })
 
     /**
-     * The routing call creates an app for [APP_REQUEST] and changes the shown app for [CHANGE_REQUEST]. With [holdRouting] it waits with no
-     * end after it completes [routed]. Each generation call answers [plan]. After the routing of [CHANGE_REQUEST], it completes
-     * [changeCalled] and answers [CHANGE_LINE] when [changeGo] completes.
+     * The routing call creates an app for [APP_REQUEST], or gives a screen with [screen], and changes the shown app for [CHANGE_REQUEST]. With
+     * [holdRouting] it waits with no end after it completes [routed]. Each generation call answers [plan]. After the routing of
+     * [CHANGE_REQUEST], it completes [changeCalled] and answers [CHANGE_LINE] when [changeGo] completes.
      */
-    private class Screens(private val plan: String, private val holdRouting: Boolean = false) : ChatProvider {
+    private class Screens(private val plan: String, private val holdRouting: Boolean = false, private val screen: Boolean = false) : ChatProvider {
         val routed = CompletableDeferred<Unit>()
         val changeCalled = CompletableDeferred<Unit>()
         val changeGo = CompletableDeferred<Unit>()
@@ -289,7 +278,8 @@ class StagePreviewWorkflowTest {
             val turn = request.decisionContext?.originalUserTurn?.text
             if (turn == CHANGE_REQUEST) changing = true
             emit(CloudEvent.RoundComplete(when (turn) {
-                APP_REQUEST -> chatDecision("create", "Готово.", "Make the app")
+                APP_REQUEST -> if (screen) JSONObject(chatDecision("screen", "Готово.", "Make the app")).put("show", true).toString()
+                    else chatDecision("create", "Готово.", "Make the app")
                 CHANGE_REQUEST -> chatDecision("refine", "Готово.", "Change the shown app")
                 else -> chatDecision("answer", "Fixture response")
             }, false))

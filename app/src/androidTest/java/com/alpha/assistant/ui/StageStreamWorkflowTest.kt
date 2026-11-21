@@ -2,13 +2,9 @@ package com.alpha.assistant.ui
 
 import android.graphics.Rect
 import android.os.SystemClock
-import android.view.View
-import android.view.ViewGroup
-import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.getAllSemanticsNodes
 import androidx.compose.ui.semantics.getOrNull
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
@@ -378,12 +374,9 @@ internal fun halves(text: String) = text.lines().filter { it.isNotEmpty() }.flat
 internal fun <T> readStage(robot: ShellRobot, read: (List<SemanticsNode>) -> T): T {
     var result: T? = null
     robot.instrumentation.runOnMainSync {
-        fun root(view: View): ViewRootForTest? = view as? ViewRootForTest
-            ?: (view as? ViewGroup)?.let { group -> (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) } }
         fun all(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::all)
         val activity = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).firstOrNull()
-        result = read(activity?.let { root(it.window.decorView) }?.semanticsOwner?.getAllSemanticsNodes(mergingEnabled = false).orEmpty()
-            .filter { it.config.getOrNull(SemanticsProperties.TestTag) == "dialogue_stage" }.flatMap(::all))
+        result = read(activity?.let(robot::nodes).orEmpty().filter { it.config.getOrNull(SemanticsProperties.TestTag) == "dialogue_stage" }.flatMap(::all))
     }
     @Suppress("UNCHECKED_CAST") return result as T
 }
