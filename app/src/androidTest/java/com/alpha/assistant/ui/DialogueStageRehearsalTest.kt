@@ -77,8 +77,9 @@ class DialogueStageRehearsalTest {
      * its controls in this order, with no frame that goes away.
      */
     @Test fun eachStreamDialoguePassesTheRehearsal() {
-        for (name in listOf("tpl-d", "tpl-e", "tpl-f")) {
-            val steps = rows(templateRehearsal(name, stream = true))
+        // All three run before the marks are read, so a fault of a dialogue shows before a fault of the stream.
+        val runs = listOf("tpl-d", "tpl-e", "tpl-f").associateWith { rows(templateRehearsal(it, stream = true)) }
+        for ((name, steps) in runs) {
             for (row in steps) assertTrue("$name: $row", row.getInt("preview_updates") >= 1)
             for (row in steps.filter { it.getString("goal") == "screen" }) streamed(row, "$name: ")
         }
@@ -104,7 +105,6 @@ class DialogueStageRehearsalTest {
         assertEquals(report.toString(), "complete", report.getString("phase"))
         val row = rows(report).single()
         assertEquals(row.toString(), "passed", row.getString("verdict"))
-        streamed(row, "")
         for ((text, line) in watched) {
             val complete = sent.firstOrNull { (_, so) -> lines[line] + "\n" in so }?.first
             assertNotNull("the line of «$text» never completed: $sent", complete)
@@ -112,6 +112,7 @@ class DialogueStageRehearsalTest {
             assertNotNull("«$text» never showed on the stage", shown)
             assertTrue("«$text» showed before the delta that completes its line", shown!! >= complete!!)
         }
+        streamed(row, "")
     }
 
     /**
@@ -129,6 +130,9 @@ class DialogueStageRehearsalTest {
         val steps = rows(report)
         assertEquals(steps.toString(), List(6) { "answer" }, steps.map { it.getString("goal") })
         assertTrue(steps.toString(), steps.all { it.getString("verdict") == "passed" && !it.getJSONObject("screen").getBoolean("shown") })
+        // Each turn is the first of a new talk: its own voice session and its own chat.
+        assertEquals(steps.toString(), 6, steps.map { it.getInt("voiceSession") }.toSet().size)
+        assertEquals(steps.toString(), 6, steps.map { it.getString("talk") }.toSet().size)
         assertEquals(steps.toString(), listOf(1, 0, 0, 0, 0, 0), steps.map { it.getInt("previews_gone") })
         assertTrue(steps.toString(), steps[0].getInt("preview_updates") >= 1)
         assertEquals(steps.toString(), List(5) { 0 }, steps.drop(1).map { it.getInt("preview_updates") })

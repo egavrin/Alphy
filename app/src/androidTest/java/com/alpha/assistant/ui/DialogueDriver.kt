@@ -400,6 +400,8 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
                     // a template file, and a preview frame is still on the stage.
                     .put("appFileChanged", after != null && after.first == before?.first && appFiles[step] != beforeFile)
                     .put("templateFile", isTemplateAppFile(appFiles[step])).put("previewLeft", main { model.tools.stagePreviews.current != null })
+                    // The voice session and the chat of the step, so a dialogue of new talks shows a new one for each step.
+                    .put("voiceSession", sessions.get()).put("talk", main { model.snapshot.selectedId })
                 var next: DialogueStep? = null
                 if (dialogue.adaptive) {
                     val reply = request?.let { asked -> main { messages(model).dropWhile { it.id != asked.id }.firstOrNull { it.role == "assistant" } } }
