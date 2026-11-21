@@ -22,11 +22,15 @@ import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudFailure
+import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.Endpoints
+import com.alpha.assistant.data.Source
+import com.alpha.assistant.tools.Scripted
 import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.tools.send
 import com.alpha.assistant.tools.withPlanStep
 import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.INPUT
@@ -38,6 +42,7 @@ import com.alpha.assistant.voice.OUTPUT
 import com.alpha.assistant.voice.WavFeeder
 import com.alpha.assistant.voice.wavSamples
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -62,11 +67,27 @@ internal class DialogueStep(val speech: Speech?, val handOff: Boolean, val scree
  * A dialogue. [maxCalls] is a hard cost stop: the chat call after it is refused before it is sent. An [adaptive] dialogue (lane V)
  * answers a question back with «Да» and a spoken failure with a bare retry, lets the full generation run, gives a step [FULL_STEP_MS],
  * and judges each step by [PASS_BAR].
+ * A dialogue of [newTalks] says each request as the first turn of a new chat, with a new voice session.
  */
-internal class Dialogue(val name: String, val steps: List<DialogueStep>, val maxCalls: Int = MAX_CALLS, val adaptive: Boolean = false)
+internal class Dialogue(val name: String, val steps: List<DialogueStep>, val maxCalls: Int = MAX_CALLS, val adaptive: Boolean = false,
+    val newTalks: Boolean = false)
 
 /** A cost guard: the early plan call and the new screen after a failed change let a working dialogue make 11 calls or more. */
 private const val MAX_CALLS = 14
+
+/**
+ * The cap of each template dialogue (plan of 2026-11-21, Tasks 10b and 19), from the code: a first screen makes 2 chat calls (the
+ * routing call and the early template call), a spoken change 2, a request to learn 3 (the template call refuses, then the free plan),
+ * and a later screen 2. One repair in each of the 4 steps, two inserted steps of at most 3 calls, and one full generation of 4 calls:
+ * 9 + 4 + 6 + 4 = 23. Six template dialogues and [NO_SCREEN_CALLS] stay inside the 160 chat calls of the live check: 6 × 23 + 20 = 158.
+ */
+private const val TEMPLATE_CALLS = 23
+
+/**
+ * The cap of the no-screen probe: each of its 6 first turns makes at most 3 chat calls (the routing call, the early template call, and
+ * the free plan that the early plan starts after a template refusal), and 2 calls more for one repair.
+ */
+private const val NO_SCREEN_CALLS = 20
 
 /**
  * The cap of each adaptive dialogue, from the code: a change makes at most 9 chat calls (the routing call, a change by lines and its
@@ -91,7 +112,9 @@ internal const val PASS_BAR = "Each step ends in a changed stage (a new app, a n
     "a spoken reason (the last line of Alphy in the step is a host line, not a reply, and the voice spoke after it). Each step asks to " +
     "change or to see something, so a step that ends with a plain spoken text fails. A message with the status error or a session " +
     "error on the stage fails the step. A question back passes only when the «Да» right after it passes. An element of the talk that " +
-    "the model did not reach is recorded as not exercised, never as passed."
+    "the model did not reach is recorded as not exercised, never as passed. A step with the goal answer asks for no screen: it passes " +
+    "when it ends in a plain spoken text or a question back, and it fails when a frame of a preview stays on the stage. It gets no " +
+    "inserted step."
 
 private fun dialogue(name: String, before: Speech?, request: Speech, press: Speech, change: Speech, requestStarts: String? = null) =
     Dialogue(name, listOf(DialogueStep(before, handOff = false, screen = false), DialogueStep(request, true, true, requestStarts),
@@ -100,6 +123,18 @@ private fun dialogue(name: String, before: Speech?, request: Speech, press: Spee
 /** A request of an adaptive dialogue: it asks to see or to change the stage. */
 internal fun ask(fixture: String, words: String, goal: String, touch: Boolean = false) =
     DialogueStep(Speech(fixture, words), handOff = true, screen = true, goal = goal, touch = touch)
+
+/**
+ * A template dialogue (plan of 2026-11-21, Task 10b): a request to explain a thing, a spoken change of that screen ([changeGoal]
+ * `search` asks for fresh facts), a request to learn with a check, which the template prompt refuses, and a request to explain a
+ * different thing, whose screen replaces the shown one. The fixture of each step is `<name>-<goal>`, and `<name>-next` for the last.
+ */
+private fun template(name: String, explain: String, change: String, learn: String, next: String, changeGoal: String = "change") =
+    Dialogue(name, listOf(ask("$name-explain", explain, "screen"), ask("$name-$changeGoal", change, changeGoal), ask("$name-learn", learn, "learn"),
+        ask("$name-next", next, "screen")), TEMPLATE_CALLS, adaptive = true)
+
+/** A first turn of the no-screen probe: the person wants a spoken answer, and the stage must stay empty. */
+private fun answer(fixture: String, words: String) = DialogueStep(Speech(fixture, words), handOff = true, screen = false, goal = "answer")
 
 /**
  * The three live dialogues of design part 4: «Шаг 1» the stage, «Шаг 2» the request, «Шаг 3» a press, «Шаг 4» a change. Then the
@@ -125,7 +160,33 @@ internal val DIALOGUES = listOf(
     Dialogue("water", listOf(ask("water-show", "Show me how the water cycle works.", "english"),
         ask("water-label", "Подпиши на картинке каждый этап.", "touch", touch = true),
         ask("water-replace", "Замени картинку целиком: покажи, как образуется облако.", "replace")), ADAPTIVE_CALLS, adaptive = true),
+    // The template dialogues of the plan of 2026-11-21 on subjects of no earlier run. tpl-e is in English. The controller runs tpl-c and
+    // tpl-f at the fold size. tpl-d to tpl-f are the stream dialogues of Task 19.
+    template("tpl-a", "Объясни, почему магнит притягивает железо.", "Нарисуй стрелками, куда тянет магнит.",
+        "Дай мне пару задачек про магниты, чтобы я себя проверил.", "А теперь объясни, откуда берётся эхо."),
+    template("tpl-b", "Объясни, как образуется ураган.", "Найди свежие новости о последнем урагане и добавь их на экран.",
+        "Устрой мне небольшой тест про ветры, чтобы проверить себя.", "А теперь объясни, почему гром слышно позже, чем видно молнию.",
+        changeGoal = "search"),
+    template("tpl-c", "Объясни, как работают передачи на велосипеде.", "Сделай заднюю звёздочку побольше.",
+        "Дай мне несколько задач про передачи и проверь мои ответы.", "А теперь объясни, как устроены часы со стрелками."),
+    template("tpl-d", "Объясни, как гусеница превращается в бабочку.", "Добавь, сколько дней длится каждая стадия.",
+        "Задай мне вопросы про насекомых и проверь мои ответы.", "А теперь объясни, откуда у дерева годовые кольца."),
+    template("tpl-e", "Explain how an airplane stays in the air.", "Add an arrow that shows the lift.",
+        "Give me a few practice questions about flight and check my answers.", "Now explain how a parachute slows you down."),
+    template("tpl-f", "Объясни, что такое площадь фигуры.", "Сделай поле побольше, клеток на сто.",
+        "Дай мне задачки на площадь и проверь, правильно ли я решаю.", "А теперь объясни, как устроены римские цифры."),
+    // The probe of Task 19: six first turns that need no screen, two greetings, two short facts, and two questions about the assistant.
+    Dialogue("no-screen", listOf(answer("no-screen-hello", "Здравствуй, как настроение?"), answer("no-screen-evening", "Добрый вечер, Альфи!"),
+        answer("no-screen-leap-year", "Сколько дней в високосном году?"), answer("no-screen-ocean", "Какой океан самый большой?"),
+        answer("no-screen-name", "А как тебя зовут?"), answer("no-screen-skills", "Что ты умеешь делать?")), NO_SCREEN_CALLS,
+        adaptive = true, newTalks = true),
 ).associateBy { it.name }
+
+/** The rule of the kit for a template file (`TEMPLATE_HEAD` in kit/src/template.js), applied to its first line that is not empty. */
+private val TEMPLATE_HEAD = Regex("""^\s*(scene|items|cells)\s*\(""")
+
+/** True when [appFile] is a template file, not a free app file. */
+internal fun isTemplateAppFile(appFile: String?) = appFile?.lineSequence()?.firstOrNull { it.isNotBlank() }?.let(TEMPLATE_HEAD::containsMatchIn) == true
 
 /**
  * The outcome of one step of an adaptive dialogue, from its structure, not from its words: `error` (a message failed, or the stage
@@ -161,13 +222,20 @@ internal fun followUp(outcome: String): Speech? = when (outcome) {
  * hand-off and before the change, and a search only with sources.
  */
 internal fun judge(rows: List<JSONObject>, goals: List<String>): JSONObject {
-    fun passed(row: JSONObject?) = row?.optString("outcome") in setOf("changed", "pressed", "reason")
+    fun passed(row: JSONObject?) = if (row?.optString("goal") == "answer") row.optString("outcome") in setOf("plain", "question") &&
+        !row.optBoolean("previewLeft") else row?.optString("outcome") in setOf("changed", "pressed", "reason")
     rows.forEachIndexed { i, row ->
         val yes = rows.getOrNull(i + 1)?.takeIf { it.optString("goal") == "yes" }
         row.put("verdict", if (passed(row) || row.optString("outcome") == "question" && passed(yes)) "passed" else "failed")
     }
+    // The goals of the plan of 2026-11-21: a spoken change keeps a template file, a request to learn gets a free plan, and a turn with
+    // no screen gets a spoken answer with no app on the stage.
+    fun change(row: JSONObject) = row.optJSONObject("screen")?.optString("change")
     val evidence = mapOf<String, (JSONObject) -> Boolean>("motion" to { it.optBoolean("fullGeneration") }, "moving" to { it.optBoolean("stateCommit") },
-        "touch" to { it.has("touched") && it.optBoolean("stateCommit") }, "search" to { it.optInt("sources") > 0 })
+        "touch" to { it.has("touched") && it.optBoolean("stateCommit") }, "search" to { it.optInt("sources") > 0 },
+        "change" to { it.optBoolean("appFileChanged") && it.optBoolean("templateFile") },
+        "learn" to { change(it) in setOf("new", "revision") && !it.optBoolean("templateFile") },
+        "answer" to { it.optString("spoke").isNotBlank() && it.optJSONObject("screen")?.optBoolean("shown") == false })
     return JSONObject().apply {
         for (goal in goals + listOf("retry", "yes")) {
             val exercised = rows.filter { it.optString("goal") == goal && evidence[goal]?.invoke(it) != false }
@@ -176,12 +244,17 @@ internal fun judge(rows: List<JSONObject>, goals: List<String>): JSONObject {
     }
 }
 
-/** What the chat model answers in one step: the routing decision, and the reply of each generation call as (stage, text) in order. */
-internal class StepReplies(val decision: String, val calls: List<Pair<String, String>> = emptyList())
+/**
+ * What the chat model answers in one step: the routing decision, and the reply of each generation call as (stage, reply) in order. The
+ * routing call finds [sources] first, as a search does, and gives its decision after [decisionMs].
+ */
+internal class StepReplies(val decision: String, val calls: List<Pair<String, Scripted>> = emptyList(), val sources: List<Source> = emptyList(),
+    val decisionMs: Long = 0)
 
 /**
  * A chat model that answers by the step of the dialogue, not by the order of the calls, so a plan call beside the routing call and a
- * repair call get the text of their step. A generation call with no reply left waits until it is cancelled.
+ * repair call get the text of their step. A generation call with no reply left waits until it is cancelled. A step with no template reply
+ * answers each template call with [NO_TEMPLATE], as the template prompt answers a request that no template fits.
  */
 internal class ScriptedChat(private val steps: Map<Int, StepReplies>, private val step: () -> Int) : ChatProvider {
     private val used = HashMap<Pair<Int, String>, Int>()
@@ -189,12 +262,21 @@ internal class ScriptedChat(private val steps: Map<Int, StepReplies>, private va
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
         val number = step()
         val replies = steps[number]
-        val stage = request.generationStage?.name
-            ?: return emit(CloudEvent.RoundComplete(replies?.decision ?: chatDecision("answer", "Ответ без экрана."), false))
-        val index = synchronized(used) { used.merge(number to stage, 1, Int::plus)!! - 1 }
-        val text = replies?.calls?.filter { it.first == stage }?.getOrNull(index)?.second ?: awaitCancellation()
-        emit(CloudEvent.Text(text))
-        emit(CloudEvent.RoundComplete(text, false))
+        val generation = request.generationStage
+        if (generation == null) {
+            replies?.sources?.takeIf { it.isNotEmpty() }?.let { emit(CloudEvent.Search("found", it)) }
+            delay(replies?.decisionMs ?: 0)
+            return emit(CloudEvent.RoundComplete(replies?.decision ?: chatDecision("answer", "Ответ без экрана."), false))
+        }
+        val index = synchronized(used) { used.merge(number to generation.name, 1, Int::plus)!! - 1 }
+        val calls = replies?.calls.orEmpty().filter { it.first == generation.name }
+        val reply = calls.getOrNull(index)?.second
+            ?: if (calls.isEmpty() && generation == CloudGenerationStage.APP_FILE_TEMPLATE) Scripted.Text(NO_TEMPLATE) else awaitCancellation()
+        reply.send(emit)
+    }
+
+    companion object {
+        const val NO_TEMPLATE = """outside("other")"""
     }
 }
 
@@ -202,8 +284,9 @@ internal class ScriptedChat(private val steps: Map<Int, StepReplies>, private va
 internal fun storedReplies(stored: JSONObject): Map<Int, StepReplies> = stored.getJSONArray("steps").let { steps ->
     (0 until steps.length()).map { steps.getJSONObject(it) }.filter { it.has("decision") }.associate { step ->
         val calls = step.getJSONArray("calls")
-        step.getInt("step") to StepReplies(step.getString("decision"),
-            (0 until calls.length()).map { calls.getJSONObject(it).let { call -> call.getString("stage") to call.getString("reply") } })
+        step.getInt("step") to StepReplies(step.getString("decision"), (0 until calls.length()).map {
+            calls.getJSONObject(it).let { call -> call.getString("stage") to Scripted.Text(call.getString("reply")) }
+        })
     }
 }
 
@@ -227,7 +310,10 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
     private val audio = FakeLiveAudio(realTime = true)
     private val feeder = WavFeeder(audio)
     private val heard = CopyOnWriteArrayList<Heard>()
-    @Volatile private var voiceSeconds: Double? = null
+    /** The voice seconds that each voice session reported, by its number: a dialogue of new talks has one session for each step. */
+    private val sessionSeconds = ConcurrentHashMap<Int, Double>()
+    private val sessions = AtomicInteger()
+    private val voiceSeconds get() = sessionSeconds.values.takeIf { it.isNotEmpty() }?.sum()
     private val decisions = ConcurrentHashMap<Int, String>()
     private val replies = ConcurrentHashMap<Int, MutableList<Pair<String, String>>>()
     private val appFiles = ConcurrentHashMap<Int, String>()
@@ -285,10 +371,12 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
             val queue = ArrayDeque(dialogue.steps.take(count))
             while (queue.isNotEmpty()) {
                 val current = queue.removeFirst()
+                if (dialogue.newTalks && step > 0) newTalk(scenario, model)
                 step++
                 stageError = null
                 val began = SystemClock.elapsedRealtimeNanos()
                 val before = main { stage(model) }
+                val beforeFile = appFile(model)
                 val users = main { messages(model).filter { it.role == "user" }.map { it.id }.toSet() }
                 val errors = main { messages(model).filter { it.status == "error" }.map { it.id }.toSet() }
                 val end = current.speech?.let { speech ->
@@ -308,6 +396,10 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
                 val row = times.put("step", step).put("fixture", current.speech?.fixture).put("said", words(began, HEARD))
                     .put("spoke", words(began, SPOKE)).put("request", request?.text).put("handOffs", window.count { it.name == "delegation" })
                     .put("screen", JSONObject().put("shown", after != null).put("change", change)).put("picture", "step-$step.png")
+                    // The evidence of the goals change, learn, and answer (judge): the stored app file of the same stage app changed, it is
+                    // a template file, and a preview frame is still on the stage.
+                    .put("appFileChanged", after != null && after.first == before?.first && appFiles[step] != beforeFile)
+                    .put("templateFile", isTemplateAppFile(appFiles[step])).put("previewLeft", main { model.tools.stagePreviews.current != null })
                 var next: DialogueStep? = null
                 if (dialogue.adaptive) {
                     val reply = request?.let { asked -> main { messages(model).dropWhile { it.id != asked.id }.firstOrNull { it.role == "assistant" } } }
@@ -320,7 +412,7 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
                         .put("sources", reply?.sources?.size ?: 0).put("message", reply?.let { JSONObject().put("status", it.status).put("errorCode", it.errorCode) })
                         .put("stageError", stageError).put("touched", touched)
                     // At most one inserted step after each step of the script, and at most MAX_INSERTED in the dialogue.
-                    next = followUp(outcome)?.takeIf { current.goal != "retry" && current.goal != "yes" && inserted < MAX_INSERTED }
+                    next = followUp(outcome)?.takeIf { current.goal !in setOf("retry", "yes", "answer") && inserted < MAX_INSERTED }
                         ?.let { DialogueStep(it, handOff = true, screen = current.screen, goal = if (it == RETRY) "retry" else "yes") }
                     next?.let { queue.addFirst(it); inserted++ }
                 }
@@ -409,8 +501,19 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
             File(directory, "step-$step.png").outputStream().use { check(shot.compress(Bitmap.CompressFormat.PNG, 100, it)) }
         } finally { shot.recycle() }
         // The app file of the stage after the step, for a replay and for the reader of the run.
-        main { stage(model)?.let { (id, _) -> model.tools.tools.firstOrNull { it.id == id } } }
-            ?.let { tool -> runCatching { ToolSpec.parsePersisted(tool.spec).appFile }.getOrNull() }?.let { appFiles[step] = it }
+        appFile(model)?.let { appFiles[step] = it }
+    }
+
+    /** The stored app file of the app that the stage shows, or null. */
+    private fun appFile(model: ShellViewModel) = main { stage(model)?.let { (id, _) -> model.tools.tools.firstOrNull { it.id == id } } }
+        ?.let { tool -> runCatching { ToolSpec.parsePersisted(tool.spec).appFile }.getOrNull() }
+
+    /** Opens a new chat, which ends the voice mode, and starts the voice mode again, so the next request is the first turn of a new talk. */
+    private fun newTalk(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel) {
+        scenario.onActivity { model.select(null) }
+        robot.waitUntil(5_000) { main { model.liveVoice.phase } == LivePhase.IDLE }
+        scenario.onActivity { model.startLiveVoice() }
+        robot.waitUntil(15_000) { main { model.liveVoice.phase } == LivePhase.LISTENING }
     }
 
     /**
@@ -464,12 +567,13 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
 
     /** Keeps the transcript of the person and of the voice, each commentary of Alphy, and the voice seconds of the session. */
     private fun listen(inner: LiveTransport) = LiveTransport { url, key, listener ->
+        val session = sessions.incrementAndGet()
         val connection = inner.connect(url, key, object : LiveListener {
             override fun onText(text: String) {
                 if ("transcript.delta" in text || "\"usage\"" in text) runCatching { JSONObject(text) }.getOrNull()?.let { event ->
                     when (val type = event.optString("type")) {
                         INPUT, OUTPUT -> heard += Heard(SystemClock.elapsedRealtimeNanos(), if (type == INPUT) HEARD else SPOKE, event.optString("delta"))
-                        else -> event.optJSONObject("usage")?.optDouble("seconds")?.takeIf { !it.isNaN() }?.let { voiceSeconds = it }
+                        else -> event.optJSONObject("usage")?.optDouble("seconds")?.takeIf { !it.isNaN() }?.let { sessionSeconds[session] = it }
                     }
                 }
                 listener.onText(text)

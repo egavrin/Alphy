@@ -32,22 +32,27 @@ internal class AgentScriptProvider(private val replies: List<Scripted>) : ChatPr
     val calls: MutableList<CloudRequest> = CopyOnWriteArrayList()
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
         calls += request
-        suspend fun text(value: String) {
-            emit(CloudEvent.Text(value))
-            emit(CloudEvent.RoundComplete(value, false))
-        }
-        when (val reply = replies.getOrElse(calls.lastIndex) { replies.last() }) {
-            is Scripted.Text -> text(reply.text)
-            is Scripted.Fails -> throw CloudFailure(reply.code, "The scripted call failed.")
-            is Scripted.Waits -> { delay(reply.firstTextMs); text(reply.text) }
-            is Scripted.Stalls -> { emit(CloudEvent.Text(reply.firstLine)); delay(reply.stallMs); emit(CloudEvent.RoundComplete(reply.firstLine, false)) }
-            is Scripted.Deltas -> {
-                reply.parts.forEach { (ms, part) -> delay(ms); emit(CloudEvent.Text(part)) }
-                emit(CloudEvent.RoundComplete(reply.parts.joinToString("") { it.second }, false))
-            }
-        }
+        replies.getOrElse(calls.lastIndex) { replies.last() }.send(emit)
     }
     fun feedback(call: Int) = calls[call].turns.last().text
+}
+
+/** Sends this reply as a model sends it: its text deltas and the end of the round, or its failure. */
+internal suspend fun Scripted.send(emit: suspend (CloudEvent) -> Unit) {
+    suspend fun whole(value: String) {
+        emit(CloudEvent.Text(value))
+        emit(CloudEvent.RoundComplete(value, false))
+    }
+    when (this) {
+        is Scripted.Text -> whole(text)
+        is Scripted.Fails -> throw CloudFailure(code, "The scripted call failed.")
+        is Scripted.Waits -> { delay(firstTextMs); whole(text) }
+        is Scripted.Stalls -> { emit(CloudEvent.Text(firstLine)); delay(stallMs); emit(CloudEvent.RoundComplete(firstLine, false)) }
+        is Scripted.Deltas -> {
+            parts.forEach { (ms, part) -> delay(ms); emit(CloudEvent.Text(part)) }
+            emit(CloudEvent.RoundComplete(parts.joinToString("") { it.second }, false))
+        }
+    }
 }
 
 /** The model calls and the trace of one generation, as the plan step and the change step mark them. */

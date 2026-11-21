@@ -39,12 +39,28 @@ class LiveDialogueStageTest {
 
     @Test fun water() = live("water")
 
-    private fun live(name: String) {
+    // The template dialogues and the no-screen probe of the plan of 2026-11-21 (Tasks 10b and 19). Run tplC and tplF at the fold size.
+    @Test fun tplA() = live("tpl-a", "tplA")
+
+    @Test fun tplB() = live("tpl-b", "tplB")
+
+    @Test fun tplC() = live("tpl-c", "tplC")
+
+    @Test fun tplD() = live("tpl-d", "tplD")
+
+    @Test fun tplE() = live("tpl-e", "tplE")
+
+    @Test fun tplF() = live("tpl-f", "tplF")
+
+    @Test fun noScreen() = live("no-screen", "noScreen")
+
+    /** Runs the dialogue [name] as the test method [method]. */
+    private fun live(name: String, method: String = name) {
         val runId = InstrumentationRegistry.getArguments().getString("liveRunId")
         val files = checkNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null))
         val directory = File(files, "live-check/$runId")
         try {
-            liveCheck("LiveDialogueStageTest#$name", missing = { account -> "Only OpenAI has GPT-Live.".takeIf { account.provider != AiProvider.OPENAI } },
+            liveCheck("LiveDialogueStageTest#$method", missing = { account -> "Only OpenAI has GPT-Live.".takeIf { account.provider != AiProvider.OPENAI } },
                 model = { it.liveChatModel() }) { account, model ->
                 // The plan step, and so the kind screen, runs only with the first chat model of the provider.
                 check(model == AiProvider.OPENAI.profile.chatModels.first()) { "The dialogues need the first chat model." }

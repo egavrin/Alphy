@@ -9,7 +9,9 @@ import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.tools.AgentScriptProvider
 import com.alpha.assistant.tools.Scripted
+import com.alpha.assistant.tools.ToolGenerationTraceEvent
 import com.alpha.assistant.tools.appfile.plan as appFilePlan
+import com.alpha.assistant.tools.send
 import com.alpha.assistant.tools.withPlanStep
 import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.LivePhase
@@ -25,6 +27,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Plan D, Dd2: one clock of a scripted voice talk, from the end of the recorded speech to the screen on the stage. */
@@ -44,9 +47,13 @@ class DialogueRecorderTest {
         val plans = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("lesson"))))
         val chat = object : ChatProvider {
             override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
-                if (request.generationStage != null) plans.respond(key, request, session, emit)
-                else emit(CloudEvent.RoundComplete(JSONObject(chatDecision("screen", ANSWER, "The Moon turns once on each orbit"))
-                    .put("show", false).toString(), false))
+                when (request.generationStage) {
+                    null -> emit(CloudEvent.RoundComplete(JSONObject(chatDecision("screen", ANSWER, "The Moon turns once on each orbit"))
+                        .put("show", false).toString(), false))
+                    // No template fits, so the free plan makes the screen.
+                    CloudGenerationStage.APP_FILE_TEMPLATE -> Scripted.Text(ScriptedChat.NO_TEMPLATE).send(emit)
+                    else -> plans.respond(key, request, session, emit)
+                }
         }
         fixture.install(chat = recorder.chat(chat),
             liveVoice = fixture.liveVoice(recorder.transport(ScriptedLiveServer(listOf(REQUEST))), audio, Endpoints { "http://127.0.0.1:4000" }))
@@ -83,6 +90,31 @@ class DialogueRecorderTest {
                 scenario.onActivity { model.endLiveVoice() }
             }
         }
+    }
+
+    /**
+     * Plan of 2026-11-21, Task 19: the stream marks of each request come from the trace phases on the trace clock. A streamed screen,
+     * a turn whose frame went away, and a screen with no preview frame, which is complete at controls on.
+     */
+    @Test fun theStreamMarksComeFromTheTracePhases() {
+        val recorder = DialogueRecorder()
+        val operation = UUID.randomUUID()
+        fun at(ms: Long) = ms * 1_000_000
+        fun phase(name: String, detail: String?, ms: Long) = recorder.phase(ToolGenerationTraceEvent.Phase(operation, 1, at(ms), name, detail, null))
+        recorder.speechEnd(at(1_000))
+        listOf("frame" to 4_100L, "parts" to 4_500L, "parts" to 4_900L, "card" to 6_000L, "whole" to 6_400L).forEach { (detail, ms) -> phase("stage_preview", detail, ms) }
+        phase("controls_on", null, 8_000)
+        recorder.speechEnd(at(20_000))
+        phase("stage_preview", "frame", 23_000)
+        phase("stage_preview_gone", null, 24_000)
+        recorder.speechEnd(at(30_000))
+        phase("controls_on", null, 36_400)
+        val requests = recorder.report().getJSONArray("requests").let { r -> (0 until r.length()).map(r::getJSONObject) }
+        val names = listOf("first_line_visible", "first_part_visible", "picture_complete", "controls_on", "preview_updates", "previews_gone")
+        fun values(request: JSONObject) = names.map { if (request.has(it)) request.getLong(it) else null }
+        assertEquals(requests.toString(), listOf(listOf(3_100L, 3_500L, 5_000L, 7_000L, 5L, 0L), listOf(3_000L, null, null, null, 1L, 1L),
+            listOf(null, null, 6_400L, 6_400L, 0L, 0L)), requests.map(::values))
+        recorder.close()
     }
 
     /** Lane V: the pass bar judges a step by its structure, the stage, the kind, an error, and the classes of the lines of Alphy. */
@@ -122,6 +154,26 @@ class DialogueRecorderTest {
         assertEquals("not exercised", coverage.getString("search"))
         assertEquals("not exercised", coverage.getString("moving"))
         assertEquals("not exercised", coverage.getString("motion"))
+        // The plan of 2026-11-21: a change counts with a changed template file of the same app, a request to learn with a changed stage
+        // and no template file, and a turn with no screen with a spoken answer and no app. A frame that stays fails a turn with no screen.
+        fun screen(shown: Boolean, change: String) = JSONObject().put("shown", shown).put("change", change)
+        val template = listOf(row(1, "change", "changed").put("appFileChanged", true).put("templateFile", true),
+            row(2, "change", "changed").put("appFileChanged", true).put("templateFile", false),
+            row(3, "learn", "changed").put("screen", screen(true, "new")).put("templateFile", false),
+            row(4, "learn", "changed").put("screen", screen(true, "new")).put("templateFile", true),
+            row(5, "answer", "plain").put("spoke", "Привет!").put("screen", screen(false, "none")),
+            row(6, "answer", "question").put("spoke", "Чем помочь?").put("screen", screen(false, "none")),
+            row(7, "answer", "plain").put("spoke", "Привет!").put("screen", screen(false, "none")).put("previewLeft", true),
+            row(8, "answer", "changed").put("spoke", "Вот экран.").put("screen", screen(true, "new")))
+        val templateCoverage = judge(template, listOf("change", "learn", "answer"))
+        assertEquals(listOf("passed", "passed", "passed", "passed", "passed", "passed", "failed", "failed"), template.map { it.getString("verdict") })
+        assertEquals("passed at step 1", templateCoverage.getString("change"))
+        assertEquals("passed at step 3", templateCoverage.getString("learn"))
+        assertEquals("passed at step 5, passed at step 6, failed at step 7", templateCoverage.getString("answer"))
+        assertTrue(isTemplateAppFile("\n  scene(\"Почему корабль не тонет?\", lang=\"ru\")\ncontrol = slider(\"Размер\", 0, 10, 1, 4)"))
+        assertTrue(listOf("items(\"Части слова\", lang=\"ru\")", "cells (\"What is a majority?\", lang=\"en\")").all(::isTemplateAppFile))
+        assertFalse(isTemplateAppFile(appFilePlan("lesson")))
+        assertFalse(isTemplateAppFile(null))
     }
 
     /**
@@ -134,7 +186,7 @@ class DialogueRecorderTest {
         val directory = folder(dialogue)
         val report = rehearse(dialogue, directory, listOf(EXPLAIN, LABEL, "Да.", LONGER, "Попробуй ещё раз."), mapOf(
             1 to StepReplies(JSONObject(chatDecision("screen", ANSWER, "A screen for the request")).put("show", false).toString(),
-                listOf("APP_FILE" to appFilePlan("lesson"))),
+                listOf("APP_FILE" to Scripted.Text(appFilePlan("lesson")))),
             2 to StepReplies(chatDecision("clarify", "Показать, как вулкан извергается?")),
             3 to StepReplies(chatDecision("press", "Нажимаю.", "Дальше")),
             4 to StepReplies(chatDecision("press", "Нажимаю.", "Нет такой кнопки")),
@@ -159,7 +211,7 @@ class DialogueRecorderTest {
         val directory = folder(dialogue)
         val failure = runCatching { rehearse(dialogue, directory, listOf(EXPLAIN), mapOf(1 to StepReplies(
             JSONObject(chatDecision("screen", ANSWER, "A screen for the request")).put("show", false).toString(),
-            listOf("APP_FILE" to appFilePlan("lesson"))))) }.exceptionOrNull()
+            listOf("APP_FILE" to Scripted.Text(appFilePlan("lesson")))))) }.exceptionOrNull()
         val report = JSONObject(File(directory, "report.json").readText())
         assertTrue(failure.toString(), failure is AssertionError)
         assertEquals(report.toString(), "failed", report.getString("phase"))
@@ -171,13 +223,14 @@ class DialogueRecorderTest {
      * with no AGENT call, so the waiting line marks the full generation, and the voice speaks it before the new app shows.
      */
     @Test fun aFullGenerationIsMarkedByItsWaitingLine() {
-        val dialogue = Dialogue("full-rehearsal", listOf(ask("pendulum-motion", MOTION, "motion")), maxCalls = 4, adaptive = true)
+        // The early template call that no template fits is the fifth call (plan of 2026-11-21, Task 4).
+        val dialogue = Dialogue("full-rehearsal", listOf(ask("pendulum-motion", MOTION, "motion")), maxCalls = 5, adaptive = true)
         val directory = folder(dialogue)
-        val broken = appFilePlan("calc").replace("/ \$/people, example", "/ , example")
+        val broken = Scripted.Text(appFilePlan("calc").replace("/ \$/people, example", "/ , example"))
         val plans = AtomicInteger()
         val report = rehearse(dialogue, directory, listOf(MOTION), mapOf(1 to StepReplies(
             JSONObject(chatDecision("screen", ANSWER, "A pendulum that swings")).put("show", true).toString(),
-            listOf("APP_FILE" to broken, "APP_FILE" to broken, "APP_FILE" to appFilePlan("lesson"))))) { inner ->
+            listOf("APP_FILE" to broken, "APP_FILE" to broken, "APP_FILE" to Scripted.Text(appFilePlan("lesson")))))) { inner ->
             object : ChatProvider {
                 override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
                     // A real full generation takes about a minute, so the plan of the full generation waits for the waiting line.
@@ -189,7 +242,8 @@ class DialogueRecorderTest {
         assertEquals(report.toString(), "complete", report.getString("phase"))
         val row = report.getJSONArray("steps").getJSONObject(0)
         assertEquals(row.toString(), listOf("changed", "passed"), listOf(row.getString("outcome"), row.getString("verdict")))
-        assertEquals(row.toString(), mapOf("routing" to 1, "APP_FILE" to 3), row.getJSONObject("calls").let { c -> c.keys().asSequence().associateWith(c::getInt) })
+        assertEquals(row.toString(), mapOf("routing" to 1, "APP_FILE" to 3),
+            row.getJSONObject("calls").let { c -> c.keys().asSequence().filter { it != "APP_FILE_TEMPLATE" }.associateWith(c::getInt) })
         assertTrue(row.toString(), row.getBoolean("fullGeneration") && row.getBoolean("waitingLine") && "host" in row.getJSONArray("lines").toString())
         assertEquals("passed at step 1", report.getJSONObject("coverage").getString("motion"))
     }

@@ -102,7 +102,7 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.runOnMainSync {
             model.tools.generationTraceObserver = { event ->
-                if (event is ToolGenerationTraceEvent.Phase) mark(event.name, event.detail, event.atNanos)
+                if (event is ToolGenerationTraceEvent.Phase) phase(event)
             }
         }
         var shown: Triple<String, Int, Int>? = null
@@ -121,6 +121,9 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
             }, 0, 100, TimeUnit.MILLISECONDS)
         }
     }
+
+    /** Marks a trace phase of a generation at its time on the trace clock. [watch] passes each phase, and a test can pass its own. */
+    fun phase(event: ToolGenerationTraceEvent.Phase) = mark(event.name, event.detail, event.atNanos)
 
     fun speechEnd(atNanos: Long) {
         mark("speech_end", at = atNanos)
@@ -145,11 +148,14 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
         val ends = all.filter { it.name == "speech_end" }.map { it.atNanos }
         val requests = ends.mapIndexed { i, end ->
             val window = all.filter { it.atNanos >= end && it.atNanos < ends.getOrElse(i + 1) { Long.MAX_VALUE } }
-            fun after(name: String) = window.firstOrNull { it.name == name }?.let { (it.atNanos - end) / 1_000_000 }
+            fun ms(mark: DialogueMark?) = mark?.let { (it.atNanos - end) / 1_000_000 }
+            fun after(name: String) = ms(window.firstOrNull { it.name == name })
             val lines = window.filter { it.name == "commentary" }
             val voices = window.filter { it.name == "voice_out" }
             val screen = window.firstOrNull { it.name == "screen_visible" }?.atNanos ?: Long.MAX_VALUE
             val wait = window.firstOrNull { it.name == "full_wait" }?.atNanos
+            val previews = window.filter { it.name == STAGE_PREVIEW }
+            val controls = after(CONTROLS_ON)
             JSONObject().put("speechEndToDelegationMs", after("delegation")).put("speechEndToFirstVoiceMs", after("voice_first"))
                 .put("speechEndToAnswerVoiceMs", after("voice_out")).put("speechEndToScreenMs", after("screen_visible"))
                 .put("speechEndToStateCommitMs", after("state_commit"))
@@ -161,6 +167,12 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
                 .put("fullGeneration", wait != null || window.any { it.name == "call_start" && it.detail == "AGENT" })
                 .put("waitingLine", wait != null && voices.any { it.atNanos > wait && it.atNanos < screen })
                 .put("stateCommit", window.any { it.name == "state_commit" && it.atNanos < screen })
+                // The marks of a stage preview (plan of 2026-11-21, decision 11): the frame, the first part, the complete picture, and
+                // controls on, from the end of speech, and the counts of preview frames and of previews that went away.
+                .put("first_line_visible", ms(previews.firstOrNull()))
+                .put("first_part_visible", ms(previews.firstOrNull { it.detail in setOf("parts", "card", "whole") }))
+                .put("picture_complete", ms(previews.firstOrNull { it.detail == "card" || it.detail == "whole" }) ?: controls)
+                .put("controls_on", controls).put("preview_updates", previews.size).put("previews_gone", window.count { it.name == STAGE_PREVIEW_GONE })
         }
         return JSONObject().put("requests", JSONArray(requests)).put("calls", calls(all))
             .put("chatCalls", all.count { it.name == "call_start" })
@@ -173,6 +185,11 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
     override fun close() { poll?.shutdownNow() }
 
     internal companion object {
+        /** The trace phases of a stage preview that the production code writes (plan of 2026-11-21, decision 11). */
+        const val STAGE_PREVIEW = "stage_preview"
+        const val STAGE_PREVIEW_GONE = "stage_preview_gone"
+        const val CONTROLS_ON = "controls_on"
+
         /**
          * The class of a commentary of the app, from the prefixes that the bridge puts before a reply: `answer` (a reply), `question`
          * (a reply that asks back), `progress` (an app is made), or `host` (any other line of the app, such as a failure or a wait).
