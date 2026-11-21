@@ -5,7 +5,6 @@ import com.alpha.assistant.ui.openSeededChat
 import com.alpha.assistant.ui.seedOpenChat
 import android.app.KeyguardManager
 import android.content.Intent
-import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
@@ -289,52 +288,47 @@ class AssistantSheetWorkflowTest {
         }
     }
 
-    @Test fun keyboardControlsAndScreenshotAtNormalAndLargeText() = withFixture { fixture, _ ->
-        val previous = robot.shell("settings get system font_scale")
+    @Test fun keyboardControlsAndScreenshot() = withFixture { fixture, _ ->
         val directory = checkNotNull(app.getExternalFilesDir("assistant-evidence"))
         val bitmap = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.CYAN) }
         val manual = try { AssistContext.screenshot(app, bitmap).copy(name = "Existing photo") } finally { bitmap.recycle() }
         fixture.store.saveNewDraft(Draft("Keep the photo", listOf(manual)))
         try {
-            for (scale in listOf("1.0", "2.0")) {
-                setScale(scale)
-                launch(capture("Screen with existing photo")).use { scenario ->
-                    robot.waitFor(composer)
-                    robot.waitFor(robot.text(R.string.assistant_image_attached))
-                    assertFalse(robot.secure(scenario))
-                    val sheet = robot.composedBounds(scenario, "assistant-sheet").first
-                    for (id in listOf(R.string.composer_send, R.string.composer_voice, R.string.assistant_image_remove)) {
-                        val label = robot.text(id)
-                        val bounds = robot.assertTarget(label)
-                        assertTrue("Scale $scale: $label at $bounds must be inside the sheet $sheet", sheet.contains(bounds))
-                    }
-                    val capture = checkNotNull(robot.automation.takeScreenshot())
-                    try {
-                        assertNotEquals("Assistant sheet pixel at scale $scale", Color.BLACK, capture.getPixel(sheet.centerX(), sheet.centerY()))
-                        save(directory, "$scale-system", capture)
-                    } finally {
-                        capture.recycle()
-                    }
-                    File(directory, "$scale-labels.txt").writeText(robot.texts().joinToString("\n"))
-                    robot.edit(composer, "The keyboard keeps the send action reachable")
-                    robot.click(composer)
-                    val send = robot.text(R.string.composer_send)
-                    robot.diagnostics.target(send)
-                    robot.waitUntil {
-                        val keyboard = robot.keyboardTop(scenario) ?: return@waitUntil false
-                        val node = robot.find(send) ?: return@waitUntil false
-                        node.isVisibleToUser && Rect().also(node::getBoundsInScreen).bottom <= keyboard
-                    }
-                    val keyboard = checkNotNull(robot.keyboardTop(scenario))
-                    for (id in listOf(R.string.composer_send, R.string.composer_voice, R.string.assistant_close)) {
-                        val label = robot.text(id)
-                        val bounds = robot.assertTarget(label)
-                        assertTrue("Scale $scale: $label at $bounds must be above keyboard top $keyboard", bounds.bottom <= keyboard)
-                    }
+            launch(capture("Screen with existing photo")).use { scenario ->
+                robot.waitFor(composer)
+                robot.waitFor(robot.text(R.string.assistant_image_attached))
+                assertFalse(robot.secure(scenario))
+                val sheet = robot.composedBounds(scenario, "assistant-sheet").first
+                for (id in listOf(R.string.composer_send, R.string.composer_voice, R.string.assistant_image_remove)) {
+                    val label = robot.text(id)
+                    val bounds = robot.assertTarget(label)
+                    assertTrue("$label at $bounds must be inside the sheet $sheet", sheet.contains(bounds))
+                }
+                val capture = checkNotNull(robot.automation.takeScreenshot())
+                try {
+                    assertNotEquals("Assistant sheet pixel", Color.BLACK, capture.getPixel(sheet.centerX(), sheet.centerY()))
+                    save(directory, "system", capture)
+                } finally {
+                    capture.recycle()
+                }
+                File(directory, "labels.txt").writeText(robot.texts().joinToString("\n"))
+                robot.edit(composer, "The keyboard keeps the send action reachable")
+                robot.click(composer)
+                val send = robot.text(R.string.composer_send)
+                robot.diagnostics.target(send)
+                robot.waitUntil {
+                    val keyboard = robot.keyboardTop(scenario) ?: return@waitUntil false
+                    val node = robot.find(send) ?: return@waitUntil false
+                    node.isVisibleToUser && Rect().also(node::getBoundsInScreen).bottom <= keyboard
+                }
+                val keyboard = checkNotNull(robot.keyboardTop(scenario))
+                for (id in listOf(R.string.composer_send, R.string.composer_voice, R.string.assistant_close)) {
+                    val label = robot.text(id)
+                    val bounds = robot.assertTarget(label)
+                    assertTrue("$label at $bounds must be above keyboard top $keyboard", bounds.bottom <= keyboard)
                 }
             }
         } finally {
-            setScale(previous)
             assertTrue(AssistContext.mediaFile(app, android.net.Uri.parse(manual.uri)).delete())
         }
     }
@@ -397,11 +391,6 @@ class AssistantSheetWorkflowTest {
             resumed = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).any { it is MainActivity }
         }
         return resumed
-    }
-
-    private fun setScale(value: String) {
-        robot.shell(if (value.toFloatOrNull() == null) "settings delete system font_scale" else "settings put system font_scale $value")
-        robot.waitUntil { Resources.getSystem().configuration.fontScale == (value.toFloatOrNull() ?: 1f) }
     }
 
     private fun save(directory: File, name: String, bitmap: Bitmap) {

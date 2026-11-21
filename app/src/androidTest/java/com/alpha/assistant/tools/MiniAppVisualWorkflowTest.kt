@@ -145,22 +145,12 @@ class MiniAppVisualWorkflowTest {
         captureGallery(listOf("fixed", "device", "blue", "green"), listOf(false, true), "plan3-gallery-time-picker-delta",
             onlySections = listOf("forms/time"), widths = listOf(true))
 
-    @Test fun galleryGridShowsEveryCharacterAtDoubleFont() =
+    @Test fun galleryGridShowsEveryCharacter() =
         captureGallery(listOf("blue"), listOf(false), "plan3-gallery-grid-visibility", onlySections = listOf("records/lazy-grid"), widths = listOf(false))
 
     @Test fun galleryGridAndDateRangeAcrossSchemes() = withDateRangeDisplay(compact = true) {
         captureGallery(listOf("fixed", "device", "blue", "green"), listOf(false, true), "plan3-gallery-visibility-delta",
             onlySections = listOf("records/lazy-grid", "forms/date-range"))
-    }
-
-    @Test fun galleryDateRangeChangesAtDoubleFontInLandscape() = withDateRangeDisplay(compact = false) {
-        captureGallery(listOf("green"), listOf(true), "plan3-gallery-date-range-system-font",
-            onlySections = listOf("forms/date-range"), widths = listOf(true), fonts = listOf(2f), compactDateRange = false)
-    }
-
-    @Test fun galleryDateRangeChangesAtDoubleFontInPortrait() = withDateRangeDisplay(compact = false) {
-        captureGallery(listOf("green"), listOf(true), "plan3-gallery-date-range-portrait-system-font",
-            onlySections = listOf("forms/date-range"), widths = listOf(false), fonts = listOf(2f), compactDateRange = false)
     }
 
     private fun withDateRangeDisplay(compact: Boolean, block: () -> Unit) {
@@ -197,10 +187,10 @@ class MiniAppVisualWorkflowTest {
             if (compact) shortSide in 1..399 else shortSide >= 400)
     }
 
-    @Test fun galleryDateRangeAcceptsSoftwareKeyboardAtSystemFont200() {
+    // At font scale 1.0 only a compact window opens the date-range text fields. A wider window opens the calendar.
+    @Test fun galleryDateRangeAcceptsSoftwareKeyboard() {
         val app = robot.instrumentation.targetContext
         val directory = File(app.getExternalFilesDir(null), "plan3-gallery-date-range-ime").apply { mkdirs() }
-        val original = robot.shell("settings get system font_scale")
         val service = robot.automation.serviceInfo
         val originalFlags = service.flags
         val report = JSONArray()
@@ -208,14 +198,13 @@ class MiniAppVisualWorkflowTest {
         try {
             service.flags = originalFlags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
             robot.automation.serviceInfo = service
-            robot.shell("settings put system font_scale 2.0")
             withoutAnimations {
-                for (compact in listOf(true, false)) withDateRangeDisplay(compact) {
+                withDateRangeDisplay(compact = true) {
                     for (landscape in listOf(false, true)) {
                         val orientation = if (landscape) "landscape" else "portrait"
-                        val mode = "${if (compact) "compact" else "wide"}-$orientation"
+                        val mode = "compact-$orientation"
                         val states = JSONArray()
-                        val row = JSONObject().put("orientation", orientation).put("compact", compact).put("states", states)
+                        val row = JSONObject().put("orientation", orientation).put("compact", true).put("states", states)
                         report.put(row)
                         val intent = Intent(app, MiniAppGalleryActivity::class.java).putExtra("matrix", true)
                             .putExtra("systemFont", true).putExtra("scheme", "green").putExtra("dark", true)
@@ -224,7 +213,7 @@ class MiniAppVisualWorkflowTest {
                             robot.rotate(scenario, landscape)
                             scenario.onActivity {
                                 val configuration = it.resources.configuration
-                                assertDateRangeWindow(configuration, compact, landscape)
+                                assertDateRangeWindow(configuration, compact = true, landscape)
                                 row.put("widthDp", configuration.screenWidthDp).put("heightDp", configuration.screenHeightDp)
                             }
                             try { editDateRangeWithKeyboard(scenario, directory, states, mode, landscape) }
@@ -237,12 +226,7 @@ class MiniAppVisualWorkflowTest {
         } finally {
             service.flags = originalFlags
             robot.automation.serviceInfo = service
-            if (original == "null") robot.shell("settings delete system font_scale")
-            else robot.shell("settings put system font_scale $original")
-            val restored = robot.shell("settings get system font_scale")
-            File(directory, "matrix.json").writeText(JSONObject().put("previousSystemFontScale", original)
-                .put("restoredSystemFontScale", restored).put("orientations", report).toString(2))
-            assertEquals("System font scale restored", original, restored)
+            File(directory, "matrix.json").writeText(JSONObject().put("orientations", report).toString(2))
         }
     }
 
@@ -253,7 +237,6 @@ class MiniAppVisualWorkflowTest {
         lateinit var check: GalleryCaptureCheck
         lateinit var invalidRange: String
         scenario.onActivity {
-            assertEquals(2f, it.resources.configuration.fontScale)
             safe = safeArea(it)
             labels = listOf(R.string.tool_date_range_start, R.string.tool_date_range_end).map(it::getString)
             invalidRange = it.getString(R.string.tool_date_range_invalid)
@@ -270,7 +253,7 @@ class MiniAppVisualWorkflowTest {
             capture(states, directory, "$mode-$state",
                 check.copy(body = check.body + labels, unclipped = labels), safe, surface,
                 dateFields = reachableDateRangeFields(safe, landscape), dateInk = colors.onSurface.toArgb() to colors.onSurfaceVariant.toArgb(),
-                expectedFontScale = 2f)
+                expectedFontScale = 1f)
         }
         fun type(field: AccessibilityNodeInfo, digits: String, state: String) {
             typeDateWithKeyboard(field, digits, "$mode-$state", safe, directory, states, colors.onSurface.toArgb())
@@ -291,7 +274,7 @@ class MiniAppVisualWorkflowTest {
         }
         captureDialog("ready-to-apply")
         tap(robot.assertTarget(apply))
-        capture(states, directory, "$mode-applied", GalleryCaptureCheck(targets = listOf(applied)), safe, surface, expectedFontScale = 2f)
+        capture(states, directory, "$mode-applied", GalleryCaptureCheck(targets = listOf(applied)), safe, surface, expectedFontScale = 1f)
         tap(robot.assertTarget(applied))
         type(reachableDateRangeFields(safe).last(), "12062028", "cancelled-end-ime")
         tap(robot.assertTarget(cancel))
@@ -310,12 +293,12 @@ class MiniAppVisualWorkflowTest {
         val keyboard = checkNotNull(keyboardWindow())
         val keyboardBounds = Rect().also(keyboard::getBoundsInScreen)
         val record = JSONObject().put("state", state)
-            .put("keyboardBoundsPx", keyboardBounds.toShortString()).put("windowFontScale", 2).put("complete", false)
+            .put("keyboardBoundsPx", keyboardBounds.toShortString()).put("windowFontScale", 1).put("complete", false)
         states.put(record)
         fun focusedField() = robot.automation.windows.firstOrNull { it.id == appWindowId }?.root?.let(::descendants)
             ?.firstOrNull { it.isEditable && it.isFocused && it.isVisibleToUser }
         fun captureValue(stage: String) {
-            awaitRenderedWindow(appWindowId, 2f)
+            awaitRenderedWindow(appWindowId, 1f)
             val screenshot = checkNotNull(robot.automation.takeScreenshot())
             try {
                 val file = "$state-$stage.png"
@@ -323,7 +306,7 @@ class MiniAppVisualWorkflowTest {
                 record.put("${stage}File", file)
                 val focused = focusedField() ?: throw AssertionError("Focused date field in $state")
                 val unobscured = Rect(safe).apply { bottom = minOf(bottom, keyboardBounds.top) }
-                record.put("${stage}Value", dateFieldPixels(screenshot, listOf(focused), ink to ink, 2f, emptyList(), unobscured))
+                record.put("${stage}Value", dateFieldPixels(screenshot, listOf(focused), ink to ink, 1f, emptyList(), unobscured))
             } finally { screenshot.recycle() }
         }
         captureValue("before")
@@ -355,10 +338,6 @@ class MiniAppVisualWorkflowTest {
     private fun keyboardWindow() = robot.automation.windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
 
     private fun tap(bounds: Rect) = robot.shell("input tap ${bounds.centerX()} ${bounds.centerY()}")
-
-    @Test fun gallerySheetExpandsAtDoubleFontOnDeviceScheme() =
-        captureGallery(listOf("device"), listOf(false), "plan3-gallery-sheet-system-font",
-            onlySections = listOf("presentation/sheet"), widths = listOf(false), fonts = listOf(2f), requireSheetExpansion = true)
 
     private fun changeGalleryDateRange(safe: Rect, stacked: Boolean): String {
         visible("Дни доставки", textOnly = true)
@@ -407,179 +386,153 @@ class MiniAppVisualWorkflowTest {
             it.actionList.any { action -> action.id == AccessibilityNodeInfo.ACTION_SET_TEXT } }?.toList().orEmpty()
 
     private fun captureGallery(schemes: List<String>, modes: List<Boolean>, directoryName: String,
-        collectFailures: Boolean = false, onlySections: List<String>? = null, widths: List<Boolean> = listOf(false, true),
-        fonts: List<Float> = listOf(1f, 2f), requireSheetExpansion: Boolean = false, compactDateRange: Boolean = true) {
+        collectFailures: Boolean = false, onlySections: List<String>? = null, widths: List<Boolean> = listOf(false, true)) {
         val app = robot.instrumentation.targetContext
         val gallery = Intent(app, MiniAppGalleryActivity::class.java).putExtra("matrix", true).putExtra("systemFont", true)
-        val originalFont = robot.shell("settings get system font_scale")
         val destination = File(app.getExternalFilesDir(null), directoryName).apply { mkdirs() }
         val report = JSONArray()
         val failures = mutableListOf<String>()
-        val normalHeights = mutableMapOf<Triple<String, Boolean, Boolean>, Int>()
         try {
             withoutAnimations {
-                for (fontScale in fonts) {
-                    robot.shell("settings put system font_scale $fontScale")
-                    for (scheme in schemes)
-                        for (dark in modes)
-                            for (expanded in widths) {
-                                val name = "$scheme-${if (dark) "dark" else "light"}-${(fontScale * 100).toInt()}-${if (expanded) "expanded" else "compact"}"
-                                val intent = Intent(gallery).putExtra("scheme", scheme).putExtra("dark", dark)
-                                    .putExtra("expanded", expanded)
-                                val colors = when (scheme) {
-                                    "fixed" -> if (dark) AlphaDarkColors else AlphaLightColors
-                                    "device" -> alphaColorScheme(dark)
-                                    else -> galleryWallpaperColors(scheme, dark)
+                for (scheme in schemes)
+                    for (dark in modes)
+                        for (expanded in widths) {
+                            val name = "$scheme-${if (dark) "dark" else "light"}-${if (expanded) "expanded" else "compact"}"
+                            val intent = Intent(gallery).putExtra("scheme", scheme).putExtra("dark", dark)
+                                .putExtra("expanded", expanded)
+                            val colors = when (scheme) {
+                                "fixed" -> if (dark) AlphaDarkColors else AlphaLightColors
+                                "device" -> alphaColorScheme(dark)
+                                else -> galleryWallpaperColors(scheme, dark)
+                            }
+                            // Success and warning keep green and amber in every scheme.
+                            fun roleSurfaces(roles: androidx.compose.material3.ColorScheme) = mapOf("default" to roles.surfaceContainer,
+                                "muted" to roles.surfaceVariant, "accent" to roles.primaryContainer, "error" to roles.errorContainer)
+                                .mapValues { it.value.toArgb() } + listOf("success", "warning")
+                                .associateWith { checkNotNull(ToolPalettes.status(it, dark)).second.toArgb() }
+                            val backgrounds = roleSurfaces(colors)
+                            // The swatches are inside a theme node, so they use the palette of its preset, not the shell scheme.
+                            val themed = roleSurfaces(checkNotNull(ToolPalettes.scheme(presetPalette("clean"), dark)))
+                            val captures = JSONArray()
+                            val row = JSONObject().put("scheme", scheme).put("dark", dark).put("expanded", expanded)
+                                .put("animations", "disabled for capture").put("captures", captures)
+                            report.put(row)
+                            ActivityScenario.launch<MiniAppGalleryActivity>(intent).use { scenario ->
+                                robot.rotate(scenario, landscape = expanded)
+                                robot.waitUntil { !ValueAnimator.areAnimatorsEnabled() }
+                                lateinit var checks: Map<String, GalleryCaptureCheck>
+                                lateinit var safe: Rect
+                                lateinit var dateLabels: List<String>
+                                scenario.onActivity { activity ->
+                                    checks = galleryCaptureChecks(activity)
+                                    safe = safeArea(activity)
+                                    dateLabels = listOf(R.string.tool_date_range_start, R.string.tool_date_range_end).map(activity::getString)
                                 }
-                                // Success and warning keep green and amber in every scheme.
-                                fun roleSurfaces(roles: androidx.compose.material3.ColorScheme) = mapOf("default" to roles.surfaceContainer,
-                                    "muted" to roles.surfaceVariant, "accent" to roles.primaryContainer, "error" to roles.errorContainer)
-                                    .mapValues { it.value.toArgb() } + listOf("success", "warning")
-                                    .associateWith { checkNotNull(ToolPalettes.status(it, dark)).second.toArgb() }
-                                val backgrounds = roleSurfaces(colors)
-                                // The swatches are inside a theme node, so they use the palette of its preset, not the shell scheme.
-                                val themed = roleSurfaces(checkNotNull(ToolPalettes.scheme(presetPalette("clean"), dark)))
-                                val captures = JSONArray()
-                                val row = JSONObject().put("scheme", scheme).put("dark", dark)
-                                    .put("fontScale", fontScale.toDouble()).put("expanded", expanded)
-                                    .put("animations", "disabled for capture").put("captures", captures)
-                                report.put(row)
-                                ActivityScenario.launch<MiniAppGalleryActivity>(intent).use { scenario ->
-                                    robot.rotate(scenario, landscape = expanded)
-                                    robot.waitUntil {
-                                        var effective = 0f
-                                        scenario.onActivity { effective = it.resources.configuration.fontScale }
-                                        effective == fontScale && !ValueAnimator.areAnimatorsEnabled()
-                                    }
-                                    lateinit var checks: Map<String, GalleryCaptureCheck>
-                                    lateinit var safe: Rect
-                                    lateinit var dateLabels: List<String>
-                                    scenario.onActivity { activity ->
-                                        checks = galleryCaptureChecks(activity)
-                                        safe = safeArea(activity)
-                                        dateLabels = listOf(R.string.tool_date_range_start, R.string.tool_date_range_end).map(activity::getString)
-                                    }
-                                    val sections = GallerySamples.values.flatMap { sample ->
-                                        sample.sections.map { section -> "${sample.id}/${section.id}" }
-                                    } + "canvas"
-                                    assertEquals("Every section has a rendered-state check", sections.toSet(), checks.keys)
-                                    val selected = onlySections ?: sections
-                                    if ("forms/date-range" in selected) scenario.onActivity {
-                                        val configuration = it.resources.configuration
-                                        assertDateRangeWindow(configuration, compactDateRange, expanded)
-                                        row.put("widthDp", configuration.screenWidthDp).put("heightDp", configuration.screenHeightDp)
-                                    }
-                                    for (key in selected) {
-                                        val page = key.substringBefore('/')
-                                        val section = key.substringAfter('/', "").ifEmpty { null }
-                                        scenario.onActivity { it.page = page; it.section = section }
-                                        val check = checks.getValue(key)
-                                        val stem = "$name-${key.replace('/', '-')}"
-                                        try {
-                                            val roleLabels = when (key) {
-                                                "roles/swatches" -> ToolUiCatalog.tones.associateWith { it }
-                                                "catalog/containers" -> GalleryToneLabels
-                                                else -> emptyMap()
-                                            }
-                                            capture(captures, destination, stem, check, safe, colors.surface.toArgb(), roleLabels.mapValues {
-                                                (if (key == "roles/swatches") themed else backgrounds).getValue(it.value)
-                                            }, expectedFontScale = fontScale)
-                                            if (key == "presentation/snackbar") {
-                                                val message = visible(check.body.single(), textOnly = true).screenBounds()
-                                                val target = robot.assertTarget(check.targets.single())
-                                                assertFalse("$stem action $target overlaps the message $message", Rect.intersects(target, message))
-                                            }
-                                            if (key == "roles/swatches") {
-                                                val width = robot.assertTarget("Проверить роли").width() / app.resources.displayMetrics.density
-                                                assertTrue("$stem width=$width", if (expanded) width >= 580 else width <= 360)
-                                                val dimensions = Triple(scheme, dark, expanded)
-                                                val height = visible("default", textOnly = true).screenBounds().height()
-                                                if (fontScale == 2f) {
-                                                    val baseline = normalHeights[dimensions]
-                                                    assertTrue("$stem 200% text height=$height, 100% height=$baseline",
-                                                        baseline != null && height > baseline)
-                                                } else normalHeights[dimensions] = height
-                                            }
-                                            check.next?.let { step ->
-                                                step.click?.let(robot::click)
-                                                step.reveal?.let { label -> if (findVisible(label, textOnly = true) == null) robot.reveal(label) }
-                                                if (step.back) robot.back()
-                                                if (key == "choices/select" || key == "choices/menu") {
-                                                    val label = step.check.targets.single()
-                                                    val minimum = (48 * app.resources.displayMetrics.density).toInt()
-                                                    robot.diagnostics.target(label)
-                                                    robot.waitUntil {
-                                                        val item = generateSequence(robot.find(label)) { it.parent }
-                                                            .firstOrNull { it.isClickable && it.isEnabled }
-                                                        val bounds = item?.screenBounds()
-                                                        bounds != null && bounds.width() >= minimum && bounds.height() >= minimum
-                                                    }
-                                                }
-                                                val expansion = if (step.expandSheet) expandSheet(checkNotNull(step.dismiss), safe, requireSheetExpansion) else null
-                                                val editDateRange = key == "forms/date-range"
-                                                val fields = if (editDateRange) reachableDateRangeFields(safe, expanded) else emptyList()
-                                                val openedCheck = if (editDateRange) {
-                                                    step.check.copy(body = step.check.body + dateLabels, unclipped = dateLabels)
-                                                } else step.check
-                                                val opened = capture(captures, destination, "$stem-${step.id}", openedCheck, safe, colors.surface.toArgb(),
-                                                    platform = step.platform, requirePlatformContrast = expanded && key == "forms/time",
-                                                    dateFields = fields, dateInk = colors.onSurface.toArgb() to colors.onSurfaceVariant.toArgb(),
-                                                    expectedFontScale = fontScale)
-                                                expansion?.let { opened.put("sheetExpansion", it) }
-                                                if (editDateRange) {
-                                                    val applied = changeGalleryDateRange(safe, stacked = !expanded)
-                                                    capture(captures, destination, "$stem-applied", GalleryCaptureCheck(targets = listOf(applied)),
-                                                        safe, colors.surface.toArgb(), expectedFontScale = fontScale)
-                                                } else if (step.platform) robot.back()
-                                                else step.dismiss?.let(robot::click)
-                                            }
-                                        } catch (failure: AssertionError) {
-                                            val message = "$stem: ${failure.message}"
-                                            if (!collectFailures) throw AssertionError(message, failure)
-                                            failures += message
-                                            scenario.recreate()
+                                val sections = GallerySamples.values.flatMap { sample ->
+                                    sample.sections.map { section -> "${sample.id}/${section.id}" }
+                                } + "canvas"
+                                assertEquals("Every section has a rendered-state check", sections.toSet(), checks.keys)
+                                val selected = onlySections ?: sections
+                                if ("forms/date-range" in selected) scenario.onActivity {
+                                    val configuration = it.resources.configuration
+                                    assertDateRangeWindow(configuration, compact = true, expanded)
+                                    row.put("widthDp", configuration.screenWidthDp).put("heightDp", configuration.screenHeightDp)
+                                }
+                                for (key in selected) {
+                                    val page = key.substringBefore('/')
+                                    val section = key.substringAfter('/', "").ifEmpty { null }
+                                    scenario.onActivity { it.page = page; it.section = section }
+                                    val check = checks.getValue(key)
+                                    val stem = "$name-${key.replace('/', '-')}"
+                                    try {
+                                        val roleLabels = when (key) {
+                                            "roles/swatches" -> ToolUiCatalog.tones.associateWith { it }
+                                            "catalog/containers" -> GalleryToneLabels
+                                            else -> emptyMap()
                                         }
+                                        capture(captures, destination, stem, check, safe, colors.surface.toArgb(), roleLabels.mapValues {
+                                            (if (key == "roles/swatches") themed else backgrounds).getValue(it.value)
+                                        }, expectedFontScale = 1f)
+                                        if (key == "presentation/snackbar") {
+                                            val message = visible(check.body.single(), textOnly = true).screenBounds()
+                                            val target = robot.assertTarget(check.targets.single())
+                                            assertFalse("$stem action $target overlaps the message $message", Rect.intersects(target, message))
+                                        }
+                                        if (key == "roles/swatches") {
+                                            val width = robot.assertTarget("Проверить роли").width() / app.resources.displayMetrics.density
+                                            assertTrue("$stem width=$width", if (expanded) width >= 580 else width <= 360)
+                                            visible("default", textOnly = true)
+                                        }
+                                        check.next?.let { step ->
+                                            step.click?.let(robot::click)
+                                            step.reveal?.let { label -> if (findVisible(label, textOnly = true) == null) robot.reveal(label) }
+                                            if (step.back) robot.back()
+                                            if (key == "choices/select" || key == "choices/menu") {
+                                                val label = step.check.targets.single()
+                                                val minimum = (48 * app.resources.displayMetrics.density).toInt()
+                                                robot.diagnostics.target(label)
+                                                robot.waitUntil {
+                                                    val item = generateSequence(robot.find(label)) { it.parent }
+                                                        .firstOrNull { it.isClickable && it.isEnabled }
+                                                    val bounds = item?.screenBounds()
+                                                    bounds != null && bounds.width() >= minimum && bounds.height() >= minimum
+                                                }
+                                            }
+                                            val expansion = if (step.expandSheet) expandSheet(checkNotNull(step.dismiss), safe) else null
+                                            val editDateRange = key == "forms/date-range"
+                                            val fields = if (editDateRange) reachableDateRangeFields(safe, expanded) else emptyList()
+                                            val openedCheck = if (editDateRange) {
+                                                step.check.copy(body = step.check.body + dateLabels, unclipped = dateLabels)
+                                            } else step.check
+                                            val opened = capture(captures, destination, "$stem-${step.id}", openedCheck, safe, colors.surface.toArgb(),
+                                                platform = step.platform, requirePlatformContrast = expanded && key == "forms/time",
+                                                dateFields = fields, dateInk = colors.onSurface.toArgb() to colors.onSurfaceVariant.toArgb(),
+                                                expectedFontScale = 1f)
+                                            expansion?.let { opened.put("sheetExpansion", it) }
+                                            if (editDateRange) {
+                                                val applied = changeGalleryDateRange(safe, stacked = !expanded)
+                                                capture(captures, destination, "$stem-applied", GalleryCaptureCheck(targets = listOf(applied)),
+                                                    safe, colors.surface.toArgb(), expectedFontScale = 1f)
+                                            } else if (step.platform) robot.back()
+                                            else step.dismiss?.let(robot::click)
+                                        }
+                                    } catch (failure: AssertionError) {
+                                        val message = "$stem: ${failure.message}"
+                                        if (!collectFailures) throw AssertionError(message, failure)
+                                        failures += message
+                                        scenario.recreate()
                                     }
-                                    if (!collectFailures) {
-                                        val dateRangeResult = if ("forms/date-range" in selected) 1 else 0
-                                        assertEquals(selected.size + selected.count { checks.getValue(it).next != null } + dateRangeResult,
-                                            captures.length())
-                                    }
+                                }
+                                if (!collectFailures) {
+                                    val dateRangeResult = if ("forms/date-range" in selected) 1 else 0
+                                    assertEquals(selected.size + selected.count { checks.getValue(it).next != null } + dateRangeResult,
+                                        captures.length())
                                 }
                             }
-                }
+                        }
                 assertTrue(failures.joinToString("\n"), failures.isEmpty())
-                assertEquals(schemes.size * modes.size * widths.size * fonts.size, report.length())
+                assertEquals(schemes.size * modes.size * widths.size, report.length())
             }
         } finally {
-            if (originalFont == "null") robot.shell("settings delete system font_scale")
-            else robot.shell("settings put system font_scale $originalFont")
             File(destination, "matrix.json").writeText(report.toString(2))
-            assertEquals("System font scale restored", originalFont, robot.shell("settings get system font_scale"))
         }
     }
 
     // The short landscape window (below 400 dp) needs the compact display. A 1080 px display gives 411 dp.
-    @Test fun nativePickersKeepActionsReachableAtSystemFont200() = withDateRangeDisplay(compact = true) {
+    @Test fun nativePickersKeepActionsReachable() = withDateRangeDisplay(compact = true) {
         val app = robot.instrumentation.targetContext
-        val original = robot.shell("settings get system font_scale")
-        val destination = File(app.getExternalFilesDir(null), "plan3-native-pickers-200").apply { mkdirs() }
+        val destination = File(app.getExternalFilesDir(null), "plan3-native-pickers").apply { mkdirs() }
         val report = JSONArray()
         val failures = mutableListOf<String>()
         val inputs = mapOf("date" to "День покупки: 2028-06-03", "time" to "Время покупки: 09:00")
         try {
-            robot.shell("settings put system font_scale 2.0")
             withoutAnimations {
                 for (expanded in listOf(false, true)) {
                     val intent = Intent(app, MiniAppGalleryActivity::class.java).putExtra("scheme", "fixed")
                         .putExtra("large", true).putExtra("expanded", expanded).putExtra("page", "forms")
                     ActivityScenario.launch<MiniAppGalleryActivity>(intent).use { scenario ->
                         robot.rotate(scenario, landscape = expanded)
-                        robot.waitUntil {
-                            var scale = 0f
-                            scenario.onActivity { scale = it.resources.configuration.fontScale }
-                            scale == 2f && !ValueAnimator.areAnimatorsEnabled()
-                        }
+                        robot.waitUntil { !ValueAnimator.areAnimatorsEnabled() }
                         lateinit var safe: Rect
                         lateinit var cancel: String
                         lateinit var confirm: String
@@ -598,8 +551,8 @@ class MiniAppVisualWorkflowTest {
                                 robot.assertTarget(label)
                                 robot.click(label)
                                 val observed = capture(report, destination, stem, GalleryCaptureCheck(), safe,
-                                    AlphaLightColors.surface.toArgb(), platform = true, requirePlatformContrast = true, expectedFontScale = 2f)
-                                    .put("systemFontScale", 2).put("windowHeightDp", height)
+                                    AlphaLightColors.surface.toArgb(), platform = true, requirePlatformContrast = true, expectedFontScale = 1f)
+                                    .put("windowHeightDp", height)
                                 val actions = observed.getJSONObject("controls").keys().asSequence().toList()
                                 val positive = actions.singleOrNull { it.equals(confirm, ignoreCase = true) }
                                 val negative = actions.singleOrNull { it.equals(cancel, ignoreCase = true) }
@@ -618,12 +571,7 @@ class MiniAppVisualWorkflowTest {
             assertTrue(failures.joinToString("\n"), failures.isEmpty())
             assertEquals(4, report.length())
         } finally {
-            if (original == "null") robot.shell("settings delete system font_scale")
-            else robot.shell("settings put system font_scale $original")
-            val restored = robot.shell("settings get system font_scale")
-            File(destination, "matrix.json").writeText(JSONObject().put("previousSystemFontScale", original)
-                .put("restoredSystemFontScale", restored).put("captures", report).toString(2))
-            assertEquals("System font scale restored", original, restored)
+            File(destination, "matrix.json").writeText(JSONObject().put("captures", report).toString(2))
         }
     }
 
@@ -838,7 +786,7 @@ class MiniAppVisualWorkflowTest {
         return chars
     }
 
-    private fun expandSheet(close: String, safe: Rect, requireExpansion: Boolean): JSONObject {
+    private fun expandSheet(close: String, safe: Rect): JSONObject {
         val action = AccessibilityNodeInfo.AccessibilityAction.ACTION_EXPAND
         val minSize = (48 * robot.instrumentation.targetContext.resources.displayMetrics.density).toInt()
         fun Rect.fits() = safe.contains(this) && width() >= minSize && height() >= minSize
@@ -851,7 +799,7 @@ class MiniAppVisualWorkflowTest {
             handle = robot.diagnostics.freshRoot()?.let(::descendants)?.firstOrNull { node ->
                 node.isVisibleToUser && node.actionList.any { it.id == action.id }
             }
-            handle != null || !requireExpansion && closeFits()
+            handle != null || closeFits()
         }
         val evidence = JSONObject().put("usedExpandAction", handle != null)
         handle?.let {

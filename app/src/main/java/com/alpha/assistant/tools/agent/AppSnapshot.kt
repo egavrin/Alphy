@@ -2,6 +2,7 @@ package com.alpha.assistant.tools.agent
 
 import android.app.Presentation
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
@@ -51,7 +52,8 @@ internal object AppSnapshot {
         val pictures = preview.spec.generatedImages.associateBy { "slot:" + it.slot }
         val presentation = Presentation(context, display.display)
         try {
-            val view = ComposeView(presentation.context).apply {
+            // The app draws at font scale 1.0 (AlphyActivity), so the review picture ignores the Android font size setting too.
+            val view = ComposeView(presentation.context.createConfigurationContext(Configuration().apply { fontScale = 1f })).apply {
                 setViewTreeLifecycleOwner(owner)
                 setViewTreeSavedStateRegistryOwner(owner)
                 setContent {

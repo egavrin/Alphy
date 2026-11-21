@@ -45,7 +45,6 @@ class ShellScreenshotTest {
     @Test fun captureShellScreens() {
         val night = checkNotNull(Regex("""Night mode: (\S+)""").find(robot.shell("cmd uimode night"))).groupValues[1]
         val nightBits = Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val scale = robot.shell("settings get system font_scale")
         try {
             val root = checkNotNull(fixture.context.getExternalFilesDir("alphy-ui-screens")).apply { check(deleteRecursively()) }
             fixture.install()
@@ -53,27 +52,22 @@ class ShellScreenshotTest {
             fixture.seedChat("trip", title, message, updatedAt = 1_793_000_000_000L)
             for ((mode, bits) in listOf("no" to Configuration.UI_MODE_NIGHT_NO, "yes" to Configuration.UI_MODE_NIGHT_YES)) {
                 setNight(mode, bits)
-                for (size in listOf("1.0", "2.0")) {
-                    setScale(size)
-                    fixture.launch().use { scenario ->
-                        scenario.onActivity {
-                            assertEquals(size.toFloat(), it.resources.configuration.fontScale)
-                            assertEquals(bits, it.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
-                        }
-                        captureScreens(scenario, File(root, "$mode-$size").apply { mkdirs() }, dark = bits == Configuration.UI_MODE_NIGHT_YES)
+                fixture.launch().use { scenario ->
+                    scenario.onActivity {
+                        assertEquals(1f, it.resources.configuration.fontScale)
+                        assertEquals(bits, it.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
                     }
+                    captureScreens(scenario, File(root, mode).apply { mkdirs() }, dark = bits == Configuration.UI_MODE_NIGHT_YES)
                 }
             }
         } finally {
-            try { setNight(night, nightBits) } finally { setScale(scale) }
-            assertEquals(scale, robot.shell("settings get system font_scale"))
+            setNight(night, nightBits)
         }
     }
 
     @Test fun captureDrawerAndChatIcons() {
         val night = checkNotNull(Regex("""Night mode: (\S+)""").find(robot.shell("cmd uimode night"))).groupValues[1]
         val nightBits = Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val scale = robot.shell("settings get system font_scale")
         val root = checkNotNull(fixture.context.getExternalFilesDir("alphy-drawer-screens"))
         fixture.install()
         fixture.store.saveSetting("userName", "Евгений")
@@ -85,44 +79,36 @@ class ShellScreenshotTest {
         try {
             for ((mode, bits) in listOf("no" to Configuration.UI_MODE_NIGHT_NO, "yes" to Configuration.UI_MODE_NIGHT_YES)) {
                 setNight(mode, bits)
-                for (size in listOf("1.0", "2.0")) {
-                    setScale(size)
-                    fixture.launch().use { scenario ->
-                        val directory = File(root, "$mode-$size").apply { mkdirs() }
-                        robot.waitFor(message)
-                        robot.assertTarget(robot.text(R.string.new_chat))
-                        screen(directory, "chat").recycle()
-                        robot.openDrawer(scenario)
-                        robot.assertTarget(robot.text(R.string.search))
-                        val newChat = robot.assertTarget(robot.text(R.string.new_chat))
-                        val settings = robot.assertTarget(robot.text(R.string.settings))
-                        var widthDp = 0f
-                        scenario.onActivity { activity ->
-                            val width = activity.window.decorView.width
-                            val density = activity.resources.displayMetrics.density
-                            widthDp = width / density
-                            val expected = (width * 0.75f).coerceIn(360 * density, 560 * density)
-                                .coerceAtMost(width - 56 * density)
-                            assertTrue("Drawer width for $width px is $expected px", abs(robot.drawerRight(activity) - expected) <= 2f)
-                            if (width <= 320 * density && size == "2.0") {
-                                assertTrue("Large labels have separate rows at 320 dp", newChat.bottom <= settings.top)
-                            }
-                        }
-                        if (size == "1.0") {
-                            assertEquals("Drawer profile name is reserved for widths of at least 400 dp",
-                                widthDp >= 400f, robot.composedText(scenario, "Евгений"))
-                        }
-                        val drawer = screen(directory, "drawer")
-                        try {
-                            val expectedSurface = if (mode == "yes") 0xFF1D1D1D.toInt() else Color.WHITE
-                            val inset = (4 * fixture.context.resources.displayMetrics.density).roundToInt()
-                            assertEquals("Graphite drawer surface", expectedSurface, drawer.getPixel(inset, drawer.height / 2))
-                        } finally { drawer.recycle() }
+                fixture.launch().use { scenario ->
+                    val directory = File(root, mode).apply { mkdirs() }
+                    robot.waitFor(message)
+                    robot.assertTarget(robot.text(R.string.new_chat))
+                    screen(directory, "chat").recycle()
+                    robot.openDrawer(scenario)
+                    robot.assertTarget(robot.text(R.string.search))
+                    robot.assertTarget(robot.text(R.string.new_chat))
+                    robot.assertTarget(robot.text(R.string.settings))
+                    var widthDp = 0f
+                    scenario.onActivity { activity ->
+                        val width = activity.window.decorView.width
+                        val density = activity.resources.displayMetrics.density
+                        widthDp = width / density
+                        val expected = (width * 0.75f).coerceIn(360 * density, 560 * density)
+                            .coerceAtMost(width - 56 * density)
+                        assertTrue("Drawer width for $width px is $expected px", abs(robot.drawerRight(activity) - expected) <= 2f)
                     }
+                    assertEquals("Drawer profile name is reserved for widths of at least 400 dp",
+                        widthDp >= 400f, robot.composedText(scenario, "Евгений"))
+                    val drawer = screen(directory, "drawer")
+                    try {
+                        val expectedSurface = if (mode == "yes") 0xFF1D1D1D.toInt() else Color.WHITE
+                        val inset = (4 * fixture.context.resources.displayMetrics.density).roundToInt()
+                        assertEquals("Graphite drawer surface", expectedSurface, drawer.getPixel(inset, drawer.height / 2))
+                    } finally { drawer.recycle() }
                 }
             }
         } finally {
-            try { setNight(night, nightBits) } finally { setScale(scale) }
+            setNight(night, nightBits)
         }
     }
 
@@ -160,46 +146,42 @@ class ShellScreenshotTest {
         }
     }
 
-    // The «Сервис ИИ» panel at a 360 dp phone width, in both themes, at the default font scale and at 1.3.
+    // The «Сервис ИИ» panel at a 360 dp phone width, in both themes.
     @Test fun captureAiPanelAtPhoneWidth() {
         val night = checkNotNull(Regex("""Night mode: (\S+)""").find(robot.shell("cmd uimode night"))).groupValues[1]
         val nightBits = Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val scale = robot.shell("settings get system font_scale")
         val root = checkNotNull(fixture.context.getExternalFilesDir("alphy-ai-panel-screens")).apply { check(deleteRecursively()) }
         fixture.install(saveKey = false)
         try {
             for ((mode, bits) in listOf("no" to Configuration.UI_MODE_NIGHT_NO, "yes" to Configuration.UI_MODE_NIGHT_YES)) {
                 setNight(mode, bits)
-                for (size in listOf("1.0", "1.3")) {
-                    setScale(size)
-                    check(fixture.keys.clear().isSuccess)
-                    fixture.launch().use { scenario ->
-                        val directory = File(root, "$mode-$size").apply { mkdirs() }
-                        phoneWidth(scenario)
-                        scenario.onActivity { checkNotNull(fixture.model).openSurface(null, settings = true) }
-                        robot.waitFor(robot.text(R.string.key_missing))
-                        robot.reveal(robot.text(R.string.key_help))
-                        capturePanel(scenario, directory, "missing")
-                        enterKey("sk-ant-api03-alpha-test-only")
-                        robot.selected("Anthropic")
-                        assertProviderFits(scenario, "$mode-$size")
-                        capturePanel(scenario, directory, "anthropic")
-                        robot.reveal(robot.text(R.string.ai_available))
-                        capturePanel(scenario, directory, "anthropic-functions")
-                        enterKey("sk-or-v1-alpha-test-only")
-                        robot.selected("OpenRouter")
-                        assertProviderFits(scenario, "$mode-$size")
-                        robot.reveal(robot.text(R.string.consent_and_save))
-                        robot.click(robot.text(R.string.consent_and_save))
-                        robot.waitFor(robot.text(R.string.key_ready))
-                        capturePanel(scenario, directory, "ready-openrouter")
-                        robot.reveal(robot.text(R.string.ai_available))
-                        capturePanel(scenario, directory, "ready-openrouter-functions")
-                    }
+                check(fixture.keys.clear().isSuccess)
+                fixture.launch().use { scenario ->
+                    val directory = File(root, mode).apply { mkdirs() }
+                    phoneWidth(scenario)
+                    scenario.onActivity { checkNotNull(fixture.model).openSurface(null, settings = true) }
+                    robot.waitFor(robot.text(R.string.key_missing))
+                    robot.reveal(robot.text(R.string.key_help))
+                    capturePanel(scenario, directory, "missing")
+                    enterKey("sk-ant-api03-alpha-test-only")
+                    robot.selected("Anthropic")
+                    assertProviderFits(scenario, mode)
+                    capturePanel(scenario, directory, "anthropic")
+                    robot.reveal(robot.text(R.string.ai_available))
+                    capturePanel(scenario, directory, "anthropic-functions")
+                    enterKey("sk-or-v1-alpha-test-only")
+                    robot.selected("OpenRouter")
+                    assertProviderFits(scenario, mode)
+                    robot.reveal(robot.text(R.string.consent_and_save))
+                    robot.click(robot.text(R.string.consent_and_save))
+                    robot.waitFor(robot.text(R.string.key_ready))
+                    capturePanel(scenario, directory, "ready-openrouter")
+                    robot.reveal(robot.text(R.string.ai_available))
+                    capturePanel(scenario, directory, "ready-openrouter-functions")
                 }
             }
         } finally {
-            try { setNight(night, nightBits) } finally { setScale(scale) }
+            setNight(night, nightBits)
         }
     }
 
@@ -532,11 +514,5 @@ class ShellScreenshotTest {
     private fun setNight(mode: String, bits: Int) {
         robot.shell("cmd uimode night $mode")
         robot.waitUntil { (Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == bits }
-    }
-
-    // "settings get" prints "null" when the value is unset, and "settings put … null" does not restore that state.
-    private fun setScale(value: String) {
-        robot.shell(if (value.toFloatOrNull() == null) "settings delete system font_scale" else "settings put system font_scale $value")
-        robot.waitUntil { Resources.getSystem().configuration.fontScale == (value.toFloatOrNull() ?: 1f) }
     }
 }

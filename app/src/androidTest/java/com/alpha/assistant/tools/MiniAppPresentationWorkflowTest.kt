@@ -366,12 +366,8 @@ class MiniAppPresentationWorkflowTest {
         val arguments = InstrumentationRegistry.getArguments()
         val nightMode = robot.shell("cmd uimode night").trim().substringAfterLast(": ")
         val dark = arguments.getString("observatoryNight") == "true"
-        val fontScale = arguments.getString("observatoryFontScale", "2.0")
-        require(fontScale == "1.0" || fontScale == "2.0")
-        val originalScale = if (sceneChoices) robot.shell("settings get system font_scale") else null
         try {
             if (dark) robot.shell("cmd uimode night yes")
-            if (sceneChoices) robot.shell("settings put system font_scale $fontScale")
             fixture(specJson = saved.getJSONObject("spec").toString(), initialState = saved.getJSONObject("state").toString(),
                 revision = if (sceneChoices) revision else 1,
                 stateVersion = if (sceneChoices) saved.getInt("stateVersion") else 1) { _, store, scenario ->
@@ -504,7 +500,6 @@ class MiniAppPresentationWorkflowTest {
                 scenario.onActivity {
                     density = it.resources.displayMetrics.density
                     if (sceneChoices) {
-                        assertEquals(fontScale.toFloat(), it.resources.configuration.fontScale, 0f)
                         assertEquals("Сначала", restart)
                         if (dark) assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_YES,
                             it.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK)
@@ -676,11 +671,6 @@ class MiniAppPresentationWorkflowTest {
             }
         } finally {
             if (dark && nightMode in setOf("auto", "yes", "no", "custom")) robot.shell("cmd uimode night $nightMode")
-            if (originalScale != null) {
-                if (originalScale == "null") robot.shell("settings delete system font_scale")
-                else robot.shell("settings put system font_scale $originalScale")
-                assertEquals(originalScale, robot.shell("settings get system font_scale"))
-            }
         }
     }
 
@@ -1478,21 +1468,12 @@ class MiniAppPresentationWorkflowTest {
             shown("Native timeline"); shown("10:00"); screenshot("compose-families-timeline")
             scenario.onActivity {it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE}
             shown("Native facts"); screenshot("compose-families-wide")
-            val original=automation.executeShellCommand("settings get system font_scale").use {android.os.ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText().trim()}
-            try {
-                automation.executeShellCommand("settings put system font_scale 1.5").close()
-                SystemClock.sleep(500)
-                shown("Native facts"); screenshot("compose-families-large-font")
-            } finally {
-                val restore=original.toDoubleOrNull()?.toString() ?: "1.0"
-                automation.executeShellCommand("settings put system font_scale $restore").close()
-            }
             scenario.onActivity {it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT}
             click("Clear rows"); shown("Sample is empty"); shown("No sample rows")
             screenshot("compose-families-empty")
             assertEquals(0,JSONObject(store.tool("lake")!!.state).getJSONArray("rows").length())
             assertTrue(store.effects("lake").isEmpty())
-            println("NATIVE_COMPOSE families=PASS templateToggle=PASS templateNumber=PASS tabs=PASS empty=PASS wide=PASS fontScale1.5=PASS effects=0")
+            println("NATIVE_COMPOSE families=PASS templateToggle=PASS templateNumber=PASS tabs=PASS empty=PASS wide=PASS effects=0")
         }
     }
 
@@ -1621,7 +1602,6 @@ class MiniAppPresentationWorkflowTest {
     @Test fun detailTitleAndActionsShareOneRowFromChatAndLibrary() {
         val robot = ShellRobot("shared-detail-bar")
         val title = "Lake day with a longer title for a narrow detail pane"
-        val previousFont = robot.shell("settings get system font_scale")
         val library = robot.text(R.string.mini_apps)
         val back = robot.text(R.string.tool_library_back)
         val edit = robot.text(R.string.tool_refine)
@@ -1646,7 +1626,7 @@ class MiniAppPresentationWorkflowTest {
             }
             val titleBounds = titleInPane(diagnostics.freshRoot())
             println("SHARED_DETAIL_BAR origin=$origin pane=$pane title=$titleBounds back=$backLabelBounds edit=$editLabelBounds overflow=$optionsLabelBounds")
-            screenshot("shared-detail-from-$origin-font-200")
+            screenshot("shared-detail-from-$origin")
             assertNotNull("The detail pane exposes the full title as a visible heading", titleBounds)
             val backBounds = robot.assertTarget(back)
             val editBounds = robot.assertTarget(edit)
@@ -1657,31 +1637,24 @@ class MiniAppPresentationWorkflowTest {
             assertTrue("The detail actions leave room for the title",
                 backBounds.right <= titleBounds.left && titleBounds.right <= editBounds.left && editBounds.right <= optionsBounds.left)
         }
-        try {
-            robot.shell("settings put system font_scale 2.0")
-            fixture(specJson = ItineraryFixture.spec(title)) { model, _, scenario ->
-                scenario.onActivity { assertEquals(2f, it.resources.configuration.fontScale) }
-                assertNull("The chat card has no detail Back action", find(back))
-                assertNull("The chat card has no detail edit action", find(edit))
-                click(robot.text(R.string.tool_open))
-                assertBar(scenario, "chat")
-                click(options)
-                val details = robot.text(R.string.tool_details_desktop)
-                shown(details)
-                robot.back()
-                robot.waitGone(details)
-                click(back)
-                waitUntil { model.tools.selectedId == null }
-                shown(robot.text(R.string.composer_label))
-                robot.openDrawer(scenario)
-                click(library)
-                robot.awaitDrawerClosed(scenario)
-                click(title)
-                assertBar(scenario, "library")
-            }
-        } finally {
-            if (previousFont == "null") robot.shell("settings delete system font_scale")
-            else robot.shell("settings put system font_scale $previousFont")
+        fixture(specJson = ItineraryFixture.spec(title)) { model, _, scenario ->
+            assertNull("The chat card has no detail Back action", find(back))
+            assertNull("The chat card has no detail edit action", find(edit))
+            click(robot.text(R.string.tool_open))
+            assertBar(scenario, "chat")
+            click(options)
+            val details = robot.text(R.string.tool_details_desktop)
+            shown(details)
+            robot.back()
+            robot.waitGone(details)
+            click(back)
+            waitUntil { model.tools.selectedId == null }
+            shown(robot.text(R.string.composer_label))
+            robot.openDrawer(scenario)
+            click(library)
+            robot.awaitDrawerClosed(scenario)
+            click(title)
+            assertBar(scenario, "library")
         }
     }
 

@@ -559,19 +559,14 @@ class LibraryManagementWorkflowTest {
         }
     }
 
-    @Test fun emptyLibraryAndUnavailableSavedAppAtDoubleFontSize() {
+    @Test fun emptyLibraryAndUnavailableSavedApp() {
         val name="library-empty-ui-${UUID.randomUUID()}.db"
         val shell=ShellStore(app,name)
         val toolName="$name-tools.db"
         val keys=SecureKeyStore(app,name,name)
-        val automation=instrumentation.uiAutomation
-        fun command(value: String)=android.os.ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(value))
-            .bufferedReader().use {it.readText().trim()}
-        val font=command("settings get system font_scale")
         lateinit var model: ShellViewModel
         try {
             CloudTestActivity.factory={ ShellViewModel(it,offline,shell,keys, legacy = isolatedLegacyKeys(it), models = isolatedModels(it), imageStore = ISOLATED_IMAGES, voiceStore = ISOLATED_VOICE).openSeededChat(shell).also { model=it } }
-            command("settings put system font_scale 2.0")
             ActivityScenario.launch(CloudTestActivity::class.java).use { scenario ->
                 waitUntil {!model.loading && !model.tools.busy}
                 robot.openDrawer(scenario);click(app.getString(R.string.mini_apps));robot.awaitDrawerClosed(scenario)
@@ -589,11 +584,9 @@ class LibraryManagementWorkflowTest {
                 waitUntil {!model.loading && !model.tools.busy}
                 openUnavailableApp(scenario,"Недоступный счётчик")
                 assertNull(find(diagnostics.freshRoot(),"Изменить"))
-                diagnostics.capture("unavailable-double-font")
+                diagnostics.capture("unavailable")
             }
         } finally {
-            if(font.toDoubleOrNull()==null) command("settings delete system font_scale")
-            else command("settings put system font_scale $font")
             closeShell(name,toolName,shell,keys)
         }
     }

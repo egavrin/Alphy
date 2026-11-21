@@ -9,11 +9,18 @@ import com.alpha.assistant.semantic.SemanticRuntime
 import com.alpha.assistant.tools.three.ThreeSceneForeground
 import java.util.Locale
 
-/** Every Alphy activity uses Russian resources, so Material component labels are Russian on any device locale. */
+/**
+ * Every Alphy activity uses Russian resources, so Material component labels are Russian on any device locale.
+ * The app sets its own font size: each screen is planned for font scale 1.0, so the Android font size setting has no effect.
+ */
 abstract class AlphyActivity : ComponentActivity() {
-    // Only the locale: a copy of the base configuration would keep the attach-time screen size and window bounds after a resize.
+    // Only the locale and the font scale: a copy of the base configuration would keep the attach-time screen size and window bounds after a resize.
     override fun attachBaseContext(base: Context) {
-        super.attachBaseContext(base.createConfigurationContext(Configuration().apply { setLocales(LocaleList(Locale.forLanguageTag("ru"))) }))
+        super.attachBaseContext(base.createConfigurationContext(Configuration().apply {
+            setLocales(LocaleList(Locale.forLanguageTag("ru")))
+            // The layout checks of the app measure at 1.0. The system font scale must not change a screen.
+            fontScale = 1f
+        }))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

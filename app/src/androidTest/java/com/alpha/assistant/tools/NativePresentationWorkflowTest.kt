@@ -52,37 +52,25 @@ class NativePresentationWorkflowTest {
 
     /** Run the same target and inputs on both revisions for comparable native captures. */
     @Test fun captureComparableFixtures() {
-        val font = robot.shell("settings get system font_scale")
         val manifest = JSONArray()
         try {
-            for (scale in listOf(1f, 2f)) {
-                robot.shell("settings put system font_scale $scale")
-                withPreview { scenario ->
-                    for (wide in listOf(false, true)) {
-                        robot.rotate(scenario, landscape = wide)
-                        robot.waitUntil {
-                            var actual = 0f
-                            scenario.onActivity { actual = it.resources.configuration.fontScale }
-                            actual == scale
-                        }
-                        for (dark in listOf(false, true)) for (scene in PresentationFixtures.comparison) {
-                            preview(scenario, scene, dark, wide)
-                            val stem = "${scene.id}-${if (dark) "dark" else "light"}-${if (wide) "wide" else "narrow"}-${(scale * 100).toInt()}"
-                            capture(stem)
-                            var width = 0
-                            scenario.onActivity { width = it.resources.configuration.screenWidthDp }
-                            manifest.put(JSONObject().put("file", "$stem.png").put("seed", "green").put("dark", dark)
-                                .put("fontScale", scale.toDouble()).put("windowWidthDp", width).put("fixture", scene.id))
-                        }
+            withPreview { scenario ->
+                for (wide in listOf(false, true)) {
+                    robot.rotate(scenario, landscape = wide)
+                    for (dark in listOf(false, true)) for (scene in PresentationFixtures.comparison) {
+                        preview(scenario, scene, dark, wide)
+                        val stem = "${scene.id}-${if (dark) "dark" else "light"}-${if (wide) "wide" else "narrow"}"
+                        capture(stem)
+                        var width = 0
+                        scenario.onActivity { width = it.resources.configuration.screenWidthDp }
+                        manifest.put(JSONObject().put("file", "$stem.png").put("seed", "green").put("dark", dark)
+                            .put("windowWidthDp", width).put("fixture", scene.id))
                     }
                 }
             }
-            assertEquals(PresentationFixtures.comparison.size * 8, manifest.length())
+            assertEquals(PresentationFixtures.comparison.size * 4, manifest.length())
         } finally {
-            if (font == "null") robot.shell("settings delete system font_scale")
-            else robot.shell("settings put system font_scale $font")
             File(output, "matrix.json").writeText(manifest.toString(2))
-            assertEquals("Android font scale was restored", font, robot.shell("settings get system font_scale"))
         }
     }
 

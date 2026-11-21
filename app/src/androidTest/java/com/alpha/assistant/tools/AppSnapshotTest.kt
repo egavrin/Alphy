@@ -9,6 +9,7 @@ import com.alpha.assistant.images.ImageAspect
 import com.alpha.assistant.tools.agent.AppSnapshot
 import com.alpha.assistant.tools.three.ThreeSceneAssetCleanup
 import com.alpha.assistant.tools.three.ThreeSceneAssets
+import com.alpha.assistant.ui.ShellRobot
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -38,6 +39,37 @@ class AppSnapshotTest {
             }
             assertTrue("the green button is drawn: $colored samples", colored > 20)
         } finally { shot.recycle() }
+    }
+
+    // Failure case: the review picture follows the Android font size, so the model judges a screen that the person does not see.
+    @Test fun theSnapshotKeepsFontScaleOneAtAnotherSystemFontScale() = runBlocking {
+        val robot = ShellRobot("app-snapshot")
+        // The screenshot review gets the application context (SandboxClient).
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
+        val ui = JSONObject().put("type", "column").put("children", org.json.JSONArray((1..8).map {
+            JSONObject().put("type", "text").put("text", "Строка $it: вода за день, восемь стаканов и прогулка.")
+        }))
+        val spec = ToolSpec.parse(JSONObject().put("formatVersion", 3).put("title", "Text").put("description", "")
+            .put("stateSchema", JSONObject().put("note", "string")).put("initialState", JSONObject().put("note", "")).put("ui", ui)
+            .put("source", "return {state:input.state};").put("capabilities", org.json.JSONArray()).toString())
+        // The lowest row that differs from the bottom-right pixel: the end of the text, or of its surface.
+        suspend fun contentBottom(systemScale: String): Int {
+            robot.shell("settings put system font_scale $systemScale")
+            robot.waitUntil { context.resources.configuration.fontScale == systemScale.toFloat() }
+            val shot = AppSnapshot.capture(context, ToolPreview(spec, """{"note":""}""", ui.toString()))
+            try {
+                val background = shot.getPixel(shot.width - 1, shot.height - 1)
+                return (shot.height - 1 downTo 0).first { y -> (0 until shot.width).any { x -> shot.getPixel(x, y) != background } }
+            } finally { shot.recycle() }
+        }
+        val scale = robot.shell("settings get system font_scale")
+        try {
+            assertEquals("Content bottom at system font scale 1.3 and 1.0", contentBottom("1.0"), contentBottom("1.3"))
+        } finally {
+            // "settings get" prints "null" when the value is unset, and "settings put … null" does not restore that state.
+            robot.shell(if (scale.toFloatOrNull() == null) "settings delete system font_scale" else "settings put system font_scale $scale")
+            robot.waitUntil { context.resources.configuration.fontScale == (scale.toFloatOrNull() ?: 1f) }
+        }
     }
 
     @Test fun theSnapshotShowsTheGeneratedPicture() = runBlocking {

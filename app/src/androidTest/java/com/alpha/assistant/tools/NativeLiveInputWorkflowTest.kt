@@ -176,34 +176,25 @@ class NativeLiveInputWorkflowTest {
         }
     }
 
-    @Test fun rejectedAndHiddenInputRemainsExplicitAtLargeSystemFont() {
-        val font = robot.shell("settings get system font_scale")
+    @Test fun rejectedAndHiddenInputRemainsExplicit() {
         val channel = Channel()
-        try {
-            robot.shell("settings put system font_scale 2.0")
-            withFixture(channel = channel) { scenario, shown, _ ->
-                scenario.onActivity { assertEquals(2f, it.resources.configuration.fontScale, 0f) }
-                robot.edit(text, "локально")
-                val pending = channel.await(textAction)
-                pending.receipt.complete(LiveInputResult.Rejected(LiveInputRejection.Conflict))
-                robot.waitFor(robot.text(R.string.tool_live_input_unsaved))
-                assertEquals("локально", robot.field(text).text.toString())
-                val retry = robot.text(R.string.tool_generated_apply, text)
-                robot.assertTarget(retry)
-                robot.click(retry)
-                val final = channel.await(textAction, "локально", finished = true)
-                scenario.onActivity {
-                    shown.value = changed(shown.value, JSONObject(shown.value.tool.state).put("shown", false))
-                }
-                robot.waitGone(text)
-                robot.waitFor(robot.text(R.string.tool_live_input_unsaved))
-                assertFalse(final.active())
-                assertEquals(2, channel.calls.size)
+        withFixture(channel = channel) { scenario, shown, _ ->
+            robot.edit(text, "локально")
+            val pending = channel.await(textAction)
+            pending.receipt.complete(LiveInputResult.Rejected(LiveInputRejection.Conflict))
+            robot.waitFor(robot.text(R.string.tool_live_input_unsaved))
+            assertEquals("локально", robot.field(text).text.toString())
+            val retry = robot.text(R.string.tool_generated_apply, text)
+            robot.assertTarget(retry)
+            robot.click(retry)
+            val final = channel.await(textAction, "локально", finished = true)
+            scenario.onActivity {
+                shown.value = changed(shown.value, JSONObject(shown.value.tool.state).put("shown", false))
             }
-        } finally {
-            if (font == "null") robot.shell("settings delete system font_scale")
-            else robot.shell("settings put system font_scale $font")
-            assertEquals(font, robot.shell("settings get system font_scale"))
+            robot.waitGone(text)
+            robot.waitFor(robot.text(R.string.tool_live_input_unsaved))
+            assertFalse(final.active())
+            assertEquals(2, channel.calls.size)
         }
     }
 

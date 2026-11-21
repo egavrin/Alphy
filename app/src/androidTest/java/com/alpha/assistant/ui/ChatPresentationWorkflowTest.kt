@@ -4,7 +4,6 @@ import com.alpha.assistant.cloud.AiProvider
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
-import android.content.res.Resources
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -240,8 +239,8 @@ class ChatPresentationWorkflowTest {
         } finally { fixture.remove() }
     }
 
-    // Failure cases: a previous failure offers retry, or key recovery and retry become unreachable at large font scale.
-    @Test fun latestFailureHasRetryAndSettingsAtLargeFontScale() {
+    // Failure cases: a previous failure offers retry, or key recovery and retry become unreachable.
+    @Test fun latestFailureHasRetryAndSettings() {
         val fixture = ShellFixture("chat-failure-ui")
         val user = Message("user", "user", "Исходный запрос", 1, "sent")
         val old = Message("old", "assistant", "Первый фрагмент", 1, "cancelled", replyTo = user.id)
@@ -250,12 +249,8 @@ class ChatPresentationWorkflowTest {
         fixture.store.saveConversation(Conversation("chat", "Восстановление", 1, 1, messages = listOf(user, old, latest)))
         fixture.store.seedOpenChat("chat")
         fixture.install()
-        val fontScale = robot.shell("settings get system font_scale")
         try {
-            robot.shell("settings put system font_scale 2.0")
-            robot.waitUntil { Resources.getSystem().configuration.fontScale == 2f }
-            fixture.launch().use { scenario ->
-                scenario.onActivity { assertEquals(2f, it.resources.configuration.fontScale) }
+            fixture.launch().use {
                 robot.reveal("Последний фрагмент")
                 // A key error shows the retry action without a long press.
                 robot.reveal(robot.text(R.string.chat_message_retry))
@@ -264,11 +259,7 @@ class ChatPresentationWorkflowTest {
                 robot.click(settings)
                 robot.waitFor(robot.text(R.string.settings_ai))
             }
-        } finally {
-            fixture.remove()
-            robot.shell(if (fontScale.toFloatOrNull() == null) "settings delete system font_scale" else "settings put system font_scale $fontScale")
-            robot.waitUntil { Resources.getSystem().configuration.fontScale == (fontScale.toFloatOrNull() ?: 1f) }
-        }
+        } finally { fixture.remove() }
     }
 
     private fun openActions(text: String) {
