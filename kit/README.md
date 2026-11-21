@@ -18,14 +18,15 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/run.js` | The run-time of a compiled app: `handle` answers each event, and `screen` maps each component to its Alphy node. A timer with rounds, a rest, or no alert draws its bar on a surface and asks for a timer event each second while it runs. A timer with an alert and one phase is Alphy's foreground timer. A Drawing is a canvas with one surface that each reply draws again. A value that an `animate` moves keeps its change in the state field `anim` and asks for a timer event each 50 ms while it moves. `stateOf` copies each field of `app.keep` from the stored state, so a field that a change kept stays after each event. |
 | `src/emit.js` | The emitter: an expanded app file as Alphy's app definition, whose `source` is the run-time and the compiled data of the app (`sourceOf`). `dataOf` reads the compiled data back from a `source`. It gives a fault for each limit of Alphy that the kit's own mapping can pass: state fields, the fields of a need's object, source bytes, and the nodes and depth of the screen. It also keeps the lower limits: a container with no child is a fault of its line, and a plan with no state value keeps one hidden boolean field `d0`, because Alphy keeps 1 to 40 state fields. No line of a plan gets the name `d0`. Each need object has a namer of its own, so the names in it do not depend on the other needs. |
 | `src/change.js` | The next state of a change: `nextState` gives the definition and the state of a changed app from the stored app of the person (section "Changes of an app"), and `BLOCKS` and `MISMATCH` are the texts of its faults. Only the compile step uses it. |
-| `src/compile.js` | The compile `compileAppFile(text, previous?)`: an app file in; the faults and notes of the report, the definition, `hole`, the flags `blockedBySavedData` and `savedDataMismatch`, and `state` out. With `previous`, `state` is the next state of a change (`src/change.js`), else `null`. `hole` is true when the file has a need of kind `hole`, also with faults, so the plan step of the app gives that plan to its loop. The merge `patchAppFile(plan, reply)`: the plan text after a repair reply (section "Repair replies"). The reader `readPlanReply(text)`: `{kind: "outside", word}` for a reply of the one line `outside("word")`, with a word of 1 to 16 small Latin letters or digits, such as `3d`. Each other reply is `{kind: "plan", text}`: its lines with no empty line and no markdown fence line, and a final newline. Prose stays, and the compile reports it. The step `compileStep({text, plan, read, previous, cap})`: the sandbox entry, one step of the host with these three (section "The step of the host"). |
-| `build.js` | The bundle of the modules as one plain script for the sandbox, with the one global `compileStep`, the run-time text in it (minified by `Bun.build`), the prompt asset `app/src/main/assets/appfile/prompt.json` (`promptAsset`), and the copies of the plans for the device tests. |
-| `prompt.js` | The texts of the prompt for the model check and the app: `PROMPT` (the sections of `prompt.md` by heading), `PROMPT_HASH`, and the task texts `taskText`, `repairText`, and `changeText`. `prompt.json` holds the four sections as `system`, `repair`, `dialogue`, and `change`, and the templates `repairTask` and `changeTask`. The host puts the plan with no newline at its end in `{{plan}}`, the faults joined by `"\n- "` in `{{faults}}`, and the task text or the request in `{{task}}` or `{{request}}`. A filled template is then the text of `repairText` or `changeText`. |
-| `prompt.md` | The plan prompt: the section "System" is the instructions of each plan call and repair call, "Repair" is the rule of a repair call, "Dialogue" is the line under the request of a screen of a voice dialogue (today only `modelcheck.js` adds it, and the app will add it with the voice path), and "Change" is the rule of a change call of an app (after the request and the app file). Task 2b measured "Change" on set F of `modelcheck.js` (results document, section "Changes by lines"). `test/prompt.test.js` checks each kind, option, icon, and example of it against the kit. The section "System" names no `hole`: the kit keeps the kind and its tests. A request that no kind serves gets `outside(...)` with one of six words: `game`, `drawing`, `3d`, `picture`, `device`, or `other` for a main thing that no kind gives and that is none of the others. |
-| `modelcheck.js` | The model check of `prompt.md` outside the app: for each request, a plan call of the OpenAI Responses API with the body of `OpenAiResponsesWire.kt`, the texts of `prompt.js`, `compileStep` of the kit for the read of the reply, each merge, and each compile, as the app runs them, and up to 2 repair calls at the effort low (the setting `REPAIRS` gives another count, such as 1 for the loop of the app). It counts each call in `evidence/modelcheck/spend.json` before the call and keeps each reply and record in `evidence/modelcheck/<label>/`. Its sets of requests are C (the 45 cases of the corpus), D (8 requests of a voice dialogue), E (`test/fixtures/fresh-requests.json`, 28 requests that no earlier run used), and F (`test/fixtures/change-requests.json`, 16 change requests on 8 plans of `test/fixtures/model/`). A case of set F runs the events of the person through the run-time to make the stored state, sends `changeText`, merges the reply into the app file and compiles it with the stored app (`compileStep`), and gets one repair call. As in the app, it gets no repair call after a fault that the saved data blocks or the mismatch fault (the flags `blockedBySavedData` and `savedDataMismatch`). In each set, a plan with a hole gets no repair call and ends with the outcome `hole`, also when it compiles clean. The app gives it `fallback:hole`, or `fallback:data_blocks` when a saved-data flag is also set. Its record compares each stored value of the person with the next state by the names of the previous definition. `test/modelcheck.test.js` covers its task text, body, repair, sets, records, and change cases with a fake of the call. |
+| `src/template.js` | The template file of a screen of the voice mode (section "Template files"): `TEMPLATE_HEAD`, `BUDGET`, `COLOR_NAMES`, `isTemplateFile`, `readTemplate` (the lines in the fixed order and the fault of each line), `mergeTemplate` (the merge of a reply by line name), `expandTemplate` (the app file of a template file), and `buildTemplate` (the compile of a template file with the compile of `compile.js`). |
+| `src/compile.js` | The compile `compileAppFile(text, previous?)`: an app file in; the faults and notes of the report, the definition, `hole`, the flags `blockedBySavedData` and `savedDataMismatch`, and `state` out. With `previous`, `state` is the next state of a change (`src/change.js`), else `null`. `hole` is true when the file has a need of kind `hole`, also with faults, so the plan step of the app gives that plan to its loop. A result with a definition also has `frame` (section "The preview step"). A template file also gives `template`, `kept`, `expanded`, and `leftOut` (section "Template files"). The merge `patchAppFile(plan, reply)`: the plan text after a repair reply (section "Repair replies"). The reader `readPlanReply(text)`: `{kind: "outside", word}` for a reply of the one line `outside("word")`, with a word of 1 to 16 small Latin letters or digits, such as `3d`. Each other reply is `{kind: "plan", text}`: its lines with no empty line and no markdown fence line, and a final newline. Prose stays, and the compile reports it. The step `compileStep({text, plan, read, previous, cap})`: the sandbox entry, one step of the host with these three (section "The step of the host"). The step `previewStep({text, plan, previous})`: the second sandbox entry, the frame of the complete lines of a reply so far (section "The preview step"). |
+| `build.js` | The bundle of the modules as one plain script for the sandbox, with the two globals `compileStep` and `previewStep`, the run-time text in it (minified by `Bun.build`), the prompt asset `app/src/main/assets/appfile/prompt.json` (`promptAsset`), and the copies of the plans and the template files for the device tests. |
+| `prompt.js` | The texts of the prompt for the model check and the app: `PROMPT` (the sections of `prompt.md` by heading), `hashOf(names, sections)` (the first 12 hex digits of the SHA-256 of the named sections), `PROMPT_HASH` (the sections "System", "Repair", "Dialogue", and "Change"), and `TEMPLATE_HASH` (the sections "Template", "Template repair", and "Template change"). So each record names the prompt that made it. The section "Template rest" is in neither hash. The task texts are `taskText`, `repairText`, `changeText`, `templateRepairText`, `templateChangeText`, and `templateRestText`. `prompt.json` holds the four sections of the plan prompt as `system`, `repair`, `dialogue`, and `change`, and the section "Template" as `template`. It also holds the task texts `repairTask`, `changeTask`, `templateRepairTask`, `templateChangeTask`, and `templateRestTask`, and `templateHead`, the source of `TEMPLATE_HEAD`. The host puts the plan with no newline at its end in `{{plan}}`, the faults joined by `"\n- "` in `{{faults}}`, and the task text or the request in `{{task}}` or `{{request}}`. A filled task text is then the text of its function in `prompt.js`: `repairText` for `repairTask`, and so on. |
+| `prompt.md` | The plan prompt: the section "System" is the instructions of each plan call and repair call, "Repair" is the rule of a repair call, "Dialogue" is the line under the request of the plan call of a screen of a voice dialogue (the app and `modelcheck.js` add it), and "Change" is the rule of a change call of an app (after the request and the app file). The sections "Template", "Template repair", "Template change", and "Template rest" are the template prompt of a voice screen (section "Template files"). Task 2b measured "Change" on set F of `modelcheck.js` (results document, section "Changes by lines"). `test/prompt.test.js` checks each kind, option, icon, and example of it against the kit. The section "System" names no `hole`: the kit keeps the kind and its tests. A request that no kind serves gets `outside(...)` with one of six words: `game`, `drawing`, `3d`, `picture`, `device`, or `other` for a main thing that no kind gives and that is none of the others. |
+| `modelcheck.js` | The model check of `prompt.md` outside the app: for each request, a plan call of the OpenAI Responses API with the body of `OpenAiResponsesWire.kt`, the texts of `prompt.js`, `compileStep` of the kit for the read of the reply, each merge, and each compile, as the app runs them, and up to 2 repair calls at the effort low (the setting `REPAIRS` gives another count, such as 1 for the loop of the app). It counts each call in `evidence/modelcheck/spend.json` before the call and keeps each reply and record in `evidence/modelcheck/<label>/`. Its sets of requests for the plan prompt are C (the 45 cases of the corpus), D (8 requests of a voice dialogue), E (`test/fixtures/fresh-requests.json`, 28 requests that no earlier run used), and F (`test/fixtures/change-requests.json`, 16 change requests on 8 plans of `test/fixtures/model/`). A case of set F runs the events of the person through the run-time to make the stored state, sends `changeText`, merges the reply into the app file and compiles it with the stored app (`compileStep`), and gets one repair call. As in the app, it gets no repair call after a fault that the saved data blocks or the mismatch fault (the flags `blockedBySavedData` and `savedDataMismatch`). In each set, a plan with a hole gets no repair call and ends with the outcome `hole`, also when it compiles clean. The app gives it `fallback:hole`, or `fallback:data_blocks` when a saved-data flag is also set. Its record compares each stored value of the person with the next state by the names of the previous definition. `test/modelcheck.test.js` covers its task text, body, repair, sets, records, and change cases with a fake of the call. The template check runs the sets T (`test/fixtures/template-tuning.json`), U (`template-holdout.json`), V (`template-changes.json`), and W (`template-pilot.json`) alone, with a label that starts with `tpl-`. Each request gets one call with the section "Template" as the instructions and at most one repair call (`checkTemplate`, `checkTemplateChange`). A change item of V or W changes its base file of `test/fixtures/template-bases/`. The calls of the `tpl-` labels never pass `TEMPLATE_LIMIT` (150). `table` gives one line of `templateNumbers` for each such label, and `test/modelcheck-template.test.js` covers the template check with a fake of the call. |
 | `look.js` | The look numbers of each saved plan and each look fixture of `build.js`: `score_app` of `tools/agent_corpus/visual_score.py` on the compiled definition, as one table row for each plan. |
 | `plans/` | The saved plans. |
-| `test/` | The Bun tests. `test/fixtures/` holds example plans of the prototype that only the tests read, and the requests of set E of `modelcheck.js`. `test/nodes.plan` holds each component of the emitter's node table: the kit test and the device test `eachNodeOfTheTablePassesParseAndSmoke` read it. `test/lists.plan`, `test/rich.plan`, and `test/cards.plan` hold the lists and modals, the lists full to the render work limit, and the cards, charts, tabs, lessons, and questions: each has a kit test and a device test. `test/free.plan` holds the free forms that no other plan holds (an inline Row as a List template, a row Button with `enabled=`, `flip`, `move` with a test, and a line whose name is the name of an inline child): the kit tests and the device test `eachFreeFormPassesParseAndSmoke` read it. `test/shapes.plan` holds each shape kind, each outline form, `each` over a list, each kind of color, a text, and `animate` beside a timer with rounds: the kit tests and the device test `eachShapeAndColorPassesParseAndSmoke` read it. `test/draw.test.js` holds the commands, colors, and limits of `src/draw.js`. `test/budget.test.js` measures each compiled plan against each limit of Alphy and prints one table row for each plan. `test/timers.test.js` holds the timers of `plans/tea.plan` and `plans/timer-rounds.plan`, and the short plan of the device test `timerRoundsPassesParseAndSmoke`. `test/looks.plan` holds each look option and a `Grid`: `test/looks.test.js` and the device test `eachLookOptionPassesParseAndSmoke` read it. `test/fixtures/look-water-ko.plan` and `test/fixtures/look-shopping-it.plan` are two requests of the corpus with components only, in the tree of their baseline apps. `test/fixtures/mock-water-ko.plan`, `mock-units-pl.plan`, `mock-shopping-it.plan`, `mock-habits-uk.plan`, and `mock-price-filter.plan` are five requests of the corpus with parts: the device test `picturesOfEachPlan` shows each one beside the spec of its baseline app (`app/src/androidTest/assets/appfile/baseline/`). `test/entries.test.js`, `test/inputs.test.js`, `test/figures.test.js`, and `test/counter.test.js` hold the parts of a list app (section "Parts"). `test/fixtures/model/` holds the 56 plans that `gpt-6.1-terra` wrote in the model check: the final plan of each clean record of the runs `final-terra-low` (sets C and D) and `fresh-terra-low` (set E), and the first reply of four records of the runs `v5-terra-low` and `v5b-terra-low` (task P5). Its `index.json` holds the request, the dialogue flag, the set, the model, the effort, the prompt hash, and the run label of each plan. `test/modelplans.test.js` compiles each one, and the device tests read them. |
+| `test/` | The Bun tests. `test/fixtures/` holds example plans of the prototype that only the tests read, and the requests of set E of `modelcheck.js`. `test/nodes.plan` holds each component of the emitter's node table: the kit test and the device test `eachNodeOfTheTablePassesParseAndSmoke` read it. `test/lists.plan`, `test/rich.plan`, and `test/cards.plan` hold the lists and modals, the lists full to the render work limit, and the cards, charts, tabs, lessons, and questions: each has a kit test and a device test. `test/free.plan` holds the free forms that no other plan holds (an inline Row as a List template, a row Button with `enabled=`, `flip`, `move` with a test, and a line whose name is the name of an inline child): the kit tests and the device test `eachFreeFormPassesParseAndSmoke` read it. `test/shapes.plan` holds each shape kind, each outline form, `each` over a list, each kind of color, a text, and `animate` beside a timer with rounds: the kit tests and the device test `eachShapeAndColorPassesParseAndSmoke` read it. `test/draw.test.js` holds the commands, colors, and limits of `src/draw.js`. `test/budget.test.js` measures each compiled plan against each limit of Alphy and prints one table row for each plan. `test/timers.test.js` holds the timers of `plans/tea.plan` and `plans/timer-rounds.plan`, and the short plan of the device test `timerRoundsPassesParseAndSmoke`. `test/looks.plan` holds each look option and a `Grid`: `test/looks.test.js` and the device test `eachLookOptionPassesParseAndSmoke` read it. `test/fixtures/look-water-ko.plan` and `test/fixtures/look-shopping-it.plan` are two requests of the corpus with components only, in the tree of their baseline apps. `test/fixtures/mock-water-ko.plan`, `mock-units-pl.plan`, `mock-shopping-it.plan`, `mock-habits-uk.plan`, and `mock-price-filter.plan` are five requests of the corpus with parts: the device test `picturesOfEachPlan` shows each one beside the spec of its baseline app (`app/src/androidTest/assets/appfile/baseline/`). `test/entries.test.js`, `test/inputs.test.js`, `test/figures.test.js`, and `test/counter.test.js` hold the parts of a list app (section "Parts"). `test/fixtures/model/` holds the 56 plans that `gpt-6.1-terra` wrote in the model check: the final plan of each clean record of the runs `final-terra-low` (sets C and D) and `fresh-terra-low` (set E), and the first reply of four records of the runs `v5-terra-low` and `v5b-terra-low` (task P5). Its `index.json` holds the request, the dialogue flag, the set, the model, the effort, the prompt hash, and the run label of each plan. `test/modelplans.test.js` compiles each one, and the device tests read them. `test/fixtures/template/` holds the three example template files `ship.plan`, `word-parts.plan`, and `majority.plan`, and six template files at their caps (`*-caps.plan`, and `*-caps125.plan` with each text inside the picture at floor(1.25 × cap)). `test/template-file.test.js` compiles them, and `build.js` copies them for the device tests. `test/fixtures/template-bases/` holds the 8 base files of the change sets of the template check. `test/template-preview.test.js` holds the preview step. `test/template-grow.test.js` checks that each longer prefix of each of these template files keeps the UI and the drawing of the shorter prefix. |
 
 The gate of the kit is `"smoke"`: the smoke run uses each control. The report also runs each check line.
 In each new state, the smoke run presses again each control that it used in an earlier state, such as a tab, when that press shows a control that it did not use yet.
@@ -65,7 +66,7 @@ A repair reply writes again each wrong line of a plan (`prompt.md` section "Repa
 `compileStep({text, plan, read, previous, cap})` is one step of the host (`AppFileCompiler.kt`) in one call of the sandbox:
 
 1. With `read` true, the kit reads the reply text with `readPlanReply`. An `outside` reply returns at once as `{kind: "outside", word}`.
-2. With `plan` not `null`, `patchAppFile` merges the reply into `plan`.
+2. With `plan` not `null`, `patchAppFile` merges the reply into `plan`. For a template file in `plan`, `mergeTemplate` merges it (section "Template files").
 3. A merged text of more than `cap` characters gives `result: null`, and the kit does not compile it.
 4. Else `result` is `compileAppFile` of the merged text with the stored app `previous`.
 
@@ -74,15 +75,149 @@ Each other result is `{kind: "plan", text, result}`, where `text` is the merged 
 `test/compile.test.js` tests each branch, and the bundle test runs the step in a fresh context.
 `modelcheck.js` runs each reply through this step as the app does: with `read` true and the cap of the app (65536 characters). An outside repair reply ends the request, and a text past the cap gets the fault of the app and no repair call.
 
+## Template files
+
+A template file is the text that a model writes for a screen of the voice mode (`src/template.js`).
+Its lines have names and a fixed order: the first line, the control, the parts of the picture, and the card.
+Each line is complete by itself, so the stage can draw each line when it arrives (section "The preview step").
+The kit checks each line, expands the file into an app file, and compiles that app file.
+This is `test/fixtures/template/ship.plan`:
+
+```
+scene("Почему корабль не тонет?", lang="ru", palette="blue")
+control = choice("Предмет", ["Корабль", "Гвоздь"])
+s1 = rect(0, 110, 300, 110, "water", 0)
+s2 = polygon([45, 75, 255, 75, 225, 140, 75, 140], "ink", visible=$/v == "Корабль")
+s3 = text(150, 50, "Воздух внутри", "ink", 14, visible=$/v == "Корабль")
+card = card("Вытеснение воды", "Полый корабль вытесняет достаточно воды, чтобы удержаться на плаву.")
+```
+
+The lines of a template file:
+
+- The first line names the template: `scene(TITLE, lang=CODE, palette=NAME)`, or `items(…)` or `cells(…)` with the same arguments.
+  `isTemplateFile` tests `TEMPLATE_HEAD` on the first line that is not empty, so it tells a template file from an app file.
+  `lang=` is a code of two small letters. `palette=` is optional: `teal`, `green`, `blue` (the default), `amber`, `orange`, `red`, `pink`, `purple`, `indigo`, `brown`, or `graphite`.
+- The control line `control = …`:
+  - `scene`: `slider(LABEL, MIN, MAX, STEP, START)` with numbers, or `choice(LABEL, [OPTION, …], START)` with 2 to 6 options. With no START, the first option is the start.
+  - `items`: `choice(LABEL)`. The labels of the items are its options.
+  - `cells`: `slider(LABEL, 0, COUNT, 1, START)`, where COUNT is a whole number from 2 to 100. The control draws the cells.
+- The parts: `s1` to `s12` of `scene`, and `i1` to `i6` of `items`. `cells` has no part line.
+  - A shape is `circle`, `rect`, `line`, `text`, or `polygon`, with only `visible=` and `stroke=` by name. The points of a polygon are an even count of at least 6 numbers.
+  - An item is `item(LABEL, SIGN, TEXT)`. Each item has a label of its own, because the choice shows the labels.
+- The card: `card = card(TITLE, TEXT)` of `scene` and `cells`, and `card = card(TITLE)` of `items`, whose card shows the text of the chosen item.
+- A line reads no value other than `$/v`, the value of the control.
+- The line `$/v = VALUE` in the place of the control holds the start value of a control that the kit left out (`kept` below).
+
+`readTemplate` puts the lines in the fixed order, so a reply with the card before the shapes gives the same app.
+A second line of one name, a line of a name that the template does not have, a line with no name, and a `delete` line are faults.
+
+`expandTemplate` writes the app line `app(TITLE, lang=…, preset="clean", palette=…)`, the drawing `need picture` of 300 × 220 with the parts, the control, and the card.
+The control is `need v = input("slider", …)` or `need v = input("choice", …)`, and the card is `need card = card(…)`.
+The drawing has its final size from the first line. An `items` drawing shows the sign and the label of the chosen item.
+A `cells` drawing shows rows of at most ten cells and the caption "K / N = P%".
+
+### Budget and colors
+
+`BUDGET` holds the caps of the texts in characters and of the lists in items:
+
+| Text or list | Cap |
+| --- | --- |
+| The title | 30 |
+| The label of the control | 28 |
+| The card title | 32 |
+| The card text, and the text of an item | 140 |
+| An option, and the label of an item | 12 |
+| The sign of an item | 14 |
+| A text in quotes of a shape | 28 |
+| Options, items, and shapes | 6, 6, and 12 |
+| Cells | 100 |
+
+- A text inside the picture (the sign of an item, and a text in quotes of a shape) has no fault up to floor(1.25 × cap) (`INSIDE`). Such a text cannot change the height of the screen.
+- A text outside the picture has a hard cap.
+- The kit cuts a card text or an item text past its cap after the last whole sentence inside the cap (`cut`). This gives no fault and needs no model call.
+  The kept line holds the cut text. In a formula, the kit cuts each text by itself.
+- A sentence ends at `.`, `!`, `?`, or `…` before a space, or at `。`, `！`, or `？`, with the quote marks and brackets after it (`SENTENCE_END`). So 3.5 ends no sentence. With no sentence end inside the cap, the text is a fault of its line.
+- Each other text past its cap, and each list past its cap, is a fault of its line. The fault names the cap.
+
+The color of a shape is a color of the kit (`core.js` `TONES`), a hex such as `"#336699"`, or a common color name (`COLOR_NAMES`).
+The common color names are `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `violet`, `pink`, `brown`, `gray`, `grey`, `cyan`, `teal`, `indigo`, `black`, and `white`.
+The kit puts the hex of a common color name in its place with no model call, and `ink` for `black` and `surface` for `white`. The case of the name has no effect.
+Each value of a choice, such as `$/v == "Day" ? "yellow" : "ink"`, gets the same check. Each other color is a fault of its line, and the fault names the colors of the kit.
+
+### Faults by line
+
+Each fault has the form `NAME: message`. NAME is the name of its line, or the template word for the first line and for a line with no name.
+When the compile of the expansion has faults of the kit, the kit finds the line that owns each one (`ownersOf`):
+
+- A fault of `need v` belongs to `control`, and a fault of `need card` belongs to `card`.
+- Each other fault belongs to each part whose compile with the first line and the control alone has faults. The fault then names the part, not the need.
+- In a `scene`, the faults of the first line and the control alone belong to `control`.
+
+The kit leaves out each owner and compiles once more. These rules give the result:
+
+- The kit leaves out each line with a fault, and the definition comes with the faults of these lines.
+- A `scene` control that no line reads changes nothing on the screen. The kit leaves it out with the fault `control: the control changes nothing on the screen, …`.
+- `kept` is the text to store. It holds each line with no fault that the kit did not leave out.
+  In the place of a control that is left out or has a fault, it holds `$/v = START`.
+  START is the start of the control, the label of the first item of `items`, or 0. A compile of `kept` gives no fault and the same definition.
+- A whole fault gives no definition, and `expanded` is null. These faults are whole:
+  - A fault of the first line.
+  - No shape or item with no fault.
+  - A `cells` file whose control has a fault or is absent.
+  - A fault of the kit after the second compile.
+- For a change, a changed line with a fault takes the stored version of that line, so a change never loses a good stored line.
+
+`compileAppFile` of a template file gives `template` (the template word), `kept`, `expanded` (the app file of `kept`), and `leftOut` (the names of the lines that the kit left out).
+
+### Merge by name
+
+`mergeTemplate(stored, reply)` merges a repair reply, a change reply, or a rest reply into a template file by the name of each line:
+
+- A line of a name that the file has replaces that line in place. A new first line replaces the first line.
+- A new part goes after the last part, a new control goes after the first line, and each other new line goes at the end.
+- `delete NAME` removes the line of that name. A line with no name, such as prose or a fence, goes.
+
+### The template prompt
+
+The sections "Template", "Template repair", "Template change", and "Template rest" of `prompt.md` are the template prompt.
+"Template" is the instructions of each template call: the lines, the order, the caps, the colors, the formulas of `$/v`, and four examples.
+A template call replies `outside("learn")` to a request to learn or practice with a check, a timer, a list, a form, or a game.
+It replies `outside("other")` to each other request that no template shows. `readPlanReply` reads these replies.
+"Template repair" asks again for each line with a fault. "Template change" asks for each changed line, and `delete NAME` for a part that goes.
+A change that a template cannot hold gets `outside("other")`. "Template rest" is the rule of the call for the missing lines (section "The preview step").
+Each record of the template check holds `TEMPLATE_HASH` (row `prompt.js`).
+
+## The preview step
+
+`previewStep({text, plan, previous})` gives the frame that the stage of the voice mode draws while a reply arrives: `{kind: "preview", frame}`, or `{kind: "none"}`.
+
+- `text` is the complete lines of a reply so far. The step reads them as `readPlanReply` reads a reply, and merges them into `plan` as `compileStep` merges a reply.
+- `plan` is the stored template file of a change, or `null`. `previous` is the stored app of a change as `compileStep` takes it, so a value that the person moved stays.
+- `frame` is `{definition, ui, state, drawing, holds}`. The kit runs an open event of the run-time on the compiled data (`compile.js` `frameOf`).
+  `state` is the state of the reply, `drawing` is its `surfaces` (`{}` with no surface), and `ui` is the screen of that state.
+- `holds` tells what the frame shows: `frame` (the first line, with or without the control), `parts` (a shape, an item, or the cells of a control), `card`, or `whole` (an app file that is not a template file).
+- The step runs no smoke run: it sets `settings.gate` to `"off"` for its compile, and then sets it back. It also keeps a control that no line reads yet.
+- The step takes each line with a fault as the compile takes it (section "Faults by line"), with no repair.
+  In a preview, only a fault of the first line and a fault of the kit after the second compile are whole. So the first line alone gives a frame, with the picture at its final size.
+  An `items` frame draws nothing before its first item.
+- An `outside` reply, a text with no usable first line, and each throw give `{kind: "none"}`.
+
+The result of `compileStep` with a definition also has `frame`: `{ui, state, drawing, holds}` with `holds` `"whole"`, for a template file and for an app file.
+That frame holds no copy of the definition, because the result beside it holds it. `AppFileCompiler.preview` of the app calls the preview step (`docs/tool-integration.md`).
+
+The call for the missing lines of a template call that ended early (`docs/voice-integration.md`) sends `templateRestText({task, plan})`.
+That text holds the task, the complete lines so far, and the section "Template rest", which asks only for the lines that the screen does not hold yet.
+
 ## Changes of an app
 
 `compileAppFile(text, previous)` compiles a changed app file and gives the next state of the stored app.
 `previous` is `{appFile, stateSchema, state}` as the host keeps it.
-The result is `{faults, notes, definition, language, hole, blockedBySavedData, savedDataMismatch, state}`. `state` is `null` with a fault, and with no `previous`.
+The result is `{faults, notes, definition, language, hole, blockedBySavedData, savedDataMismatch, state}`, and `frame` with a definition (section "The preview step"). `state` is `null` with a fault, and with no `previous`.
+A template file adds `template`, `kept`, `expanded`, and `leftOut` (section "Template files").
 `blockedBySavedData` is true for the faults of rule 4, and `savedDataMismatch` is true for the fault of rule 1. The kit sets each flag where it makes the fault, so the host reads the flags and not the texts of the faults.
 The rules keep each stored value of the person, and they never move a value to another line:
 
-1. The kit compiles `previous.appFile` again. A fault there is the one fault `kit: the saved data does not match the app file` (`MISMATCH`).
+1. The kit compiles `previous.appFile` again. For a template file there, it compiles the expansion of the file (section "Template files"). A fault there is the one fault `kit: the saved data does not match the app file` (`MISMATCH`).
    So are a field of the person that `previous.stateSchema` does not hold with the same schema, and a field of the schema that the state does not hold.
 2. The name of a stored value comes from its key alone (`rows.js` `stable`), so a line that a change adds before it cannot change its name.
    A root that Alphy does not take as a name, such as `yaş` or the open tab `pages:tab` of a Tabs line, gets the hash name, so two roots never share a name.
@@ -310,7 +445,7 @@ Run each command from the repository root.
 The kit has no dependencies and no install step.
 
 - `bun test kit` runs the tests. The summary of the output shows `0 fail`.
-- `bun kit/build.js` writes `src/icons.js` from the host's sources, the sandbox bundle `app/src/main/assets/appfile/kit.js`, and the prompt asset `app/src/main/assets/appfile/prompt.json`, and copies `plans/*.plan`, the test plans `nodes`, `looks`, `lists`, `rich`, `cards`, `free`, `shapes`, `bytes`, and `model`, and the fixtures `water-ko`, `units-pl`, `shopping`, `habits`, `price-filter`, `look-water-ko`, `look-shopping-it`, `look-deck-es`, `look-guide-es`, and the five `mock-*` plans to `app/src/androidTest/assets/appfile/` for the device tests. It copies the model plans of `test/fixtures/model/` and their `index.json` to `app/src/androidTest/assets/appfile/model/`.
+- `bun kit/build.js` writes `src/icons.js` from the host's sources, the sandbox bundle `app/src/main/assets/appfile/kit.js`, and the prompt asset `app/src/main/assets/appfile/prompt.json`, and copies `plans/*.plan`, the test plans `nodes`, `looks`, `lists`, `rich`, `cards`, `free`, `shapes`, `bytes`, and `model`, and the fixtures `water-ko`, `units-pl`, `shopping`, `habits`, `price-filter`, `look-water-ko`, `look-shopping-it`, `look-deck-es`, `look-guide-es`, and the five `mock-*` plans to `app/src/androidTest/assets/appfile/` for the device tests. It copies the model plans of `test/fixtures/model/` and their `index.json` to `app/src/androidTest/assets/appfile/model/`, and the template files of `test/fixtures/template/` to `app/src/androidTest/assets/appfile/template/`.
 - `bun kit/build.js --check` writes nothing. It exits 1 when one of these files differs from what the build writes, and it prints the version of Bun that ran.
 
 The minifier of Bun makes the run-time text, so the bundle depends on the version of Bun.

@@ -85,8 +85,8 @@ The spec is `docs/superpowers/specs/2026-11-18-live-voice-dialog-design.md`.
 - With an OpenAI account, a press of the assistant button opens the compact assistant with the voice view and starts the voice mode at once. With another provider, the sheet opens as before, and «Непрерывный голосовой сеанс» stays in its menu.
 - The course composers have no voice mode.
 - The start needs the microphone permission. The voice mode and the continuous voice session never run at the same time.
-- The voice screen is a stage above a low strip (`docs/superpowers/specs/2026-11-20-dialogue-stage-design.md`). The stage shows the app of the latest hand-off that made or changed an app. Before the first app, it shows the Alphy character.
-- The stage shows a chat card only when the card waits for a tap, or when a finished answer has a generated image. At a smallest width of 600 dp or more, the stage has two columns: the main visual with its controls at the left, and the other parts at the right.
+- The voice screen is a stage above a low strip (`docs/superpowers/specs/2026-11-20-dialogue-stage-design.md`). The stage shows the app of the latest hand-off that made or changed an app, or a stage preview while Alphy makes a screen (section "Template screens and the stage preview"). Before the first app or preview, it shows the Alphy character.
+- The stage shows a chat card only when the card waits for a tap, or when a finished answer has a generated image. At a smallest width of 600 dp or more, the stage has two columns: the main visual with its controls at the left, and the other parts at the right. At that width, the stage keeps 276 dp for the padding, the kind label, the title, the first control, and the gaps around the canvas (`STAGE_TEXT_HEIGHT` in `ui/DialogueStage.kt`).
 - The strip shows the status («Слушаю», «Alphy говорит», or «Alphy выполняет запрос»), the microphone state («Микрофон включён» or «Микрофон выключен»), and the current line of the speech of GPT-Live.
 - The microphone button mutes the capture and sends `session.input_audio.mute`. ✕ ends the voice mode.
 
@@ -101,19 +101,65 @@ The session omits `delegation`, so GPT-Live runs in client mode. GPT-Live sends 
 - A mini-app request first sends «Alphy готовит мини-приложение, оно появится на экране.». The ready mini-app sends «Мини-приложение готово. Ответ Alphy: » and the reply.
 - A failed request sends «Alphy не смог выполнить запрос: » and the error text.
 - A phone-action plan shows its plan card on the stage. Each end phase of the plan sends one more commentary: «Готово.», «Не получилось.», or «Действие отменено.».
-- A spoken request that a picture or a model makes clearer can get the routing kind `screen`. The voice says «Ответ Alphy: » and the answer at once, and the screen comes later on the stage. When the person asked in words to see a thing and the fast path gives no screen, the voice says «Быстро не получилось. Alphy собирает экран заново, это займёт около минуты.», and the full generation builds a new app. A screen that the person did not ask to see ends with no more call and no more line.
+- A spoken request that a picture or a model makes clearer can get the routing kind `screen`. The voice says «Ответ Alphy: » and the answer at once, and the screen comes later on the stage. When the person asked in words to see a thing and the fast path gives no screen, the voice says «Быстро не получилось. Alphy собирает экран заново, это займёт около минуты.», and the full generation builds a new app. A screen that the person did not ask to see ends with no more call and no more line. The fast path of a new screen is the template call (section "Template screens and the stage preview") and the plan call. The plan call has the section "System" of `kit/prompt.md` as its instructions.
 - With an app on the stage, the routing call gets the shown screen (its title, its app file when the line fits 8,000 characters, and its controls) as untrusted data, and it can answer with the kind `press`. A press runs the named control as a tap, and then the voice says the answer. A label that names no control gives «На экране нет такой кнопки.». A tap that does not run in 2 s gives «Нажать не получилось.».
 - The routing call of a spoken request also gets the last turns of the chat as untrusted turns before the shown screen and the request: the newest three request and reply pairs, at most 2,000 characters, and a long text keeps its start and its end. A text goes only when its message has clean provenance and no web sources. Each other text is a host note with none of its text. A reply that ended with an error, or a change or screen that gave no app, carries a host note that no new screen and no change came.
 - A retry, a «да», or a short follow-up takes its meaning from these turns, and the decision brief states the whole request. A «да» to an offered phone action, automation, memory write, or app test is not a request for it. Earlier turns never authorize an operation that the latest request does not ask for. When a spoken request runs a web search, its grounded decision gets the same turns and the shown screen. The search query still comes from the latest request only.
 - The answer step of a spoken request knows that screens exist in the talk. It never says that it cannot show or change a screen, and it claims no action as done. After a «да» to an offered phone action, automation, memory write, or app test, it says that nothing started and asks the person to say that request in full.
-- A spoken change of the app on the stage runs the change by lines. The voice stays silent until the changed screen shows, and then it says the answer. A change that the kit cannot make becomes a new screen, which gets the plan of the old screen as untrusted data, and the old app stays. When the new screen also fails, the voice says the waiting line, and the full generation builds a new app from the request, the brief, and the plan of the old screen.
-- The app on the stage keeps its frames and timers while a change of it runs. The save of the change takes the newest state of the app: the kit computes the state of the changed plan again from that state, with no model call. A new revision from a different writer still stops the change.
+- A spoken change of the app on the stage runs the change by lines. The voice stays silent until the changed app is stored, and then it says the answer. A change that the kit cannot make becomes a new screen, which gets the plan of the old screen as untrusted data and sends only the plan call. The old app stays. When the new screen also fails, the voice says the waiting line, and the full generation builds a new app from the request, the brief, and the plan of the old screen.
+- The app on the stage keeps its frames and timers while a change of it runs, until a stage preview takes its place. The save of the change takes the newest state of the app: the kit computes the state of the changed plan again from that state, with no model call. A new revision from a different writer still stops the change.
 - A chat that the voice layer covers shows its mini-app cards without their live app, so the stage app gets the one drawing slot. The cards run their apps again when the voice mode ends. When the stage app waits for the slot, the stage shows «Запустится, когда другое мини-приложение остановится.» above the app, or below a drawing that is not part of the app.
 - When the full generation fails, the voice says the reason and a hint: «Экран не собран: сервис ИИ не ответил.», «Экран не собран: запрос не помещается на один экран.», or «Экран не собран: Alphy не смог его построить.», each followed by «Скажите запрос полностью, одной фразой.». The message keeps the failure code. When the voice mode ends during the full generation, the hand-off ends with no more line, and the request runs to its end.
 - A build that falls back or fails writes a release log line with the tag `AlphyGeneration`. A line of the chat request has the operation, the decision kind, the step, the outcome or the fallback reason, the failure code, and the exception class. Where a build goes on to the loop, or where a typed change step falls back, the route writes a line with `kind=none` and the id of the app or the operation. A build that falls back and then fails has two lines. No line holds text of the person.
 - A memory fact, an automation draft, or a course topic ends the voice mode with «Продолжите на экране».
 - A hand-off request runs to its end, also after the voice mode ends. Its result stays in the chat.
 - Text that the user types on the voice screen goes to Alphy. The reply goes to GPT-Live as quiet context (`session.thinking.append`).
+
+### Template screens and the stage preview
+
+A new screen of a spoken request is a template file when a template can hold it: one picture, one control, and one card (`kit/README.md`, section "Template files").
+A free app file is an app file that is not a template file.
+The host check is the checks that `kitCheck` in `tools/agent/AppAgent.kt` runs on the compiled app before Alphy stores it.
+They are the validation and the smoke run of a candidate (`docs/tool-integration.md`), and a search for a long decimal number on the screen.
+
+- A new screen sends a template call first (`CloudGenerationStage.APP_FILE_TEMPLATE`), with the section "Template" of `kit/prompt.md` as its instructions.
+  Its input is the task text of the plan call with no Dialogue line (the section "Dialogue" of `kit/prompt.md`). That text holds the request, the decision brief, the reply excerpt, and the source excerpts.
+- When the stage shows no app, a new screen does not wait for the routing call. Its early template call starts at the hand-off, with the request alone.
+  Alphy cancels that call when the routing call gives no screen, starts a web search, or prepares an action. After a web search, the new screen sends its own template call with the brief and the source excerpts.
+- An `outside` reply sends the plan call with its Dialogue line, and the app gets a free app file.
+- A reply with faults gets one repair call that names each faulty line. A reply that is no template file also gets the repair call.
+  The kit puts each line of the repair reply in its place by its name. It leaves out each line that still has a fault, and the screen keeps each other line (`kit/README.md`, section "Faults by line").
+  The app stores the template file with no faulty line in `appFile` (`docs/tool-integration.md`).
+- A template call that ends early after its first complete line gets one call for the missing lines. The kit merges the reply of that call by name.
+- A new screen fails as a whole in these cases, and then the fast path gives no screen (section "Session and hand-offs"):
+  - After the repair, the first line has a fault, or no shape, item, or `cells` control is valid.
+  - After the repair, the reply is no template file, or the kit finds a fault that no line owns.
+  - The template call ends early with no complete first line.
+  - The repair call or the call for the missing lines fails or replies `outside`.
+  - The host check of the complete screen finds a fault. This fault gets no repair call.
+- A spoken change of a template app sends a template change call with the request and the stored template file. The reply holds only the changed lines and `delete NAME`, and the kit merges them by name (`kit/README.md`, section "Merge by name").
+  A reply with faults gets one repair call. `kit/README.md` (section "Faults by line") gives what the kit does with a changed line that still has a fault. A template change call that ends early gets no call for the missing lines.
+- An `outside` reply to a template change call runs the change by lines on the expanded app file. The app then has a free app file. A typed change of a template app runs that change too.
+  A template change that gives no app falls back as a change that the kit cannot make (section "Session and hand-offs").
+
+The stage preview:
+
+- While the reply of the first template call arrives, the stage draws a stage preview of its complete lines. The first preview shows at the first complete line: the title and the picture at its final size.
+  Then the control, each part, and the card draw, each when its line is complete. An unfinished last line does not draw.
+- A line with a fault does not draw before its repair, and each other line stays.
+- A preview has the layout of the live stage app, with its control off. It takes the place of the shown app, so a later new screen replaces the shown app at its first line.
+- The kit preview step makes each preview (`kit/README.md`, section "The preview step"). `docs/tool-integration.md` gives the rules of each update.
+- While `ToolController.previewBeforeRouting` is true (the default), the early template call shows its previews before the routing call ends. When it is false, the newest preview waits until the routing call gives the kind `screen`.
+- When Alphy cancels the early template call, or the request ends, its preview goes away with no error and no spoken line. So a turn that gets no screen ends with no preview.
+- While the host check runs, the stage shows the compiled app as a preview. This applies to a new screen (a template or a free app file) and to a template change.
+- A fallback, a cancel, or a failure of a screen removes its preview, and a later preview of that screen does not show.
+- When the app is stored, the canvas keeps the drawing of the last preview until the live app draws. The control turns on when the operation is no longer busy.
+- A spoken change of a template app draws each changed line over the shown screen, in place of the live app. The preview uses the stored state, so a value that the person moved stays.
+- An `outside` reply to a template change call, a change of a free app file, and a typed request show no preview.
+- `ToolController.previewStream` is true by default. When it is false, no screen gets a preview.
+- The generation trace marks `template_call_start` and `template_outcome` (`clean0`, `clean1`, `partial1`, `outside`, `whole`, or `failed`) for the template call of a new screen.
+  It marks `stage_preview` with the `holds` value of each preview that shows, and `stage_preview_gone` when a shown preview goes away with no app.
+  It marks `controls_on` when the operation is no longer busy after a screen stored its app.
 
 ### Data sent to OpenAI
 
