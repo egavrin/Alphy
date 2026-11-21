@@ -187,7 +187,7 @@ control = slider(LABEL, MIN, MAX, STEP, START), or control = choice(LABEL, [OPTI
 s1 = SHAPE, and so on to s12 = SHAPE
 card = card(TITLE, TEXT)
 A slider is a number that the person drags from MIN to MAX in steps of STEP, and START is its start value. A choice has 2 to 6 options, each at most 12 characters, and START is one of them. With no START the first option is the start.
-s1 to s12 are at most 12 shapes in a box 300 wide and 220 high. x goes right and y goes down. At least one shape reads $/v, so that the control changes the picture.
+s1 to s12 are at most 12 shapes in a box 300 wide and 220 high. Use as few shapes as show the thing: most pictures need 4 to 8. x goes right and y goes down. At least one shape reads $/v, so that the control changes the picture.
 Shapes: circle(x, y, r, color), rect(x, y, w, h, color, radius), line(x1, y1, x2, y2, color, width), text(x, y, value, color, size), polygon([x1, y1, x2, y2, ...], color). A shape takes visible=test and stroke=true for the outline only. The center of a text is at x, y, and a text in quotes in a shape has at most 28 characters.
 Keep each shape inside the box, and put a text where no shape covers it. The point at angle a on a circle around cx, cy is cx + r * cos(a), cy - r * sin(a). A later shape covers an earlier one.
 color: "ink", "muted", "accent", "surface", "water", "land", "sun", "sand", "wood", "success", "warning", or "#RRGGBB". A line or an outline is never "muted".
