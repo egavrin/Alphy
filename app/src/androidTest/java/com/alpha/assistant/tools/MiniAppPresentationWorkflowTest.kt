@@ -1762,7 +1762,8 @@ class MiniAppPresentationWorkflowTest {
             assertEquals(original,store.tool("lake"))
         }
     }
-    @Test fun concurrentStateChangeRejectsStaleApplyWithoutDataLoss() = fixture(true) {model,store,_ ->
+    // Ruling FX-6: a saved state change before the apply does not fail the change. The new revision holds the newer value.
+    @Test fun concurrentStateChangeIsKeptByTheAppliedChange() = fixture(true) {model,store,_ ->
         instrumentation.runOnMainSync {model.openSurface("lake")}
         waitUntil {!model.tools.busy}
         instrumentation.runOnMainSync {model.tools.selectDraft("candidate")}
@@ -1772,13 +1773,18 @@ class MiniAppPresentationWorkflowTest {
         val changed=old.copy(stateVersion=old.stateVersion+1,state=nextState.toString())
         store.commitTool(changed,old,false)
         click("Применить изменения")
-        waitUntil {!model.tools.busy && model.tools.error != null}
-        shown("Инструмент изменился. Открой текущую версию.")
-        assertEquals(changed,store.tool("lake")); assertNotNull(store.draft("candidate"))
-        shown("Применить изменения"); shown("Удалить предпросмотр")
-        screenshot("stale-apply-rejected")
-        click("Удалить предпросмотр")
-        shown("Lake day"); assertEquals(changed,store.tool("lake"))
+        waitUntil {!model.tools.busy && store.tool("lake")!!.revision == 2}
+        assertNull(model.tools.error)
+        // The row of revision 2 starts from the concurrent commit: it holds each saved value of that commit, and no value from before it.
+        val saved=store.tool("lake")!!
+        assertEquals(changed.stateVersion+1,saved.stateVersion)
+        assertTrue(saved.state,sameToolJson(JSONObject(changed.state),JSONObject(saved.state)))
+        assertEquals("Concurrent saved edit",JSONObject(saved.state).getJSONArray("stops").getJSONObject(0).getString("detail"))
+        assertEquals(2,store.revisions("lake").size)
+        assertEquals(2,store.draft("candidate")?.acceptedRevision)
+        assertTrue(store.effects("lake").isEmpty())
+        shown("Revised lake day")
+        screenshot("concurrent-apply-kept")
     }
     @Test fun twoButtonsOnOneStopCreateDistinctCorrectNativeRequests() {
         val definition=JSONObject(ItineraryFixture.spec())

@@ -343,10 +343,10 @@ class AppFileChangeWorkflowTest {
 
     /**
      * The lesson app after a press of its lap button, which starts an animate of the angle. With [open], the host of its drawing is open before the
-     * press, as the stage keeps it, and the second value is its session.
+     * press, as the stage keeps it, and the second value is its session. [lapMs] is the time of the lap.
      */
-    private fun lapRunning(open: Boolean): Pair<ToolRecord, Long?> {
-        val lesson = created(plan("lesson"), LESSON_REQUEST)
+    private fun lapRunning(open: Boolean, lapMs: Int = 5000): Pair<ToolRecord, Long?> {
+        val lesson = created(plan("lesson").replace("360, 5000", "360, $lapMs"), LESSON_REQUEST)
         val session = if (open) runBlocking { engine.openArtifactHost(lesson.id, lesson.revision) }.sessionGeneration else null
         return pressed(lesson, "lap_button", null) to session
     }
@@ -355,6 +355,24 @@ class AppFileChangeWorkflowTest {
     private suspend fun tick(record: ToolRecord, session: Long?): ToolRecord {
         delay(100)
         return engine.artifactEvent(record.id, record.revision, JSONObject().put("type", "timer").put("timerId", "anim"), session).tool
+    }
+
+    // Failure case: a press after the end of a lap ended the lap and its timer, and the timer event that the host of the drawing read before
+    // the press stopped the drawing with «Сеанс остановлен».
+    @Test fun aTimerEventAfterAPressThatEndsTheLapChangesNothing() {
+        val (lapped, session) = lapRunning(open = true, lapMs = 200)
+        val shown = runBlocking { engine.artifactSnapshot(lapped.id, lapped.revision, session) }
+        val timer = shown.timers.keys.single()
+        Thread.sleep(300)
+        // No tick after the end of the lap: the press takes the queue slot between the snapshot of the host and its timer event.
+        val next = pressed(lapped, "lesson_next", null)
+        val late = runBlocking { engine.artifactEvent(lapped.id, lapped.revision, JSONObject().put("type", "timer").put("timerId", timer), session) }
+        // The press applies, the lap keeps its end value, and the late timer replaces nothing.
+        assertEquals(2, JSONObject(next.state).getInt("lesson"))
+        assertEquals(360.0, angle(next), 0.0)
+        assertTrue(late.timers.toString(), late.timers.isEmpty())
+        assertEquals(next, late.tool)
+        assertEquals(next, store.tool(lapped.id))
     }
 
     // Failure case (R1 of the owner's dialogue): a tick of a running animate after the request read its app failed the change at its draft.

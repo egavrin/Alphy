@@ -492,8 +492,9 @@ internal class ArtifactCoordinator private constructor() {
         val active=session
         check(active!=null || hosts.values.any {it.nonGraphics}) {"The artifact session is closed. Reopen the mini-app."}
         GraphicsContract.validateSurfaceEvent(event,effectiveSurfaces)
-        if(event.getString("type")=="frame")require(event.getString("surfaceId") in frames) {"The surface did not subscribe to frames."}
-        if(event.getString("type")=="timer")require(event.getString("timerId") in timers) {"The timer did not subscribe."}
+        // A press can end a subscription after the host read it. The app gets no late frame or timer event, and nothing changes.
+        if(event.getString("type")=="frame" && event.getString("surfaceId") !in frames ||
+            event.getString("type")=="timer" && event.getString("timerId") !in timers) return snapshot(store)
         if(store.artifactWorkPending(id))return snapshot(store)
         val result=evaluate(generation,old,event)
         if(active!=null) ensureCurrentEvaluation(store,id,active)

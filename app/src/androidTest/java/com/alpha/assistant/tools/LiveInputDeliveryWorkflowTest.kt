@@ -105,7 +105,8 @@ class LiveInputDeliveryWorkflowTest {
             {"type":"input","text":"Hidden","bind":"text","action":"hidden","inputMode":"live","visible":false},
             {"type":"input","text":"Disabled","bind":"text","action":"disabled","inputMode":"live","enabled":false},
             {"type":"input","text":"Apply","bind":"text","action":"apply"},
-            {"type":"button","text":"Probe","action":"probe"}
+            {"type":"button","text":"Probe","action":"probe"},
+            {"type":"button","text":"Stop","action":"stop"}
         ]}"""
         val source="""
             const e=input.event,s=input.state;
@@ -116,6 +117,7 @@ class LiveInputDeliveryWorkflowTest {
                 s.text=e.value;
             }
             if(e.type==='action' && e.actionId==='probe' && globalThis.lastEdit) s.text=globalThis.lastEdit;
+            if(e.type==='action' && e.actionId==='stop') return {state:s,frames:[]};
             if(e.type==='frame') {
                 s.frames++;
                 const ui=$ui;
@@ -202,6 +204,20 @@ class LiveInputDeliveryWorkflowTest {
             assertEquals(LiveInputResult.Rejected(LiveInputRejection.Conflict),withTimeout(5000) {replaced.await()})
             engine.flushArtifact(initial.id,1,first.sessionGeneration)
             assertEquals("",JSONObject(checkNotNull(store.tool(initial.id)).state).getString("other"))
+        }
+    }
+
+    // Failure case: a press that stopped the frames came between the snapshot of the host of the drawing and its frame event, and the late frame stopped the drawing.
+    @Test fun aFrameAfterAPressThatStopsTheFramesChangesNothing(): Unit=runBlocking {
+        fixture {store,engine,_,initial,_ ->
+            val shown=engine.openArtifact(initial)
+            assertEquals(setOf("board"),shown.frames)
+            val stopped=engine.interact(initial.id,1,initial.stateVersion,"stop",null)
+            val late=engine.artifactEvent(initial.id,1,GraphicsContract.event("frame",16,surfaceId="board"),shown.sessionGeneration)
+            assertTrue(late.frames.isEmpty())
+            assertEquals(stopped,late.tool)
+            assertEquals(stopped,store.tool(initial.id))
+            assertEquals(0,JSONObject(stopped.state).getInt("frames"))
         }
     }
 

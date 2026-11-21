@@ -1129,7 +1129,8 @@ class AutomaticToolWorkflowTest {
             }
         }
     }
-    @Test fun incompatibleRevisionRepairsButAConcurrentStateChangeStillRejectsCommit() {
+    // Ruling FX-6: a state commit during a change does not fail the change. The revision holds the newer value.
+    @Test fun incompatibleRevisionRepairsAndKeepsAConcurrentStateChange() {
         listOf(false,true).forEach { changeState ->
             val entered = CountDownLatch(1); val release = CountDownLatch(1)
             var calls = 0
@@ -1156,13 +1157,11 @@ class AutomaticToolWorkflowTest {
                             .interact(before.id,before.revision,before.stateVersion,"add",null)
                     } else before
                     release.countDown(); f.idle(); assertEquals(3,calls)
-                    if(changeState) {
-                        assertEquals("error",f.last.status); assertEquals(expected,f.toolStore.tool("existing"))
-                        assertEquals(1,f.toolStore.revisions("existing").size)
-                    } else {
-                        assertEquals("complete",f.last.status); assertEquals(2,f.toolStore.tool("existing")!!.revision)
-                        assertEquals(4,JSONObject(f.toolStore.tool("existing")!!.state).getInt("count"))
-                    }
+                    // The press during the repair call counts: the revision starts from the count after it, not from the count that the refine read.
+                    assertEquals(if(changeState) 5 else 4,JSONObject(expected.state).getInt("count"))
+                    assertEquals("complete",f.last.status); assertEquals(2,f.toolStore.tool("existing")!!.revision)
+                    assertEquals(JSONObject(expected.state).getInt("count"),JSONObject(f.toolStore.tool("existing")!!.state).getInt("count"))
+                    assertEquals(2,f.toolStore.revisions("existing").size)
                     assertTrue(f.toolStore.drafts().isEmpty()); assertTrue(f.toolStore.effects("existing").isEmpty())
                 } finally { release.countDown() }
             }
