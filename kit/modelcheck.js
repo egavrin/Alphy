@@ -70,16 +70,28 @@ const CHANGE_REPAIRS = 1;
 /** The files of the sets of the template check (stage templates plan, decision 7): T tuning, U held-out screens, V held-out changes, W the change pilot. */
 const TEMPLATE_SETS = { T: "template-tuning.json", U: "template-holdout.json", V: "template-changes.json", W: "template-pilot.json" };
 const isChangeSet = (set) => set === "V" || set === "W";
+/** The expect of a screen item that names only its type, as the items of set U do (stage templates plan, Task 7). */
+const EXPECT_OF_TYPE = { explain: "template", learn: "outside" };
 /**
  * The items of a template set. A screen item is {id, request, expect: "template" | "outside" | "any"}, and a change item of V or W is
  * {id, base, request, expect: "lines" | "outside"}, which gets the text of its base file of test/fixtures/template-bases/ as plan.
  * The read is lazy: a set whose file is missing stops only the run that names it.
+ * A screen item with type: "explain" | "learn" and no expect gets the expect of its type (EXPECT_OF_TYPE).
  */
 export function templateSet(name) {
   const at = (path) => new URL(`./test/fixtures/${path}`, import.meta.url);
   if (!existsSync(at(TEMPLATE_SETS[name]))) throw new Error(`set ${name}: kit/test/fixtures/${TEMPLATE_SETS[name]} is missing`);
-  return JSON.parse(readFileSync(at(TEMPLATE_SETS[name]), "utf8"))
-    .map((item) => ({ ...item, set: name, ...(isChangeSet(name) && { plan: readFileSync(at(`template-bases/${item.base}`), "utf8") }) }));
+  return JSON.parse(readFileSync(at(TEMPLATE_SETS[name]), "utf8")).map((item) => ({ ...item, set: name, expect: item.expect ?? EXPECT_OF_TYPE[item.type],
+    ...(isChangeSet(name) && { plan: readFileSync(at(`template-bases/${item.base}`), "utf8") }) }));
+}
+/**
+ * The records with the expect of their item: a record with no expect takes the one of its item in the file of its set, by its id. The records of
+ * the final run of 2026-11-21 hold no expect, because set U named only the type of each item then.
+ */
+export function withItemExpect(records) {
+  const items = new Map();
+  const itemOf = (record) => (items.get(record.set) ?? items.set(record.set, templateSet(record.set)).get(record.set)).find((item) => item.id === record.id);
+  return records.map((record) => (record.expect !== undefined || !Object.hasOwn(TEMPLATE_SETS, record.set) ? record : { ...record, expect: itemOf(record)?.expect }));
 }
 
 /** The cases of set C: each request of the corpus, the reply text of its saved report, and the path of its baseline app. */
@@ -562,7 +574,7 @@ if (import.meta.main) {
     for (const label of labels) {
       const records = recordsOf(label);
       if (records.some((record) => Object.hasOwn(TEMPLATE_SETS, record.set))) {
-        console.log(templateRow(label, records));
+        console.log(templateRow(label, withItemExpect(records)));
         if (detail) for (const [fault, row] of faultTable(records)) console.log(`  ${row.count} ${row.repaired} ${row.kept} ${row.last} | ${fault} | ${row.ids.join(" ")}`);
         continue;
       }

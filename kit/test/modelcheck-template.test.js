@@ -107,3 +107,21 @@ test("overLimitHoldsBothCaps", () => {
   const templates = [...entries(525, "final-terra-low d-moon low"), ...entries(150, "tpl-tune t-ship low")];
   expect([check.overLimit(templates, "tpl-final u-x low"), check.overLimit(templates, "fresh-terra-low e-bmi-en low"), check.overLimit(templates.slice(0, -1), "tpl-final u-x low")]).toEqual([true, false, false]);
 });
+
+test("theHeldOutScreensLoadWithTheExpectOfTheirType", () => {
+  // Set U names the type of each item (Task 7): explain gives template, and learn gives outside.
+  const items = check.templateSet("U");
+  expect([items.length, items.filter((item) => item.expect === "template").length, items.filter((item) => item.expect === "outside").length]).toEqual([24, 16, 8]);
+  expect(items.filter((item) => item.expect !== { explain: "template", learn: "outside" }[item.type]).map((item) => item.id)).toEqual([]);
+  // An item that has its own expect keeps it.
+  expect(check.templateSet("T").find((item) => item.id === "t-morse").expect).toBe("any");
+});
+
+test("aRecordWithNoExpectTakesTheExpectOfItsItem", () => {
+  // The records of the final run of 2026-11-21 hold no expect, so the table takes it from the set file by the id of the record.
+  const items = check.templateSet("U"), explain = items.find((item) => item.type === "explain"), learn = items.find((item) => item.type === "learn");
+  const record = (id, outcome, more = {}) => ({ id, set: "U", outcome, firstCallMs: 1000, repeated: 0, replied: { kind: outcome === "outside" ? "outside" : "lines" }, ...more });
+  const records = check.withItemExpect([record(explain.id, "clean0"), record(learn.id, "outside"), record(learn.id, "outside", { expect: "template" })]);
+  expect(records.map((one) => one.expect)).toEqual(["template", "outside", "template"]);
+  expect(check.templateNumbers(records.slice(0, 2))).toMatchObject({ explainClean: 1, refusalsRight: 1, explainRefused: 0 });
+});

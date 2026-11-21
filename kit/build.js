@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PROMPT, changeText, repairText, templateChangeText, templateRepairText } from "./prompt.js";
+import { PROMPT, changeText, repairText, templateChangeText, templateRepairText, templateRestText } from "./prompt.js";
 import { TEMPLATE_HEAD } from "./src/template.js";
 
 /** The modules of the bundle in dependency order: each one imports only modules before it. */
@@ -101,11 +101,13 @@ export async function bundle() {
  * joined by "\n- ", so a filled template is the text of repairText and changeText (prompt.js). No prompt text is typed in Kotlin.
  * The template prompt adds its section (template), the task texts of its repair and change calls with the same placeholders
  * (templateRepairTask, templateChangeTask), and templateHead, the source of the pattern that tells a template file from an app file (src/template.js).
+ * templateRestTask is the task text of the call for the missing lines of a template call that stopped early, with {{task}} and {{plan}}.
  */
 export const promptAsset = () => ({ system: PROMPT.System, repair: PROMPT.Repair, dialogue: PROMPT.Dialogue, change: PROMPT.Change,
   repairTask: repairText({ task: "{{task}}", plan: "{{plan}}", faults: ["{{faults}}"] }), changeTask: changeText({ request: "{{request}}", plan: "{{plan}}" }),
   template: PROMPT.Template, templateRepairTask: templateRepairText({ task: "{{task}}", plan: "{{plan}}", faults: ["{{faults}}"] }),
-  templateChangeTask: templateChangeText({ request: "{{request}}", plan: "{{plan}}" }), templateHead: TEMPLATE_HEAD.source });
+  templateChangeTask: templateChangeText({ request: "{{request}}", plan: "{{plan}}" }), templateRestTask: templateRestText({ task: "{{task}}", plan: "{{plan}}" }),
+  templateHead: TEMPLATE_HEAD.source });
 
 /** The plan files of a directory. */
 export const plansIn = (directory) => readdirSync(directory).filter((name) => name.endsWith(".plan")).map((name) => join(directory, name));

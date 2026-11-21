@@ -34,3 +34,6 @@ export const templateRepairText = ({ task, plan, faults }) => `${task}\n\nYour l
 
 /** The text of a change call of a template file: the request of the person, the stored template file, and the change rule of the template prompt. */
 export const templateChangeText = ({ request, plan }) => `${request}\n\nYour lines:\n${plan.trimEnd()}\n\n${PROMPT["Template change"]}`;
+
+/** The text of a rest call of a template file: the task, the complete lines so far of a call that stopped early, and the rest rule of the template prompt. */
+export const templateRestText = ({ task, plan }) => `${task}\n\nYour lines so far:\n${plan.trimEnd()}\n\n${PROMPT["Template rest"]}`;

@@ -11,7 +11,8 @@ A change call of an app gets the request, the app file, and the section "Change"
 The section "Template" is the instructions of each call of a template file for a voice screen (`src/template.js`), and of its repair and change calls.
 A template repair call gets the task, the lines, the faults of the kit, and the section "Template repair" (`prompt.js` `templateRepairText`).
 A template change call gets the request, the stored template file, and the section "Template change" (`prompt.js` `templateChangeText`).
-`PROMPT_HASH` covers the sections "System", "Repair", "Dialogue", and "Change", and `TEMPLATE_HASH` covers the three template sections.
+A template rest call gets the task, the complete lines so far of a call that stopped early, and the section "Template rest" (`prompt.js` `templateRestText`).
+`PROMPT_HASH` covers the sections "System", "Repair", "Dialogue", and "Change", and `TEMPLATE_HASH` covers the three template sections. The section "Template rest" is in neither.
 `test/prompt.test.js` compiles each example of the section "Template" and checks that the section states each cap of the budget.
 
 ## System
@@ -255,3 +256,7 @@ The kit found faults in some lines of your screen. A fault starts with the name 
 ## Template change
 
 The request above asks for a change of your screen. Write each line that changes and each new line, complete and with its name, and nothing more: a line with the name of an earlier line replaces it, a new part takes the next free name, such as s4 after s3, and delete NAME removes a part. Do not write a line that stays as it is. Keep the template and the names of the lines, and keep the caps of the template. When the template cannot hold the change, reply with the one line outside("other"). Reply with lines only.
+
+## Template rest
+
+Your reply stopped before its end, and the lines above are the complete lines of your screen so far. Write only the lines that the screen does not hold yet, each complete and with its name, and nothing more: keep the fixed order of the first line, the control, the parts, and the card, and give a new part the next free name, such as s4 after s3. Do not write a line of the screen again. Reply with lines only.

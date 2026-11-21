@@ -23,8 +23,8 @@ const optionsIn = (text) => [...new Set([...text.matchAll(/\b([A-Za-z]+)=/g)].ma
 /** A task text of prompt.json with each placeholder filled one time, as the host fills it. */
 const fill = (template, values) => template.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key]);
 
-test("prompt: the file has the sections System, Repair, Dialogue, Change, Template, Template repair, and Template change", () => {
-  expect(Object.keys(SECTIONS)).toEqual(["System", "Repair", "Dialogue", "Change", "Template", "Template repair", "Template change"]);
+test("prompt: the file has the sections System, Repair, Dialogue, Change, Template, Template repair, Template change, and Template rest", () => {
+  expect(Object.keys(SECTIONS)).toEqual(["System", "Repair", "Dialogue", "Change", "Template", "Template repair", "Template change", "Template rest"]);
   for (const text of Object.values(SECTIONS)) expect(text.length).toBeGreaterThan(100);
   expect(KINDS.length).toBe(17);
   expect(EXAMPLES.length).toBe(4);
@@ -55,7 +55,7 @@ test("prompt (task 1): the section Change is one paragraph that names the change
 
 test("prompt.json (task 1): it holds each section of prompt.md and the two templates, and a filled template is the text that the model check sends", () => {
   const asset = promptAsset();
-  expect(Object.keys(asset)).toEqual(["system", "repair", "dialogue", "change", "repairTask", "changeTask", "template", "templateRepairTask", "templateChangeTask", "templateHead"]);
+  expect(Object.keys(asset)).toEqual(["system", "repair", "dialogue", "change", "repairTask", "changeTask", "template", "templateRepairTask", "templateChangeTask", "templateRestTask", "templateHead"]);
   expect([asset.system, asset.repair, asset.dialogue, asset.change, asset.template]).toEqual([SECTIONS.System, SECTIONS.Repair, SECTIONS.Dialogue, SECTIONS.Change, SECTIONS.Template]);
   // templateHead is the source of the pattern of a first line, not a text of the prompt, so it is short.
   const { templateHead, ...texts } = asset;
@@ -236,4 +236,18 @@ test("theBundleReadsATemplate", async () => {
   const input = { text: ship, plan: null, read: true, previous: null, cap: 65536 };
   const step = JSON.parse(await runInContext(`compileStep(${JSON.stringify(input)}).then(JSON.stringify)`, context));
   expect([step.kind, step.text, step.result.faults, step.result.template, step.result.definition === null]).toEqual(["plan", ship, [], "scene", false]);
+});
+
+test("theRestSectionChangesNoHash", () => {
+  // The hashes of the free records and of the records of gate 2b: the rest section came after them.
+  const { PROMPT_HASH, TEMPLATE_HASH, hashOf } = prompts, rest = SECTIONS["Template rest"];
+  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "6595f0dbb072"]);
+  expect(rest?.length).toBeGreaterThan(100);
+  const copy = { ...SECTIONS, "Template rest": `${rest} Write it.` };
+  expect([hashOf(["System", "Repair", "Dialogue", "Change"], copy), hashOf(["Template", "Template repair", "Template change"], copy)]).toEqual([PROMPT_HASH, TEMPLATE_HASH]);
+  // The task text of a rest call: the task and the complete lines so far, filled as the host fills the other task texts.
+  const asset = promptAsset();
+  for (const part of ["{{task}}", "{{plan}}"]) expect([part, asset.templateRestTask?.includes(part)]).toEqual([part, true]);
+  expect(asset.templateRestTask.endsWith(rest)).toBe(true);
+  expect(fill(asset.templateRestTask, { task: "TASK", plan: ship.trimEnd() })).toBe(prompts.templateRestText({ task: "TASK", plan: ship }));
 });
