@@ -38,7 +38,8 @@ Paths: `app/…/` is `app/src/main/java/com/alpha/assistant/`, and `test/…/` i
 - A failed gate goes to the owner before the work that depends on it.
 - Model check budget: at most 150 calls of `gpt-6.1-terra` at the effort low. Each label starts with `tpl-`. `LIMIT` in `kit/modelcheck.js` goes from 539 to 689, and a second cap stops the 151st `tpl-` call. `evidence/modelcheck/spend.json` held 525 calls on 2026-11-21.
 - Split of the 150 calls: tuning at most 56, change pilot at most 12, final run at most 80, 2 in reserve. The final run happens once.
-- Live budget: at most 480 s of voice and 160 chat calls. Phase 1 live check: 180 s and 60 calls. Gate 5: 300 s and 100 calls. The 15 calls left of the template check stay with that check.
+- Live budget: at most 480 s of voice and 160 chat calls, for the one live check after both phases (Task 23). The 15 calls left of the template check stay with that check.
+- Order of the owner, 2026-11-21 ("Faster"): one push to `main` after both phases, then the release. The stream tasks start when Task 5 is in, and they do not wait for the gates of phase 1. No check is dropped: the full device suite and the live check run once, on the final head.
 - Only the controller runs a paid call, a merge, a commit, or a push. No push without the owner's yes.
 - Commit gate: before each commit the controller runs the Slopo review and `bash .superpowers/sdd/2026-11-18-app-file-kit/scripts/gate.sh`, and resolves each blocking finding. The controller reads each patch itself, applies it, and commits it by task. No reviewer agent.
 - Before a push the controller does the untangle review of the range against `origin/main` and records it.
@@ -142,27 +143,26 @@ Design section 6 changes two anti-goals of `docs/superpowers/specs/2026-11-20-di
 
 ## Lanes and order
 
-Phase 1 (templates). It works alone and can go to `main` after the owner's yes.
+Phase 1 (templates). It works alone. It gets no push of its own (the order of 2026-11-21 in Global Constraints).
 
 | Lane | Tasks in order | Starts after |
 | --- | --- | --- |
 | K (kit) | 1, 2, 3 | — |
 | A (app, `emulator-5592`) | 4, 5, 10 | 2 |
-| D (device gate, `emulator-5596`) | 9, then 8b | 9 after 4; 8b after 8 |
+| D (device gate, `emulator-5596`) | 9, 14, 10b, then 8b | 9 after 4; 14 after 13; 10b after 5; 8b after 8 |
 | P (paid, controller) | 6, then 8 | 6 after 3; 8 after 7 |
 | H (held-out author) | 7 | 6 |
-| B (`emulator-5594`) | 10b | 5 |
-| Controller | 11, 12 | 5, 8, 8b, 9, 10, 10b |
+| Controller | 12 | 5, 8, 8b, 9, 10, 10b |
 
-Phase 2 (stream). Tasks 13 and 14 (the device cost, gate 1a) run beside phase 1. Each other task starts after Task 12.
+Phase 2 (stream). Tasks 13 and 14 (the device cost, gate 1a) run beside phase 1. Tasks 15 and 16 start when Tasks 5 and 14 are in. Task 12 is a check point, and no task waits for it.
 
 | Lane | Tasks in order | Starts after |
 | --- | --- | --- |
 | K | 13, 21, 13b | 13 after 3; 13b after 8 and 13 |
-| D (`emulator-5596`) | 14, then 20 | 14 after 13 (and after 9 frees the emulator); 20 after 17 and 19 |
-| A (`emulator-5592`) | 15, 17, 18, 22 | 15 after 12 and 14; 17 after 13b, 15, and 16 |
-| B (`emulator-5594`) | 16, then 19 | 16 after 12 and 14; 19 after 17 |
-| Controller | 23, 24 | 18, 19, 20, 21, 22 |
+| D (`emulator-5596`) | 20 | 17 and 19 |
+| A (`emulator-5592`) | 15, 17, 18, 22 | 15 after 5 and 14; 17 after 13b, 15, and 16 |
+| B (`emulator-5594`) | 16, then 19 | 16 after 5 and 14; 19 after 10b and 17 |
+| Controller | 23, 24, 25 | 8, 8b, 9, 12, 18, 19, 20, 21, 22 |
 
 Task 13 and Task 6 both lead to new generated assets (`kit.js`, `prompt.json`). The controller runs `bun kit/build.js` after it applies each of them.
 
@@ -431,7 +431,7 @@ Gate 2 runs in Bun, so it shows only the faults of the kit. The app also runs it
 
 ### Task 10b: New subjects of the phase 1 live check
 
-**Lane:** B · **Waits for:** 5 · **Who:** agent (`emulator-5594`)
+**Lane:** D · **Waits for:** 5 · **Who:** agent (`emulator-5596`)
 
 **Files:**
 - Modify: `test/…/ui/DialogueDriver.kt` (the list of dialogues, and the `evidence` map of the goals), `test/…/ui/LiveDialogueStageTest.kt` (one method for each new dialogue), `test/…/ui/DialogueStageRehearsalTest.kt`.
@@ -447,25 +447,19 @@ Gate 2 runs in Bun, so it shows only the faults of the kit. The app also runs it
 - [ ] **Step 4: Run** `DialogueStageRehearsalTest` and `DialogueRecorderTest`, and see each pass.
 - [ ] **Step 5: Hand back** the patch and the test output with the `lastUpdateTime` values. No commit.
 
-### Task 11: Phase 1 live check
+### Task 11: Phase 1 live check (moved)
 
-**Lane:** controller · **Waits for:** 5, 8, 8b, 9, 10b · **Who:** controller
+The owner chose one live check after both phases (Global Constraints, the order of 2026-11-21). Task 23 runs the dialogues `tplA`, `tplB`, and `tplC` of Task 10b with its own dialogues, in one budget. No task has this number.
 
-- [ ] **Step 1: Prepare.** One free emulator. Budget: 180 s of voice and 60 chat calls. `#tplC` runs at the fold size: set it before that run and reset it after (Global Constraints).
-- [ ] **Step 2: Run** the free rehearsal (`DialogueStageRehearsalTest`, `StageTemplateWorkflowTest`), then the paid dialogues `LiveDialogueStageTest#tplA`, `#tplB`, and `#tplC` with the label `tpl-live1` (the form of Global Constraints).
-- [ ] **Step 3: Judge.** Look at each picture. Report speech end to screen against today's 8.4 to 12.3 s, the template outcomes, the refusals, and the fit.
-- [ ] **Step 4: Failure path.** An anti-goal seen, a screen that scrolls, or an explain request refused: report to the owner before Task 12.
-- [ ] **Step 5: Record** the marks, the voice seconds, and the calls in the ledger.
+### Task 12: Phase 1 check point
 
-### Task 12: Phase 1 merge and commit
-
-**Lane:** controller · **Waits for:** 10, 11 · **Who:** controller
+**Lane:** controller · **Waits for:** 5, 8, 8b, 9, 10, 10b · **Who:** controller
 
 - [ ] **Step 1: Prepare.** Each patch of Tasks 1 to 10b is applied in the order of the File map and committed by its task.
-- [ ] **Step 2: Run** `bun test kit`, `bun kit/build.js --check`, each changed device class on one emulator, and the full device suite once on the phase head.
-- [ ] **Step 3: Do** the untangle review of the range against `origin/main` and record it.
-- [ ] **Step 4: Failure path.** A blocking finding or a failed check: fix it in the owning task, and repeat Steps 2 and 3.
-- [ ] **Step 5: Record** the commits, and ask the owner for the push of phase 1 to `main`. No push without the owner's yes.
+- [ ] **Step 2: Run** `bun test kit`, `bun kit/build.js --check`, the free rehearsal (`DialogueStageRehearsalTest`, `StageTemplateWorkflowTest`), and each changed device class on one emulator. The full device suite runs once, in Task 24.
+- [ ] **Step 3: Judge.** Each gate of phase 1 (2, 2c, 3) holds its bar.
+- [ ] **Step 4: Failure path.** A failed check: fix it in the owning task, and repeat Step 2. A missed bar goes to the owner.
+- [ ] **Step 5: Record** the commits and the gate results in the ledger. No push here.
 
 ## Phase 2: the stream
 
@@ -536,7 +530,7 @@ Gate 2 runs in Bun, so it shows only the faults of the kit. The app also runs it
 
 ### Task 15: Text hand-off
 
-**Lane:** A · **Waits for:** 12, 14 · **Who:** agent (`emulator-5592`)
+**Lane:** A · **Waits for:** 5, 14 · **Who:** agent (`emulator-5592`)
 
 **Files:**
 - Modify: `app/…/tools/ToolEngine.kt` (`response`, `appFileCall`, `planCall`, `earlyPlan`), `app/…/tools/agent/AppFileSteps.kt` (the typealias and the constructor and `routeAppFile` types), `app/…/tools/agent/AppAgent.kt` (the type at line 103).
@@ -563,7 +557,7 @@ Gate 2 runs in Bun, so it shows only the faults of the kit. The app also runs it
 
 ### Task 16: Stage preview
 
-**Lane:** B · **Waits for:** 12, 14 · **Who:** agent (`emulator-5594`)
+**Lane:** B · **Waits for:** 5, 14 · **Who:** agent (`emulator-5594`)
 
 **Files:**
 - Create: `app/…/tools/StagePreview.kt`, `test/…/ui/StagePreviewWorkflowTest.kt`.
@@ -652,7 +646,7 @@ Gate 2 runs in Bun, so it shows only the faults of the kit. The app also runs it
 
 ### Task 19: Recorder marks and the stream rehearsal
 
-**Lane:** B · **Waits for:** 17 · **Who:** agent (`emulator-5594`)
+**Lane:** B · **Waits for:** 10b, 17 · **Who:** agent (`emulator-5594`)
 
 **Files:**
 - Modify: `test/…/ui/DialogueRecorder.kt`, `test/…/ui/DialogueDriver.kt` (`ScriptedChat`, the list of dialogues), `test/…/ui/DialogueStageRehearsalTest.kt`, `test/…/ui/DialogueRecorderTest.kt`, `test/…/ui/LiveDialogueStageTest.kt`.
@@ -713,23 +707,33 @@ Gate 2 runs in Bun, so it shows only the faults of the kit. The app also runs it
 
 ### Task 23: Gate 5, live check
 
-**Lane:** controller · **Waits for:** 18, 19, 20, 21, 22 · **Who:** controller
+**Lane:** controller · **Waits for:** 12, 18, 19, 20, 21, 22 · **Who:** controller
 
-- [ ] **Step 1: Prepare.** One free emulator. Budget: 300 s of voice and 100 chat calls. `#tplF` runs at the fold size: set it before that run and reset it after (Global Constraints).
-- [ ] **Step 2: Run** the free rehearsal (Task 19 cases), then the paid dialogues `LiveDialogueStageTest#tplD`, `#tplE`, and `#tplF` with the label `tpl-live2`, then the paid probe `LiveDialogueStageTest#noScreen` in the same budget (the form of Global Constraints).
+- [ ] **Step 1: Prepare.** One free emulator. Budget: 480 s of voice and 160 chat calls. `#tplC` and `#tplF` run at the fold size: set it before each of these runs and reset it after (Global Constraints).
+- [ ] **Step 2: Run** the free rehearsal (the cases of Tasks 10b and 19), then the paid dialogues `LiveDialogueStageTest#tplA` to `#tplF` with the label `tpl-live`, then the paid probe `LiveDialogueStageTest#noScreen` in the same budget (the form of Global Constraints). Run `#tplA` and `#tplD` first and look at their pictures before the other runs.
 - [ ] **Step 3: Judge.** Look at each picture. Report `first_line_visible`, `first_part_visible`, `picture_complete`, and `controls_on` for each screen against the estimates (frame about 3.1 s, first shape about 3.5 s, picture about 5.0 s, controls on 6.4 to 7.8 s) and today's 8.4 to 12.3 s. Report `preview_updates`, and the count of frames that went away in the probe (design section 6).
 - [ ] **Step 4: Failure path.** An anti-goal seen (a part that moves, a screen that starts again, a control on before the app is live, a frame with no end), or controls on later than today: report to the owner before Task 24.
 - [ ] **Step 5: Record** the marks, the voice seconds, and the calls in the ledger.
 
-### Task 24: Phase 2 merge and commit
+### Task 24: Final checks and the push
 
 **Lane:** controller · **Waits for:** 23 · **Who:** controller
 
-- [ ] **Step 1: Prepare.** Each patch of Tasks 13 to 22 is applied in the order of the File map and committed by its task.
-- [ ] **Step 2: Run** `bun test kit`, `bun kit/build.js --check`, each changed device class on one emulator, and the full device suite once on the phase head.
-- [ ] **Step 3: Do** the untangle review of the range against `origin/main` and record it.
-- [ ] **Step 4: Failure path.** A blocking finding or a failed check: fix it in the owning task, and repeat Steps 2 and 3.
-- [ ] **Step 5: Record** the commits, and ask the owner for the push of phase 2 to `main`. No push without the owner's yes.
+- [ ] **Step 1: Prepare.** Each patch of Tasks 1 to 22 is applied in the order of the File map and committed by its task.
+- [ ] **Step 2: Run** `bun test kit`, `bun kit/build.js --check`, and the full device suite once on the final head. Explain each failure: run it alone, and run it on `origin/main` when it fails alone.
+- [ ] **Step 3: Do** the untangle review of the range against `origin/main` (read after a fetch) and record it.
+- [ ] **Step 4: Failure path.** A blocking finding or a failure that this range causes: fix it in the owning task, and repeat Steps 2 and 3.
+- [ ] **Step 5: Push** to `main` (the owner's go-ahead of 2026-11-21 covers this push when the checks hold), and record the range in the ledger.
+
+### Task 25: Release
+
+**Lane:** controller · **Waits for:** 24 · **Who:** an Opus agent for the build and the checks, the controller for the version push and the publish
+
+- [ ] **Step 1: Prepare.** The next version (`0.1.0-alpha.17`, version code 17), by the release procedure of the earlier releases: one commit "Prepare Alphy Alpha 17 release" that changes only the two version lines.
+- [ ] **Step 2: Build** `./gradlew :app:assembleRelease`, and sign a copy with the key of the earlier release only when the signer certificate of that release equals it.
+- [ ] **Step 3: Check** (AGENTS.md): `aapt dump badging` succeeds, and its output has no `application-debuggable` entry. The version is right. The new file installs over the earlier release on one own emulator and starts.
+- [ ] **Step 4: Publish** the version commit to `main`, then `gh release create v0.1.0-alpha.17` as a prerelease with the signed APK. Compare the digest of the asset with the local file.
+- [ ] **Step 5: Record** the release, and tell the owner each thing that was not checked.
 
 ## Self-check
 

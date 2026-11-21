@@ -179,7 +179,9 @@ Estimates for the first screen of a talk, after speech end (from fills of one li
 
 ### 8. Order of the build
 
-Two phases. Each ends in a state that can go to `main` after the owner's yes.
+Two phases. Each ends in a state that works alone.
+
+The owner's order of 2026-11-21: one push to `main` after both phases, then one release. The stream tasks start when the app side of the templates is in. The full device suite and the live check run once, on the final head.
 
 1. **Templates**: the template file in the kit (the expansion, the faults of a line, the two fixes with no call), the template prompt, the plan step with the fall to the free plan, the repair by lines, the change by template lines, gates 2 and 3, a live check.
 2. **The stream**: the preview step of the kit and gate 1a run beside phase 1, so the device cost is known early. Then the hand-off of the text, the preview on the stage (also for a free plan before its host check), the stream of a new screen and of a change, gates 1b, 4, and 5.
