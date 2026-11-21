@@ -8,15 +8,9 @@ import { PROMPT, changeText, repairText, taskText } from "../prompt.js";
 import { BLOCKS } from "../src/change.js";
 import { patchAppFile } from "../src/compile.js";
 import { MAX_STATE_BYTES } from "../src/run.js";
-import "./helpers.js";
+import { fake } from "./helpers.js";
 
 const PLAN = 'app("Tip", lang="en")\nneed bill = input("money", "Bill", 80, min=0, max=500)\nneed tip = figure("money", "Tip", $/bill * 0.1, example=[{bill: 100}, 10])\n';
-/** A fake of the API call: each call takes the next reply of the list, and the bodies stay for the test. */
-const fake = (...texts) => {
-  const bodies = [];
-  const ask = async (body) => { bodies.push(body); const text = texts[bodies.length - 1]; return text === null ? { status: "incomplete", text: "", wallS: 1 } : { status: "completed", text, wallS: 2, firstTextS: 1, usage: { output_tokens: 10 } }; };
-  return { ask, bodies };
-};
 const item = { id: "t", set: "C", request: "A tip calculator", reply: "I'll build it.", expect: "plan" };
 
 test("modelcheck: the task text is the generationPrompt of the app, with the host line under the request of a dialogue", () => {

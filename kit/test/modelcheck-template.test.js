@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import * as check from "../modelcheck.js";
 import * as prompts from "../prompt.js";
 import { compileStep } from "../src/compile.js";
-import "./helpers.js";
+import { fake } from "./helpers.js";
 
 const ship = readFileSync(new URL("./fixtures/template/ship.plan", import.meta.url), "utf8");
 /** The line of a name of the ship file. */
@@ -14,11 +14,6 @@ const line = (name) => ship.split("\n").find((one) => one.startsWith(`${name} = 
 const broken = ship.replace(line("s2"), "s2 = polygon(45, 75, 255)");
 const screen = { id: "t-ship", set: "T", request: "Почему железный корабль не тонет?", expect: "template" };
 const task = prompts.taskText({ request: screen.request, brief: "" });
-/** A fake of the API call: each call takes the next reply of the list, and the bodies stay for the test. */
-const fake = (...texts) => {
-  const bodies = [];
-  return { bodies, ask: async (body) => { bodies.push(body); return { status: "completed", text: texts[bodies.length - 1], wallS: 1, usage: { output_tokens: 10 } }; } };
-};
 const screenOf = async (item, ...texts) => {
   const { ask, bodies } = fake(...texts);
   return { record: await check.checkTemplate(item, { ask, model: "m", effort: "low" }), bodies };
@@ -88,10 +83,20 @@ test("templateNumbersReadTheBars", () => {
   const changes = [0, 0, 1, 0, 2].map((repeated, index) => record("V", index === 4 ? "outside" : "lines", "clean0", 99000, { repeated }));
   const numbers = check.templateNumbers([...explain, ...learn, ...changes, record("V", "outside", "outside", 99000)]);
   // The median first call is the one of the 16 explain records only.
-  expect(numbers).toEqual({ explainClean: 15, refusalsRight: 7, explainRefused: 1, medianFirstCallMs: 8500, changesOnlyChanged: 3 });
+  // The right refusal of a change writes no unchanged line, so it counts with the three replies that repeat no stored line.
+  expect(numbers).toEqual({ explainClean: 15, refusalsRight: 7, explainRefused: 1, medianFirstCallMs: 8500, changesOnlyChanged: 4 });
   // An item with expect any (steps with no check) counts in no number.
   const any = [record("T", "any", "outside", 1), record("T", "any", "clean0", 1), record("T", "any", "not", 1)];
   expect(check.templateNumbers([...explain, ...learn, ...changes, record("V", "outside", "outside", 99000), ...any])).toEqual(numbers);
+});
+
+test("aRightRefusalOfAChangeCountsAsOnlyChangedLines", () => {
+  const change = (expect, outcome, replied, repeated = 0) => ({ id: `w-${expect}-${outcome}`, set: "W", expect, outcome, firstCallMs: 1, replied, repeated });
+  const onlyChanged = (record) => check.templateNumbers([record]).changesOnlyChanged, refused = { kind: "outside", word: "other" };
+  // A right refusal writes no line again. A refusal of a change that the template can hold is no right refusal.
+  expect([onlyChanged(change("outside", "outside", refused)), onlyChanged(change("lines", "outside", refused))]).toEqual([1, 0]);
+  // A reply of lines counts only when it repeats no stored line.
+  expect([onlyChanged(change("lines", "clean0", { kind: "lines", lines: 2 })), onlyChanged(change("lines", "clean0", { kind: "lines", lines: 2 }, 1))]).toEqual([1, 0]);
 });
 
 test("overLimitHoldsBothCaps", () => {

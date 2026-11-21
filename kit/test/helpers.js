@@ -66,6 +66,15 @@ export const clocked = async (text) => {
   return { kit, send, app, definition, get state() { return state; } };
 };
 export const has = (file, part) => report(file).faults.some((fault) => fault.includes(part));
+/**
+ * A fake of the API call of the model check (kit/modelcheck.js): each call takes the next reply of the list, and the bodies stay for the test.
+ * A null reply is a call that the model did not complete.
+ */
+export const fake = (...texts) => {
+  const bodies = [];
+  const ask = async (body) => { bodies.push(body); const text = texts[bodies.length - 1]; return text === null ? { status: "incomplete", text: "", wallS: 1 } : { status: "completed", text, wallS: 2, firstTextS: 1, usage: { output_tokens: 10 } }; };
+  return { ask, bodies };
+};
 
 const clock = settings.now;
 /**

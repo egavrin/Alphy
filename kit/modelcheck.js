@@ -96,6 +96,12 @@ export const bodyOf = ({ model, effort, system, input, maxTokens = MAX_OUTPUT })
   reasoning: { effort }, model, stream: true, store: false, include: ["reasoning.encrypted_content"], max_output_tokens: maxTokens,
   instructions: system, input: [{ type: "message", role: "user", content: [{ type: "input_text", text: input }] }],
 });
+/** The call of one request: it sends input with system as the instructions through ask, and keeps the call in calls with its step and effort. */
+const senderOf = ({ ask, model, system, calls }) => async (step, level, input) => {
+  const call = await ask(bodyOf({ model, effort: level, system, input }));
+  calls.push({ step, effort: level, ...call });
+  return call;
+};
 
 /** The kind of a reply for the numbers: readPlanReply of the kit, and "other" for a plan with no header and no need line. */
 export function kindOf(text) {
@@ -223,12 +229,7 @@ async function compile(input) {
 export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
   runtime.text ||= await runtimeText();
   const stored = item.set === "F" ? await storedOf(item) : null, limit = stored ? CHANGE_REPAIRS : repairs;
-  const task = stored ? changeText(item) : taskText(item), calls = [], steps = [];
-  const send = async (step, level, input) => {
-    const call = await ask(bodyOf({ model, effort: level, system: PROMPT.System, input }));
-    calls.push({ step, effort: level, ...call });
-    return call;
-  };
+  const task = stored ? changeText(item) : taskText(item), calls = [], steps = [], send = senderOf({ ask, model, system: PROMPT.System, calls });
   const first = await send(0, effort, task), kind = first.status !== "completed" ? { kind: first.status } : stored ? changeKindOf(first.text) : kindOf(first.text);
   const record = { id: item.id, set: item.set, dialogue: Boolean(item.host), expect: item.expect, model, effort, repairs: limit, prompt: PROMPT_HASH, task, calls, steps, first: kind, clean: null, hole: false, plan: null };
   let result = null;
@@ -304,11 +305,7 @@ function finish(record) {
  */
 async function templateRecord(item, { ask, model, effort }, input, plan, previous) {
   runtime.text ||= await runtimeText();
-  const calls = [], steps = [], send = async (step, level, text) => {
-    const call = await ask(bodyOf({ model, effort: level, system: PROMPT.Template, input: text }));
-    calls.push({ step, effort: level, ...call });
-    return call;
-  };
+  const calls = [], steps = [], send = senderOf({ ask, model, system: PROMPT.Template, calls });
   const started = performance.now(), first = await send(0, effort, input);
   const record = { id: item.id, set: item.set, expect: item.expect, prompt: TEMPLATE_HASH, outcome: first.status, firstCallMs: Math.round(performance.now() - started), calls,
     replied: { kind: first.status }, kept: null, faults: [], leftOut: [], repeated: 0, steps };
@@ -480,13 +477,14 @@ const TEMPLATE_GROUPS = { explain: (record) => !isChangeSet(record.set) && recor
 /**
  * The numbers of the bars of gate 2 (stage templates plan, Global Constraints) as counts: the explain screens clean after at most one repair, the
  * refusals that got outside, the explain screens that got outside, the median first call of the explain screens in ms, and the changes whose
- * first reply is lines that repeat no stored line.
+ * first reply writes no unchanged line again: lines that repeat no stored line, or outside for a change that expects outside (the controller's
+ * decision of 2026-11-21). Any outside word is a right refusal, because the app goes to the free plan after each one.
  */
 export function templateNumbers(records) {
   const explain = records.filter(TEMPLATE_GROUPS.explain), outcome = (list, test) => list.filter((record) => test.test(record.outcome)).length;
+  const onlyChanged = (record) => (record.replied.kind === "lines" && !record.repeated) || (record.expect === "outside" && record.outcome === "outside");
   return { explainClean: outcome(explain, /^clean[01]$/), refusalsRight: outcome(records.filter(TEMPLATE_GROUPS.refusal), /^outside$/), explainRefused: outcome(explain, /^outside$/),
-    medianFirstCallMs: median(explain.map((record) => record.firstCallMs)),
-    changesOnlyChanged: records.filter((record) => TEMPLATE_GROUPS.change(record) && record.replied.kind === "lines" && !record.repeated).length };
+    medianFirstCallMs: median(explain.map((record) => record.firstCallMs)), changesOnlyChanged: records.filter((record) => TEMPLATE_GROUPS.change(record) && onlyChanged(record)).length };
 }
 /** The one line of a label of the template check: the five numbers with the size of each group. */
 function templateRow(label, records) {
