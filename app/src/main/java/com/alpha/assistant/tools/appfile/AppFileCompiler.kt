@@ -68,8 +68,7 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
      */
     suspend fun preview(text: String,plan: String?,previous: AppFilePrevious?): StagePreviewFrame? {
         if(listOfNotNull(text,plan,previous?.appFile).any {it.length>APP_FILE_MAX_CHARS}) return null
-        val input=JSONObject().put("text",text).put("plan",plan ?: JSONObject.NULL)
-            .put("previous",previous?.let {JSONObject().put("appFile",it.appFile).put("stateSchema",it.stateSchema).put("state",it.state)} ?: JSONObject.NULL)
+        val input=JSONObject().put("text",text).put("plan",plan ?: JSONObject.NULL).put("previous",previousJson(previous))
         val hold=previewHoldMs.takeIf {it>0}?.let {"(()=>{const end=Date.now()+$it;while(Date.now()<end){}})();\n"}.orEmpty()
         val result=sandbox.evaluateScript(kit,"${hold}Promise.resolve(previewStep(JSON.parse(${JSONObject.quote(input.toString())}))).then(JSON.stringify)",
             APP_FILE_PREVIEW_MS,APP_FILE_RETURN_BYTES)
@@ -89,7 +88,7 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
             return AppFileRead.Plan(given,failed("INVALID_REQUEST"))
         // All inputs come in as one JSON text, so they stay data.
         val input=JSONObject().put("text",text).put("plan",plan ?: JSONObject.NULL).put("read",read).put("cap",APP_FILE_MAX_CHARS)
-            .put("previous",previous?.let {JSONObject().put("appFile",it.appFile).put("stateSchema",it.stateSchema).put("state",it.state)} ?: JSONObject.NULL)
+            .put("previous",previousJson(previous))
         val result=sandbox.evaluateScript(kit,"compileStep(JSON.parse(${JSONObject.quote(input.toString())})).then(JSON.stringify)",APP_FILE_COMPILE_MS,APP_FILE_RETURN_BYTES)
         if(result.status!="OK") return AppFileRead.Plan(given,failed(result.status))
         // A promise that the engine does not resolve gives an empty text, not JSON. An output without its faults or notes is not a result either.
@@ -132,3 +131,7 @@ private fun stagePreviewFrame(frame: JSONObject,definition: String?): StagePrevi
         StagePreviewFrame(ToolSpec.parse(it),frame.get("ui").toString(),frame.get("state").toString(),frame.optJSONObject("drawing")?.toString(),frame.getString("holds"))
     } catch(_: JSONException) {null} catch(_: IllegalArgumentException) {null}
 }
+
+/** The stored app of a change as the kit reads it ({appFile, stateSchema, state}), or JSON null for a new app. */
+private fun previousJson(previous: AppFilePrevious?): Any=
+    previous?.let {JSONObject().put("appFile",it.appFile).put("stateSchema",it.stateSchema).put("state",it.state)} ?: JSONObject.NULL
