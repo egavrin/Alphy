@@ -26,6 +26,7 @@ import com.alpha.assistant.tools.withPlanStep
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -58,8 +59,9 @@ class StagePreviewWorkflowTest {
             stage.socket.say(APP_REQUEST, "d1", 100)
             robot.waitUntil(30_000) { provider.routed.isCompleted && robot.composedTextIn(scenario, STRIP, robot.text(R.string.live_voice_working)) }
             show(model, frame)
-            robot.waitUntil { robot.composedTextIn(scenario, STAGE, SHIP_TITLE) && canvasLabels(scenario) == SHIP_LABELS }
-            assertTrue("the preview shows its control", robot.composedIn(scenario, STAGE) { SemanticsActions.OnClick in it })
+            // The whole preview, with its control, so the check of the control below is not empty.
+            robot.waitUntil { robot.composedTextIn(scenario, STAGE, SHIP_TITLE) && canvasLabels(scenario) == SHIP_LABELS &&
+                robot.composedIn(scenario, STAGE) { SemanticsActions.OnClick in it } }
             assertFalse("the control of the preview is off", controlOn(scenario))
             assertTrue("the strip keeps its working status", robot.composedTextIn(scenario, STRIP, robot.text(R.string.live_voice_working)))
             ToolStore(context, "${stage.fixture.name}.db-tools.db").use { store ->
@@ -135,6 +137,29 @@ class StagePreviewWorkflowTest {
             robot.waitUntil(60_000) { seen += canvasLabels(scenario); stored(model, before.id).revision == before.revision + 1 && !model.tools.busy }
             seen += commitAndWatch(scenario, model, stored(model, before.id))
             assertEquals("the canvas from the change preview to the new live drawing", setOf(CHANGED_LABELS), seen)
+        }
+    }
+
+    /** A change preview takes the place of the live app while the change runs: the value that the person moved still reaches the changed app. */
+    @Test fun aChangePreviewKeepsTheValueThatThePersonMoved() {
+        val changed = frame(SHIP_CHANGED)
+        val provider = Screens(SHIP)
+        live(provider) { scenario, model ->
+            stage.socket.say(APP_REQUEST, "d1", 100)
+            robot.waitUntil(60_000) { model.stageToolId != null && !model.tools.busy && canvasLabels(scenario) == SHIP_LABELS }
+            val before = stored(model, checkNotNull(model.stageToolId))
+            robot.click(OPTION)
+            // s3 shows for the ship only, so the canvas has no text after the press.
+            robot.waitUntil { canvasLabels(scenario) == "" }
+            stage.socket.say(CHANGE_REQUEST, "d2", 2_000)
+            robot.waitUntil(30_000) { provider.changeCalled.isCompleted }
+            show(model, changed, before.id)
+            robot.waitUntil { canvasLabels(scenario) == CHANGED_LABELS }
+            provider.changeGo.complete(Unit)
+            robot.waitUntil(60_000) { stored(model, before.id).revision == before.revision + 1 && !model.tools.busy }
+            // The state of the ship holds the value of its control only, under a generated key.
+            val state = JSONObject(stored(model, before.id).state)
+            assertEquals("the value after the change", listOf(OPTION), state.keys().asSequence().map(state::get).toList())
         }
     }
 
