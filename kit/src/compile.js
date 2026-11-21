@@ -1,10 +1,13 @@
 // The compile of the kit: an app file in, the report of the host and the app definition out. kit/build.js makes compileStep (one step of
-// the host with compileAppFile, patchAppFile, and readPlanReply) the one global of the bundle: the sandbox entry.
+// the host with compileAppFile, patchAppFile, and readPlanReply) and previewStep (the frame of the lines so far of a stream) the globals of
+// the bundle: the sandbox entries.
 
 import { AppFile, HEADS } from "./dsl.js";
+import { settings } from "./core.js";
 import { expand } from "./parts.js";
 import { report } from "./check.js";
-import { emit } from "./emit.js";
+import { handle, kitOf, screen } from "./run.js";
+import { dataOf, emit } from "./emit.js";
 import { nextState } from "./change.js";
 import { buildTemplate, expandTemplate, isTemplateFile, mergeTemplate, readTemplate } from "./template.js";
 
@@ -25,6 +28,16 @@ function build(text) {
 }
 
 /**
+ * The frame that the stage draws for a definition on a state: {definition, ui, state, drawing, holds}. The definition holds no drawing commands,
+ * so an open event of the run-time on its compiled data gives the state and the drawing (the surfaces of the reply, {} with no surface), and the
+ * screen of that state gives the ui.
+ */
+function frameOf(definition, state, holds) {
+  const app = dataOf(definition), reply = handle({ artifactId: "preview", revision: 0, state, event: { type: "open" } }, app);
+  return { definition, ui: screen(kitOf(app, reply.state), app).ui, state: reply.state, drawing: reply.surfaces ?? {}, holds };
+}
+
+/**
  * The faults hold the line faults and the report faults, or, when the report is clean, what the emitter cannot build yet.
  * A definition comes only with no fault. A throw inside the kit is the one fault "kit: <message>".
  * The host reads the result through compileStep as a promise (AppFileCompiler.kt: compileStep(...).then(JSON.stringify)).
@@ -35,18 +48,21 @@ function build(text) {
  * A template file (template.js) also gives template (its word), kept (the text to store), expanded (the app file of kept, null on a whole fault), and leftOut (the names
  * of the lines that it left out). Its definition comes also with the faults of the lines that it left out, and is null only on a whole fault.
  * A template file as previous.appFile is the app file of its expansion for the change rules.
+ * A result with a definition has frame (frameOf) with holds "whole". preview is true only for previewStep: a template then keeps the lines so far
+ * (template.js buildTemplate), and its frame holds what they draw.
  */
-export async function compileAppFile(text, previous) {
-  const storedTemplate = isTemplateFile(previous?.appFile), template = isTemplateFile(text) && buildTemplate(text, storedTemplate ? previous.appFile : null, build);
+export async function compileAppFile(text, previous, preview = false) {
+  const storedTemplate = isTemplateFile(previous?.appFile), template = isTemplateFile(text) && buildTemplate(text, storedTemplate ? previous.appFile : null, build, preview);
   const stored = storedTemplate ? { ...previous, appFile: expandTemplate(readTemplate(previous.appFile), new Set()) } : previous;
   const { file, emitted, ...built } = template ? template.built : build(text), result = { ...built, blockedBySavedData: false, savedDataMismatch: false };
   if (template) Object.assign(result, { template: template.word, kept: template.kept, expanded: template.expanded, leftOut: template.leftOut });
-  if (!stored || !result.definition) return { ...result, state: null };
+  const framed = (out) => (out.definition ? { ...out, frame: frameOf(out.definition, out.state ?? out.definition.initialState, preview && template ? template.holds : "whole") } : out);
+  if (!stored || !result.definition) return framed({ ...result, state: null });
   try {
     // A change adds its own notes to the notes of the report.
     // A template keeps the faults of the lines that it left out beside the faults of the change.
     const { notes = [], ...change } = nextState(file, emitted, stored, build);
-    return { ...result, ...change, faults: [...result.faults, ...change.faults], notes: [...result.notes, ...notes] };
+    return framed({ ...result, ...change, faults: [...result.faults, ...change.faults], notes: [...result.notes, ...notes] });
   } catch (failure) {
     return { ...result, faults: [`kit: ${failure?.message ?? failure}`], definition: null, state: null };
   }
@@ -104,7 +120,30 @@ export function patchAppFile(plan, reply) {
 export async function compileStep({ text, plan, read, previous, cap }) {
   const reply = read ? readPlanReply(text) : { kind: "plan", text };
   if (reply.kind !== "plan") return reply;
-  const merged = plan === null ? reply.text : isTemplateFile(plan) ? mergeTemplate(plan, reply.text) : patchAppFile(plan, reply.text);
-  const stored = previous && { appFile: previous.appFile, stateSchema: JSON.parse(previous.stateSchema), state: JSON.parse(previous.state) };
-  return { kind: "plan", text: merged, result: merged.length > cap ? null : await compileAppFile(merged, stored) };
+  const merged = mergedOf(plan, reply.text);
+  return { kind: "plan", text: merged, result: merged.length > cap ? null : await compileAppFile(merged, storedOf(previous)) };
+}
+
+/** The reply merged into plan (null for a new screen), and the stored app previous with its schema and state read from JSON text. */
+const mergedOf = (plan, text) => (plan === null ? text : isTemplateFile(plan) ? mergeTemplate(plan, text) : patchAppFile(plan, text));
+const storedOf = (previous) => previous && { appFile: previous.appFile, stateSchema: JSON.parse(previous.stateSchema), state: JSON.parse(previous.state) };
+
+/**
+ * The preview step of the host (stage templates design, section 3): {kind: "preview", frame} for the complete lines so far of a reply, or
+ * {kind: "none"}. text is read as readPlanReply reads it and merged into plan as compileStep merges it, and previous is the stored app of a change
+ * as compileStep takes it, so a value that the person moved stays. The compile runs with no check run (settings.gate off) and keeps the lines so far
+ * of a template: a line with a fault is left out with no repair (a change keeps its stored version), and the first line alone gives the frame with
+ * the picture card at its final size. A free plan gives holds "whole". An outside reply, a text with no usable first line, and each throw give none.
+ */
+export async function previewStep({ text, plan = null, previous = null }) {
+  const gate = settings.gate;
+  settings.gate = "off";
+  try {
+    const reply = readPlanReply(text), { frame } = reply.kind === "plan" ? await compileAppFile(mergedOf(plan, reply.text), storedOf(previous), true) : {};
+    return frame ? { kind: "preview", frame } : { kind: "none" };
+  } catch {
+    return { kind: "none" };
+  } finally {
+    settings.gate = gate;
+  }
 }

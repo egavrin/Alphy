@@ -83,6 +83,9 @@ function partFault(tree, word) {
   const other = Object.keys(tree.named).find((key) => key !== "visible" && key !== "stroke");
   if (other) return `a shape takes only visible= and stroke= by name, and ${other}= is not one`;
   if (tree.name === "text") return textFault("the text", tree.args[2], BUDGET.text, true);
+  // The kit compiles a shorter or an odd list clean: it draws nothing for two points and drops the last number of an odd list.
+  const points = tree.name === "polygon" && tree.args[0]?.k === "list" ? tree.args[0].items.length : 6;
+  if (points < 6 || points % 2) return `the points of a polygon are a list of x and y numbers for at least 3 points (6 numbers), and this list has ${points} numbers`;
   return null;
 }
 
@@ -141,6 +144,9 @@ export function readTemplate(text) {
       const shape = name !== "card" && word === "scene", path = nodesIn(tree, (node) => node.k === "path" && !readsV(node))[0];
       message = (name === "card" ? cardFault(tree, word) : partFault(tree, word)) ?? (path ? `a line reads only $/v, the value of the control, and this line reads ${show(path)}` : null);
       if (shape && !message) message = colorFault(tree = colored(tree));
+      // The choice of items shows their labels, so it cannot tell two items of one label apart.
+      const twin = !message && word === "items" && name !== "card" && lines.find((line) => line.tree && PART.items.test(line.name) && line.tree.args[0].v === tree.args[0].v);
+      if (twin) message = `the label ${show(tree.args[0])} is the label of ${twin.name} too. Each item needs a label of its own: the choice shows the labels`;
     }
     if (message) fault(name, message);
     lines.push({ name, raw: raw.trim(), tree: message ? null : tree });
@@ -196,7 +202,8 @@ export function expandTemplate(read, leftOut) {
   if (word === "items") {
     out.push(`$/items := [${parts.map(({ tree: { args: [label, sign, text] } }) => `{label: ${show(label)}, sign: ${show(sign)}, text: ${show(text)}}`).join(", ")}]`, "$/now := find($/items, $label == $/v)");
     // The sign is large when it is one or two characters, and smaller for a word, so a sign at 1.25 times its cap fits the 300 px of the drawing.
-    shapes = ['text(150, 95, $/now/sign, "accent", len($/now/sign) <= 2 ? 72 : (len($/now/sign) <= 6 ? 44 : 24))', 'text(150, 190, $/v, "ink", 20)'];
+    // A preview with no item yet draws nothing, so the first item only adds to the picture.
+    shapes = parts.length ? ['text(150, 95, $/now/sign, "accent", len($/now/sign) <= 2 ? 72 : (len($/now/sign) <= 6 ? 44 : 24))', 'text(150, 190, $/v, "ink", 20)'] : [];
   } else if (word === "cells" && control?.k === "call") {
     // Rows of at most ten cells, filled evenly, in the top 176 px, and the caption "K / N = P%" under them. One row of few cells gets taller cells.
     const count = numberOf(control.args[2]), rows = Math.ceil(count / 10), cols = Math.ceil(count / rows);
@@ -238,11 +245,14 @@ function ownersOf(read, leftOut, faults, build) {
  * takes it). stored is the template file of the stored app of a change, or null for a new screen.
  * A line with a fault is left out: a change takes the stored version of that line instead. A control that no line reads changes nothing, so
  * it is left out too. When the expansion has kit faults, each owner (ownersOf) is left out and the kit compiles once more.
- * Returns {built, word, kept, expanded, leftOut}. built is the result of build for expanded, the expansion of kept, with each fault of a line that
+ * Returns {built, word, kept, expanded, leftOut, holds}. built is the result of build for expanded, the expansion of kept, with each fault of a line that
  * was left out. A whole fault gives built with no definition and expanded null: a fault of the first line, no part with no fault, a cells file
  * with no control, or a kit fault of the last compile.
+ * preview is true for the lines so far of a stream (compile.js previewStep): a control that no line reads yet stays, and only a fault of the first
+ * line or a kit fault of the last compile is whole, so the first line alone gives the frame. holds is what kept draws: "card", "parts" (a shape, an
+ * item, or the cells of a control), or "frame" (the first line, maybe the control).
  */
-export function buildTemplate(text, stored, build) {
+export function buildTemplate(text, stored, build, preview = false) {
   const old = stored === null ? null : readTemplate(stored), faults = [], out = new Set();
   let read, leftOut, kept, expanded = null, built = null;
   const settle = () => {
@@ -250,15 +260,16 @@ export function buildTemplate(text, stored, build) {
     if (back.length) { text = mergeTemplate(text, back.map((line) => line.raw).join("\n")); read = readTemplate(text); faults.push(...read.faults); }
     leftOut = new Set([...read.lines.filter((line) => !line.tree).map((line) => line.name), ...[...out].filter((name) => !back.some((line) => line.name === name))]);
     const control = read.lines.some((line) => line.name === "control" && line.tree?.k === "call") && !leftOut.has("control");
-    if (control && read.word === "scene" && !read.lines.some((line) => line.tree && line.name !== "control" && !leftOut.has(line.name) && nodesIn(line.tree, readsV).length)) {
+    if (!preview && control && read.word === "scene" && !read.lines.some((line) => line.tree && line.name !== "control" && !leftOut.has(line.name) && nodesIn(line.tree, readsV).length)) {
       faults.push("control: the control changes nothing on the screen, because no line reads $/v. Make a part read $/v, such as visible=$/v > 2");
       leftOut.add("control");
     }
     kept = keptOf(read, leftOut);
   };
   // The first line's own fault is in faults already.
-  const whole = () => (!read.lines[0].tree ? faults[0]
-    : read.word === "cells" ? (read.lines.some((line) => line.name === "control" && line.tree?.k === "call" && !leftOut.has("control")) ? null : "cells: the cells need a line control = slider(LABEL, 0, COUNT, 1, START) with no fault")
+  const drawn = (test) => read.lines.some((line) => line.tree && !leftOut.has(line.name) && test(line)), cells = (line) => line.name === "control" && line.tree.k === "call";
+  const whole = () => (!read.lines[0].tree ? faults[0] : preview ? null
+    : read.word === "cells" ? (drawn(cells) ? null : "cells: the cells need a line control = slider(LABEL, 0, COUNT, 1, START) with no fault")
       : drawnParts(read, leftOut).length ? null : `${read.word}: the picture needs a ${read.word === "scene" ? "shape" : "item"} with no fault`);
   read = readTemplate(text);
   faults.push(...read.faults);
@@ -276,6 +287,7 @@ export function buildTemplate(text, stored, build) {
   const lacking = whole();
   faults.push(...(lacking ? [lacking] : built.faults.map((fault) => `${read.word}: ${fault}`)));
   const unique = [...new Set(faults)], broken = Boolean(lacking) || built.faults.length > 0;
+  const holds = drawn((line) => line.name === "card") ? "card" : drawnParts(read, leftOut).length || (read.word === "cells" && drawn(cells)) ? "parts" : "frame";
   return { built: broken ? { faults: unique, notes: built?.notes ?? [], definition: null, language: null, hole: false } : { ...built, faults: unique },
-    word: read.word, kept, expanded: broken ? null : expanded, leftOut: [...leftOut] };
+    word: read.word, kept, expanded: broken ? null : expanded, leftOut: [...leftOut], holds };
 }

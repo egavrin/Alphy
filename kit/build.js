@@ -86,11 +86,12 @@ export async function runtimeText() {
 }
 
 /**
- * The bundle defines globalThis.compileStep (one step of the host: the read of a reply, the merge, and the compile) and no other global.
+ * The bundle defines globalThis.compileStep (one step of the host: the read of a reply, the merge, and the compile), globalThis.previewStep
+ * (compile.js: the frame of the lines so far of a stream, for the preview of the stage), and no other global.
  * The script of the host (AppFileCompiler.kt) calls only it.
  */
 export async function bundle() {
-  return `// Built by kit/build.js from kit/src with Bun ${Bun.version}. Do not edit: run bun kit/build.js.\n(() => {\n"use strict";\n${script(MODULES.map(source))}runtime.text = ${JSON.stringify(await runtimeText())};\nglobalThis.compileStep = compileStep;\n})();\n`;
+  return `// Built by kit/build.js from kit/src with Bun ${Bun.version}. Do not edit: run bun kit/build.js.\n(() => {\n"use strict";\n${script(MODULES.map(source))}runtime.text = ${JSON.stringify(await runtimeText())};\nglobalThis.compileStep = compileStep;\nglobalThis.previewStep = previewStep;\n})();\n`;
 }
 
 /**

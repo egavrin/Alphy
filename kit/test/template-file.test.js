@@ -138,6 +138,27 @@ test("textsUpToOneAndAQuarterOfTheirCaps", async () => {
   expect(named((await compileAppFile(put(cells, "control", 'control = slider("Votes for", 0, 101, 1, 11)'))).faults, "control")).toHaveLength(1);
 });
 
+test("twoOptionsOrItemsWithTheSameTextAreAFaultOfTheirLine", async () => {
+  // The choice cannot tell two options of one text apart.
+  const options = await compileAppFile(put(ship, "control", 'control = choice("Предмет", ["Корабль", "Корабль"])'));
+  expect([named(options.faults, "control").length, options.leftOut]).toEqual([1, ["control"]]);
+  // The second item with the label of an earlier item is left out, and the control keeps the other items.
+  const items = await compileAppFile(put(template("word-parts"), "i3", 'i3 = item("Приставка", "-ок", "Стоит после корня.")'));
+  expect(items.faults).toHaveLength(1);
+  expect(items.faults[0]).toStartWith("i3: ");
+  expect(items.leftOut).toEqual(["i3"]);
+  expect(every(items.definition.ui).find((node) => node.type === "segmented").options.map((option) => option.text)).toEqual(["Приставка", "Корень", "Окончание"]);
+});
+
+test("aPolygonWithFewerThanThreePointsOrAnOddListIsAFaultOfItsLine", async () => {
+  // The kit compiles both clean: it draws nothing for two points and drops the last number of an odd list.
+  for (const points of ["[45, 75, 255, 75]", "[45, 75, 255, 75, 225, 140, 75]"]) {
+    const result = await compileAppFile(put(ship, "s2", `s2 = polygon(${points}, "ink", visible=$/v == "Корабль")`));
+    expect([points, result.faults.length, result.leftOut]).toEqual([points, 1, ["s2"]]);
+    expect(result.faults[0]).toStartWith("s2: ");
+  }
+});
+
 test("aPartReadsOnlyTheControlValue", async () => {
   const { faults } = await compileAppFile(put(ship, "s1", 's1 = rect(0, 110, 300, $/x, "water", 0)'));
   expect(faults).toHaveLength(1);

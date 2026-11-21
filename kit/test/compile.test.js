@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext, runInContext } from "node:vm";
-import { LINE, NEED_NAME, compileAppFile, compileStep, needsIn, patchAppFile, readPlanReply } from "../src/compile.js";
+import { LINE, NEED_NAME, compileAppFile, compileStep, needsIn, patchAppFile, previewStep, readPlanReply } from "../src/compile.js";
 import { AppFile, HEADS, parseLine } from "../src/dsl.js";
 import { expand } from "../src/parts.js";
 import { bundle, iconModule, outputs, planCopies, plansIn, script, withoutMessages } from "../build.js";
@@ -228,13 +228,16 @@ test("compileStep (U-K item 2): a change merges the reply into the stored app fi
   await expect(step({ text: reply, plan: shopping, previous: { ...previous, state: "{" } })).rejects.toThrow();
 });
 
-test("bundle: it defines only compileStep, and the script of the host compiles calc.plan, reads a reply, and merges a repair reply through it", async () => {
+test("bundle: it defines only compileStep and previewStep, and the script of the host compiles calc.plan, reads a reply, merges a repair reply, and previews a template through them", async () => {
   // The sandbox has no structuredClone and no host API: a fresh context of the language is closer to it than Bun's own.
   const context = createContext();
   const names = () => [...runInContext("Object.getOwnPropertyNames(globalThis)", context)];
   const before = names();
   runInContext(await bundle(), context);
-  expect(names().filter((name) => !before.includes(name))).toEqual(["compileStep"]);
+  expect(names().filter((name) => !before.includes(name))).toEqual(["compileStep", "previewStep"]);
+  const ship = readFileSync(new URL("./fixtures/template/ship.plan", import.meta.url), "utf8"), input = { text: ship.split("\n").slice(0, 3).join("\n"), plan: null, previous: null };
+  const previewed = await runInContext(`previewStep(${JSON.stringify(input)}).then(JSON.stringify)`, context);
+  expect(JSON.parse(previewed)).toEqual(JSON.parse(JSON.stringify(await previewStep(input))));
   // The script of the host (AppFileCompiler.kt): compileStep(...).then(JSON.stringify).
   const calc = plan("calc"), reply = 'need tip = input("percent", "Tip", 20)\ndelete people';
   for (const input of [{ text: calc, plan: null, read: false }, { text: '```\noutside("game")\n```', plan: null, read: true }, { text: "```\n" + calc + "```", plan: null, read: true }, { text: reply, plan: calc, read: true }]) {
