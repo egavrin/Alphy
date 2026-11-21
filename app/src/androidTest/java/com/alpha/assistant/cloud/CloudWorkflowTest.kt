@@ -2141,7 +2141,7 @@ class CloudWorkflowTest {
         assertFalse("Choose answer with search none for a question about this context or a short follow-up" in system)
     }
 
-    /** Ruling FX-1, the owner's T6: a spoken «Да» gets the question back. Ruling FX-2: the answer step gets the one sentence of the talk. */
+    /** Ruling FX-1, the owner's T6: a spoken «Да» gets the question back. Ruling FX-2: the answer step gets the text of the talk, with the yes rule. */
     @Test fun aSpokenYesGetsTheQuestionBack() {
         val question = "Вы хотите отметить на схеме планеты Солнечной системы, на которых теоретически возможна жизнь?"
         val history = listOf(
@@ -2149,8 +2149,9 @@ class CloudWorkflowTest {
             Message("t5-reply", "assistant", question, 2, "complete", replyTo = "t5", provenance = MessageProvenance.CLEAN))
         val (routing, answer) = routedAfter(history, "Да", spoken = true).map { it.json.turns() }
         assertEquals(history.map { it.role to it.text } + ("user" to "Да"), routing.drop(1))
-        assertTrue("Screens exist in this spoken talk, so never say that you cannot show or change a screen, and never claim that an action is done."
-            in answer.first().second)
+        assertTrue("Screens exist in this spoken talk, so never say that you cannot show or change a screen, and never claim that an action is done. " +
+            "A yes to an offered phone action, automation, memory write, or app test starts nothing: say plainly that nothing was started, " +
+            "and ask the person to say that request in full." in answer.first().second)
     }
 
     /**
