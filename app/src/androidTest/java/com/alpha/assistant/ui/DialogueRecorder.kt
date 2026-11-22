@@ -44,6 +44,8 @@ internal data class DialogueMark(val name: String, val detail: String?, val atNa
  * - `voice_phase`: the phase of the voice mode changed, with the new phase, such as `SPEAKING`.
  * - `thinking`: the app sends a thinking text to the voice, such as a sentence of the narrator of a walk.
  * - `stage_step`: the step of the stage app changed, with the step and the count, and who set it ([stage]).
+ * - `step_cause`: at the time of each `stage_step`, the cause of the move: exact, classifier, command, question, or none (plan "one scene", K9).
+ * - `classifier`: one classifier answer, with its side, each choice with its confidence, and its input tokens (K9).
  */
 internal class DialogueRecorder(private val clock: () -> Long = SystemClock::elapsedRealtimeNanos) : Closeable {
     private val marks = CopyOnWriteArrayList<DialogueMark>()
@@ -79,6 +81,7 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
         val event = runCatching { JSONObject(text) }.getOrNull() ?: return
         when (event.optString("type")) {
             "session.delegation.created" -> { awaitStateCommit = true; mark("delegation") }
+            "decision.event" -> (LiveProtocol.parse(text) as? com.alpha.assistant.voice.LiveEvent.Decision)?.let { mark(CLASSIFIER, classifierLine(it)) }
             "session.output_audio.delta" -> {
                 if (!awaitFirstVoice && !awaitAnswerVoice) return
                 val bytes = ByteBuffer.wrap(Base64.decode(event.optString("delta"), Base64.DEFAULT)).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
@@ -163,9 +166,11 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
             moved = Triple(step, clock(), 0)
         }
         val (pending, at, polls) = moved ?: return
-        val who = actions.lastOrNull()?.takeIf { it.control == stepControl && it.value == pending.label }?.who
+        val action = actions.lastOrNull()?.takeIf { it.control == stepControl && it.value == pending.label }
+        val who = action?.who
         if (who == null && polls < WHO_POLLS) { moved = Triple(pending, at, polls + 1); return }
         mark(STAGE_STEP, "${pending.index}/${pending.count} ${who ?: "unknown"}", at)
+        mark(STEP_CAUSE, action?.cause ?: "none", at)
         moved = null
     }
 
@@ -230,7 +235,10 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
                 .put("stepMoves", JSONArray(window.filter { it.name == STAGE_STEP }.map { move ->
                     val (step, who) = checkNotNull(move.detail).split(" ")
                     JSONObject().put("ms", ms(move)).put("step", step).put("who", who)
+                        .put("cause", window.firstOrNull { it.name == STEP_CAUSE && it.atNanos == move.atNanos }?.detail)
                 }))
+                // Plan "one scene", K9: each classifier answer with its time.
+                .put("classifier", JSONArray(window.filter { it.name == CLASSIFIER }.map { JSONObject().put("ms", ms(it)).put("answer", it.detail) }))
         }
         return JSONObject().put("requests", JSONArray(requests)).put("calls", calls(all))
             .put("chatCalls", all.count { it.name == "call_start" })
@@ -250,6 +258,8 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
         const val VOICE_PHASE = "voice_phase"
         const val THINKING = "thinking"
         const val STAGE_STEP = "stage_step"
+        const val STEP_CAUSE = "step_cause"
+        const val CLASSIFIER = "classifier"
         /** The polls (100 ms each) that a step move waits for the action of the bridge that names its who. */
         const val WHO_POLLS = 10
         val SPEAKING = LivePhase.SPEAKING.name
@@ -265,6 +275,11 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
             content.trimEnd().endsWith("?") -> "question"
             else -> "answer"
         }
+
+        /** One classifier answer as `input user_command=next:0.83 user_step=none:0.40 tokens=210`: names and numbers, never a text of the talk. */
+        fun classifierLine(decision: com.alpha.assistant.voice.LiveEvent.Decision) =
+            (listOf(if (decision.input) "input" else "output") + decision.answers.map { "${it.name}=${it.choice}:${"%.2f".format(java.util.Locale.ROOT, it.confidence)}" } +
+                "tokens=${decision.inputTokens}").joinToString(" ")
 
         /** A routing kind is a schema name. Any other text, such as a decision with no JSON, is `other`. */
         private fun kindOf(decision: String) = runCatching { JSONObject(decision).optString("kind") }.getOrNull()

@@ -180,6 +180,7 @@ A template file can hold narration lines (`kit/README.md`, section "Template fil
 The host turns on the controls of a new scene when its narration starts, and saves the narration later (`docs/tool-integration.md`). The voice speaks it as follows (`ui/LiveVoiceBridge.kt`, `ui/StageNarrator.kt`):
 
 - A new scene with `say` sends `MARK + say` as thinking (`session.thinking.append`) when the narration is saved. A change, or a scene that opens again, says nothing.
+- A change that turns a scene with no steps into a steps scene walks from step 1, as a new steps scene does, when the list of tools holds the changed revision. It sends no `say` line (C4 of plan "one scene").
 - A new steps scene shows its answer step during the opener. Then the narrator walks the steps: it sends the sentence of step 1 after the mark, and at most one sentence waits at the voice.
 - The narrator arms when the output transcript starts the waiting sentence. A piece that goes another way before the end of the sentence disarms it. So the opener, own words of the voice, and a repeat of a sentence move no step.
 - The transcript leads the audio, and a reply ends by its audio, so a reply end can fall inside a sentence. An armed sentence stays armed across a reply end and the next reply start. After a reply boundary, a piece that does not go on with the armed words is tried alone, so older words block no later arm. The skip of the session uses the same rule. A started skip ends at a reply end only after its whole sentence came, or when a barge-in cut the reply. Only such a cut reply end, or a reply end at a sentence end, counts for a pending skip.
@@ -195,6 +196,52 @@ The host turns on the controls of a new scene when its narration starts, and sav
 - While a steps scene is before its last step, the shown screen lists the host control «Продолжить по шагам» (`stage_continue_steps`). «Продолжай» presses it: the voice says the sentence of the next step, and the walk goes on from there to the last step.
 - Between two sentences of a walk, the strip keeps the status «Alphy говорит», and a reply end opens no approval window.
 - The bridge keeps the last three actions on the stage app for the shown screen, each with its source: `tap` (the person), `voice` (a routing press or «Дальше»), or `narrator` (a press of the walk). Taps on one control less than 1 s apart are one action with the last value. A new app on the stage starts with no action.
+
+### Voice-only turns and the follow call
+
+A turn that the voice answers alone, with no hand-off, gets a follow call (plan "one scene", decisions 18 to 20, `ui/LiveVoiceBridge.kt`, `ShellViewModel.followTurn`):
+
+- The first reply of a person turn with no hand-off and no host text after the turn start makes a spoken pair: a user message with the words of the person and an assistant message with the words of the voice. Both have `Message.spoken`, status `complete`, and provenance `CLEAN`. The chat card shows «Сказано голосом» (`chat_spoken_label`).
+- The pair persists at each reply end and at the start of the next turn. A hand-off in the same turn drops the pair, so the chat keeps one user message, the one of the hand-off. With no open chat, the pair makes a new chat, and a dropped pair takes that chat away again.
+- The follow call starts once for the turn: at the first sentence end of the voice, or at the reply end. While the end of the phrase can still find a spoken command (section "The classifier"), the call waits for that end. Implementation choice: the call starts after the voice words, not at the reply start, so it sees whether the voice gave the answer.
+- The call is one forced tool call `submit_follow_decision` with stage `DECISION` and one retry on a network failure (`docs/tool-integration.md`). Its input is the system text `ChatToolReply.followInstructions`, the spoken context, the shown screen, the words of the person, and the words of the voice so far.
+- A new turn, a hand-off, a spoken command, and the end of the mode cancel the call that still runs, and also the screen build of a follow call. A failed call changes nothing and writes a log line with the tag `AlphyFollow` and the failure code only.
+- The kinds:
+  - `none`: nothing changes.
+  - `screen`: the brief goes to the template call with no routing call (`QueuedRequest.follow`). The new scene is the card of the assistant message of the pair. It gets no commentary. When `answered` is true, the scene says nothing and does not walk. When `answered` is false (the voice only said a waiting line), the scene speaks as a new scene of a hand-off: it walks, or it says its one sentence (C5).
+  - `mark` and `press`: the host presses the named control of the stage app with who `voice` and says nothing. A target that names no control gives `none`. The follow call and the press read the same list of controls, with «Продолжить по шагам». A press of that control walks the rest of the steps as the routing press does: the sentence of the next step goes out as thinking.
+  - `clear`: the stage shows no app. The chat keeps the card.
+- After a classifier move in the same turn (K4 or K6), `screen` and `clear` do nothing (K7).
+- A command turn of the classifier (K3) saves the words of the person and the sentence of the voice as a normal pair, with no `spoken` flag, as a routing press does.
+- Each follow decision writes the trace phase `follow` with the kind as its detail.
+
+### The classifier
+
+The voice session runs the GPT-Live Decisions classifier beside the voice (plan "one scene", part K, design 9.5, `voice/LiveProtocol.kt`, `ui/LiveVoiceBridge.kt`):
+
+- `session.start` holds `session.triggers` (`LiveProtocol.triggers()`): one trigger on `session.input_transcript.delta` with the questions `user_command` (`next`, `back`, `repeat`, `go_to`, `none`) and `user_step`, and one on `session.output_transcript.delta` with `spoken_step`. The step choices are `1` to `6` (`LiveProtocol.MAX_STEPS`, the largest step count of the kit) and `none`.
+- Each caption piece keeps its `event_id`. A `decision.event` with `decision.completed` names its piece in `source_event_id`. The confidence of an answer is the probability of the chosen value. An answer with no `choice` (a refusal) is skipped, and the other answers of the event stay.
+- The scene text (K2): when a steps scene comes on the stage or changes, and its narration is saved, the host sends one `decision.item.create` with «На экране сцена «title». Шаги сцены:» and one line for each step with its number, its label, and its sentence. It holds no line about the present step. Another scene, or no steps scene, deletes the old item first (`decision.item.delete`). With no steps scene, the host ignores each answer.
+- A spoken command (K3). The end of a phrase is the hand-off of the turn, or 1000 ms with no new caption piece of the person (`PHRASE_END_MS`). The answer of the newest piece of the turn counts. At a hand-off, the host waits at most 300 ms for that answer (`HAND_OFF_WAIT_MS`).
+  - A hand-off stops the 1000 ms timer, so each hand-off gets exactly one answer: a commentary, or the empty append.
+  - The session ends a turn after 1200 ms, so a caption piece after the end of a phrase starts a new person turn in the bridge.
+  - A command counts at a confidence of at least 0.75 (`COMMAND_MIN`). For `go_to`, `user_step` needs a step of the scene at a confidence of at least 0.6 (`GO_TO_STEP_MIN`).
+  - Then no routing call runs. The host moves the step (`next` +1, `back` -1, `repeat` the same, `go_to` the named step) with who `voice`, and the voice says the sentence of that step: as the answer of the hand-off, or as thinking with no hand-off. `back` at step 1 says «Это первый шаг.» (`FIRST_STEP`).
+  - Implementation choice: `next` at the last step and `go_to` with no valid step go to the routing call, as before.
+  - A hand-off that comes after the host acted on its turn gets an empty `session.thinking.append` with its id and no routing call.
+- A question about a step (K4): at the end of a phrase with `user_command` `none` and a `user_step` of at least 0.8 (`QUESTION_MIN`) that is not the present step, the host moves the picture to that step and says nothing. The turn goes on.
+- The second signal of a walk (K5): while the narrator waits for the voice to start its sentence, an output answer that names the step of that sentence at a confidence of at least 0.5 (`WALK_MIN`) counts as the start. The exact match and this signal act once together. Each other step answer during a walk is ignored.
+- A free answer (K6): outside a walk, in a turn where the host sent no text, an output answer that names another step at a confidence of at least 0.6 (`FREE_MIN`) moves the picture there, also back. `FREE_ANSWER_MOVES` turns this rule off.
+- Absence and failure (K8): an error or a close before `session.started` after a start with triggers starts the session once more with no triggers. The classifier stays off for the app run only when that start reaches `session.started`. When it fails too, the mode ends as in Alpha 19, and the next start sends the triggers again. A refused upgrade with an HTTP status ends the mode as before. An `error` event for a scene item or a decision (its `client_event_id`, or a code or parameter that names a decision or a trigger) turns the classifier off for the session, and the mode stays on. With the classifier off, the app behaves as Alpha 19.
+- The bridge records the cause of each voice and narrator move (`SceneAction.cause`: `exact`, `classifier`, `command`, or `question`). A narrator press that is no sync fire (a step with no sentence, also in the rest walk) has no cause. The line of the shown screen does not hold it. The dialogue recorder of the tests writes it as `step_cause`, and it writes each classifier answer as `classifier` (K9).
+
+### Stage lifetime and the work card
+
+The stage shows the subject of the talk now (plan "one scene", decision 21, `ui/DialogueStage.kt`):
+
+- A plan card that waits for the person (`REVIEW`, or a selection or a permission) leaves the stage at a follow `screen` or `clear`, or when a later hand-off ends with no plan. The plan stays in the chat and on its card there (`LiveVoiceBridge.hiddenPlan`).
+- A hand-off that searches the web with no app takes the old scene off the stage. The chat keeps the card of that scene.
+- While the hand-off of the stage card searches, the stage shows the work card «Ищу: » and the subject (`stage_work_search`). While its screen builds with no preview frame, it shows «Собираю экран: » and the subject (`stage_work_build`). The subject is the words of the person, cut at a word end to at most 48 characters (`WORK_SUBJECT_MAX`). The work card comes before the old app, and the first preview frame replaces it.
 
 ### Template screens and the stage preview
 
@@ -249,6 +296,8 @@ The stage preview:
 - Fixed Russian instructions (`LiveProtocol.INSTRUCTIONS` in `voice/LiveProtocol.kt`).
 - A history preload: the latest text messages of the selected conversation, at most 128 messages and 8,192 tokens. Attachments, images, and mini-app content are not sent.
 - The commentary and thinking texts: the replies of Alphy after the mark, the host lines, and the typed words of a typed turn.
+- To the Decisions model of the same session: the input and output captions, and the scene text of a steps scene (its title, its step labels, and its sentences). The triggers and the scene item go on the same socket.
+- The saved spoken pairs of voice-only turns: they are chat messages, so the history preload of a later session holds them.
 
 Each hand-off request also goes to the chat model of the account, as a typed request does.
 With an app on the stage, the routing call and the grounded decision of a spoken request also get the shown screen (`ShownScreen.line()` in `tools/ShownScreen.kt`).
@@ -256,8 +305,9 @@ It holds the title, the app file when the line fits, the labels of the controls,
 A steps scene adds `step` (the index, the count, and the label of the present step), and the line holds `actions`: the last three actions on the stage app, each with `who`, `control`, and `value`.
 `values` also comes from an app that takes no press. An app with private results gives no `values` (`docs/tool-integration.md`).
 The voice mode needs an OpenAI account, so this data goes to OpenAI too.
+The follow call of a voice-only turn goes to the chat model of the account: the words of the person, the words of the voice, the spoken context, and the shown screen.
 The voice mode adds no consent line. The OpenAI consent already names voice recordings for speech recognition, and chat text already goes to OpenAI.
-Alphy does not store the audio. The transcripts stay in memory for the session. Only the hand-off messages are saved in the chat.
+Alphy does not store the audio. The transcripts stay in memory for the session. The chat saves the hand-off messages and the spoken pairs of voice-only turns.
 
 ### Cost
 

@@ -670,8 +670,20 @@ internal class StreamTalk(private val templates: List<Streamed>, private val pla
     /** Each routing call in its order. */
     val routed = CopyOnWriteArrayList<CloudRequest>()
     @Volatile private var routings = 0
+    /** Each follow call in its order (plan "one scene", decision 19). It answers [follow] after [followDelayMs]. */
+    val follows = CopyOnWriteArrayList<CloudRequest>()
+    @Volatile var follow = CloudEvent.Follow("none", "", "")
+    @Volatile var followDelayMs = 0L
+    /** The follow calls that a cancel stopped. */
+    val followCancels = java.util.concurrent.atomic.AtomicInteger()
 
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+        if (request.follow) {
+            follows += request
+            try { delay(followDelayMs) } catch (cancel: CancellationException) { followCancels.incrementAndGet(); throw cancel }
+            emit(follow)
+            return
+        }
         val stage = request.generationStage
         if (stage == APP_FILE_TEMPLATE) {
             val index = calls.count { it.generationStage == APP_FILE_TEMPLATE }

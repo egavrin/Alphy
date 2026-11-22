@@ -176,4 +176,68 @@ class VoiceModeProtocolTest {
         assertFalse(out, out.endsWith("3."))
         assertTrue(out, out.startsWith("Курс 3.5"))
     }
+
+    /** Plan "one scene", K1: the start holds one trigger for each transcript side with the questions of the decisions probe. */
+    @Test fun theStartHoldsTheTwoTriggers() {
+        assertFalse(JSONObject(LiveProtocol.start(emptyList())).getJSONObject("session").has("triggers"))
+        val triggers = JSONObject(LiveProtocol.start(emptyList(), LiveProtocol.triggers())).getJSONObject("session").getJSONArray("triggers")
+        fun questions(i: Int) = triggers.getJSONObject(i).also { assertEquals("decisions", it.getString("type")) }
+            .getJSONObject("decisions").getJSONArray("questions").let { list -> List(list.length()) { list.getJSONObject(it) } }
+        fun choices(question: JSONObject) = question.getJSONArray("choices").let { list -> List(list.length()) { list.getJSONObject(it).getString("value") } }
+        assertEquals(listOf("session.input_transcript.delta", "session.output_transcript.delta"), List(triggers.length()) { triggers.getJSONObject(it).getString("event_type") })
+        assertEquals(listOf("user_command", "user_step"), questions(0).map { it.getString("name") })
+        assertEquals(listOf("next", "back", "repeat", "go_to", "none"), choices(questions(0)[0]))
+        val steps = listOf("1", "2", "3", "4", "5", "6", "none")
+        assertEquals(steps, choices(questions(0)[1]))
+        assertEquals(listOf("spoken_step"), questions(1).map { it.getString("name") })
+        assertEquals(steps, choices(questions(1)[0]))
+        assertTrue((questions(0) + questions(1)).all { it.getString("type") == "choice" && it.getString("instructions").isNotBlank() })
+    }
+
+    /** K1: a decision gives the confidence as the probability of the chosen value, and each transcript piece keeps its event id. */
+    @Test fun aDecisionEventGivesItsAnswers() {
+        val decision = LiveProtocol.parse(liveDecision("piece_1", true, classified("user_command", "next", 0.83), classified("user_step", "none", 0.4), inputTokens = 210))
+        assertEquals(LiveEvent.Decision("piece_1", true, listOf(ClassifierAnswer("user_command", "next", 0.83), ClassifierAnswer("user_step", "none", 0.4)), 210), decision)
+        assertEquals(false, (LiveProtocol.parse(liveDecision("piece_2", false, classified("spoken_step", "2", 0.6))) as LiveEvent.Decision).input)
+        assertEquals("piece_3", (LiveProtocol.parse(inputDelta("Дальше", 0, 300, "piece_3")) as LiveEvent.InputTranscript).eventId)
+        assertEquals("piece_4", (LiveProtocol.parse(outputDelta("Гвоздь", 0, 300, "piece_4")) as LiveEvent.OutputTranscript).eventId)
+        assertNull((LiveProtocol.parse(inputDelta("Дальше", 0, 300)) as LiveEvent.InputTranscript).eventId)
+    }
+
+    /** An answer with no choice (a refusal) is skipped, and the other answers of the event stay. */
+    @Test fun aRefusalAnswerIsSkipped() {
+        val line = """{"type":"decision.event","source_event_id":"piece_1","source_event_type":"session.input_transcript.delta","event":{"type":"decision.completed","decision":{"answers":[{"type":"refusal","name":"user_command","refusal":"no answer"},{"type":"choice","name":"user_step","choice":"2","probabilities":[{"value":"2","probability":0.7}]}],"usage":{"input_tokens":90}}}}"""
+        assertEquals(LiveEvent.Decision("piece_1", true, listOf(ClassifierAnswer("user_step", "2", 0.7)), 90), LiveProtocol.parse(line))
+    }
+
+    /**
+     * Real lines of the decisions probe of 2026-11-22 (run mix-mwrqudxz): the first decision event, the scene item answer, and the first
+     * received input piece. The confidence of an answer is the probability of its chosen value, not its confidence field (0.44 and 0.64).
+     */
+    @Test fun recordedProbeLinesParse() {
+        val decision = """{"t":3307,"dir":"recv","event_id":"event_EmzsghKYC6EyTZJm40ey9","type":"decision.event","delegation_id":null,"event":{"type":"decision.completed","decision":{"model":"gpt-6-luna","answers":[{"type":"choice","name":"user_command","choice":"none","probabilities":[{"value":"next","probability":0.09},{"value":"back","probability":0.14},{"value":"repeat","probability":0.14},{"value":"go_to","probability":0.08},{"value":"none","probability":0.55}],"confidence":0.44},{"type":"choice","name":"user_step","choice":"none","probabilities":[{"value":"1","probability":0.17},{"value":"2","probability":0.04},{"value":"3","probability":0.02},{"value":"4","probability":0.04},{"value":"5","probability":0.03},{"value":"6","probability":0.01},{"value":"none","probability":0.69}],"confidence":0.64}],"usage":{"input_tokens":494,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens":0,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":494}}},"source_event_id":"event_EmzsgfS6RQd8vkD0Npitj","source_event_type":"session.input_transcript.delta","trigger_id":"trg_EmzsgX4qjPkDrRPBQ5Msu"}"""
+        val item = """{"t":1676,"dir":"recv","event_id":"event_EmzsfGt405MdiDEcy75UV","type":"decision.item.created","client_event_id":"item_2","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"На экране сцена «Как работает сердце». Шаги сцены:\n1. Из тела: Кровь с малым содержанием кислорода возвращается из тела в сердце.\n2. В лёгкие: Сердце направляет кровь в лёгкие, где она насыщается кислородом.\n3. Из лёгких: Из лёгких насыщенная кислородом кровь возвращается в сердце.\n4. В тело: Сердце сокращается и выталкивает кровь к органам и тканям тела."}],"id":"msg_02da6e597e09347e016b02cf910f008190805516e0b1bd0a03"}}"""
+        val delta = """{"t":3155,"dir":"recv","type":"session.input_transcript.delta","start_ms":1600,"end_ms":1800,"delta":" Объясни","event_id":"event_EmzsgfS6RQd8vkD0Npitj"}"""
+        assertEquals(LiveEvent.Decision("event_EmzsgfS6RQd8vkD0Npitj", true,
+            listOf(ClassifierAnswer("user_command", "none", 0.55), ClassifierAnswer("user_step", "none", 0.69)), 494), LiveProtocol.parse(decision))
+        assertEquals(LiveEvent.ItemCreated("item_2", "msg_02da6e597e09347e016b02cf910f008190805516e0b1bd0a03"), LiveProtocol.parse(item))
+        assertEquals("event_EmzsgfS6RQd8vkD0Npitj", (LiveProtocol.parse(delta) as LiveEvent.InputTranscript).eventId)
+    }
+
+    /** K2 and K8: the scene item, its created answer, and the failed client event id in each error shape. */
+    @Test fun itemEventsAndErrorIds() {
+        val create = JSONObject(LiveProtocol.itemCreate("event_a", "Сцена"))
+        assertEquals("decision.item.create", create.getString("type"))
+        val item = create.getJSONObject("item")
+        assertEquals(listOf("message", "user"), listOf(item.getString("type"), item.getString("role")))
+        assertEquals("input_text" to "Сцена", item.getJSONArray("content").getJSONObject(0).let { it.getString("type") to it.getString("text") })
+        assertEquals("item_1", JSONObject(LiveProtocol.itemDelete("event_b", "item_1")).getString("item_id"))
+        assertEquals(LiveEvent.ItemCreated("event_a", "item_9"), LiveProtocol.parse(liveItemCreated("event_a", "item_9")))
+        fun id(json: String) = (LiveProtocol.parse(json) as LiveEvent.Failure).clientEventId
+        assertEquals("event_c", id("""{"type":"error","error":{"message":"bad","client_event_id":"event_c"}}"""))
+        assertEquals("event_d", id("""{"type":"error","client_event_id":"event_d","error":{"message":"bad"}}"""))
+        assertEquals("event_e", id("""{"type":"error","error":{"message":"bad","event_id":"event_e"}}"""))
+        val coded = LiveProtocol.parse("""{"type":"error","error":{"message":"bad","code":"invalid_decision","param":"session.triggers"}}""") as LiveEvent.Failure
+        assertEquals("invalid_decision" to "session.triggers", coded.code to coded.param)
+    }
 }

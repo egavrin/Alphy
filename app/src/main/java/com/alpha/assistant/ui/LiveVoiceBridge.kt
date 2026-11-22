@@ -14,6 +14,7 @@ import com.alpha.assistant.agent.AgentPhase
 import com.alpha.assistant.agent.AgentPlan
 import com.alpha.assistant.agent.AgentStep
 import com.alpha.assistant.cloud.AiProvider
+import com.alpha.assistant.cloud.FollowDecision
 import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.surfaces.AssistCapture
@@ -26,6 +27,7 @@ import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.voice.ApprovalWindow
+import com.alpha.assistant.voice.LiveEvent
 import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.LiveVoiceHost
 import com.alpha.assistant.voice.LiveVoiceSession
@@ -117,20 +119,82 @@ internal class LiveVoiceBridge(
     /** The new scene of a hand-off whose start waits for its narration call or for the list of tools (decision 14). */
     private var sceneWaits: String? = null
 
+    /** The person turn of the follow signal and of the classifier (plan "one scene", decisions 19 and 20, K3 to K7). */
+    private class PersonTurn(val texts: Int, val firstPiece: Long) {
+        val words = StringBuilder()
+        /** The server event ids of the caption pieces of the person, in order. */
+        val pieces = ArrayList<String>()
+        var handOff = false
+        var pair: SpokenPair? = null
+        /** The words of the voice in this turn while the host sent no text, and whether the follow call started. */
+        val said = StringBuilder()
+        var followed = false
+        var followDue = false
+        /** The end of the phrase came (K3), a command answered the turn ([acted]), and K4 or K6 moved the picture ([moved], K7). */
+        var ended = false
+        var acted = false
+        var moved = false
+    }
+    private var personTurn: PersonTurn? = null
+    /** The input answers of the classifier by the event id of their caption piece, for the turn that runs (K3). */
+    private val inputAnswers = HashMap<String, LiveEvent.Decision>()
+    private var phraseJob: Job? = null
+    /** The number of each output caption piece by its event id, and the count so far (K5). */
+    private val outputPieces = HashMap<String, Long>()
+    private var pieceCount = 0L
+    /** The scene item of the classifier: its server id, its scene and text, and the client event id of a create with no answer yet (K2). */
+    private var sceneItem: String? = null
+    private var sceneItemTool: String? = null
+    private var sceneItemText: String? = null
+    private var sceneItemCreate: String? = null
+    /** The follow screens of voice-only turns by their assistant message id, with whether the voice gave the answer (decision 19, C5). */
+    private val follows = HashMap<String, Boolean>()
+    /** Whether the stage scene of each running change had steps before the change, and the changed scene and revision that can walk (C4). */
+    private val changedFromSteps = HashMap<String, Boolean>()
+    private var changeWalk: Pair<String, Int>? = null
+    /** The scene of [sceneWaits] may only walk: a changed scene says no narration line (C4). */
+    private var sceneWalkOnly = false
+    /** The scene and the step of a move of the voice that runs, so a repeated answer for the same step presses nothing more (K4, K6). */
+    private var moving: Pair<String, Int>? = null
+
     /** The walk of a new stepped scene (plan "one scene", decisions 14 to 17). Branch (b) of Task 24, by ruling 1 of stage 2. */
     private val narrator = StageNarrator(send = { session.thinking(it) }, press = ::pressStep, cardText = ::cardText,
         onsetAfter = session::onsetAfter, cancelOnset = session::cancelOnset, skip = session::skip, skipAfterSpeech = true,
-        scope = model.viewModelScope)
+        scope = model.viewModelScope, pieces = { pieceCount })
 
     /** A walk goes on: the strip keeps the speaking status, and a reply end opens no approval window (decision 17). */
     val walking: Boolean get() = narrator.walking
+
+    /** The plan card that left the stage (plan "one scene", decision 21). The chat keeps it. */
+    var hiddenPlan by mutableStateOf<String?>(null); private set
+
+    /** A waiting plan card leaves the stage (decision 21): at a follow clear or screen, or at a later completed hand-off. */
+    private fun planLeaves() {
+        model.agent.plan?.takeIf { it.phase == AgentPhase.REVIEW || it.phase in SCREEN_PHASES }?.let { hiddenPlan = it.id }
+    }
+
+    /**
+     * The text of the work card that replaces the stage app while the latest hand-off searches, or builds a screen with no frame yet (decision
+     * 21). The subject is the words of the hand-off, cut at a word end at [WORK_SUBJECT_MAX] characters. Null when no card shows.
+     */
+    val workCard: String? get() {
+        val id = cardId?.takeIf { it in handOffs.values } ?: return null
+        val message = message(id)?.takeIf { it.status in unfinishedStatuses } ?: return null
+        val words = message.replyTo?.let(::message)?.text?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val subject = if (words.length <= WORK_SUBJECT_MAX) words else words.take(WORK_SUBJECT_MAX + 1).substringBeforeLast(' ', words.take(WORK_SUBJECT_MAX)).trimEnd()
+        return when {
+            message.searchStatus == "searching" -> string(R.string.stage_work_search, subject)
+            id in screens && model.tools.stagePreviews.current == null -> string(R.string.stage_work_build, subject)
+            else -> null
+        }
+    }
 
     /**
      * Runs [control] of the stage app [toolId] as a tap. False when no stage ran the tap within [PRESS_WAIT_MS]. [who] is "voice" for a
      * routing press and «Дальше», and "narrator" for a press of a walk: the next change of that control is an action of [who].
      */
-    suspend fun press(toolId: String, control: ShownControl, who: String = "voice"): Boolean {
-        val own = SceneAction(who, control.label, control.value) to SystemClock.uptimeMillis()
+    suspend fun press(toolId: String, control: ShownControl, who: String = "voice", cause: String? = null): Boolean {
+        val own = SceneAction(who, control.label, control.value, cause) to SystemClock.uptimeMillis()
         expected.addLast(own)
         val press = VoicePress(toolId, control)
         var ran = false
@@ -168,14 +232,14 @@ internal class LiveVoiceBridge(
     /** The app file of [record], or the kept text with the narration that the controller saved at its revision, before the list of tools reloads. */
     private fun appFileOf(record: ToolRecord) = model.tools.savedNarration(record) ?: ToolSpec.availablePersisted(record)?.appFile
 
-    /** The press of [step] of the scene of the walk, as a narrator action. It returns when the list of tools shows the step. */
-    private suspend fun pressStep(step: String): Boolean {
+    /** The press of [step] of the scene of the walk, as a narrator action with [cause]. It returns when the list of tools shows the step. */
+    private suspend fun pressStep(step: String, cause: String?): Boolean {
         val toolId = narrator.scene ?: return false
         fun screen() = model.tools.tools.find { it.id == toolId }?.let { ShownScreen.of(it) }
         val screen = screen() ?: return false
         if (screen.step?.label == step) return true
         val control = screen.controls.find { it.label == "${screen.stepControl}: $step" } ?: return false
-        if (!press(toolId, control, "narrator")) return false
+        if (!press(toolId, control, "narrator", cause)) return false
         // The stage commits the tap, and the list of tools reloads after the store changes.
         return withTimeoutOrNull(PRESS_WAIT_MS) { while (screen()?.step?.label != step) delay(20); true } == true
     }
@@ -195,6 +259,8 @@ internal class LiveVoiceBridge(
      * one control by tap less than 1 s apart replace the last action, so a slider drag is one action. A new stage app adds no action.
      */
     private fun observe(record: ToolRecord?) {
+        syncSceneItem()
+        changeWalks()
         if (record == null) return
         sceneWaits?.takeIf { it == record.id }?.let { beginScene(it) }
         val screen = ShownScreen.of(record) ?: return
@@ -214,7 +280,7 @@ internal class LiveVoiceBridge(
         own?.let(expected::remove)
         val who = own?.first?.who ?: "tap"
         if (who == "tap" && now - lastTapMs < TAP_MERGE_MS && recent.lastOrNull()?.let { it.who == "tap" && it.control == label } == true) recent.removeLast()
-        recent.addLast(SceneAction(who, label, value))
+        recent.addLast(SceneAction(who, label, value, own?.first?.cause))
         while (recent.size > ShownScreen.MAX_ACTIONS) recent.removeFirst()
         if (who != "tap") return
         lastTapMs = now
@@ -227,13 +293,14 @@ internal class LiveVoiceBridge(
     }
 
     /** A new scene of a hand-off came on the stage (decision 14): it starts when its narration call ended and the list of tools holds it. */
-    private fun sceneCame(toolId: String) {
+    private fun sceneCame(toolId: String, walkOnly: Boolean = false) {
         narrator.stop(WalkStop.ANSWER)
         sceneWaits = toolId
+        sceneWalkOnly = walkOnly
         beginScene(toolId)
     }
 
-    /** A stepped scene starts its walk. A scene with one narration line says it once. Each other scene says nothing. */
+    /** A stepped scene starts its walk. A scene with one narration line says it once, unless only a walk may start. Each other scene says nothing. */
     private fun beginScene(toolId: String) {
         if (sceneWaits != toolId || model.tools.narrationPending(toolId)) return
         val record = model.tools.tools.find { it.id == toolId } ?: return
@@ -241,15 +308,24 @@ internal class LiveVoiceBridge(
         val narration = SceneNarration.of(appFileOf(record))
         val screen = ShownScreen.of(record) ?: return
         if (narration.stepped && screen.steps.isNotEmpty()) narrator.start(toolId, screen.steps, narration)
-        else narration.say?.let { session.thinking(LiveProtocol.MARK + it) }
+        else if (!sceneWalkOnly) narration.say?.let { session.thinking(LiveProtocol.MARK + it) }
+    }
+
+    /** C4: the changed scene of [changeWalk] walks when the list of tools holds its revision with steps. A result with no steps says nothing. */
+    private fun changeWalks() {
+        val (id, revision) = changeWalk ?: return
+        val record = model.tools.tools.find { it.id == id }?.takeIf { it.revision >= revision } ?: return
+        changeWalk = null
+        if (ShownScreen.of(record)?.steps.isNullOrEmpty()) return
+        sceneCame(id, walkOnly = true)
     }
 
     /** A touch on the stage starts ([down]) or ends. A press by voice is no touch. The session hears no microphone sound for its time. */
     fun stageTouch(down: Boolean) = session.touch(down)
 
     fun start(firstSpeech: Boolean) {
-        session.start(this, firstSpeech)
-        model.tools.narrationEnded = { toolId -> beginScene(toolId) }
+        session.start(this, firstSpeech, LiveProtocol.triggers().takeUnless { classifierOffForApp })
+        model.tools.narrationEnded = { toolId -> beginScene(toolId); syncSceneItem() }
         watch = model.viewModelScope.launch {
             // The session reads the account only at its start, so a later provider change or key removal ends it here (spec 5.8).
             launch {
@@ -287,7 +363,11 @@ internal class LiveVoiceBridge(
      * changed or the new screen is there. A change that gives neither goes on to the full generation ([fullStarted]). A message of no
      * hand-off gets nothing.
      */
-    fun changeStarted(messageId: String) { if (messageId in handOffs.values) changes += messageId }
+    fun changeStarted(messageId: String) {
+        if (messageId !in handOffs.values) return
+        changes += messageId
+        changedFromSteps[messageId] = stageScreen()?.steps?.isNotEmpty() == true
+    }
 
     /**
      * The full generation of the hand-off of [messageId] starts, because its screen or its change gave no app on the fast path (ruling FX-4).
@@ -304,20 +384,237 @@ internal class LiveVoiceBridge(
 
     override fun history(): List<Message> = model.snapshot.selected?.messages.orEmpty()
 
-    override fun outputText(text: String, startMs: Long, endMs: Long, replyStart: Boolean, arrivedNanos: Long) =
-        narrator.output(text, replyStart, arrivedNanos)
+    override fun outputPiece(eventId: String?) { pieceCount++; eventId?.let { outputPieces[it] = pieceCount } }
 
-    override fun inputStarted() = narrator.stop(WalkStop.SPEECH)
+    override fun outputText(text: String, startMs: Long, endMs: Long, replyStart: Boolean, arrivedNanos: Long) {
+        followWords(text, replyStart)
+        narrator.output(text, replyStart, arrivedNanos)
+    }
+
+    /**
+     * The follow signal (plan "one scene", decisions 19 and 20): the first reply of a person turn with no hand-off and no host text after it
+     * makes the spoken pair, and the words of the voice go to the pair. Implementation choice: the follow call starts at the first sentence
+     * end of the voice, or at the reply end, so that the call sees whether the voice answered or only promised an answer (C5).
+     */
+    private fun followWords(text: String, replyStart: Boolean) {
+        val turn = personTurn?.takeIf { !it.handOff && !it.acted && session.texts == it.texts } ?: return
+        if (turn.pair == null) {
+            if (!replyStart || turn.words.isBlank()) return
+            turn.pair = model.startSpokenPair(turn.words.toString())
+        }
+        turn.said.append(text)
+        model.appendSpokenWords(checkNotNull(turn.pair), text)
+        if (turn.said.any { it in SENTENCE_ENDS }) follow(turn)
+    }
+
+    /** Starts the follow call of [turn] once. While the end of its phrase can still find a command (K3), the call waits for that end. */
+    private fun follow(turn: PersonTurn) {
+        val pair = turn.pair ?: return
+        if (turn.followed || turn.handOff || turn.acted || session.texts != turn.texts) return
+        if (!turn.ended && phraseJob?.isActive == true) { turn.followDue = true; return }
+        turn.followed = true
+        model.followTurn(turn.words.toString().trim(), pair)
+    }
+
+    /** The follow decision of a voice-only turn (decision 18). Mark and press select the option quietly. After a classifier move, no screen and no clear (K7). */
+    fun followed(decision: FollowDecision, pair: SpokenPair, toolId: String?) {
+        val turn = personTurn?.takeIf { it.pair == pair } ?: return
+        model.tools.traceFollow(decision.kind)
+        when (decision) {
+            is FollowDecision.None -> Unit
+            is FollowDecision.Screen -> if (!turn.moved) model.followScreen(pair, decision)?.let { id -> follows[id] = decision.answered; tracked += id; planLeaves() }
+            is FollowDecision.Mark, is FollowDecision.Press -> {
+                val target = if (decision is FollowDecision.Mark) decision.target else (decision as FollowDecision.Press).target
+                val record = toolId?.let { id -> model.tools.tools.find { it.id == id } } ?: return
+                // The list of the follow call: with the continue control, which walks the rest of the steps as the routing press does.
+                val screen = ShownScreen.of(record, continueLabel = string(R.string.stage_continue_steps))
+                val control = screen?.controls?.singleOrNull { it.label == target } ?: return
+                if (control.actionId == ShownScreen.CONTINUE_ACTION) rest(record.id)?.let { session.thinking(LiveProtocol.MARK + it) }
+                else model.viewModelScope.launch { press(record.id, control, "voice") }
+            }
+            is FollowDecision.Clear -> if (!turn.moved) { stageToolId = null; planLeaves() }
+        }
+    }
+
+    override fun inputStarted() {
+        narrator.stop(WalkStop.SPEECH)
+        closeTurn()
+        personTurn = PersonTurn(session.texts, pieceCount)
+        inputAnswers.clear()
+    }
+
+    override fun inputText(delta: String, eventId: String?) {
+        // K3: the phrase end (1000 ms) comes before the turn gap of the session (1200 ms), so a piece after it starts a new person turn.
+        if (personTurn?.ended == true && delta.isNotBlank()) inputStarted()
+        val turn = personTurn ?: return
+        turn.words.append(delta)
+        eventId?.let { turn.pieces += it }
+        // K3: with no hand-off, the end of a phrase is 1000 ms with no new caption piece of the person.
+        if (turn.handOff || turn.ended || classifiedScreen() == null) return
+        phraseJob?.cancel()
+        phraseJob = model.viewModelScope.launch {
+            delay(PHRASE_END_MS)
+            phraseJob = null
+            if (!phraseEnd(turn, null, turn.words.toString().trim()) && turn.followDue) follow(turn)
+        }
+    }
+
+    /** The turn before a new turn or the end: its spoken pair persists, and its follow call and the screen build of its follow call stop (decisions 19, 20). */
+    private fun closeTurn() {
+        phraseJob?.cancel(); phraseJob = null
+        val turn = personTurn ?: return
+        personTurn = null
+        turn.pair?.let(model::persistSpokenPair)
+        model.cancelFollow()
+    }
 
     override fun delegation(id: String, request: String) {
         // A new hand-off stops a walk (decision 14).
         narrator.stop(WalkStop.ANSWER)
+        // A hand-off drops the spoken pair of its turn and stops the follow call (decisions 19 and 20, review focus 3).
+        val turn = personTurn
+        turn?.let { it.handOff = true; it.pair?.let(model::dropSpokenPair); it.pair = null }
+        model.cancelFollow()
+        // K3: the hand-off is the end of the phrase, so the 1000 ms timer stops, and the hand-off gets the one answer.
+        phraseJob?.cancel(); phraseJob = null
         // Rule 7: the hand-off of an approval or rejection turn gets the rule-5 text, and the chat saves nothing.
         answered?.takeIf { spokenAnswer(request) == it.first }?.let { answered = null; session.commentary(id, it.second); return }
+        // K3, Assumption: a hand-off of a turn that the host already answered gets an empty append and no routing call.
+        if (turn?.acted == true) { session.thinking("", id); return }
         if (request.isBlank()) { session.commentary(id, NOT_HEARD); return }
+        // K3: the newest piece of the turn can still wait for its answer, for at most 300 ms.
+        val last = turn?.pieces?.lastOrNull()
+        if (turn != null && !turn.ended && last != null && last !in inputAnswers && classifiedScreen() != null) {
+            model.viewModelScope.launch {
+                withTimeoutOrNull(HAND_OFF_WAIT_MS) { while (last !in inputAnswers) delay(10) }
+                handOff(id, request, turn)
+            }
+            return
+        }
+        handOff(id, request, turn)
+    }
+
+    private fun handOff(id: String, request: String, turn: PersonTurn?) {
+        if (turn != null && phraseEnd(turn, id, request)) return
         if (assistantInvocation == null) { track(id, model.submitDraft(Draft(request), search = true, spoken = true)); return }
         val first = takeFirstCapture()
         model.viewModelScope.launch { track(id, handOffOrder.withLock { model.submitLiveRequest(request, assistantInvocation, first) }) }
+    }
+
+    /**
+     * The end of a phrase (K3, K4): the newest input answer of the turn decides. A command moves the step, and the voice says its sentence with
+     * no routing call: then this gives true. A question about another step moves the picture and says nothing, and the turn goes on.
+     */
+    private fun phraseEnd(turn: PersonTurn, handOff: String?, words: String): Boolean {
+        if (turn.ended) return turn.acted
+        turn.ended = true
+        phraseJob?.cancel()
+        if (turn !== personTurn) return false
+        val screen = classifiedScreen() ?: return false
+        val present = screen.step?.index ?: return false
+        val answer = turn.pieces.lastOrNull()?.let(inputAnswers::get) ?: return false
+        fun of(name: String) = answer.answers.find { it.name == name }
+        fun step(min: Double) = of(LiveProtocol.USER_STEP)?.takeIf { it.confidence >= min }?.choice?.toIntOrNull()?.takeIf { it in 1..screen.steps.size }
+        val command = of(LiveProtocol.USER_COMMAND)
+        if (command != null && command.choice in COMMANDS && command.confidence >= COMMAND_MIN) {
+            val target = when (command.choice) {
+                "next" -> present + 1
+                "back" -> present - 1
+                "repeat" -> present
+                else -> step(GO_TO_STEP_MIN)
+            }
+            // next at the last step and go_to with no valid step go to the routing call, as in Alpha 19.
+            if (target == null || target > screen.steps.size) return false
+            act(turn, screen, target, handOff, words)
+            return true
+        }
+        if (command?.choice == "none") step(QUESTION_MIN)?.takeIf { it != present }?.let { turn.moved = true; moveTo(screen, it, "question") }
+        return false
+    }
+
+    /** A spoken command (K3): the step moves with who voice, and the voice says its sentence. The chat keeps the words and the sentence. */
+    private fun act(turn: PersonTurn, screen: ShownScreen, target: Int, handOff: String?, words: String) {
+        turn.acted = true
+        narrator.stop(WalkStop.ANSWER)
+        turn.pair?.let(model::dropSpokenPair); turn.pair = null
+        model.cancelFollow()
+        fun say(text: String, saved: String) {
+            if (handOff != null) session.commentary(handOff, text) else session.thinking(text)
+            model.saveVoiceTurn(words, saved)
+        }
+        if (target < 1) { say(FIRST_STEP, FIRST_STEP); return }
+        val record = model.tools.tools.find { it.id == screen.toolId }
+        val sentence = record?.let { SceneNarration.of(appFileOf(it)).sentence(target) } ?: screen.steps[target - 1]
+        moveTo(screen, target, "command") { ran -> if (ran) say(LiveProtocol.MARK + sentence, sentence) else say(PRESS_FAILED, PRESS_FAILED) }
+    }
+
+    /** Moves the stepped [screen] to [step] with who voice. [then] gets whether the stage shows the step. */
+    private fun moveTo(screen: ShownScreen, step: Int, cause: String, then: ((Boolean) -> Unit)? = null) {
+        val move = screen.toolId to step
+        // An answer comes for each caption piece, so the same step can be named again before the stage shows the first press.
+        if (moving == move) { then?.invoke(true); return }
+        val control = screen.controls.find { it.label == "${screen.stepControl}: ${screen.steps[step - 1]}" }
+        moving = move
+        model.viewModelScope.launch {
+            val ran = try { screen.step?.index == step || control != null && press(screen.toolId, control, "voice", cause) }
+                finally { if (moving == move) moving = null }
+            then?.invoke(ran)
+        }
+    }
+
+    override fun decision(decision: LiveEvent.Decision) {
+        if (decision.input) { inputAnswers[decision.sourceEventId] = decision; return }
+        val screen = classifiedScreen() ?: return
+        val answer = decision.answers.find { it.name == LiveProtocol.SPOKEN_STEP } ?: return
+        val step = answer.choice.toIntOrNull()?.takeIf { it in 1..screen.steps.size } ?: return
+        val piece = outputPieces[decision.sourceEventId] ?: return
+        // K5: in a walk, only the step of the waiting sentence counts.
+        if (narrator.walking) { if (answer.confidence >= WALK_MIN && narrator.scene == screen.toolId) narrator.classified(step, piece); return }
+        // K6: a free answer in a turn where the host sent no text. A reply to a host text never moves the picture this way.
+        val turn = personTurn ?: return
+        if (!FREE_ANSWER_MOVES || answer.confidence < FREE_MIN || turn.acted || session.texts != turn.texts || piece <= turn.firstPiece) return
+        if (screen.step?.index == step) return
+        turn.moved = true
+        moveTo(screen, step, "classifier")
+    }
+
+    override fun itemCreated(clientEventId: String, itemId: String) {
+        // An item that a newer scene replaced before its create came back goes at once.
+        if (clientEventId == sceneItemCreate) { sceneItemCreate = null; sceneItem = itemId } else session.deleteItem(itemId)
+    }
+
+    override fun classifierOff(appRun: Boolean) {
+        if (appRun) classifierOffForApp = true
+        sceneItem = null; sceneItemText = null; sceneItemCreate = null
+        phraseJob?.cancel()
+    }
+
+    /** The stage app as a shown screen, or null. */
+    private fun stageScreen(): ShownScreen? = model.stageToolId?.let { id -> model.tools.tools.find { it.id == id } }?.let { ShownScreen.of(it) }
+
+    /** The stepped scene on the stage that the classifier knows from its scene item, or null: then each classifier answer is ignored (K2). */
+    private fun classifiedScreen(): ShownScreen? =
+        if (!session.classifierOn || sceneItemText == null) null else stageScreen()?.takeIf { it.steps.isNotEmpty() }
+
+    /** K2: one scene item for the stepped scene on the stage. A new or changed scene deletes the old item first. With no stepped scene, none. */
+    private fun syncSceneItem() {
+        if (!session.classifierOn) return
+        val record = model.stageToolId?.let { id -> model.tools.tools.find { it.id == id } }
+        val text = record?.takeIf { !model.tools.narrationPending(it.id) }?.let(::sceneText)
+        // Another scene with the same text still replaces the item, as K2 asks.
+        if (text == sceneItemText && (text == null || record?.id == sceneItemTool)) return
+        sceneItem?.let(session::deleteItem)
+        sceneItem = null; sceneItemText = text; sceneItemTool = record?.id?.takeIf { text != null }
+        sceneItemCreate = text?.let(session::createItem)
+    }
+
+    /** The scene text of K2: the title, then each step as number, label, and narration sentence, with no line about the present step. */
+    private fun sceneText(record: ToolRecord): String? {
+        val screen = ShownScreen.of(record) ?: return null
+        val narration = SceneNarration.of(appFileOf(record))
+        if (!narration.stepped || screen.steps.isEmpty()) return null
+        val steps = screen.steps.mapIndexed { index, label -> "${index + 1}. $label" + narration.sentence(index + 1)?.let { ": $it" }.orEmpty() }
+        return "На экране сцена «${screen.title}». Шаги сцены:\n" + steps.joinToString("\n")
     }
 
     // shortcut: every refusal gets the busy text. A spoken request reaches only the full queue, a busy «+» attachment, or a failed
@@ -361,6 +658,8 @@ internal class LiveVoiceBridge(
     // shortcut: the window opens at the first output end after the acknowledgment (rule 3), which can be the tail of an earlier
     // line or early after a late transcript delta. Add a transcript-based end if the live check (6.3) shows an early window.
     override fun outputEnded(endMs: Long) {
+        // The spoken pair persists at each reply end, and a reply with no sentence end starts the follow call here (decisions 19 and 20).
+        personTurn?.let { turn -> turn.pair?.let { follow(turn); model.persistSpokenPair(it) } }
         narrator.replyEnded()
         // A reply end inside a walk is a gap between two sentences, so it opens no approval window (decision 17).
         if (narrator.walking) return
@@ -370,6 +669,9 @@ internal class LiveVoiceBridge(
     // The end of the mode also stops each narration call that a stored scene waits on (plan "one scene", decision 6).
     override fun ended(status: String, settingsRequired: Boolean) {
         narrator.stop(WalkStop.END)
+        closeTurn()
+        inputAnswers.clear(); outputPieces.clear(); follows.clear(); changedFromSteps.clear(); changeWalk = null; moving = null
+        sceneItem = null; sceneItemText = null; sceneItemCreate = null
         watch?.cancel(); watch = null; capture = null; stageToolId = null
         model.tools.stopNarrations()
         model.tools.narrationEnded = null
@@ -383,6 +685,10 @@ internal class LiveVoiceBridge(
             val message = changed(id) ?: continue
             // The person needs a full silence time to see the screen, and a screen that the voice announced at its start sends no text.
             if (message.status == "complete") message.toolId?.let { stageToolId = it; session.countSilence() }
+            // Decision 21: a hand-off that searched and gave no app takes the old scene off the stage, and a later completed hand-off takes a
+            // waiting plan card off it. The hand-off of the plan itself keeps it.
+            if (message.status == "complete" && message.toolId == null && message.searchStatus.isNotEmpty()) stageToolId = null
+            if (message.status == "complete" && message.text != planReady) planLeaves()
             val full = message.status !in unfinishedStatuses && fulls.remove(id)
             // The voice said the answer of a screen at its start. A stop or a failure still goes on to the failure text.
             if (id in screens) {
@@ -395,8 +701,11 @@ internal class LiveVoiceBridge(
             if (id in changes) {
                 if (message.status == "generating") continue
                 changes -= id
+                val hadSteps = changedFromSteps.remove(id)
                 if (message.status == "complete") {
                     session.commentary(delegation, spoken(LiveProtocol.MARK, message.text))
+                    // C4: a change that turns a scene into a stepped scene walks it from step 1, once the list of tools holds its revision.
+                    if (hadSteps == false) message.toolId?.let { changeWalk = it to (message.toolRevision ?: 0); changeWalks() }
                     continue
                 }
             }
@@ -413,6 +722,15 @@ internal class LiveVoiceBridge(
                 message.text == PRESS_MISSING || message.text == PRESS_FAILED -> message.text
                 else -> spoken(LiveProtocol.MARK, message.text)
             })
+        }
+        // A follow screen shows its scene with no words. When the voice only promised an answer, the scene speaks as a new scene (C5).
+        for ((id, answered) in follows.entries.toList()) {
+            val message = changed(id)?.takeIf { it.status == "complete" && it.toolId != null } ?: continue
+            follows -= id
+            val toolId = checkNotNull(message.toolId)
+            stageToolId = toolId
+            session.countSilence()
+            if (!answered && message.toolRevision == 1) sceneCame(toolId)
         }
         for ((id, text) in typed) {
             val message = changed(id)?.takeIf { it.status == "complete" } ?: continue
@@ -519,6 +837,25 @@ internal class LiveVoiceBridge(
             "pre_headers_io", "pre_headers_timeout", "stream_io", "stream_timeout", "stream_invalid", "widget_generation")
         /** The failure codes of a request or a reply that does not fit a limit. */
         val TOO_BIG_CODES = setOf("widget_size", "widget_response_size", "response_size", "response_length", "tool_limit")
+        /** The thresholds of the classifier rules K3 to K6 (plan "one scene"). */
+        const val COMMAND_MIN = 0.75
+        const val GO_TO_STEP_MIN = 0.6
+        const val QUESTION_MIN = 0.8
+        const val WALK_MIN = 0.5
+        const val FREE_MIN = 0.6
+        /** K3: the end of a phrase with no hand-off, and the wait for the answer of the newest piece at a hand-off. */
+        const val PHRASE_END_MS = 1_000L
+        const val HAND_OFF_WAIT_MS = 300L
+        val COMMANDS = setOf("next", "back", "repeat", "go_to")
+        /** The answer of «back» at the first step (K3). */
+        const val FIRST_STEP = "Это первый шаг."
+        /** The longest subject of the work card (decision 21). */
+        const val WORK_SUBJECT_MAX = 48
+        /** K6: the one switch of the move by a free answer. */
+        @Volatile var FREE_ANSWER_MOVES = true
+        /** K8: a failed start with triggers keeps the classifier off for the rest of the app run. */
+        @Volatile var classifierOffForApp = false
+        private const val SENTENCE_ENDS = ".!?…"
         const val FAILED = "Не получилось: "
         const val PROPOSE = "Предлагаю: "
         const val ASK = " Скажи «да», чтобы выполнить, или «нет», чтобы отменить."

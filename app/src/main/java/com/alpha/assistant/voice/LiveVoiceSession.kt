@@ -91,6 +91,16 @@ internal interface LiveVoiceHost {
     fun outputText(text: String, startMs: Long, endMs: Long, replyStart: Boolean, arrivedNanos: Long) {}
     /** The first input transcript piece of a user turn. */
     fun inputStarted() {}
+    /** Each input transcript piece, after [inputStarted] for the first one, with its server event id (plan "one scene", K1). */
+    fun inputText(delta: String, eventId: String?) {}
+    /** The server event id of each output transcript piece, before [outputText] and also for a skipped piece (K5). */
+    fun outputPiece(eventId: String?) {}
+    /** A classifier answer, only while [LiveVoiceSession.classifierOn] (K1). */
+    fun decision(decision: LiveEvent.Decision) {}
+    /** The server id of the scene item of [LiveVoiceSession.createItem] (K2). */
+    fun itemCreated(clientEventId: String, itemId: String) {}
+    /** The classifier went off: for the session after a classifier error, or for the app run after a failed start with triggers (K8). */
+    fun classifierOff(appRun: Boolean) {}
     /** At `session.commentary.appended` for the client event id that [LiveVoiceSession.commentary] returned. */
     fun appended(eventId: String)
     /** Once at the end of each reply, as [LiveTiming] defines it. [endMs] is [LiveTranscript.outputEndMs]. */
@@ -124,6 +134,15 @@ internal class LiveVoiceSession(
     var userMuted by mutableStateOf(false); private set
     /** The output transcript of the current or the last reply (plan D, Da3). The end of the mode clears it. */
     var speech by mutableStateOf(""); private set
+    /** The count of host texts (commentary and thinking appends) sent in this session, for the follow signal (plan "one scene", decision 19). */
+    var texts = 0; private set
+    /** The start held the classifier triggers, and no classifier error came since (plan "one scene", K8). */
+    var classifierOn = false; private set
+    private var triggers: org.json.JSONArray? = null
+    /** This start is the K8 start with no triggers. At `session.started`, the classifier goes off for the app run. */
+    private var retried = false
+    /** The client event ids of the scene item creates and deletes of this session. An error for one turns the classifier off (K8). */
+    private val classifierIds = HashSet<String>()
 
     private var generation = 0
     private var host: LiveVoiceHost? = null
@@ -202,12 +221,16 @@ internal class LiveVoiceSession(
     private val sender = CoroutineScope(Dispatchers.IO.limitedParallelism(1))
     private val player = CoroutineScope(Dispatchers.IO.limitedParallelism(1))
 
-    /** [firstSpeech]: an assistant button start, which ends after [LiveTiming.firstSpeechMs] without speech (spec 5.11.2). */
-    fun start(host: LiveVoiceHost, firstSpeech: Boolean = false) {
+    /**
+     * [firstSpeech]: an assistant button start, which ends after [LiveTiming.firstSpeechMs] without speech (spec 5.11.2). [triggers]: the
+     * classifier triggers of plan "one scene", K1. A failed start with them starts once more without them (K8).
+     */
+    fun start(host: LiveVoiceHost, firstSpeech: Boolean = false, triggers: org.json.JSONArray? = null) {
         if (active) return
         val token = ++generation
         this.host = host
         this.firstSpeech = firstSpeech
+        this.triggers = triggers; classifierOn = triggers != null; classifierIds.clear(); texts = 0; retried = false
         transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null; tolerated.clear()
         started = false; userMuted = false; awayMuted = false; captureMuted = false; dropping = false; interrupted = false
         playbackSeenMs = Long.MIN_VALUE; held.clear(); touchDownMs = null; touchOpenMs = 0L
@@ -222,7 +245,7 @@ internal class LiveVoiceSession(
                 if (account == null || account.provider != AiProvider.OPENAI) { end(string(R.string.live_voice_openai_only), settingsRequired = true); return@launch }
                 val url = liveUrl(endpoints)
                 // Before the connect, so a failed read leaves no open socket (review m9).
-                val first = LiveProtocol.start(host.history())
+                val first = LiveProtocol.start(host.history(), triggers)
                 val device = audio().also { live = it }
                 if (captureMuted) device.setCaptureMuted(true)
                 if (!device.open({ block -> onMain(token) { captured(block) } }, { onMain(token) { end(string(R.string.live_voice_focus_lost)) } })) {
@@ -262,7 +285,7 @@ internal class LiveVoiceSession(
     fun commentary(delegationId: String, text: String): String {
         skipSentence?.let { if (it in text) skipSentence = null }
         val id = LiveProtocol.newId()
-        if (started) { tolerated += id; send(LiveProtocol.commentary(id, delegationId, text)); countSilence() }
+        if (started) { tolerated += id; texts++; send(LiveProtocol.commentary(id, delegationId, text)); countSilence() }
         return id
     }
 
@@ -349,15 +372,54 @@ internal class LiveVoiceSession(
     /** The frames that the speaker played in this session, with the queued frames that a flush skipped. */
     private fun playedFrames() = (live?.playedFrames() ?: 0L) + skippedFrames.get()
 
-    /** Quiet context for a typed turn (spec 5.7.2). */
-    fun thinking(text: String) {
+    /** Quiet context for a typed turn (spec 5.7.2). [delegationId]: the hand-off of a turn that the host already answered (plan "one scene", K3). */
+    fun thinking(text: String, delegationId: String? = null) {
         skipSentence?.let { if (it in text) skipSentence = null }
         if (!started) return
         val id = LiveProtocol.newId()
         tolerated += id
-        send(LiveProtocol.thinking(id, text))
+        texts++
+        send(LiveProtocol.thinking(id, text, delegationId))
         countSilence()
     }
+
+    /** The scene item of the classifier (K2). Its client event id, or null when the classifier is off. */
+    fun createItem(text: String): String? {
+        if (!started || !classifierOn) return null
+        val id = LiveProtocol.newId()
+        classifierIds += id
+        send(LiveProtocol.itemCreate(id, text))
+        return id
+    }
+
+    fun deleteItem(itemId: String) {
+        if (!started || !classifierOn) return
+        val id = LiveProtocol.newId()
+        classifierIds += id
+        send(LiveProtocol.itemDelete(id, itemId))
+    }
+
+    /**
+     * K8: an error or a close before `session.started`, after a start with triggers, starts the session once more with no triggers. The
+     * classifier stays off for the app run only when that start reaches `session.started`. When it fails too, the mode ends. A refused upgrade with an HTTP status cannot come from the triggers, so it ends as before.
+     */
+    private fun retryWithoutTriggers(socketOpen: Boolean): Boolean {
+        val host = host
+        if (started || triggers == null || host == null) return false
+        generation++
+        replyJob?.cancel(); cancelOnset()
+        connection?.let { if (socketOpen) it.send(LiveProtocol.close()); it.close() }
+        connection = null
+        live?.close(); live = null
+        active = false
+        start(host, firstSpeech, null)
+        retried = true
+        return true
+    }
+
+    /** An error of a scene item or of a decision: the classifier goes off for this session, and the mode stays on (K8). */
+    private fun classifierFailure(event: LiveEvent.Failure): Boolean = triggers != null && (event.clientEventId in classifierIds ||
+        listOf(event.code, event.param).any { it.contains("decision", true) || it.contains("trigger", true) })
 
     /** Ends the session. Without a session, it clears the last end status, as a stop of the one-shot voice clears its status (review I2). */
     fun stop(status: String = "") { if (active) end(status) else { this.status = ""; settingsRequired = false } }
@@ -384,16 +446,17 @@ internal class LiveVoiceSession(
     private fun listener(token: Int) = object : LiveListener {
         override fun onText(text: String) { val event = LiveProtocol.parse(text); onMain(token) { handle(event) } }
         override fun onFailure(status: Int?, message: String) = onMain(token) {
-            if (status == null) end(string(R.string.live_voice_connection), socketOpen = false)
+            if (status == null) { if (!retryWithoutTriggers(socketOpen = false)) end(string(R.string.live_voice_connection), socketOpen = false) }
             else end(message, providerFailure(AiProvider.OPENAI, status, null, false).code in KEY_ERRORS, socketOpen = false)
         }
-        override fun onClosed() = onMain(token) { end(string(R.string.live_voice_connection), socketOpen = false) }
+        override fun onClosed() = onMain(token) { if (!retryWithoutTriggers(socketOpen = false)) end(string(R.string.live_voice_connection), socketOpen = false) }
     }
 
     private fun handle(event: LiveEvent) {
         when (event) {
             is LiveEvent.Started -> if (!started) {
                 started = true
+                if (retried) { retried = false; host?.classifierOff(appRun = true) }
                 if (captureMuted) sendMute(true)
                 // Both counts start when GPT-Live can hear the user, so they do not race the connection.
                 heardMs = SystemClock.uptimeMillis()
@@ -404,6 +467,7 @@ internal class LiveVoiceSession(
             is LiveEvent.OutputAudio -> output(event.samples)
             is LiveEvent.InputTranscript -> {
                 if (!inputOpen && event.delta.isNotBlank()) { inputOpen = true; host?.inputStarted() }
+                host?.inputText(event.delta, event.eventId)
                 refresh()
                 // A delta arrives after its own end, so its phrase began at or before this time (ruling R11).
                 val began = SystemClock.uptimeMillis() - (event.endMs - event.startMs)
@@ -413,6 +477,7 @@ internal class LiveVoiceSession(
                 gapJob = after(timing.turnGapMs) { inputOpen = false; turn(transcript.endTurn()) }
             }
             is LiveEvent.OutputTranscript -> {
+                host?.outputPiece(event.eventId)
                 val replyStart = replyEnded
                 // A pending skip starts at the first piece that starts its sentence, also inside the reply before it (decision 15). The
                 // transcript runs ahead of the audio, and a reply ends by its audio, so a reply start can fall inside a sentence: the words
@@ -440,14 +505,21 @@ internal class LiveVoiceSession(
             }
             is LiveEvent.Delegation -> delegation(event)
             is LiveEvent.Appended -> host?.appended(event.clientEventId)
-            is LiveEvent.Closed -> end(string(when (event.reason) {
+            is LiveEvent.Closed -> if (!retryWithoutTriggers(socketOpen = false)) end(string(when (event.reason) {
                 "expired" -> R.string.live_voice_expired
                 "content" -> R.string.live_voice_content
                 else -> R.string.live_voice_connection
             }), socketOpen = false)
             // A rejected append keeps the mode (the fallbacks of spec 5.5.6 and 5.7.2), and so does a rejected mute or unmute, as the
             // capture stops here in any case (R37). The server message can echo part of the key, so it is never shown (spec 5.3.6).
-            is LiveEvent.Failure -> if (event.clientEventId !in tolerated) end(string(R.string.live_voice_failed))
+            is LiveEvent.Failure -> when {
+                retryWithoutTriggers(socketOpen = true) -> Unit
+                // The triggers still run on the server after the first error, so a later classifier error keeps the mode too.
+                classifierFailure(event) -> if (classifierOn) { classifierOn = false; host?.classifierOff(appRun = false) }
+                event.clientEventId !in tolerated && event.clientEventId !in classifierIds -> end(string(R.string.live_voice_failed))
+            }
+            is LiveEvent.Decision -> if (classifierOn) host?.decision(event)
+            is LiveEvent.ItemCreated -> if (event.clientEventId in classifierIds) host?.itemCreated(event.clientEventId, event.itemId)
             LiveEvent.Other -> Unit
         }
     }

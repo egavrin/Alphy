@@ -26,7 +26,9 @@ data class Message(val id: String, val role: String, val text: String, val creat
     val refinementChoices: List<RefinementChoice> = emptyList(),
     val provenance: MessageProvenance = MessageProvenance.UNKNOWN,
     val automationResult: Boolean = false,
-    val screenContext: ScreenContext? = null)
+    val screenContext: ScreenContext? = null,
+    /** A turn that the voice answered alone, saved as a spoken pair (plan "one scene", decision 20). */
+    val spoken: Boolean = false)
 data class Conversation(val id: String, val title: String, val createdAt: Long, val updatedAt: Long, val draft: Draft = Draft(), val messages: List<Message> = emptyList(),
     val refinementTargetId: String? = null, val refinementDraft: Draft? = null) {
     val cardIds: List<String> get() = messages.mapNotNull { it.toolId }.distinct()
@@ -223,7 +225,7 @@ class ShellStore(private val context: Context, name: String = "alpha.db") : SQLi
     private fun encodeConversation(c: Conversation) = JSONObject().put("id", c.id).put("title", c.title).put("createdAt", c.createdAt).put("updatedAt", c.updatedAt)
         .put("draft", encodeDraft(c.draft)).put("refinementTargetId",c.refinementTargetId)
         .put("refinementDraft",c.refinementDraft?.let(::encodeDraft)).put("messages", JSONArray().apply { c.messages.filterNot { it.automationResult }.forEach { m -> put(JSONObject().put("id", m.id).put("role", m.role).put("text", m.text).put("createdAt", m.createdAt).put("status", m.status).put("attachments", encodeAttachments(m.attachments)).put("replyTo", m.replyTo).put("search", m.search)
-            .put("provenance", m.provenance.name).put("screenContext", m.screenContext?.json())
+            .put("provenance", m.provenance.name).put("screenContext", m.screenContext?.json()).put("spoken", m.spoken)
             .put("toolId",m.toolId).put("toolRevision",m.toolRevision).put("toolOperationId",m.toolOperationId)
             .put("queueOrder",m.queueOrder).put("hostTargetId",m.hostTargetId).put("requiresRefinement",m.requiresRefinement)
             .put("refinementChoices",JSONArray().apply { m.refinementChoices.forEach { choice ->
@@ -243,7 +245,7 @@ class ShellStore(private val context: Context, name: String = "alpha.db") : SQLi
             provenance = (it.opt("provenance") as? String)?.let { name ->
                 MessageProvenance.entries.firstOrNull { value -> value.name == name }
             } ?: MessageProvenance.UNKNOWN,
-            screenContext = it.optJSONObject("screenContext")?.let(ScreenContext::fromJson)) } } }, j.opt("refinementTargetId") as? String, j.optJSONObject("refinementDraft")?.let(::decodeDraft))
+            screenContext = it.optJSONObject("screenContext")?.let(ScreenContext::fromJson), spoken = it.optBoolean("spoken")) } } }, j.opt("refinementTargetId") as? String, j.optJSONObject("refinementDraft")?.let(::decodeDraft))
 }
 
 internal fun Conversation.withAutomationMessages(messages: List<Message>): Conversation {

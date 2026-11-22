@@ -65,10 +65,11 @@ internal class Speech(val fixture: String, val words: String)
  * and the expected start of the request text of the hand-off ([requestStarts], reported). [goal]: the element of the owner's talk
  * that the step holds (lane V). [touch]: the driver taps a control of the stage app [TOUCH_MS] after the end of the speech, as the
  * person who changes a value while the change runs. [tapWhileSpeaking]: the driver taps a control of the stage app while the voice
- * speaks the reply of the step and records the 8 s after the tap (the field `tap` of the step row).
+ * speaks the reply of the step and records the 8 s after the tap (the field `tap` of the step row). [untilStep]: the step ends as soon as
+ * a steps scene on the stage shows that step, so the next step speaks while the voice narrates it (plan "one scene", L1).
  */
 internal class DialogueStep(val speech: Speech?, val handOff: Boolean, val screen: Boolean, val requestStarts: String? = null,
-    val goal: String? = null, val touch: Boolean = false, val tapWhileSpeaking: Boolean = false)
+    val goal: String? = null, val touch: Boolean = false, val tapWhileSpeaking: Boolean = false, val untilStep: Int? = null)
 
 /**
  * A dialogue. [maxCalls] is a hard cost stop: the chat call after it is refused before it is sent. An [adaptive] dialogue (lane V)
@@ -242,6 +243,12 @@ internal val DIALOGUES = listOf(
     Dialogue("speed-pythagoras", listOf(probe("ux-pythagoras-1", "Объясни теорему Пифагора.")), maxCalls = RESEARCH_CALLS, adaptive = true),
     Dialogue("speed-orbit", listOf(probe("ux-orbit-1", "Покажи, как Земля вращается вокруг Солнца.")), maxCalls = RESEARCH_CALLS,
         adaptive = true),
+    // The classifier dialogue of stage 3 (plan "one scene", L1): «Верни назад» comes while the voice narrates the second step. The
+    // phrases are of the macOS voice Milena, as the decisions probe of 2026-11-22 made them.
+    Dialogue("ux-steps", listOf(DialogueStep(Speech("ux-steps-1", "Объясни, как работает сердце"), handOff = true, screen = false, goal = PROBE,
+        untilStep = 2), probe("ux-steps-2", "Верни назад"), probe("ux-steps-3", "Повтори"), probe("ux-steps-4", "Покажи четвёртый шаг"),
+        probe("ux-steps-5", "А почему кровь идёт в лёгкие?"), probe("ux-steps-6", "Дальше"),
+        probe("ux-steps-7", "Продолжай")), maxCalls = RESEARCH_CALLS, adaptive = true),
 ).associateBy { it.name }
 
 /** The rule of the kit for a template file (`TEMPLATE_HEAD` in kit/src/template.js), applied to its first line that is not empty. */
@@ -464,7 +471,7 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
                 val (touched, tap, late) = try {
                     Triple(if (current.touch && end != null) touch(model, end) else null,
                         if (current.tapWhileSpeaking && end != null) tapWhileSpeaking(scenario, model, end, began) else null,
-                        settle(scenario, model, end))
+                        settle(scenario, model, end, current.untilStep))
                 } finally { frames?.close() }
                 picture(model)
                 val after = main { stage(model) }
@@ -540,12 +547,13 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
      * decision. A refused call ends the wait. An adaptive dialogue also notes the first session error on the stage, which can show for a
      * moment only. Returns true when a hand-off still works at the end of the limit.
      */
-    private fun settle(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel, end: Long?): Boolean {
+    private fun settle(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel, end: Long?, untilStep: Int? = null): Boolean {
         val start = end ?: SystemClock.elapsedRealtimeNanos()
         val deadline = start + (if (dialogue.adaptive) FULL_STEP_MS else STEP_MS) * 1_000_000
         var since = SystemClock.elapsedRealtimeNanos()
         while (SystemClock.elapsedRealtimeNanos() < deadline && !capped) {
             noteStageError(scenario)
+            if (untilStep != null && main { stageStep(model) } >= untilStep) break
             val now = SystemClock.elapsedRealtimeNanos()
             val marks = recorder.marks()
             val commentary = marks.lastOrNull { it.name == "commentary" && it.atNanos > start }?.atNanos
@@ -566,6 +574,10 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         robot.awaitFrames(5)
         return late
     }
+
+    /** The present step of a steps scene on the stage, or 0. */
+    private fun stageStep(model: ShellViewModel): Int =
+        model.stageToolId?.let { id -> model.tools.tools.firstOrNull { it.id == id } }?.let { ShownScreen.of(it)?.step?.index } ?: 0
 
     /** Notes the first session error that the stage shows in this step of an adaptive dialogue. It can show for a moment only. */
     private fun noteStageError(scenario: ActivityScenario<CloudTestActivity>) {

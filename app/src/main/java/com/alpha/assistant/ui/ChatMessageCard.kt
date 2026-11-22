@@ -88,6 +88,7 @@ import com.alpha.assistant.data.Source
             border = if (user) null else BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.6f)),
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                if (message.spoken) Text(stringResource(R.string.chat_spoken_label), style = MaterialTheme.typography.labelSmall)
                 if (fragment != null || (!accepted && message.text.isNotBlank() && message.status in listOf("cancelled", "interrupted"))) {
                     Text(stringResource(R.string.chat_answer_incomplete), style = MaterialTheme.typography.labelSmall)
                 }

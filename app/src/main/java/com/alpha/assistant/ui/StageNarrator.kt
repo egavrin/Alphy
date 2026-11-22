@@ -25,13 +25,16 @@ internal enum class WalkStop { SPEECH, TAP, ANSWER, END }
  */
 internal class StageNarrator(
     private val send: (String) -> Unit,
-    private val press: suspend (step: String) -> Boolean,
+    /** Presses a step. The cause names a sync fire only: "exact" (the transcript comparison) or "classifier" (K5, K9), else null. */
+    private val press: suspend (step: String, cause: String?) -> Boolean,
     private val cardText: () -> String?,
     private val onsetAfter: (Long, () -> Unit) -> Unit,
     private val cancelOnset: () -> Unit,
     private val skip: (String) -> Unit,
     private val skipAfterSpeech: Boolean,
     private val scope: CoroutineScope,
+    /** The count of output transcript pieces so far, so a classifier answer can tell a piece after the send of a sentence (K5). */
+    private val pieces: () -> Long = { 0L },
 ) {
     var walking by mutableStateOf(false); private set
     /** The scene of the last walk. */
@@ -55,7 +58,8 @@ internal class StageNarrator(
     private var cardStep: Int? = null
     /** The press of the walk that runs now. A stop cancels it, so a press that the stage has not run yet never runs (fix list item 1). */
     private var pressJob: Job? = null
-
+    /** The piece count when the waiting sentence went out (K5). */
+    private var sentAt = 0L
     /** Starts the walk of [toolId] from its first step: the sentence of step 1 goes to the voice at once and waits behind the opener. */
     fun start(toolId: String, steps: List<String>, narration: SceneNarration) {
         walk(toolId, steps, narration, 1)
@@ -91,14 +95,14 @@ internal class StageNarrator(
     }
 
     private fun wait(k: Int, sentence: String, pressed: Boolean) {
-        waiting = k; waitingText = sentence; waitingPressed = pressed; armed = false; confirmed = false
+        waiting = k; waitingText = sentence; waitingPressed = pressed; armed = false; confirmed = false; sentAt = pieces()
     }
 
     /** Presses step [k] with no sentence, then sends its card text, which exists only after the press. */
     private fun pressCard(k: Int) {
         val walkOf = scene
         pressJob = scope.launch {
-            if (!walking || scene != walkOf || !press(steps[k - 1])) return@launch
+            if (!walking || scene != walkOf || !press(steps[k - 1], null)) return@launch
             step = k
             val card = cardText()?.takeIf { it.isNotBlank() }
             if (!walking || scene != walkOf) return@launch
@@ -132,18 +136,29 @@ internal class StageNarrator(
         if (startsSentence(start, sentence)) {
             armed = true
             confirmed = coversSentence(start, sentence)
-            onsetAfter(arrivedNanos) { fire(k) }
+            onsetAfter(arrivedNanos) { fire(k, "exact") }
         }
     }
 
-    /** The sync fire of step [k]: presses it and sends the sentence of the next step. */
-    private fun fire(k: Int) {
+    /**
+     * The second signal of a walk (plan "one scene", K5): a classifier answer that names [k], the step of the waiting sentence, for the piece
+     * number [piece] after the send of that sentence, counts as its start while no exact match armed it. The step moves at once, and the next
+     * sentence goes out. The first of the two signals acts, and the second does nothing.
+     */
+    fun classified(k: Int, piece: Long) {
+        if (!walking || waiting != k || armed || piece <= sentAt) return
+        armed = true
+        fire(k, "classifier")
+    }
+
+    /** The sync fire of step [k] by [cause]: presses it and sends the sentence of the next step. */
+    private fun fire(k: Int, cause: String) {
         if (!walking || waiting != k || !armed) return
         val pressed = waitingPressed
         waiting = null; waitingText = null; armed = false
         val walkOf = scene
         pressJob = scope.launch {
-            if (!pressed && (!walking || scene != walkOf || !press(steps[k - 1]))) return@launch
+            if (!pressed && (!walking || scene != walkOf || !press(steps[k - 1], cause))) return@launch
             step = k
             if (!walking || scene != walkOf) return@launch
             if (k < steps.size) sendStep(k + 1, send = true) else walking = false

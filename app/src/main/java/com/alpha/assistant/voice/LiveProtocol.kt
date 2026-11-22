@@ -14,14 +14,21 @@ import java.util.UUID
 internal sealed interface LiveEvent {
     data class Started(val sessionId: String) : LiveEvent
     class OutputAudio(val samples: ShortArray) : LiveEvent
-    data class InputTranscript(val delta: String, val startMs: Long, val endMs: Long) : LiveEvent
-    data class OutputTranscript(val delta: String, val startMs: Long, val endMs: Long) : LiveEvent
+    data class InputTranscript(val delta: String, val startMs: Long, val endMs: Long, val eventId: String? = null) : LiveEvent
+    data class OutputTranscript(val delta: String, val startMs: Long, val endMs: Long, val eventId: String? = null) : LiveEvent
     data class Delegation(val id: String, val offsetMs: Long) : LiveEvent
     data class Appended(val clientEventId: String) : LiveEvent
     data class Closed(val reason: String?) : LiveEvent
-    data class Failure(val message: String, val clientEventId: String?) : LiveEvent
+    /** [clientEventId]: the id of the sent event that failed. [code] and [param] name what failed, also with no id (plan "one scene", K8). */
+    data class Failure(val message: String, val clientEventId: String?, val code: String = "", val param: String = "") : LiveEvent
+    /** A classifier answer for the caption piece [sourceEventId] of the side [input] (plan "one scene", K1). */
+    data class Decision(val sourceEventId: String, val input: Boolean, val answers: List<ClassifierAnswer>, val inputTokens: Int) : LiveEvent
+    data class ItemCreated(val clientEventId: String, val itemId: String) : LiveEvent
     data object Other : LiveEvent
 }
+
+/** One answer of a classifier question: the chosen value and its probability. */
+internal data class ClassifierAnswer(val name: String, val choice: String, val confidence: Double)
 
 /** Pure builders and parser for the GPT-Live wire protocol. No network. */
 internal object LiveProtocol {
@@ -53,7 +60,8 @@ internal object LiveProtocol {
 
     fun newId() = "event_" + UUID.randomUUID().toString().replace("-", "")
 
-    fun start(history: List<Message>): String = JSONObject()
+    /** [triggers]: the classifier triggers of plan "one scene", K1, or null for a start with no classifier (K8). */
+    fun start(history: List<Message>, triggers: JSONArray? = null): String = JSONObject()
         .put("type", "session.start").put("event_id", newId())
         .put("session", JSONObject()
             .put("model", OPENAI_LIVE_MODEL)
@@ -61,8 +69,46 @@ internal object LiveProtocol {
             .put("input", history(history))
             .put("audio", JSONObject()
                 .put("format", JSONObject().put("type", "audio/pcm").put("rate", LIVE_RATE))
-                .put("output", JSONObject().put("voice", OPENAI_LIVE_VOICE))))
+                .put("output", JSONObject().put("voice", OPENAI_LIVE_VOICE)))
+            .apply { if (triggers != null) put("triggers", triggers) })
         .toString()
+
+    /** The largest step count of a steps control of the kit (BUDGET.options of kit.js), so the step choices are 1 to this and none. */
+    const val MAX_STEPS = 6
+    const val USER_COMMAND = "user_command"
+    const val USER_STEP = "user_step"
+    const val SPOKEN_STEP = "spoken_step"
+    private const val INPUT_DELTA = "session.input_transcript.delta"
+    private const val OUTPUT_DELTA = "session.output_transcript.delta"
+
+    /** The two classifier triggers of plan "one scene", K1, with the questions of the decisions probe of 2026-11-22. */
+    fun triggers(): JSONArray {
+        val steps = JSONArray().apply { (1..MAX_STEPS).forEach { put(JSONObject().put("value", "$it")) }; put(JSONObject().put("value", "none")) }
+        fun question(name: String, instructions: String, choices: JSONArray) =
+            JSONObject().put("type", "choice").put("name", name).put("instructions", instructions).put("choices", choices)
+        fun trigger(event: String, vararg questions: JSONObject) = JSONObject().put("type", "decisions").put("event_type", event)
+            .put("decisions", JSONObject().put("questions", JSONArray(questions.toList())))
+        val commands = JSONArray().apply { listOf("next", "back", "repeat", "go_to", "none").forEach { put(JSONObject().put("value", it)) } }
+        return JSONArray()
+            .put(trigger(INPUT_DELTA,
+                question(USER_COMMAND, "The user speaks to the assistant about the scene. Choose what the user's latest words ask the screen to do. " +
+                    "next: show the next step. back: show the previous step. repeat: say the present step again. " +
+                    "go_to: show a step that the user names by its number, its label, or its place (the first, the last, the start). " +
+                    "none: everything else, such as a question about the subject, a new topic, small talk, or unfinished words.", commands),
+                question(USER_STEP, "Choose the number of the scene step that the user's latest words are about: a step that the user names, " +
+                    "or the step that the user's question concerns. Choose none when no step fits.", steps)))
+            .put(trigger(OUTPUT_DELTA,
+                question(SPOKEN_STEP, "The assistant speaks about the scene. Choose the number of the scene step that the assistant's latest words describe. " +
+                    "Choose none when the latest words describe no step of the scene, or when the words are too few to tell.", steps)))
+    }
+
+    /** The scene item of the classifier (K2): a user message with [text]. */
+    fun itemCreate(eventId: String, text: String): String = JSONObject().put("type", "decision.item.create").put("event_id", eventId)
+        .put("item", JSONObject().put("type", "message").put("role", "user")
+            .put("content", JSONArray().put(JSONObject().put("type", "input_text").put("text", text)))).toString()
+
+    fun itemDelete(eventId: String, itemId: String): String =
+        JSONObject().put("type", "decision.item.delete").put("event_id", eventId).put("item_id", itemId).toString()
 
     /**
      * The newest finished text messages inside the documented limits, oldest first. The chat saves a sent request as `sent`, so a
@@ -102,10 +148,10 @@ internal object LiveProtocol {
         .put("type", "session.commentary.append").put("event_id", eventId)
         .put("delegation_id", delegationId).put("content", text).toString()
 
-    /** Quiet context without an open delegation (spec 5.7.2). */
-    fun thinking(eventId: String, text: String): String = JSONObject()
+    /** Quiet context without an open delegation (spec 5.7.2), or for [delegationId] (an empty append for a turn that the host answered, K3). */
+    fun thinking(eventId: String, text: String, delegationId: String? = null): String = JSONObject()
         .put("type", "session.thinking.append").put("event_id", eventId)
-        .put("delegation_id", JSONObject.NULL).put("content", text).toString()
+        .put("delegation_id", delegationId ?: JSONObject.NULL).put("content", text).toString()
 
     fun mute(eventId: String) = simple("session.input_audio.mute", eventId)
     fun unmute(eventId: String) = simple("session.input_audio.unmute", eventId)
@@ -118,21 +164,41 @@ internal object LiveProtocol {
         when (e.optString("type")) {
             "session.started" -> LiveEvent.Started(e.getJSONObject("session").getString("id"))
             "session.output_audio.delta" -> LiveEvent.OutputAudio(pcm(e.getString("delta")))
-            "session.input_transcript.delta" ->
-                LiveEvent.InputTranscript(e.getString("delta"), e.optLong("start_ms"), e.optLong("end_ms"))
-            "session.output_transcript.delta" ->
-                LiveEvent.OutputTranscript(e.getString("delta"), e.optLong("start_ms"), e.optLong("end_ms"))
+            INPUT_DELTA -> LiveEvent.InputTranscript(e.getString("delta"), e.optLong("start_ms"), e.optLong("end_ms"), e.optString("event_id").ifEmpty { null })
+            OUTPUT_DELTA -> LiveEvent.OutputTranscript(e.getString("delta"), e.optLong("start_ms"), e.optLong("end_ms"), e.optString("event_id").ifEmpty { null })
+            "decision.event" -> decision(e)
+            "decision.item.created" -> LiveEvent.ItemCreated(e.getString("client_event_id"), e.getJSONObject("item").getString("id"))
             "session.delegation.created" ->
                 LiveEvent.Delegation(e.getJSONObject("delegation").getString("id"), e.optLong("offset_ms"))
             "session.commentary.appended" -> LiveEvent.Appended(e.getString("client_event_id"))
             "session.closed" -> LiveEvent.Closed(e.optString("reason").ifEmpty { null })
+            // The reference names the failed client event in client_event_id. An older shape put it in error.event_id.
             "error" -> e.optJSONObject("error").let {
-                LiveEvent.Failure(it?.optString("message")?.ifEmpty { null } ?: "Ошибка голосового режима", it?.optString("event_id")?.ifEmpty { null })
+                val id = listOf(it?.optString("client_event_id"), e.optString("client_event_id"), it?.optString("event_id")).firstOrNull { id -> !id.isNullOrEmpty() }
+                LiveEvent.Failure(it?.optString("message")?.ifEmpty { null } ?: "Ошибка голосового режима", id,
+                    it?.optString("code").orEmpty(), it?.optString("param").orEmpty())
             }
             else -> LiveEvent.Other
         }
     } catch (_: Exception) {
         LiveEvent.Other
+    }
+
+    /** A completed decision of a trigger. Confidence is the probability of the chosen value. Any other decision event is [LiveEvent.Other]. */
+    private fun decision(e: JSONObject): LiveEvent {
+        val event = e.getJSONObject("event")
+        if (event.optString("type") != "decision.completed") return LiveEvent.Other
+        val decision = event.getJSONObject("decision")
+        // An answer with no choice (a refusal) is skipped, and the other answers stay.
+        val answers = decision.getJSONArray("answers").let { list -> List(list.length()) { list.getJSONObject(it) } }.filter { !it.isNull("choice") }.map { answer ->
+            val choice = answer.get("choice").toString()
+            val probabilities = answer.optJSONArray("probabilities")
+            val confidence = (0 until (probabilities?.length() ?: 0)).map { probabilities!!.getJSONObject(it) }
+                .firstOrNull { it.get("value").toString() == choice }?.optDouble("probability") ?: answer.optDouble("confidence", 0.0)
+            ClassifierAnswer(answer.getString("name"), choice, confidence)
+        }
+        return LiveEvent.Decision(e.getString("source_event_id"), e.optString("source_event_type") == INPUT_DELTA, answers,
+            decision.optJSONObject("usage")?.optInt("input_tokens") ?: 0)
     }
 
     private fun pcm(base64: String): ShortArray {

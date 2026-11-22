@@ -137,6 +137,7 @@ internal fun safePhaseDetail(name: String, detail: String?): String? = when {
     name == AppFileNames.COMPILE -> detail.takeIf { it.matches(compileStatus) } ?: "other"
     name == AppFileNames.TEMPLATE_OUTCOME -> detail.takeIf { it in AppFileNames.TEMPLATE_OUTCOMES } ?: "other"
     name == AppFileNames.STAGE_PREVIEW -> detail.takeIf { it in AppFileNames.PREVIEW_HOLDS } ?: "other"
+    name == AppFileNames.FOLLOW -> detail.takeIf { it in com.alpha.assistant.cloud.ChatToolReply.followKinds } ?: "other"
     name != AppFileNames.PLAN_OUTCOME -> null
     detail == "accepted" -> detail
     detail.startsWith("outside:") -> "outside:" + (detail.removePrefix("outside:").takeIf { it.matches(outsideWord) } ?: "other")

@@ -1999,6 +1999,77 @@ class CloudWorkflowTest {
         }
     }
 
+    private fun followRequest(words: String = "Почему небо голубое?", said: String = "Потому что воздух рассеивает синий свет.") = CloudRequest(
+        listOfNotNull(CloudTurn("user", words), said.takeIf { it.isNotEmpty() }?.let { CloudTurn("assistant", it) }), true, "",
+        shownScreen = lessonScreen().line(), spokenContext = listOf(CloudTurn("user", "Привет"), CloudTurn("assistant", "Здравствуйте!")), follow = true)
+
+    private fun followReply(json: String): List<CloudEvent> = kotlinx.coroutines.runBlocking {
+        val events = mutableListOf<CloudEvent>()
+        Server { _, output -> output.responsesCall("follow-0", ChatToolReply.SUBMIT_FOLLOW_DECISION, json) }.use { server ->
+            CloudChatProvider({ AiAccount(AiProvider.OPENAI, "alpha-test-only") }, Endpoints { server.url })
+                .respond("alpha-test-only", followRequest(), CloudSession()) { events += it }
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+        events
+    }
+
+    /**
+     * Task 43 (decision 18): the follow call has the follow text as its system text, one strict tool with a forced choice, and the
+     * earlier spoken turns, the shown screen, the spoken words, and the words of the voice as turns in this order.
+     */
+    @Test fun theFollowCallOffersOneTool() = kotlinx.coroutines.runBlocking {
+        val line = lessonScreen().line()
+        Server { request, output ->
+            assertEquals("/v1/responses", request.path)
+            assertEquals(ChatToolReply.followInstructions, request.json.getString("instructions"))
+            val tools = request.json.getJSONArray("tools")
+            assertEquals(1, tools.length())
+            assertEquals(ChatToolReply.SUBMIT_FOLLOW_DECISION, tools.getJSONObject(0).getString("name"))
+            assertEquals(ChatToolReply.SUBMIT_FOLLOW_DECISION, request.json.getJSONObject("tool_choice").getString("name"))
+            val parameters = tools.getJSONObject(0).getJSONObject("parameters")
+            assertFalse(parameters.getBoolean("additionalProperties"))
+            val required = parameters.getJSONArray("required")
+            assertEquals(listOf("kind", "brief", "target", "answered"), List(required.length(), required::getString))
+            assertEquals(ChatToolReply.followKinds, parameters.getJSONObject("properties").getJSONObject("kind").getJSONArray("enum")
+                .let { kinds -> List(kinds.length(), kinds::getString) })
+            assertEquals(listOf("user" to "Привет", "assistant" to "Здравствуйте!", "user" to line, "user" to "Почему небо голубое?",
+                "assistant" to "Потому что воздух рассеивает синий свет."),
+                request.json.responsesMessages().map { (role, part) -> role to part.getString("text") })
+            assertFalse(injected in request.json.getString("instructions"))
+            output.responsesCall("follow-0", ChatToolReply.SUBMIT_FOLLOW_DECISION, """{"kind":"none","brief":"","target":"","answered":true}""")
+        }.use { server ->
+            val events = mutableListOf<CloudEvent>()
+            CloudChatProvider({ AiAccount(AiProvider.OPENAI, "alpha-test-only") }, Endpoints { server.url })
+                .respond("alpha-test-only", followRequest(), CloudSession()) { events += it }
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+            assertEquals(listOf<CloudEvent>(CloudEvent.Follow("none", "", "", true)), events)
+            assertEquals(1, server.requests.size)
+        }
+    }
+
+    /** Task 43 and requirement C5: a follow reply gives its event with the four fields, and answered false survives. */
+    @Test fun aFollowReplyGivesItsEvent() {
+        val press = followReply("""{"kind":"press","brief":"","target":"Выдох","answered":true}""").single() as CloudEvent.Follow
+        assertEquals(CloudEvent.Follow("press", "", "Выдох", true), press)
+        assertEquals(FollowDecision.Press("Выдох"), FollowDecision.decode(press, listOf("Вдох", "Выдох")))
+        val waiting = followReply("""{"kind":"screen","brief":"Небо","target":"","answered":false}""").single() as CloudEvent.Follow
+        assertEquals(CloudEvent.Follow("screen", "Небо", "", false), waiting)
+        assertEquals(FollowDecision.Screen("Небо", answered = false), FollowDecision.decode(waiting, emptyList()))
+        // A reply outside the schema is a failure, not a decision.
+        val failure = runCatching { followReply("""{"kind":"move","brief":"","target":"","answered":true}""") }.exceptionOrNull()
+        assertEquals("tool_invalid", (failure as? CloudFailure)?.code)
+    }
+
+    /** Task 43: a mark or press target outside the controls of the shown screen is None, and a screen with no brief is None. */
+    @Test fun aTargetOutsideTheListIsNone() {
+        val controls = listOf("Вдох", "Выдох")
+        assertEquals(FollowDecision.None(), FollowDecision.decode(CloudEvent.Follow("press", "", "Пауза"), controls))
+        assertEquals(FollowDecision.None(), FollowDecision.decode(CloudEvent.Follow("mark", "", "Пауза"), controls))
+        assertEquals(FollowDecision.Mark("Вдох"), FollowDecision.decode(CloudEvent.Follow("mark", "", "Вдох"), controls))
+        assertEquals(FollowDecision.None(), FollowDecision.decode(CloudEvent.Follow("screen", " ", ""), controls))
+        assertEquals(FollowDecision.Clear(), FollowDecision.decode(CloudEvent.Follow("clear", "", ""), controls))
+    }
+
     /** Task Dc1: a shown screen with an app file of 9000 characters sends the title and the controls in at most 8000 characters. */
     @Test fun aLongAppFileSendsOnlyTheTitle() = kotlinx.coroutines.runBlocking {
         val appFile = "need note = text(\"" + "Луна ".repeat(1796) + "\")"

@@ -187,6 +187,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     internal val liveWalking: Boolean get() = liveBridge?.walking == true
     /** The last actions on the stage app for the routing line (plan "one scene", decision 10). */
     internal val liveActions: List<com.alpha.assistant.tools.SceneAction> get() = liveBridge?.actions.orEmpty()
+    /** The work card of the stage and the plan card that left it (plan "one scene", decision 21). */
+    internal val liveWorkCard: String? get() = liveBridge?.workCard
+    internal val liveHiddenPlan: String? get() = liveBridge?.hiddenPlan
     /** The uptime until which a screen or an app that Alphy opens is expected in front (spec 5.8.1, [expectAlphyScreen]). */
     internal var alphyScreenUntil = 0L
     /** The activity class that started the voice mode. The shell and the assistant sheet share this model ([ownsLiveVoice]). */
@@ -315,6 +318,121 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 else submitAssistant(snapshot.draft, first.id, AssistantCapture.current?.takeIf { it.id == first.id })) ?: return@launch
             bridge?.typed(id, text)
         }
+    }
+
+    /** A conversation that a spoken pair made and that is not in the store yet (plan "one scene", decision 20). */
+    private val unsavedPairChats = HashSet<String>()
+    /** The follow call of the latest voice-only turn, its call session, and the assistant message of its screen (decision 19). */
+    private var followJob: Job? = null
+    private var followSession: CloudSession? = null
+    private var followScreenId: String? = null
+
+    /** The user words and an empty voice answer of a voice-only turn, in memory only (plan "one scene", decision 20). */
+    internal fun startSpokenPair(userText: String, spoken: Boolean = true): SpokenPair {
+        val now = System.currentTimeMillis()
+        val user = Message(UUID.randomUUID().toString(), "user", userText.trim(), now, "complete", provenance = MessageProvenance.CLEAN, spoken = spoken)
+        val assistant = Message(UUID.randomUUID().toString(), "assistant", "", now, "complete", replyTo = user.id,
+            provenance = MessageProvenance.CLEAN, spoken = spoken)
+        val selected = snapshot.selected
+        val updated = selected?.copy(updatedAt = now, messages = selected.messages + listOf(user, assistant))
+            ?: Conversation(UUID.randomUUID().toString(), user.text.take(70), now, now, snapshot.newDraft, listOf(user, assistant))
+        replace(updated)
+        if (selected == null) { unsavedPairChats += updated.id; snapshot = snapshot.copy(selectedId = updated.id, newDraft = Draft()) }
+        return SpokenPair(updated.id, user.id, assistant.id)
+    }
+
+    internal fun appendSpokenWords(pair: SpokenPair, words: String) {
+        val conversation = snapshot.conversations.find { it.id == pair.conversationId } ?: return
+        replace(conversation.copy(messages = conversation.messages.map { if (it.id == pair.assistantId) it.copy(text = it.text + words) else it }))
+    }
+
+    /** Writes the conversation of [pair] with the voice words trimmed. A later call writes the words that came after. */
+    internal fun persistSpokenPair(pair: SpokenPair): CompletableDeferred<Boolean> {
+        val conversation = snapshot.conversations.find { it.id == pair.conversationId } ?: return CompletableDeferred(false)
+        val updated = conversation.copy(messages = conversation.messages.map { if (it.id == pair.assistantId) it.copy(text = it.text.trim()) else it })
+        replace(updated)
+        val created = unsavedPairChats.remove(updated.id)
+        return persist { if (created) store.createFromNewDraft(updated) else store.updateConversation(updated) }
+    }
+
+    /** Removes the two messages of [pair]. A new conversation of the pair that the store never saw goes too, so a hand-off creates it again. */
+    internal fun dropSpokenPair(pair: SpokenPair) {
+        val conversation = snapshot.conversations.find { it.id == pair.conversationId } ?: return
+        val updated = conversation.copy(messages = conversation.messages.filterNot { it.id == pair.userId || it.id == pair.assistantId })
+        if (pair.conversationId in unsavedPairChats && updated.messages.isEmpty()) {
+            unsavedPairChats -= pair.conversationId
+            snapshot = snapshot.copy(conversations = snapshot.conversations.filterNot { it.id == pair.conversationId },
+                selectedId = snapshot.selectedId.takeIf { it != pair.conversationId }, newDraft = conversation.draft)
+            return
+        }
+        replace(updated)
+        if (pair.conversationId !in unsavedPairChats) persist { store.updateConversation(updated) }
+    }
+
+    /**
+     * The follow call of a voice-only turn (plan "one scene", decision 18): it cancels a follow call that runs, then asks what the stage does.
+     * A failed call changes nothing, because the voice already answered.
+     */
+    internal fun followTurn(userText: String, pair: SpokenPair) {
+        cancelFollow()
+        val bridge = liveBridge?.takeIf { liveVoice.active } ?: return
+        val session = CloudSession().also { followSession = it }
+        followJob = viewModelScope.launch {
+            try {
+                val stage = stageToolId?.let { id -> tools.tools.find { it.id == id && !it.archived } }
+                val screen = stage?.let { ShownScreen.of(it, tools.privateResults(it.id), liveActions, text(R.string.stage_continue_steps)) }
+                val conversation = snapshot.conversations.find { it.id == pair.conversationId } ?: return@launch
+                val said = conversation.messages.find { it.id == pair.assistantId }?.text?.trim().orEmpty()
+                val request = CloudRequest(listOfNotNull(CloudTurn("user", userText), said.takeIf { it.isNotEmpty() }?.let { CloudTurn("assistant", it) }),
+                    false, "", shownScreen = screen?.line(), spokenContext = ChatToolReply.spokenContext(conversation.messages.takeWhile { it.id != pair.userId }),
+                    follow = true)
+                val key = withContext(Dispatchers.IO) { keys.cloudKey(getApplication()) }
+                var follow: CloudEvent.Follow? = null
+                withContext(Dispatchers.IO) { provider.respond(key, request, session) { if (it is CloudEvent.Follow) follow = it } }
+                val decision = follow?.let { FollowDecision.decode(it, screen?.controls?.map { control -> control.label }.orEmpty()) } ?: return@launch
+                if (followSession === session && liveBridge === bridge && liveVoice.active) bridge.followed(decision, pair, stage?.id)
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (failure: Exception) {
+                android.util.Log.w("AlphyFollow", "follow call failed: ${(failure as? CloudFailure)?.code ?: failure.javaClass.simpleName}")
+            }
+        }
+    }
+
+    /** Stops the follow call and the screen build of a follow call (decision 19). The words of the voice stay as a complete message. */
+    internal fun cancelFollow() {
+        followJob?.cancel(); followJob = null
+        followSession?.cancel(); followSession = null
+        val id = followScreenId ?: return
+        followScreenId = null
+        val queued = requests.firstOrNull { it.assistantId == id }
+        if (queued != null) { requests.remove(queued); return }
+        val request = active?.takeIf { it.assistantId == id && !it.cancelled } ?: return
+        request.session.cancel(); request.cancelled = true; request.job?.cancel(); stopEarlyPlan(request)
+        val conversation = snapshot.conversations.find { it.id == request.conversationId } ?: return
+        val updated = conversation.copy(messages = conversation.messages.map {
+            if (it.id == id) it.copy(status = "complete", error = "", errorCode = "", searchStatus = "") else it
+        })
+        replace(updated)
+        persist { store.updateConversation(updated) }
+    }
+
+    /** A spoken command of the classifier (plan "one scene", K3): the chat keeps the words of the person and the sentence, as for a routing press. */
+    internal fun saveVoiceTurn(userText: String, reply: String) {
+        if (userText.isBlank()) return
+        val pair = startSpokenPair(userText, spoken = false)
+        appendSpokenWords(pair, reply)
+        persistSpokenPair(pair)
+    }
+
+    /** The quiet screen of a follow call: the pair persists, and its assistant message builds a scene with no routing call. Null when the queue is full. */
+    internal fun followScreen(pair: SpokenPair, decision: FollowDecision.Screen): String? {
+        if (!queueHasRoom()) return null
+        val saved = persistSpokenPair(pair)
+        requests.addLast(QueuedRequest(pair.conversationId, pair.assistantId, snapshot.draft, saved, voice = true, follow = decision))
+        followScreenId = pair.assistantId
+        dispatchNext()
+        return pair.assistantId
     }
 
     fun sendVoice() {
@@ -777,7 +895,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     private var active: Active? = null
     /** [voice]: a spoken request of the voice mode. A retry is not spoken. [voiceTarget]: the stage app when the person spoke (plan D, Dc1). */
     private data class QueuedRequest(val conversationId: String, val assistantId: String, val originDraft: Draft,
-        val saved: CompletableDeferred<Boolean>, val voice: Boolean = false, val voiceTarget: String? = null)
+        val saved: CompletableDeferred<Boolean>, val voice: Boolean = false, val voiceTarget: String? = null,
+        /** The quiet screen of a follow call (plan "one scene", decision 19): no routing call, and the message keeps the voice words. */
+        val follow: FollowDecision.Screen? = null)
     private class ChooseRefinement(val choices: List<RefinementChoice>) : Exception()
     private val requests = ArrayDeque<QueuedRequest>()
     private var queueOrder = 0L
@@ -1683,7 +1803,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 }
                 val chatImageSelection = imageGeneration.settings.selection()
                 val toolInstructions = ChatToolReply.instructions(available = knownTools != null)
-                updateMessage(request, assistant.id, persist = false) { it.copy(status = "pending", hostTargetId = targetId) }
+                // A follow screen keeps the complete message of the voice words (plan "one scene", decision 19).
+                val follow = next.follow
+                if (follow == null) updateMessage(request, assistant.id, persist = false) { it.copy(status = "pending", hostTargetId = targetId) }
                 val pending = snapshot.conversations.find { it.id == conversationId } ?: return@launch
                 if(!persist { store.updateConversation(pending) }.await())
                     throw CloudFailure("storage", "Запрос не отправлен: не удалось сохранить историю. Повторите сохранение.")
@@ -1731,9 +1853,11 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     current.combine(question.provenance).combine(answer.provenance)
                 }
                 val originalTurn = CloudTurn("user", user.text, images)
-                updateMessage(request, user.id) { it.copy(status = "sent") }
-                updateMessage(request, assistant.id) { it.copy(status = "streaming", provenance = inputProvenance,
-                    error = if(knownTools == null) toolStorageWarning else "",errorCode = if(knownTools == null) "tool_storage" else "") }
+                if (follow == null) {
+                    updateMessage(request, user.id) { it.copy(status = "sent") }
+                    updateMessage(request, assistant.id) { it.copy(status = "streaming", provenance = inputProvenance,
+                        error = if(knownTools == null) toolStorageWarning else "",errorCode = if(knownTools == null) "tool_storage" else "") }
+                }
                 val raw = StringBuilder()
                 var terminal: CloudEvent.RoundComplete? = null
                 var fragmentProvenance = inputProvenance
@@ -1744,7 +1868,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 val operationId = assistant.toolOperationId ?: assistant.id
                 suspend fun dialogue() = withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.dialogue
                 // A screen does not wait for the routing call: its plan call starts now, with no brief yet (plan D, Db4, ruling OD-4).
-                if (voiceScreen && stageToolId == null) {
+                if (voiceScreen && stageToolId == null && follow == null) {
                     // A request too long for a plan prompt gets no early plan, and its routing decides as before.
                     val prompt = try { ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = dialogue()) } catch (_: CloudFailure) { null }
                     // Its template call goes first, with no dialogue line: that task is shorter than the plan prompt.
@@ -1752,7 +1876,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         tools.startEarlyPlan(ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = ""), it, key, operationId)
                     }
                 }
-                withContext(Dispatchers.IO) {
+                // A follow screen has its decision already, so it makes no routing call.
+                if (follow == null) withContext(Dispatchers.IO) {
                     val cloudRequest = CloudRequest(turns(history) + originalTurn,assistant.search,toolInstructions,
                         chatDecision = true,selectedText = selectedText,weatherLocation = { resolveWeatherPlace(request) },
                         validateOperation = ::validateOperation, allowCourseDecision = courseHost != null && !next.voice,
@@ -1793,6 +1918,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                                         terminal = event.takeUnless { it.hasToolCalls }
                                         raw.clear()
                                     }
+                                    is CloudEvent.Follow -> Unit
                                     is CloudEvent.Search -> {
                                         // A screen with found facts needs them in its plan input, so the early plan cannot serve it.
                                         stopEarlyPlan(request)
@@ -1805,7 +1931,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 }
                 currentCoroutineContext().ensureActive(); request.session.check()
                 if(!isActive(request)) return@launch
-                val completed = terminal ?: throw CloudFailure("incomplete","The reply has no completed answer. Retry the request.")
+                val completed = terminal ?: if (follow != null) CloudEvent.RoundComplete("", false, MessageProvenance.CLEAN)
+                    else throw CloudFailure("incomplete","The reply has no completed answer. Retry the request.")
                 val courseTopic = completed.courseTopic
                 val testFix = completed.testFix
                 val devicePlanSteps = completed.devicePlanSteps
@@ -1862,6 +1989,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     return@launch
                 }
                 val decoded = when {
+                    follow != null -> ChatToolReply.Decision("screen", snapshot.conversations.find { it.id == conversationId }?.messages
+                        ?.find { it.id == assistant.id }?.text?.trim().orEmpty().ifBlank { follow.brief }, follow.brief, "none")
                     courseTopic != null -> {
                         if (!ChatToolReply.validCourseTopic(courseTopic))
                             throw CloudFailure("widget_request", "The assistant returned an invalid course topic.")
@@ -1890,7 +2019,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 suspend fun prepareToolOperation(@StringRes progress: Int? = null) {
                     val text = progress?.let { getApplication<Application>().getString(it) }.orEmpty()
                     updateMessage(request, assistant.id, persist = false) {
-                        it.copy(text = text, status = "generating",
+                        it.copy(text = if (follow != null) it.text else text, status = "generating",
                             toolOperationId = operationId, provenance = replyProvenance)
                     }
                     val pending = snapshot.conversations.find { it.id == conversationId } ?: throw CancellationException()
@@ -2042,7 +2171,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                             onPublicUpdate = { note -> if (canCommit()) publicGenerationUpdate = note },
                             canCommit = canCommit,
                             committed = { tool -> updateMessage(request,assistant.id) {
-                                it.copy(text = decoded.text,status = "complete",toolId = tool.id,toolRevision = tool.revision,
+                                it.copy(text = if (follow != null) it.text else decoded.text,status = "complete",toolId = tool.id,toolRevision = tool.revision,
                                     provenance = replyProvenance)
                             } }, screen = screen)
                     // One release log line for each build that falls back or fails (ruling FX-9). A stop is no failure.
@@ -2066,7 +2195,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         } catch (_: ScreenFallback) { false }
                         // A screen that the person did not ask to see is complete without it, so the stage stays as it was and no error shows.
                         if (!built && !screenChange && !decoded.show) updateMessage(request, assistant.id) {
-                            it.copy(text = decoded.text, status = "complete", provenance = replyProvenance)
+                            it.copy(text = if (follow != null) it.text else decoded.text, status = "complete", provenance = replyProvenance)
                         } else if (!built) {
                             // Ruling FX-4 reverses OD-5: the full generation builds a new app, and the old app stays in the store.
                             // The end of the mode ends the hand-off: no line goes to it or to a later session.
@@ -2094,6 +2223,11 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 }
             } catch (failure: Exception) {
                 if(!isActive(request)) return@launch
+                // The voice already answered a follow turn, so a failed screen keeps the words as a complete message.
+                if (next.follow != null) {
+                    updateMessage(request, assistant.id) { it.copy(status = "complete", error = "", errorCode = "", searchStatus = "") }
+                    return@launch
+                }
                 if (voiceBelongsTo(null)) voice.requestFailed()
                 val known = failure as? CloudFailure
                 // Only a transport failure is network. Any other exception is a fault of Alphy (ruling FX-10).
@@ -2102,6 +2236,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 updateMessage(request, assistant.id) { it.copy(status = "error", errorCode = known?.code ?: if (transport) "network" else "internal", error = known?.message ?: if (!transport) text(if (it.toolOperationId != null) R.string.chat_app_internal_error else R.string.chat_internal_error) else accountProvider?.let { provider -> text(R.string.chat_offline, provider.displayName) } ?: text(R.string.chat_offline_unknown), searchStatus = if (it.searchStatus == "searching") "error" else it.searchStatus) }
             } finally {
                 stopEarlyPlan(request)
+                if (followScreenId == next.assistantId) followScreenId = null
                 if (active === request) {
                     clearActiveRequest()
                     dispatchNext()
@@ -2342,3 +2477,6 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
 
 /** A rejected key or a failed check is a message in Missing or Ready, not a status (spec 14.4). */
 enum class KeyStatus { Checking, Missing, Verifying, Ready, Unreadable }
+
+/** The two messages of a turn that the voice answered alone (plan "one scene", decision 20). */
+internal data class SpokenPair(val conversationId: String, val userId: String, val assistantId: String)

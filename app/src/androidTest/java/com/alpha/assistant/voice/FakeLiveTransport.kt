@@ -9,8 +9,23 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Server events that a test plays on [FakeLiveTransport]. Times are session milliseconds. */
 internal const val LIVE_STARTED = """{"type":"session.started","session":{"id":"live_1"}}"""
-internal fun inputDelta(delta: String, startMs: Long, endMs: Long) = liveTranscript("session.input_transcript.delta", delta, startMs, endMs)
-internal fun outputDelta(delta: String, startMs: Long, endMs: Long) = liveTranscript("session.output_transcript.delta", delta, startMs, endMs)
+internal fun inputDelta(delta: String, startMs: Long, endMs: Long, eventId: String? = null) = liveTranscript("session.input_transcript.delta", delta, startMs, endMs, eventId)
+internal fun outputDelta(delta: String, startMs: Long, endMs: Long, eventId: String? = null) = liveTranscript("session.output_transcript.delta", delta, startMs, endMs, eventId)
+/** A classifier answer of [liveDecision]: [name] chose [choice] with the probability [confidence]. */
+internal fun classified(name: String, choice: String, confidence: Double) = Triple(name, choice, confidence)
+/** A completed decision of the triggers for the transcript piece [sourceId]. [input] tells an input piece from an output piece. */
+internal fun liveDecision(sourceId: String, input: Boolean, vararg answers: Triple<String, String, Double>, inputTokens: Int = 120): String =
+    JSONObject().put("type", "decision.event").put("source_event_id", sourceId)
+        .put("source_event_type", if (input) "session.input_transcript.delta" else "session.output_transcript.delta")
+        .put("event", JSONObject().put("type", "decision.completed").put("decision", JSONObject()
+            .put("answers", org.json.JSONArray(answers.map { (name, choice, confidence) ->
+                JSONObject().put("name", name).put("choice", choice).put("confidence", 0.0)
+                    .put("probabilities", org.json.JSONArray().put(JSONObject().put("value", choice).put("probability", confidence)))
+            }))
+            .put("usage", JSONObject().put("input_tokens", inputTokens)))).toString()
+/** The server answer to the item create [clientId]: the new item is [itemId]. */
+internal fun liveItemCreated(clientId: String, itemId: String) =
+    JSONObject().put("type", "decision.item.created").put("client_event_id", clientId).put("item", JSONObject().put("id", itemId)).toString()
 internal fun liveDelegation(id: String, offsetMs: Long) =
     JSONObject().put("type", "session.delegation.created").put("offset_ms", offsetMs).put("delegation", JSONObject().put("id", id)).toString()
 /** Voiced output audio: [samples] samples of [marker] × 1,000, so a test can tell the chunks apart. */
@@ -22,8 +37,8 @@ internal fun silentAudio() = outputChunk(ShortArray(LIVE_RATE / 10) { (if (it % 
 /** An output chunk has the PCM16 encoding of an input append, which `audioIsBase64LittleEndian` pins. */
 private fun outputChunk(samples: ShortArray) = JSONObject().put("type", "session.output_audio.delta")
     .put("delta", JSONObject(LiveProtocol.audio(samples)).getString("audio")).toString()
-private fun liveTranscript(type: String, delta: String, startMs: Long, endMs: Long) =
-    JSONObject().put("type", type).put("delta", delta).put("start_ms", startMs).put("end_ms", endMs).toString()
+private fun liveTranscript(type: String, delta: String, startMs: Long, endMs: Long, eventId: String?) =
+    JSONObject().put("type", type).put("delta", delta).put("start_ms", startMs).put("end_ms", endMs).apply { eventId?.let { put("event_id", it) } }.toString()
 
 /** A scripted GPT-Live socket: it records what the session sends, and the test plays the server side. */
 internal class FakeLiveTransport : LiveTransport {
@@ -39,6 +54,16 @@ internal class FakeLiveTransport : LiveTransport {
     /** The sent commentary appends as (delegation id, text), in order. */
     fun commentary() = sent.map(::JSONObject).filter { it.getString("type") == "session.commentary.append" }
         .map { it.getString("delegation_id") to it.getString("content") }
+    /** The sent texts of [type], in order. */
+    fun sentOf(type: String) = sent.map(::JSONObject).filter { it.getString("type") == type }
+    /** The triggers of the last `session.start`, or null when it sent none. */
+    fun triggers() = sentOf("session.start").lastOrNull()?.getJSONObject("session")?.optJSONArray("triggers")
+    /** The text of each sent item create, as (event id, text). */
+    fun itemCreates() = sentOf("decision.item.create").map { it.getString("event_id") to it.getJSONObject("item").getJSONArray("content").getJSONObject(0).getString("text") }
+    /** The item id of each sent item delete. */
+    fun itemDeletes() = sentOf("decision.item.delete").map { it.getString("item_id") }
+    /** The sent thinking appends as (delegation id or empty, text), in order. */
+    fun thinking() = sentOf("session.thinking.append").map { (if (it.isNull("delegation_id")) "" else it.getString("delegation_id")) to it.getString("content") }
     /** For each sent input audio append, in order: whether it holds a sample that is not zero. */
     fun inputSounds() = sent.map(::JSONObject).filter { it.getString("type") == "session.input_audio.append" }
         .map { append -> Base64.decode(append.getString("audio"), Base64.DEFAULT).any { it != 0.toByte() } }

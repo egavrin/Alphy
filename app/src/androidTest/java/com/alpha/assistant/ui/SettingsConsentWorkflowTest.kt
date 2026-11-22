@@ -576,9 +576,13 @@ class SettingsConsentWorkflowTest {
             assertNotEquals(first, fixture.keys.consentIdentity())
             assertTrue(fixture.keys.consented())
             // The OpenRouter consent adds the routing line and the reply text for cloud voice.
+            // The account changes before the save ends, and the end of the save closes the consent of the typed key, so the tap
+            // waits for that end. The open consent can start above the view, so its reveal looks both ways (stage 3, X2).
+            robot.waitUntil { !fixture.model!!.keyBusy }
+            robot.instrumentation.waitForIdleSync()
             robot.reveal(robot.text(R.string.ai_disclosure, "OpenRouter"), forward = null)
             robot.click(robot.text(R.string.ai_disclosure, "OpenRouter"))
-            robot.reveal(robot.text(R.string.consent_openrouter))
+            robot.reveal(robot.text(R.string.consent_openrouter), forward = null)
             robot.reveal(robot.text(R.string.consent_voice))
             robot.reveal(robot.text(R.string.consent_voice_input))
             assertTrue(fixture.model!!.snapshot.conversations.any { it.id == "kept" })

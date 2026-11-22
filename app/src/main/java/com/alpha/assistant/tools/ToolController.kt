@@ -459,6 +459,9 @@ class ToolController internal constructor(private val app: Application, private 
      */
     private fun traceFor(id: String) = generationTraceObserver?.let { ToolGenerationTrace(UUID.fromString(id), it) }
 
+    /** The trace phase of a follow decision, with its [kind] (plan "one scene", decision 18). */
+    internal fun traceFollow(kind: String) { traceFor(UUID.randomUUID().toString())?.phase(AppFileNames.FOLLOW, kind) }
+
     /** The plan step needs the switch of the provider and the chat model that the model check measured: the first of the provider (ruling OD-3). */
     internal fun planStep(): AppFileLimits? {
         val model = chatModel ?: return null

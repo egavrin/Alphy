@@ -17,7 +17,9 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -188,7 +190,18 @@ private fun newNodes(old: String, ui: String): Set<String> {
 }
 
 /** True when the stage shows an app or a preview, and not the large character. */
-private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId != null || model.tools.stagePreviews.current != null
+private fun stageShowsApp(model: ShellViewModel): Boolean =
+    model.stageToolId != null || model.tools.stagePreviews.current != null || model.liveWorkCard != null
+
+/** The work card of the stage while a hand-off searches or builds a screen with no frame yet (plan "one scene", decision 21). */
+@Composable private fun StageWorkCard(text: String) {
+    Surface(Modifier.fillMaxWidth().testTag("stage_work_card"), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(text, style = MaterialTheme.typography.titleMedium)
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+    }
+}
 
 /** What the voice mode does now (spec 5.2.4). A mute has no status of its own, because the microphone state of the strip shows it. */
 @StringRes private fun liveStatus(model: ShellViewModel): Int? = when {
@@ -236,10 +249,13 @@ private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId !=
                         linkError = { linkError = true }, errorText = stringResource(stageError(message.errorCode)))
                 }
                 // The plan of the chat, as the chat list shows it. A later hand-off keeps it while it waits for a tap.
-                model.agent.plan?.takeIf { it.conversationId == chat.id }?.let { AgentPlanCard(model.agent, it) }
+                // A waiting plan card of an earlier subject leaves the stage, and the chat keeps it (plan "one scene", decision 21).
+                model.agent.plan?.takeIf { it.conversationId == chat.id && it.id != model.liveHiddenPlan }?.let { AgentPlanCard(model.agent, it) }
             }
+            val work = model.liveWorkCard
             when {
                 preview != null -> StagePreviewContent(preview.frame, canvasHeight)
+                work != null -> StageWorkCard(work)
                 // One layer that stays while the change runs, so the app keeps its frames and timers (ToolEngine.acceptDraft).
                 tool != null -> Column(Modifier.graphicsLayer { alpha = if (changing) CHANGING_ALPHA else 1f }
                     .then(if (changing) Modifier.testTag("stage_dimmed") else Modifier),

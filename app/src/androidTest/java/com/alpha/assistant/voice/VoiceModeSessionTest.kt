@@ -58,6 +58,11 @@ class VoiceModeSessionTest {
         val inputStarts = AtomicInteger()
         override fun outputText(text: String, startMs: Long, endMs: Long, replyStart: Boolean, arrivedNanos: Long) { pieces += "$text:$startMs:$endMs:$replyStart" }
         override fun inputStarted() { inputStarts.incrementAndGet() }
+        /** Each classifier answer and each classifier off, with its app-run flag (plan "one scene", K1 and K8). */
+        val decisions = CopyOnWriteArrayList<LiveEvent.Decision>()
+        val offs = CopyOnWriteArrayList<Boolean>()
+        override fun decision(decision: LiveEvent.Decision) { decisions += decision }
+        override fun classifierOff(appRun: Boolean) { offs += appRun }
     }
 
     private inner class Rig(timing: LiveTiming = TIMING, account: suspend () -> AiAccount? = { OPENAI }, transport: LiveTransport? = null,
@@ -153,6 +158,66 @@ class VoiceModeSessionTest {
     private fun quiet() = random.pcmBlock(0.002)
     private fun loud() = random.pcmBlock(0.15)
     private fun text(id: Int) = context.getString(id)
+
+    /** Plan "one scene", K8: an error before `session.started` after a start with triggers starts once more with no triggers. */
+    @Test fun aFailureBeforeStartedRetriesWithoutTriggers() {
+        val rig = Rig()
+        main { rig.session.start(rig.host, false, LiveProtocol.triggers()) }
+        waitUntil("first start") { rig.socket.sentOf("session.start").size == 1 }
+        assertTrue(rig.socket.triggers() != null)
+        rig.socket.emit("""{"type":"error","error":{"message":"unknown parameter","param":"session.triggers"}}""")
+        waitUntil("second start") { rig.socket.sentOf("session.start").size == 2 }
+        assertEquals(null, rig.socket.triggers())
+        // The classifier stays off for the app run only when the start with no triggers works.
+        assertTrue(rig.host.offs.isEmpty())
+        rig.socket.emit(LIVE_STARTED)
+        waitUntil("session.started") { rig.session.phase == LivePhase.LISTENING }
+        assertTrue(rig.ends().isEmpty())
+        assertFalse(main { rig.session.classifierOn })
+        assertEquals(listOf(true), rig.host.offs)
+    }
+
+    /** K8: when the start with no triggers fails too, the mode ends as in Alpha 19, and the next start sends the triggers again. */
+    @Test fun aFailedRetryKeepsTheTriggers() {
+        val rig = Rig()
+        main { rig.session.start(rig.host, false, LiveProtocol.triggers()) }
+        waitUntil("first start") { rig.socket.sentOf("session.start").size == 1 }
+        rig.socket.fail(null)
+        waitUntil("second start") { rig.socket.sentOf("session.start").size == 2 }
+        assertEquals(null, rig.socket.triggers())
+        rig.socket.fail(null)
+        waitUntil("end") { rig.ends().isNotEmpty() }
+        assertEquals(listOf("ended:${text(R.string.live_voice_connection)}:false"), rig.ends())
+        assertTrue(rig.host.offs.isEmpty())
+        main { rig.session.start(rig.host, false, LiveProtocol.triggers()) }
+        waitUntil("third start") { rig.socket.sentOf("session.start").size == 3 }
+        assertTrue(rig.socket.triggers() != null)
+    }
+
+    /** K8: an error of a scene item keeps the mode on and turns the classifier off for the session. Every other error still ends the mode. */
+    @Test fun aClassifierErrorKeepsTheMode() {
+        val rig = Rig()
+        main { rig.session.start(rig.host, false, LiveProtocol.triggers()) }
+        waitUntil("connect") { rig.socket.connected }
+        rig.socket.emit(LIVE_STARTED)
+        waitUntil("session.started") { rig.session.phase == LivePhase.LISTENING }
+        val item = checkNotNull(main { rig.session.createItem("Сцена") })
+        rig.socket.emit(liveDecision("p1", true, classified("user_command", "next", 0.9)))
+        waitUntil("decision") { rig.host.decisions.size == 1 }
+        rig.socket.emit("""{"type":"error","error":{"message":"bad item","client_event_id":"$item"}}""")
+        waitUntil("classifier off") { !rig.session.classifierOn }
+        assertEquals(listOf(false), rig.host.offs)
+        // A second classifier error and a decision after the first error change nothing.
+        rig.socket.emit("""{"type":"error","error":{"message":"bad decision","code":"decision_failed"}}""")
+        rig.socket.emit(liveDecision("p2", true, classified("user_command", "next", 0.9)))
+        SystemClock.sleep(300)
+        main { }
+        assertTrue(rig.ends().isEmpty())
+        assertEquals(1, rig.host.decisions.size)
+        assertEquals(null, main { rig.session.createItem("Сцена") })
+        rig.socket.emit("""{"type":"error","error":{"message":"bad"}}""")
+        waitUntil("end") { rig.ends().size == 1 }
+    }
 
     // Plan "one scene", Task 30: the session members of decision 12 and the sync rule of decision 13.
     @Test fun eachOutputPieceReachesTheHost() {

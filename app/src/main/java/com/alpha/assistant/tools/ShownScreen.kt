@@ -7,8 +7,11 @@ import org.json.JSONObject
 /** One control of the screen on the stage that a spoken press runs as a tap does: the [value] of a choice option, or null for a button. */
 internal data class ShownControl(val label: String, val actionId: String, val value: Any?)
 
-/** One action on the stage app: [who] is "tap" (the person), "voice" (a routing press or «Дальше»), or "narrator" (a walk press). */
-internal data class SceneAction(val who: String, val control: String, val value: Any?)
+/**
+ * One action on the stage app: [who] is "tap" (the person), "voice" (a routing press or «Дальше»), or "narrator" (a walk press). [cause] names
+ * what moved a step for the dialogue recorder: exact, classifier, command, or question (plan "one scene", K9). The routing line omits it.
+ */
+internal data class SceneAction(val who: String, val control: String, val value: Any?, val cause: String? = null)
 
 /** The present step of a stepped scene: [index] from 1 of [count], with the [label] of its option. */
 internal data class SceneStep(val index: Int, val count: Int, val label: String)

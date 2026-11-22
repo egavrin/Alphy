@@ -30,4 +30,9 @@
     <string name="stage_error_too_big">Это не помещается на один экран. Скажи короче, одной фразой.</string>
     <string name="stage_error_other">Не получилось. Скажи «попробуй ещё раз» или спроси по-другому.</string>
     <string name="stage_error_key">Нужна настройка сервиса ИИ. Нажми «Открыть настройки».</string>
+    <!-- The label of a turn that the voice answered alone (plan "one scene", decision 20). -->
+    <string name="chat_spoken_label">Сказано голосом</string>
+    <!-- The work card of the stage while a hand-off searches or builds a screen, with its subject (plan "one scene", decision 21). -->
+    <string name="stage_work_search">Ищу: %s</string>
+    <string name="stage_work_build">Собираю экран: %s</string>
 </resources>

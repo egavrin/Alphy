@@ -101,11 +101,13 @@ internal object AppFileNames {
     // The narration of a scene whose controls came on before its call ended (plan "one scene", decision 6): saved at the same revision, or dropped.
     const val NARRATION_SAVED = "narration_saved"
     const val NARRATION_DROPPED = "narration_dropped"
+    // The decision of a follow call (plan "one scene", decision 18), with its kind as the detail.
+    const val FOLLOW = "follow"
     /** The holds value of a frame (kit previewStep): the first line, parts, the card, or a whole compiled plan. */
     val PREVIEW_HOLDS = setOf("frame", "parts", "card", "whole")
     val PHASES = setOf(PLAN_CALL_START, PLAN_FIRST_TEXT, PLAN_REPLY_END, COMPILE, REPAIR_CALL_START, CHANGE_CALL_START, PLAN_OUTCOME,
         EARLY_PLAN_START, EARLY_PLAN_USED, EARLY_PLAN_CANCELED, TEMPLATE_CALL_START, TEMPLATE_OUTCOME, STAGE_PREVIEW, STAGE_PREVIEW_GONE,
-        CONTROLS_ON, NARRATION_SAVED, NARRATION_DROPPED) + HOST_CHECK_RETRIES.map { HOST_CHECK_RETRY + it } + PlanSkip.entries.map { it.phase }
+        CONTROLS_ON, NARRATION_SAVED, NARRATION_DROPPED, FOLLOW) + HOST_CHECK_RETRIES.map { HOST_CHECK_RETRY + it } + PlanSkip.entries.map { it.phase }
 
     // The reasons of a ScreenFallback that has no plan outcome. They are not on the trace.
     /** The plan step cannot run for this screen run, for example because the switch is off. */

@@ -215,6 +215,31 @@ The count of forms can grow to some tens. A family holds at most 8 forms in its 
 - A spoken «быстрее», «медленнее», «стоп», «дальше» is a press of that control: one routing call, no template call.
 - The template prompt no longer sends "a thing that moves by itself" to the full generation.
 
+### 9.5 A classifier beside the walk and for spoken commands (amendment of 2026-11-22, stage 3)
+
+Source: the owner asked for a more reliable step change and for more freedom: «верни назад», «повтори», moves inside one scene, and a question that returns the picture to an earlier step. A paid probe measured the documented GPT-Live mechanisms (`evidence/decisions-probe-2026-11-22/report.md`, outside Git). The owner then chose "add both" for stage 3.
+
+Facts from the probe:
+- The voice model has no tools of its own. It can only hand a request over.
+- GPT-Live can run a fast classifier (the Decisions API, model `gpt-6-luna`) on each caption piece of the person or of the voice (`session.triggers`). An answer comes about 0.12 s after its piece.
+- On the person's words it named the command at the end of the phrase in 6 of 6 cases, before the hand-off event. It also named the step of a question. A piece in the middle of a phrase can mislead.
+- On the words of the voice it followed the steps also in the voice's own words, about 0.3 to 1.1 s into a sentence, and it was sometimes wrong or unsure. The exact comparison of stage 2 is faster and is never wrong, but only on exact words.
+- A scene text with a stale line "the screen shows step N" made the classifier wrong.
+
+Decisions:
+1. (Requirement, the owner) Spoken commands inside a stepped scene: next, back, repeat, and go to a named step. The classifier names the command at the end of the phrase. The host moves the step and the voice says the sentence of that step. No routing call runs for such a command.
+2. (Requirement, the owner) A question about a step moves the picture to that step. The answer comes as today: from the voice alone or through a hand-off.
+3. (Requirement, the owner) A second signal for the walk. When the exact comparison does not find the start of the next sentence, a classifier answer for that step moves the picture. In a walk the picture only moves forward.
+4. (Requirement, the owner) In an answer that the voice gives in its own words, the classifier can move the picture to the step that the voice talks about, also back. A text of the host (a narration sentence, a sentence after a tap) stays with the exact comparison.
+5. (Requirement, the owner) With no Decisions permission, or with a Decisions error, the voice mode works as in Alpha 19. The person sees no error.
+6. (Implementation choice) The host uses the native triggers of the voice session, not a call of its own. A call of the host with only the sentence in progress had no wrong step in a text replay. It stays an option when the live check shows misses.
+7. (Implementation choice) The scene text for the classifier holds the title, the step labels, and the step sentences. It holds no line about the present step. The host resolves "next", "back", and "repeat" against its own present step.
+8. (Implementation choice) The end of a phrase is the hand-off of that turn, or 1.0 s with no new caption piece of the person when no hand-off came. The thresholds are in the plan of stage 3.
+
+Limits, not tested by the probe: a command while the voice narrates, an echo of the voice in the microphone on a phone, and a talk longer than one minute. The live check of stage 3 covers the first. The owner's phone covers the second.
+
+Data: with the triggers, the captions of the talk and the scene text go to the Decisions model of OpenAI. `docs/voice-integration.md` states this under «Data sent to OpenAI».
+
 ## 10. Part C: every turn updates the stage
 
 ### 10.1 The voice words reach the host

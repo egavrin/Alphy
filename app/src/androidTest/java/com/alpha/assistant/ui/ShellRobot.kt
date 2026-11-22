@@ -117,7 +117,18 @@ internal class FixtureProvider(private val reply: String = "Fixture response") :
     @Volatile var courseTopic: String? = null
     /** The chat decision creates the fixture app, so the request goes through the mini-app generation. */
     @Volatile var createApp = false
+    /** The follow calls of voice-only turns (plan "one scene", decision 19). [calls] does not count them. */
+    val follows = java.util.concurrent.CopyOnWriteArrayList<CloudRequest>()
+    /** The decision of each follow call, after [followGate]. */
+    @Volatile var follow = CloudEvent.Follow("none", "", "")
+    @Volatile var followGate: CompletableDeferred<Unit>? = null
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+        if (request.follow) {
+            follows += request
+            followGate?.await()
+            emit(follow)
+            return
+        }
         if (answerNoTemplate(request, emit)) return
         synchronized(this) { calls++; lastRequest = request }
         failure?.let { throw it }
@@ -222,11 +233,15 @@ internal class ShellFixture(prefix: String) {
 
     /** A voice mode with a scripted [socket] and [audio] on a loopback endpoint, so no test reaches OpenAI. */
     fun liveVoice(socket: FakeLiveTransport, audio: FakeLiveAudio, timing: LiveTiming = LiveTiming()): LiveVoiceFactory =
-        { app, scope -> LiveVoiceSession(app, scope, socket, { audio }, { keys.account().getOrNull() }, Endpoints { "http://127.0.0.1:4000" }, timing) }
+        liveVoice(socket, audio, Endpoints { "http://127.0.0.1:4000" }, timing)
 
     /** A voice mode with any [transport] on [endpoints], such as a scripted server or a real socket of a paid check. */
-    fun liveVoice(transport: LiveTransport, audio: FakeLiveAudio, endpoints: Endpoints, timing: LiveTiming = LiveTiming()): LiveVoiceFactory =
-        { app, scope -> LiveVoiceSession(app, scope, transport, { audio }, { keys.account().getOrNull() }, endpoints, timing) }
+    fun liveVoice(transport: LiveTransport, audio: FakeLiveAudio, endpoints: Endpoints, timing: LiveTiming = LiveTiming()): LiveVoiceFactory {
+        // An earlier test of the same process can turn the classifier off for the app run (K8) or turn free moves off.
+        LiveVoiceBridge.classifierOffForApp = false
+        LiveVoiceBridge.FREE_ANSWER_MOVES = true
+        return { app, scope -> LiveVoiceSession(app, scope, transport, { audio }, { keys.account().getOrNull() }, endpoints, timing) }
+    }
 
     /** A loopback test passes a [chat] provider that reads [models], and [imageProviders] with no network. */
     fun install(saveKey: Boolean = true, voice: VoiceFactory? = null, onboarding: Boolean = false, chat: ChatProvider = provider,

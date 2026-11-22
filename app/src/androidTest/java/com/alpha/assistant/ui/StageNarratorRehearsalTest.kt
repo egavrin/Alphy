@@ -30,14 +30,17 @@ class StageNarratorRehearsalTest {
         private val pressGate: CompletableDeferred<Boolean>? = null) {
         val sent = mutableListOf<String>()
         val pressed = mutableListOf<String>()
+        /** The cause of each press, in the order of [pressed] (K9). */
+        val causes = mutableListOf<String?>()
         val skipped = mutableListOf<String>()
         var arms = 0
         var cancels = 0
         /** The presses that a cancel stopped while they waited for [pressGate]. */
         var pressCancels = 0
         private var pending: (() -> Unit)? = null
-        val narrator = StageNarrator(send = { sent += it }, press = { step ->
+        val narrator = StageNarrator(send = { sent += it }, press = { step, cause ->
                 pressed += step
+                causes += cause
                 try { pressGate?.await() ?: true } catch (cancel: CancellationException) { pressCancels++; throw cancel }
             },
             cardText = { CARDS.getOrNull(STEPS.indexOf(pressed.lastOrNull())) },
@@ -317,6 +320,20 @@ class StageNarratorRehearsalTest {
         assertEquals(STEPS.drop(1), rig.pressed)
         assertEquals(listOf(MARK + SAYS[2]), rig.sent)
         assertEquals(null, main { rig.narrator.rest(TOOL, STEPS, NARRATION, present = 3) })
+    }
+
+    /** K9: the cause names a sync fire only. After a classifier fire, a press of a step with no sentence has none, in a walk and in the rest walk. */
+    @Test fun onlyASyncFireHasACause() {
+        val narration = SceneNarration(true, mapOf(1 to SAYS[0], 3 to SAYS[2]), null)
+        val rig = Rig(narration)
+        rig.start()
+        main { rig.narrator.classified(1, 1L) }
+        rig.replyEnded()
+        rig.say(CARDS[1], replyStart = true); rig.fire()
+        rig.say(SAYS[2], replyStart = true); rig.fire()
+        main { rig.narrator.rest(TOOL, STEPS, narration, present = 1) }
+        assertEquals(STEPS + STEPS[1], rig.pressed)
+        assertEquals(listOf("classifier", null, "exact", null), rig.causes)
     }
 
     private companion object {

@@ -92,6 +92,8 @@ data class CloudRequest(
     val shownScreen: String? = null,
     /** The earlier turns of a spoken request as untrusted context (ChatToolReply.spokenContext). Null for a typed request. */
     val spokenContext: List<CloudTurn>? = null,
+    /** The follow call of a voice-only turn (plan "one scene", decision 18): one forced tool, and the provider emits [CloudEvent.Follow]. */
+    val follow: Boolean = false,
     internal val expandedWriterOutput: Boolean = false,
     internal val capabilityDiscovery: (() -> JSONObject)? = null,
 )
@@ -112,6 +114,8 @@ sealed interface CloudEvent {
         val memoryFact: String? = null,
     ) : CloudEvent
     data class Search(val status: String, val sources: List<Source> = emptyList()) : CloudEvent
+    /** The decision of a follow call ([CloudRequest.follow]). [answered]: the voice gave an answer, not only a promise (requirement C5). */
+    data class Follow(val kind: String, val brief: String, val target: String, val answered: Boolean = true) : CloudEvent
 }
 /** Each request owns its connection. A canceled request cannot cancel a later request. */
 class CloudSession {
@@ -310,6 +314,7 @@ class CloudChatProvider internal constructor(
     }
     override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
         val wire = wire(key)
+        if(request.follow) { respondFollow(wire,key,request,session,emit); return }
         if(request.chatDecision) { respondDecision(wire,key,request,session,emit); return }
         require(request.screenContext == null && request.screenImages.isEmpty()) {
             "Automatic screen context requires the chat answer path."
@@ -548,6 +553,38 @@ class CloudChatProvider internal constructor(
         if (fits(result)) return result
         return ScreenContext(pageUrl = screen.pageUrl, pageUrlSource = screen.pageUrlSource, truncated = true)
             .takeIf(::fits)
+    }
+
+    /**
+     * The follow call (plan "one scene", decision 18). [CloudRequest.turns] ends with the spoken user words and, when the voice
+     * already spoke in this turn, its words as an assistant turn. The provider emits one [CloudEvent.Follow].
+     */
+    private suspend fun respondFollow(wire: ChatWire, key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+        val before = request.spokenContext.orEmpty() + listOfNotNull(request.shownScreen?.let { CloudTurn("user", it) })
+        val turns = before + request.turns.map { it.copy(images = emptyList()) }
+        if (request.turns.isEmpty() || turns.size > 41 || turns.sumOf { it.text.length } > 100_000)
+            throw CloudFailure("decision_context", "The request and conversation context exceed the decision limit. Shorten the request.")
+        val messages = JSONArray().put(message(CloudTurn("system", ChatToolReply.followInstructions))).apply { turns.forEach { put(message(it)) } }
+        val tool = strictTool(ChatToolReply.SUBMIT_FOLLOW_DECISION, "Submit what the stage does after the latest spoken turn.", ChatToolReply.followSchema())
+        val body = completionBody(messages).put("tools", JSONArray().put(tool)).put("tool_choice",
+            JSONObject().put("type", "function").put("function", JSONObject().put("name", ChatToolReply.SUBMIT_FOLLOW_DECISION)))
+        val limits = StreamLimits(ChatToolReply.MAX_REPLY, stage = CompletionStage.DECISION)
+        val completion = try { wire.complete(key, body, limits, session) {} } catch (failure: IOException) {
+            // As in readDecision: a plain IOException failed before any output, so one new request is safe.
+            if (failure is CloudFailure) throw failure
+            currentCoroutineContext().ensureActive()
+            wire.complete(key, body, limits, session) {}
+        }
+        fun invalid(): Nothing = throw CloudFailure("tool_invalid", "The assistant returned an invalid follow decision.",
+            ResponseShape("follow.tool_call", "$", "tool_call"))
+        val call = completion.calls.singleOrNull()?.takeIf { it.name == ChatToolReply.SUBMIT_FOLLOW_DECISION && completion.text.isBlank() } ?: invalid()
+        val json = try { ChatToolReply.strictObject(call.arguments, 4096) } catch (_: RuntimeException) { invalid() }
+        if (json.keys != setOf("kind", "brief", "target", "answered")) invalid()
+        fun text(field: String) = (json[field] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content ?: invalid()
+        val kind = text("kind").takeIf { it in ChatToolReply.followKinds } ?: invalid()
+        val answered = (json["answered"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { !it.isString }?.content?.toBooleanStrictOrNull() ?: invalid()
+        session.checkActive(currentCoroutineContext())
+        emit(CloudEvent.Follow(kind, text("brief").trim(), text("target").trim(), answered))
     }
 
     private suspend fun respondDecision(wire: ChatWire, key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {

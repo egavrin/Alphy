@@ -52,6 +52,19 @@ The narration of a new template scene (`say` or `say1` to `sayN`, `kit/README.md
 
 An app with private results gives no `values`, because a model request never gets its data. Its spec can mark it (`ToolSpec.privateResults`: typed capability results, collections, or a navigation or owned calendar capability). The store keeps that mark after a later change of the spec (`ToolController.privateResults`, the table `capability_private_owners`). A line longer than 8,000 characters (`ShownScreen.MAX_LINE`) drops the app file first, then the controls from the end, and last the values from the end.
 
+The follow call of a voice-only turn (`docs/voice-integration.md`) has one strict function tool, `submit_follow_decision` (`ChatToolReply.SUBMIT_FOLLOW_DECISION`), and the request forces it. Its schema (`ChatToolReply.followSchema()`) is an object with no other properties and four required fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `kind` | string, one of `none`, `screen`, `mark`, `press`, `clear` (`ChatToolReply.followKinds`) | What the stage does after the turn. |
+| `brief` | string | For `screen`: the brief of the new scene. Empty for the other kinds. |
+| `target` | string | For `mark` and `press`: the label of a control of the shown screen. Empty for the other kinds. |
+| `answered` | boolean | True when the words of the voice gave the answer. False when they only promised it, such as a short waiting line. |
+
+`CloudProvider` accepts only a reply with exactly these fields and a known kind. Any other reply is the failure `tool_invalid`. `FollowDecision.decode` turns a `screen` with a blank brief, or a target that names no control of the shown screen, into `none`.
+
+`Message.spoken` marks the two messages of a voice-only turn. `ShellStore` writes it as the field `spoken` of the message JSON and reads it with `optBoolean`, so a message with no field is not spoken.
+
 `ToolStore` retains accepted tools, revisions, drafts, collections, grants, and native result receipts. Acceptance commits the candidate and removes a standalone draft in one transaction. A chat-linked save retains its draft as a receipt so Alphy can recover an interrupted card write. Rejection removes only the selected draft. Refinement preserves existing field types, collection schemas, stable IDs, and saved values. Rollback creates a revision only when its schema accepts the current state.
 
 `ToolController` exposes the workflow to Compose. Chat cards, the library, the focused app, widgets, and automations use the same artifact contracts. Generated JavaScript has no direct network, files, credentials, Android APIs, imports, or generated Kotlin. Native capability execution requires the declared contract, Android permissions, and the applicable selection or approval. Network requests also require per-app consent.

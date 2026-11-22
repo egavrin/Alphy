@@ -1184,14 +1184,16 @@ class ShellLiveVoiceWorkflowTest {
 
     @Test fun endDoesNotCancelTheRequest() = endKeepsTheRequest(null) { scenario, model -> scenario.onActivity { model.endLiveVoice() } }
 
-    @Test fun smallTalkIsNotSaved() {
+    /** Decision 20 reversed the old rule: the chat keeps a voice-only turn as a spoken pair, and the follow call reads it. */
+    @Test fun smallTalkIsSavedAsSpoken() {
         install()
         live { _, model ->
             socket.emit(inputDelta("Как дела?", 100, 600))
-            // The output transcript ends the user turn at once, so the host gets it before the barrier below.
             socket.emit(outputDelta("Хорошо, спасибо!", 800, 1500))
-            robot.instrumentation.runOnMainSync { }
-            assertTrue(model.snapshot.conversations.isEmpty())
+            robot.waitUntil { fixture.provider.follows.size == 1 }
+            val saved = model.snapshot.conversations.single().messages
+            assertEquals(listOf("user" to "Как дела?", "assistant" to "Хорошо, спасибо!"), saved.map { it.role to it.text })
+            assertTrue(saved.all { it.spoken })
             assertEquals(0, fixture.provider.calls)
         }
     }
@@ -1300,6 +1302,31 @@ class ShellLiveVoiceWorkflowTest {
         robot.waitUntil { commentary().size == 2 }
         assertEquals(listOf("d1" to PROPOSAL_ADD, "d1" to DETAILS), commentary())
         gate.complete(Unit)
+    }
+
+    /** Plan "one scene", Task 45 (decision 21): a waiting plan card leaves the stage at a follow clear, and the chat still holds the plan. */
+    @Test fun aWaitingPlanCardLeavesAtAFollowClear() = reviewed { _, model, review ->
+        val execute = fixture.context.getString(R.string.agent_execute)
+        robot.waitUntil { stageHasText(robot, execute) }
+        fixture.provider.follow = CloudEvent.Follow("clear", "", "")
+        answer("Давай о другом", 6_000)
+        robot.waitUntil(10_000) { model.liveHiddenPlan == review.id }
+        robot.waitUntil { !stageHasText(robot, execute) }
+        assertEquals(review, model.agent.plan)
+        assertTrue(messages(model).any { it.text == robot.text(R.string.agent_plan_ready) })
+    }
+
+    /** Task 45: a waiting plan card leaves the stage when a later hand-off ends with an answer. */
+    @Test fun aWaitingPlanCardLeavesAtALaterHandOff() = reviewed { _, model, review ->
+        val execute = fixture.context.getString(R.string.agent_execute)
+        robot.waitUntil { stageHasText(robot, execute) }
+        fixture.provider.devicePlanSteps = null
+        fixture.provider.agentProposal = null
+        socket.say("Какая погода", "d2", 6_000)
+        robot.waitUntil(30_000) { commentary().any { it.first == "d2" } }
+        robot.waitUntil(10_000) { model.liveHiddenPlan == review.id }
+        robot.waitUntil { !stageHasText(robot, execute) }
+        assertTrue(messages(model).any { it.text == robot.text(R.string.agent_plan_ready) })
     }
 
     /** Task 3 fix round 1: a «да» after a tap on the execute button names no button. */

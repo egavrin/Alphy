@@ -22,6 +22,8 @@ import com.alpha.assistant.voice.LivePhase
 import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.ScriptedLiveServer
 import com.alpha.assistant.voice.WavFeeder
+import com.alpha.assistant.voice.classified
+import com.alpha.assistant.voice.liveDecision
 import com.alpha.assistant.voice.wavSamples
 import kotlinx.coroutines.delay
 import org.json.JSONObject
@@ -157,6 +159,33 @@ class DialogueRecorderTest {
         // The clock holds names only: no word of a sentence or of a step.
         val recorded = recorder.marks().toString() + recorder.report()
         assertFalse(recorded, listOf("Корабль", "Гвоздь", "Лодка", SAY).any { it in recorded })
+        recorder.close()
+    }
+
+    /** Plan "one scene", K9: one line for each classifier answer, and the cause of each step move beside its who. */
+    @Test fun theClockHasEachClassifierAnswerAndEachCause() {
+        var now = 0L
+        fun at(ms: Long) { now = ms * 1_000_000 }
+        val recorder = DialogueRecorder { now }
+        val socket = FakeLiveTransport()
+        recorder.transport(socket).connect("ws://127.0.0.1:4000", "", object : LiveListener {
+            override fun onText(text: String) = Unit
+            override fun onFailure(status: Int?, message: String) = Unit
+            override fun onClosed() = Unit
+        })
+        at(1_000); recorder.speechEnd(now)
+        at(1_200); socket.emit(liveDecision("p1", true, classified("user_command", "next", 0.83), classified("user_step", "none", 0.4), inputTokens = 210))
+        at(1_300); socket.emit(liveDecision("o1", false, classified("spoken_step", "2", 0.6), inputTokens = 180))
+        at(2_000); recorder.stage(SCENE, SceneStep(1, 3, "Корабль"), CONTROL, emptyList())
+        at(3_000); recorder.stage(SCENE, SceneStep(2, 3, "Гвоздь"), CONTROL, listOf(SceneAction("voice", CONTROL, "Гвоздь", "command")))
+        at(4_000); recorder.stage(SCENE, SceneStep(3, 3, "Лодка"), CONTROL, listOf(SceneAction("narrator", CONTROL, "Лодка", "classifier")))
+        val request = recorder.report().getJSONArray("requests").getJSONObject(0)
+        val answers = request.getJSONArray("classifier")
+        assertEquals(listOf("200 input user_command=next:0.83 user_step=none:0.40 tokens=210", "300 output spoken_step=2:0.60 tokens=180"),
+            List(answers.length()) { answers.getJSONObject(it).let { answer -> "${answer.getLong("ms")} ${answer.getString("answer")}" } })
+        val moves = request.getJSONArray("stepMoves")
+        assertEquals(listOf("2/3 voice command", "3/3 narrator classifier"),
+            List(moves.length()) { moves.getJSONObject(it).let { move -> "${move.getString("step")} ${move.getString("who")} ${move.getString("cause")}" } })
         recorder.close()
     }
 
