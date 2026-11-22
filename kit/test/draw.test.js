@@ -76,8 +76,24 @@ test("draw (L1 item 6): a text on a shape in an ink role is in the surface role,
   expect(textOn(box("accent"), disk("surface"))).toBe("default");
   expect(commandsOf([box("surface"), { shape: "text", x: 50, y: 50, text: "A", color: "surface" }, { shape: "text", x: 50, y: 50, text: "B", color: "accent" }])
     .slice(1).map((command) => command.color)).toEqual(["default", "accent"]);
-  // shortcut: a filled polygon covers no text.
-  expect(textOn({ shape: "polygon", points: [0, 0, 100, 0, 50, 100], color: "accent" })).toBe("default");
+  // A filled polygon in an ink role covers a text too, and its outline covers none.
+  expect([textOn({ shape: "polygon", points: [0, 0, 100, 0, 50, 100], color: "accent" }), textOn({ shape: "polygon", points: [0, 0, 100, 0, 50, 100], color: "accent", stroke: true })])
+    .toEqual(["surface", "default"]);
+});
+
+test("draw: a label on a polygon takes the contrast of the polygon fill", () => {
+  // A V of #1e3a8a: its notch at (50, 10) is inside the box of its points, but not inside the polygon.
+  const dark = { shape: "polygon", points: [0, 0, 30, 0, 50, 30, 70, 0, 100, 0, 50, 90], color: "#1e3a8a" }, page = { shape: "rect", x: 0, y: 0, w: 200, h: 200, color: "#f8fafc" };
+  const label = (x, y, ...shapes) => commandsOf([...shapes, { shape: "text", x, y, text: "c²", color: "ink" }]).at(-1).color;
+  // On the canvas: the light ink inside the polygon, and the default ink in the notch and outside the polygon.
+  expect([label(50, 60, dark), label(50, 10, dark), label(150, 150, dark)]).toEqual(["#ffffff", "default", "default"]);
+  // On a light page: the light ink inside the polygon, and the dark ink outside it. Each has a contrast of 4.5 or more against the fill under it.
+  const [inside, outside] = [label(50, 60, page, dark), label(50, 10, page, dark)];
+  expect([inside, outside, contrast("#1e3a8a", inside) >= 4.5, contrast("#f8fafc", outside) >= 4.5]).toEqual(["#ffffff", "#000000", true, true]);
+  // The topmost fill under the anchor decides: a box over the polygon, and the polygon over a box.
+  expect([label(50, 60, dark, { shape: "rect", x: 40, y: 50, w: 20, h: 20, color: "sun" }), label(50, 60, { shape: "circle", x: 50, y: 60, r: 9, color: "accent" }, dark)]).toEqual(["#000000", "#ffffff"]);
+  // A star whose edges cross: Alphy fills a Path by the non-zero rule (SurfaceDrawing.kt), so its center is inside it.
+  expect(label(50, 50, { shape: "polygon", points: [50, 0, 79, 90, 2, 35, 98, 35, 21, 90], color: "#1e3a8a" })).toBe("#ffffff");
 });
 
 test("draw (L1 item 6): a text on a shape in a hex color is black or white, with a contrast of 4.5 or more against the shape", () => {

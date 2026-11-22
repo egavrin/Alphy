@@ -31,6 +31,14 @@ const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 /** True when each value is a coordinate that Alphy takes: a finite number from -8192 to 8192. */
 const inside = (values) => values.every((value) => Number.isFinite(value) && Math.abs(value) <= 8192);
 const closed = (points) => ({ type: "polyline", points: [...points, points[0]], stroke: 2 });
+/**
+ * True when the point X, Y is inside the [x, y] points by the non-zero rule, the fill rule of an Android Path (SurfaceDrawing.kt): each edge that
+ * crosses the ray from the point toward a larger x adds 1 when it goes toward a larger y and -1 when it goes toward a smaller y, and the sum is not 0.
+ */
+const wound = (points, X, Y) => points.reduce((turns, [x, y], index) => {
+  const [a, b] = points.at(index - 1), side = (x - a) * (Y - b) - (X - a) * (y - b);
+  return turns + (b <= Y ? +(y > Y && side > 0) : -(y <= Y && side < 0));
+}, 0) !== 0;
 
 /** One shape of the kit (App.drawn) as one command of Alphy, or null for a shape that Alphy cannot draw. */
 function commandOf({ shape, x, y, r, w, h, x1, y1, x2, y2, text, points, radius, width, size, stroke }) {
@@ -61,13 +69,12 @@ function commandOf({ shape, x, y, r, w, h, x1, y1, x2, y2, text, points, radius,
 
 /**
  * The shapes of the kit as Alphy's commands, each with its color by the palette: a color name as an Alphy color. A shape that Alphy cannot
- * draw is left out, and a size past Alphy's bounds is clamped. A text takes a color that reads on the last filled disk or box under its anchor (L1 item 6):
+ * draw is left out, and a size past Alphy's bounds is clamped. A text takes a color that reads on the last filled disk, box, or polygon under its anchor (L1 item 6):
  * - on a shape in a hex color, black or white by the luminance of the shape. With a gamma of 2.2 and a limit of 0.18, the contrast is 4.5 or more.
  * - on a shape in an ink role, the surface role. The host keeps each ink and the surface role at 4.5 or more (NativeToolUi.drawingRoles).
  * - on a shape in muted, the default ink. A muted shape is a light tint of the muted ink, and only the default ink keeps 4.5 on that tint.
  * - on a shape in surface, or on no shape, its own color, and the default ink for the surface role.
- * shortcut: a polygon, a line, and an outline cover no text, so a text on a filled polygon keeps its color. No plan puts a text there, and the
- * test of a point in a polygon costs 150 bytes of the run-time text. Add it when the run-time has room.
+ * A line and an outline cover no text.
  */
 export const commandsOf = (shapes, palette = PALETTE) => shapes.reduce((drawn, shape) => {
   const command = commandOf(shape);
@@ -75,8 +82,9 @@ export const commandsOf = (shapes, palette = PALETTE) => shapes.reduce((drawn, s
   if (command?.type === "text") {
     const { x: X, y: Y } = command;
     // A box is a rect or a roundRect, the only types that start with r. An arc is the outline of a disk.
-    for (const { type, x, y, radius, width, height, color: fill } of drawn) {
-      if (type === "circle" ? (X - x) ** 2 + (Y - y) ** 2 <= radius ** 2 : /^r/.test(type) && X >= x && X <= x + width && Y >= y && Y <= y + height) under = fill;
+    for (const { type, x, y, radius, width, height, points, color: fill } of drawn) {
+      if (type === "circle" ? (X - x) ** 2 + (Y - y) ** 2 <= radius ** 2 : type === "polygon" ? wound(points, X, Y)
+        : /^r/.test(type) && X >= x && X <= x + width && Y >= y && Y <= y + height) under = fill;
     }
     // The relative luminance of the shape, with weights times 10000.
     color = HEX.test(under) ? (argbOf(under).reduce((sum, channel, index) => sum + [0, 2126, 7152, 722][index] * (channel / 255) ** 2.2, 0) > 1800 ? "#000000" : "#ffffff")

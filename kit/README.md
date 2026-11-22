@@ -415,12 +415,12 @@ A text that a format function printed is for a person: do not read it back as a 
   The line of a part chip has the part id in its name, such as `rover_part_wheels`. An id that is not a word, such as `"wheel-l"`, gives the place of the chip, such as `rover_part_2`.
   The color of a shape or a body is a color name of the kit (`core.js` `TONES`) or a hex such as `"#336699"`. Each other color of a line is a fault of the line.
   The color `surface` is the surface role of the theme (`NativeToolUi.kt` `drawingRoles`): white in a light theme and near black in a dark one. The host keeps each ink role and the surface role at a contrast of 4.5 or more.
-  A text takes a color that reads on the last filled disk or box under its anchor (`draw.js` `commandsOf`, L1 item 6):
+  A text takes a color that reads on the last filled disk, box, or polygon under its anchor (`draw.js` `commandsOf`, L1 item 6):
   - On a shape in a hex color, the text is black or white by the luminance of the shape, so the contrast is 4.5 or more.
   - On a shape in an ink role (`ink`, `accent`, `success`, `warning`, `error`), the text is in the surface role.
   - On a muted shape, the text is in the default ink. The host draws a muted shape as the muted ink at the alpha `MUTED_SHAPE_ALPHA` (56), and only the default ink keeps 4.5 on that tint on each canvas.
   - On a shape in `surface`, or on no shape, the text keeps its color, and a text in `surface` takes the default ink.
-  - A polygon, a line, and an outline cover no text, so a text on a filled polygon keeps its color.
+  - A point is inside a polygon by the non-zero rule, the fill rule of the host path. A line and an outline cover no text.
 - The value of an option has its type. `sheet=`, `edit=`, `add=`, `remove=`, `hidden=`, `reorder=`, and `cycle=` are `true` or `false` in the line, because a part reads them once when it builds the screen. `step=` and `decimals=` are numbers or formulas. A value of another type is a fault of the need.
 
 ## Look rules
