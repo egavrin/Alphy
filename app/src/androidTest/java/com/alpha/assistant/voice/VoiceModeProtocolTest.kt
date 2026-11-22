@@ -47,6 +47,14 @@ class VoiceModeProtocolTest {
         for (word in listOf("Alphy", "перескажи", "по-русски")) assertFalse(word, word in LiveProtocol.INSTRUCTIONS)
     }
 
+    /** Task 3 fix round 2: a paid check heard the voice explain on after a short marked text, so the next line tells it to stop. */
+    @Test fun theInstructionsHoldTheStopLine() {
+        val lines = LiveProtocol.INSTRUCTIONS.lines()
+        val mark = lines.indexOfFirst { it.startsWith("Если в тексте есть метка «Дословно:»") }
+        assertTrue(LiveProtocol.INSTRUCTIONS, mark >= 0)
+        assertEquals("После этого текста замолчи и жди: не объясняй и не продолжай сам, даже если ответ кажется неполным.", lines.getOrNull(mark + 1))
+    }
+
     /**
      * Plan D, Db3 (form J, ruling OD-D5): after the delegation line, the session start gives the choice between a hand-off for a
      * screen and an own short answer. The examples are not the topics of the live checks.

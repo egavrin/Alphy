@@ -262,7 +262,8 @@ private class StepProbe(private val transport: LiveTransport, private val endpoi
     private val audio = FakeLiveAudio()
     private val feeder = WavFeeder(audio)
     // Task 15 probed the instructions of plan Task 3, which are now LiveProtocol.INSTRUCTIONS. They differ from the probed text only in
-    // the mark line, which now says «и один раз» and «без повторов», because the voice said one marked answer twice in that probe.
+    // the mark line, which now says «и один раз» and «без повторов», because the voice said one marked answer twice in that probe, and in
+    // the stop line after it, because a later paid check heard the voice explain on after a short marked text.
     private val instructions = if (experiment.subject != null) LiveProtocol.INSTRUCTIONS else probeInstructions(experiment.exact)
     @Volatile private var connection: LiveConnection? = null
     @Volatile private var started = false
