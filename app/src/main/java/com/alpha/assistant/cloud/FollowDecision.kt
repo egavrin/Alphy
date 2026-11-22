@@ -16,7 +16,8 @@ internal sealed interface FollowDecision {
     }
 
     data class None(override val answered: Boolean = true) : FollowDecision
-    data class Screen(val brief: String, override val answered: Boolean = true) : FollowDecision
+    /** [family] is the family of the screen, as in the routing decision (stage 5 live check, L1). */
+    data class Screen(val brief: String, override val answered: Boolean = true, val family: String = "explain") : FollowDecision
     data class Mark(val target: String, override val answered: Boolean = true) : FollowDecision
     data class Press(val target: String, override val answered: Boolean = true) : FollowDecision
     data class Clear(override val answered: Boolean = true) : FollowDecision
@@ -24,7 +25,7 @@ internal sealed interface FollowDecision {
     companion object {
         /** A mark or press target must be one exact label of [controls]. A screen needs a brief. Every other case is None. */
         fun decode(event: CloudEvent.Follow, controls: List<String>): FollowDecision = when (event.kind) {
-            "screen" -> if (event.brief.isNotBlank()) Screen(event.brief, event.answered) else None(event.answered)
+            "screen" -> if (event.brief.isNotBlank()) Screen(event.brief, event.answered, event.family) else None(event.answered)
             "mark" -> if (event.target in controls) Mark(event.target, event.answered) else None(event.answered)
             "press" -> if (event.target in controls) Press(event.target, event.answered) else None(event.answered)
             "clear" -> Clear(event.answered)

@@ -79,11 +79,20 @@ class ClassifierRehearsalTest {
         assertEquals(routed, talk.routed.size)
     }
 
-    /** K3: a command below 0.75 goes to the routing call. */
+    /** K3: a command below 0.6 goes to the routing call. */
     @Test fun aWeakCommandGoesToTheRoutingCall() = live { model, talk ->
         scene(model)
-        command(NEXT_REQUEST, "p1", "d2", 2_000, classified(USER_COMMAND, "next", 0.7))
+        command(NEXT_REQUEST, "p1", "d2", 2_000, classified(USER_COMMAND, "next", 0.55))
         robot.waitUntil(10_000) { rig.routedOf(talk, NEXT_REQUEST) == 1 }
+    }
+
+    /** K3 after the live check of stage 5: «Дальше» came at 0.61 to 0.83, so a command at 0.61 moves the step with no routing call (L3). */
+    @Test fun aCommandAtTheLowestLiveConfidenceMovesTheStep() = live { model, talk ->
+        scene(model)
+        val routed = talk.routed.size
+        command(NEXT_REQUEST, "p1", "d2", 2_000, classified(USER_COMMAND, "next", 0.61))
+        robot.waitUntil(10_000) { "d2" to MARK + SAYS[1] in socket.commentary() }
+        assertEquals(routed, talk.routed.size)
     }
 
     /** K3: only the answer of the last piece counts. A middle piece says back at 0.83, and the last piece says none: nothing moves. */

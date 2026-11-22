@@ -1799,6 +1799,17 @@ class CloudWorkflowTest {
         assertTrue("Set family to data" in ChatToolReply.voiceScreenInstructions)
     }
 
+    /** Stage 5 live check, L2: a refine keeps its family too, so a change to a table of a shown scene is a data change. Other kinds read explain. */
+    @Test fun aRefineDecisionKeepsItsFamily() {
+        val refine = JSONObject(decision("Показываю таблицей.")).put("kind", "refine").put("brief", "The planets as a table").put("show", false)
+        val data = ChatToolReply.decode(refine.put("family", "data").toString(), allowScreen = true)
+        assertEquals("refine" to "data", data.kind to data.family)
+        assertFalse(data.isData)
+        assertEquals(data, ChatToolReply.decode(ChatToolReply.encode(data), allowScreen = true))
+        assertEquals("explain", ChatToolReply.decode(refine.put("family", "explain").toString(), allowScreen = true).family)
+        assertTrue("table, a chart, or a comparison" in ChatToolReply.FAMILY_RULE)
+    }
+
     /** Task Db2: the strict schema of a spoken request makes the model send show with each kind, and each kind passes with one call. */
     @Test fun aSpokenDecisionWithShowPassesWithOneCall() = kotlinx.coroutines.runBlocking {
         fun withShow(json: String, show: Boolean) = JSONObject(json).put("show", show).toString()
@@ -1936,6 +1947,23 @@ class CloudWorkflowTest {
     }
 
     /** One request through the routing call, the search plan, one search with one source, and the grounded call. Gives the HTTP requests and the events. */
+    /**
+     * Stage 5 live check, L2: a searched spoken refine keeps the family of its routing decision through the grounded call, as a screen does,
+     * so a grounded reply with the other family changes nothing.
+     */
+    @Test fun aSearchedRefineKeepsTheFamilyOfItsRoutingDecision() {
+        for (family in listOf("data", "explain")) {
+            fun refine(text: String, brief: String, family: String) =
+                JSONObject(decision(text, "refine", "required", brief)).put("show", false).put("family", family).toString()
+            val (requests, events) = searched(cleanChatRequest("Show the gold price of this week as a chart").copy(voiceScreen = true),
+                refine("I can show it as a chart.", "A chart of the gold price.", family),
+                refine("I can show it as a chart [1].", "A chart of the gold price [1].", if (family == "data") "explain" else "data"))
+            assertEquals(listOf("routing", "search_plan", "search", "grounded"), requests.map { it.stage })
+            val result = ChatToolReply.decode((events.last() as CloudEvent.RoundComplete).text, allowScreen = true)
+            assertEquals("refine" to family, result.kind to result.family)
+        }
+    }
+
     private fun searched(request: CloudRequest, routing: String, grounded: String): Pair<List<Request>, List<CloudEvent>> =
         kotlinx.coroutines.runBlocking {
             Server { incoming, output ->
@@ -2059,14 +2087,15 @@ class CloudWorkflowTest {
             val parameters = tools.getJSONObject(0).getJSONObject("parameters")
             assertFalse(parameters.getBoolean("additionalProperties"))
             val required = parameters.getJSONArray("required")
-            assertEquals(listOf("kind", "brief", "target", "answered"), List(required.length(), required::getString))
+            assertEquals(listOf("kind", "brief", "target", "answered", "family"), List(required.length(), required::getString))
+            assertEquals("[\"explain\",\"data\"]", parameters.getJSONObject("properties").getJSONObject("family").getJSONArray("enum").toString())
             assertEquals(ChatToolReply.followKinds, parameters.getJSONObject("properties").getJSONObject("kind").getJSONArray("enum")
                 .let { kinds -> List(kinds.length(), kinds::getString) })
             assertEquals(listOf("user" to "Привет", "assistant" to "Здравствуйте!", "user" to line, "user" to "Почему небо голубое?",
                 "assistant" to "Потому что воздух рассеивает синий свет."),
                 request.json.responsesMessages().map { (role, part) -> role to part.getString("text") })
             assertFalse(injected in request.json.getString("instructions"))
-            output.responsesCall("follow-0", ChatToolReply.SUBMIT_FOLLOW_DECISION, """{"kind":"none","brief":"","target":"","answered":true}""")
+            output.responsesCall("follow-0", ChatToolReply.SUBMIT_FOLLOW_DECISION, """{"kind":"none","brief":"","target":"","answered":true,"family":"explain"}""")
         }.use { server ->
             val events = mutableListOf<CloudEvent>()
             CloudChatProvider({ AiAccount(AiProvider.OPENAI, "alpha-test-only") }, Endpoints { server.url })
@@ -2079,14 +2108,20 @@ class CloudWorkflowTest {
 
     /** Task 43 and requirement C5: a follow reply gives its event with the four fields, and answered false survives. */
     @Test fun aFollowReplyGivesItsEvent() {
-        val press = followReply("""{"kind":"press","brief":"","target":"Выдох","answered":true}""").single() as CloudEvent.Follow
+        val press = followReply("""{"kind":"press","brief":"","target":"Выдох","answered":true,"family":"explain"}""").single() as CloudEvent.Follow
         assertEquals(CloudEvent.Follow("press", "", "Выдох", true), press)
         assertEquals(FollowDecision.Press("Выдох"), FollowDecision.decode(press, listOf("Вдох", "Выдох")))
-        val waiting = followReply("""{"kind":"screen","brief":"Небо","target":"","answered":false}""").single() as CloudEvent.Follow
+        val waiting = followReply("""{"kind":"screen","brief":"Небо","target":"","answered":false,"family":"explain"}""").single() as CloudEvent.Follow
         assertEquals(CloudEvent.Follow("screen", "Небо", "", false), waiting)
         assertEquals(FollowDecision.Screen("Небо", answered = false), FollowDecision.decode(waiting, emptyList()))
+        // Stage 5 live check, L1: the follow screen names its family, as the routing decision does.
+        val data = followReply("""{"kind":"screen","brief":"Земля и Марс","target":"","answered":true,"family":"data"}""").single() as CloudEvent.Follow
+        assertEquals(CloudEvent.Follow("screen", "Земля и Марс", "", true, "data"), data)
+        assertEquals(FollowDecision.Screen("Земля и Марс", family = "data"), FollowDecision.decode(data, emptyList()))
+        assertEquals("explain", (FollowDecision.decode(waiting, emptyList()) as FollowDecision.Screen).family)
+        assertTrue(ChatToolReply.FAMILY_RULE in ChatToolReply.followInstructions && ChatToolReply.FAMILY_RULE in ChatToolReply.voiceScreenInstructions)
         // A reply outside the schema is a failure, not a decision.
-        val failure = runCatching { followReply("""{"kind":"move","brief":"","target":"","answered":true}""") }.exceptionOrNull()
+        val failure = runCatching { followReply("""{"kind":"move","brief":"","target":"","answered":true,"family":"explain"}""") }.exceptionOrNull()
         assertEquals("tool_invalid", (failure as? CloudFailure)?.code)
     }
 

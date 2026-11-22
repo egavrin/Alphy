@@ -42,7 +42,7 @@ export function header(kit) {
 
 const today = (kit) => kit.value({ k: "call", name: "today", args: [] }, {});
 
-const STYLES = { eyebrow: { emphasis: "label", tone: "accent" }, muted: { tone: "muted" } };
+const STYLES = { eyebrow: { emphasis: "label", tone: "accent" }, muted: { tone: "muted" }, source: { emphasis: "source", tone: "muted" } };
 /** What a row template of Alphy cannot hold (ToolUiCatalog: no list, dialog, sheet, or canvas in a row), and what keeps one state field for all rows. */
 const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Table", "Tabs", "Timer", "Drawing", "Model3d"]);
 /** The components of a part that a later task builds: the fault names the kind of the need. */
@@ -126,6 +126,7 @@ const NODES = {
     return { type: "section", ...(title && { text: title }), children: at.children() };
   },
   // A tone or an emphasis of the plan wins over the one of its variant.
+  // The emphasis source is a small line with a link icon before it (stage 5 look).
   Text: (n, at) => ({ type: "text", ...at.text("text"), ...styled(n, ["emphasis", "align", "tone"], own(STYLES, n.props.variant)) }),
   Heading: (n, at) => ({ type: "text", ...at.text("text"), style: { emphasis: "title" } }),
   Metric: (n, at) => ({ type: "metric", text: at.plain(n.props.label), bind: at.shown("value"), ...iconOf(n), ...styled(n, ["emphasis", "tone"]) }),
@@ -399,8 +400,10 @@ export function screen(kit, app, first = false) {
         viewSchemas[field] = { type: "list", maxItems: MAX_ROWS, fields: { id: "string", ...Object.fromEntries(columns.map((_, index) => [cell(index), "string"])) } };
         viewOwners.push(line);
         const ids = views[field].map((row) => row.id), mark = node.props.bind && at.field((value) => (value === "" || ids.includes(value) ? value : undefined));
-        const column = node.props.column;
+        const column = node.props.column, signs = node.props.signs;
+        // signs= makes a comparison: a head cell with the sign of each thing (columns 1 on), and a bar under each number of a row.
         return { type: "table", text: at.plain(node.props.label).slice(0, 100) || at.caption(), bind: field, columns: columns.map((text, index) => ({ text, field: cell(index) })),
+          ...(Array.isArray(signs) && { variant: "compare", signs: signs.map((sign) => at.plain(sign).slice(0, 16)) }),
           visibleRows: VISIBLE_ROWS, ...(mark && { action: mark.action, selectedKeyBind: mark.bind }),
           ...(mark && Number.isInteger(column) && column > 0 && column < columns.length && { markColumn: cell(column) }) };
       },

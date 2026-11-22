@@ -1,6 +1,6 @@
 // The template compare of the data family (block 2 plan, D2): two or three things side by side, each with a name and a sign, up to 6 rows
-// with one value for each thing, one marked row, and a card with the point. The kit shows it as a native table whose first column holds
-// the row labels.
+// with one value for each thing, one marked row, and a card with the point. The kit shows it as a native table with signs= (a comparison):
+// the host draws a head cell for each thing and a row block with a bar under each value (stage 5 look).
 
 import { isText, textCardFault } from "./form-base.js";
 import { DATA_BUDGET, cellText, contextFaults, cutLabel, cutLabels, dataFile, markFault, markStart, rowFault, tableLine } from "./form-data.js";
@@ -30,8 +30,8 @@ export const COMPARE_FORM = {
   start: (parts, control) => markStart(control),
   whole: (parts) => (parts.filter((part) => THING.test(part.name)).length < 2 ? "compare: the form needs 2 or 3 things with no fault" : null),
   file(head, parts, control, card, source) {
-    const things = parts.filter((part) => THING.test(part.name)).map(({ tree: { args: [name, sign] } }) => cutLabel(sign ? `${sign.v} ${name.v}` : name.v));
+    const things = parts.filter((part) => THING.test(part.name)).map(({ tree: { args: [name, sign] } }) => [cutLabel(name.v), sign?.v ?? ""]);
     const rows = parts.filter((part) => !THING.test(part.name)).map(({ tree: { args: [label, values] } }) => [label.v, ...values.items.map(cellText)]);
-    return dataFile(head, things.length ? tableLine(head, [" ", ...things], rows) : null, markStart(control), card, source);
+    return dataFile(head, things.length ? tableLine(head, [" ", ...things.map(([name]) => name)], rows, -1, things.map(([, sign]) => sign)) : null, markStart(control), card, source);
   },
 };

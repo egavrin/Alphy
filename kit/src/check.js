@@ -360,7 +360,7 @@ const SIZES = ["small", "medium", "large"], ALIGNS = ["start", "center", "end"],
  */
 const LOOKS = {
   icon: Object.fromEntries(ICONED.map((type) => [type, ICONS])),
-  variant: { Button: ["filled", "outlined", "text", "tonal"], Text: ["muted", "eyebrow"], Card: ["hero"], CheckBox: ["circle"], Progress: ["bar", "dots"] },
+  variant: { Button: ["filled", "outlined", "text", "tonal"], Text: ["muted", "eyebrow", "source"], Card: ["hero"], CheckBox: ["circle"], Progress: ["bar", "dots"] },
   size: { Emoji: SIZES },
   emphasis: { Text: ["body", "title", "headline", "label", "number", "display"], Metric: ["display", "number"] },
   align: { Text: ALIGNS, Row: ALIGNS },

@@ -7,6 +7,7 @@ import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.MessageProvenance
 import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.ToolRecord
+import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.ui.LiveStageRig.Companion.ANSWER_REQUEST
 import com.alpha.assistant.ui.LiveStageRig.Companion.SAID
 import com.alpha.assistant.ui.LiveStageRig.Companion.stepped
@@ -110,6 +111,32 @@ class FollowTurnRehearsalTest {
         val message = shell.messages(model).single { it.toolId == model.stageToolId }
         assertEquals("assistant" to "Корабль полый, поэтому плавает.", message.role to message.text)
         assertTrue(message.spoken)
+    }
+
+    /** L1 of the stage 5 live check: a follow screen of the family data sends one data call with no search, and a data form shows. */
+    @Test fun followScreenOfTheDataFamilyShowsADataForm() = live(StreamTalk(listOf(stepped(), Streamed(listOf(DataTalk.PLANETS), gapMs = 30)))) { model, talk, _ ->
+        talk.follow = CloudEvent.Follow("screen", "Земля и Марс", "", answered = true, family = "data")
+        val first = rig.steppedScene(model)
+        voiceOnly("Сравни Землю и Марс", "Земля больше Марса.", 3_000)
+        robot.waitUntil(60_000) { model.stageToolId.let { it != null && it != first.id } && !model.tools.busy }
+        assertEquals(listOf(APP_FILE_TEMPLATE, APP_FILE_TEMPLATE), talk.stages)
+        assertEquals(AppFilePrompt.load(fixture.context).templateData, talk.calls.last().systemInstructions)
+        assertTrue(checkNotNull(shell.finalFile(model, checkNotNull(model.stageToolId))).startsWith("table(\"Планеты\""))
+    }
+
+    /**
+     * L2 of the stage 5 live check: with an explain scene on the stage, a refine of the family data is a new data screen with the shown
+     * file as context: one data call, a table on the stage, and no change call.
+     */
+    @Test fun aDataRefineOfAnExplainSceneShowsADataForm() = live(StreamTalk(listOf(stepped(), Streamed(listOf(DataTalk.PLANETS), gapMs = 30)))) { model, talk, _ ->
+        val first = rig.steppedScene(model)
+        socket.say(StreamTalk.AS_TABLE_REQUEST, "d2", 3_000)
+        robot.waitUntil(60_000) { model.stageToolId.let { it != null && it != first.id } && !model.tools.busy }
+        assertEquals(listOf(APP_FILE_TEMPLATE, APP_FILE_TEMPLATE), talk.stages)
+        val call = talk.calls.last()
+        assertEquals(AppFilePrompt.load(fixture.context).templateData, call.systemInstructions)
+        assertTrue(call.turns.single().text, ShownScreen.PREFIX in call.turns.single().text)
+        assertTrue(checkNotNull(shell.finalFile(model, checkNotNull(model.stageToolId))).startsWith("table(\"Планеты\""))
     }
 
     /** Kind screen of a turn where the voice only promised the answer (C5): the new scene walks as a new scene of a hand-off does. */

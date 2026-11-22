@@ -115,7 +115,7 @@ sealed interface CloudEvent {
     ) : CloudEvent
     data class Search(val status: String, val sources: List<Source> = emptyList()) : CloudEvent
     /** The decision of a follow call ([CloudRequest.follow]). [answered]: the voice gave an answer, not only a promise (requirement C5). */
-    data class Follow(val kind: String, val brief: String, val target: String, val answered: Boolean = true) : CloudEvent
+    data class Follow(val kind: String, val brief: String, val target: String, val answered: Boolean = true, val family: String = "explain") : CloudEvent
 }
 /** Each request owns its connection. A canceled request cannot cancel a later request. */
 class CloudSession {
@@ -579,12 +579,13 @@ class CloudChatProvider internal constructor(
             ResponseShape("follow.tool_call", "$", "tool_call"))
         val call = completion.calls.singleOrNull()?.takeIf { it.name == ChatToolReply.SUBMIT_FOLLOW_DECISION && completion.text.isBlank() } ?: invalid()
         val json = try { ChatToolReply.strictObject(call.arguments, 4096) } catch (_: RuntimeException) { invalid() }
-        if (json.keys != setOf("kind", "brief", "target", "answered")) invalid()
+        if (json.keys != setOf("kind", "brief", "target", "answered", "family")) invalid()
         fun text(field: String) = (json[field] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content ?: invalid()
         val kind = text("kind").takeIf { it in ChatToolReply.followKinds } ?: invalid()
         val answered = (json["answered"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { !it.isString }?.content?.toBooleanStrictOrNull() ?: invalid()
         session.checkActive(currentCoroutineContext())
-        emit(CloudEvent.Follow(kind, text("brief").trim(), text("target").trim(), answered))
+        val family = text("family").takeIf { it in ChatToolReply.screenFamilies } ?: invalid()
+        emit(CloudEvent.Follow(kind, text("brief").trim(), text("target").trim(), answered, family))
     }
 
     private suspend fun respondDecision(wire: ChatWire, key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
@@ -1204,7 +1205,8 @@ The user reviews and approves the plan before any device action.
                 requireSameOperation(decision, candidate)
                 if (candidate.isMiniApp) ChatToolReply.requireBriefFits(candidate.brief, allowance)
                 // The routing call reads the words of the request for show and family, so a grounded screen keeps them from the routing decision.
-                accept(candidate.copy(show = decision.show && candidate.isScreen, family = if (candidate.isScreen) decision.family else "explain"))
+                // A grounded refine keeps its family too, so a searched change to a chart stays a data change (stage 5 live check, L2).
+                accept(candidate.copy(show = decision.show && candidate.isScreen, family = decision.family))
             }
         }
         session.checkActive(currentCoroutineContext())

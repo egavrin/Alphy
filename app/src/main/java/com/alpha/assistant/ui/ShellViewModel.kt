@@ -1999,7 +1999,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 }
                 val decoded = when {
                     follow != null -> ChatToolReply.Decision("screen", snapshot.conversations.find { it.id == conversationId }?.messages
-                        ?.find { it.id == assistant.id }?.text?.trim().orEmpty().ifBlank { follow.brief }, follow.brief, "none")
+                        ?.find { it.id == assistant.id }?.text?.trim().orEmpty().ifBlank { follow.brief }, follow.brief, "none", family = follow.family)
                     courseTopic != null -> {
                         if (!ChatToolReply.validCourseTopic(courseTopic))
                             throw CloudFailure("widget_request", "The assistant returned an invalid course topic.")
@@ -2162,8 +2162,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     val screenChange = changed != null && changed.id == stageTarget && tools.planStep() != null &&
                         ToolSpec.availablePersisted(changed)?.appFile != null
                     // A spoken change of a data form is a new data screen with the shown form, such as the same planets as a chart (block 2 plan, D1).
-                    val dataChange = screenChange && withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }
-                        .isData(checkNotNull(ToolSpec.availablePersisted(checkNotNull(changed))?.appFile))
+                    // So is a change of the family data of another stage app, such as a scene shown as a table (stage 5 live check, L2).
+                    val dataChange = screenChange && (decoded.family == "data" || withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }
+                        .isData(checkNotNull(ToolSpec.availablePersisted(checkNotNull(changed))?.appFile)))
                     val bridge = liveBridge?.takeIf { liveVoice.active }
                     // The voice says the answer of a screen now: the screen comes later, or not at all (plan D, Db2).
                     if (decoded.isScreen || dataChange) bridge?.screenStarted(assistant.id, decoded.text)

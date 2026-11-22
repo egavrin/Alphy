@@ -17,6 +17,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Test
 
+/** The talk before the ship scene, for the follow check and the routing probe. */
+internal val SHIP_TALK = listOf(CloudTurn("user", "Почему корабль не тонет?"), CloudTurn("assistant", "Смотри на экран: корабль полый и вытесняет много воды."))
+/** The stepped ship scene at step 1, with the continue control, as a follow call or a routing call reads it. */
+internal val STEPS_SCENE get() = ShownScreen("scene", "Почему корабль не тонет?", STEPPED + "\n" + NARRATION_LINES.joinToString("\n"),
+    STEPS.map { ShownControl("$STEP_CONTROL: $it", "v_field", it) } + ShownControl(CONTINUE_LABEL, ShownScreen.CONTINUE_ACTION, null),
+    listOf(STEP_CONTROL to STEPS[0]), SceneStep(1, STEPS.size, STEPS[0]), stepControl = STEP_CONTROL, steps = STEPS)
+
 /**
  * The paid check of the follow instructions (plan "one scene", stage 3 fix list item 8): each case is the request of `followTurn` for one
  * voice-only turn, sent through the product path (`CloudChatProvider` with `follow = true`) to the chat model of the account. Each case runs
@@ -36,9 +43,11 @@ class LiveFollowCheckTest {
     @Test fun pressOption() = check(CASES.filter { it.name == "pressOption" })
     @Test fun continueSteps() = check(CASES.filter { it.name == "continueSteps" })
     @Test fun clearSubject() = check(CASES.filter { it.name == "clearSubject" })
+    /** Stage 5 live check, L1: a voice-only comparison is a screen of the family data. */
+    @Test fun compareData() = check(CASES.filter { it.name == "compareData" })
 
     private class Case(val name: String, val user: String, val said: String, val screen: ShownScreen?, val kind: String, val target: String,
-        val answered: Boolean, val context: List<CloudTurn> = emptyList())
+        val answered: Boolean, val context: List<CloudTurn> = emptyList(), val family: String = "explain")
 
     private fun check(cases: List<Case>) = liveCheck("LiveFollowCheckTest", missing = { null }, model = { it.liveChatModel() }) { account, model ->
         var calls = 0
@@ -53,10 +62,12 @@ class LiveFollowCheckTest {
             val got = follow
             val decoded = got?.let { FollowDecision.decode(it, case.screen?.controls?.map { control -> control.label }.orEmpty()) }
             rows.put(JSONObject().put("case", case.name).put("run", run + 1)
-                .put("expected", "${case.kind} ${case.target} answered=${case.answered}".replace("  ", " "))
-                .put("got", got?.let { "${it.kind} ${it.target} answered=${it.answered}".replace("  ", " ") } ?: JSONObject.NULL)
+                .put("expected", "${case.kind} ${case.target} answered=${case.answered} family=${case.family}".replace("  ", " "))
+                .put("got", got?.let { "${it.kind} ${it.target} answered=${it.answered} family=${it.family}".replace("  ", " ") } ?: JSONObject.NULL)
                 .put("brief", got?.brief ?: JSONObject.NULL).put("decoded", decoded?.kind ?: JSONObject.NULL)
-                .put("pass", decoded?.kind == case.kind && got?.target == case.target && got?.answered == case.answered)
+                // The family chooses the call of a screen only, so only a screen case compares it (stage 5 live check, L1).
+                .put("pass", decoded?.kind == case.kind && got?.target == case.target && got?.answered == case.answered &&
+                    (case.kind != "screen" || got?.family == case.family))
                 .put("failure", (failure as? CloudFailure)?.code ?: failure?.javaClass?.simpleName ?: JSONObject.NULL))
         }
         JSONObject().put("httpCalls", calls).put("rows", rows).toString()
@@ -64,11 +75,6 @@ class LiveFollowCheckTest {
 
     private companion object {
         const val RUNS = 2
-        val EARLIER = listOf(CloudTurn("user", "Почему корабль не тонет?"), CloudTurn("assistant", "Смотри на экран: корабль полый и вытесняет много воды."))
-        /** The stepped ship scene at step 1, with the continue control, as `followTurn` reads it. */
-        val STEPS_SCENE get() = ShownScreen("scene", "Почему корабль не тонет?", STEPPED + "\n" + NARRATION_LINES.joinToString("\n"),
-            STEPS.map { ShownControl("$STEP_CONTROL: $it", "v_field", it) } + ShownControl(CONTINUE_LABEL, ShownScreen.CONTINUE_ACTION, null),
-            listOf(STEP_CONTROL to STEPS[0]), SceneStep(1, STEPS.size, STEPS[0]), stepControl = STEP_CONTROL, steps = STEPS)
         /** The ship scene with a choice of two objects. */
         val CHOICE_SCENE get() = ShownScreen("scene", "Почему корабль не тонет?", shipTemplate(),
             listOf("Корабль", NAIL).map { ShownControl("$STEP_CONTROL: $it", "v_field", it) }, listOf(STEP_CONTROL to "Корабль"))
@@ -80,14 +86,17 @@ class LiveFollowCheckTest {
             // Block 2 plan, V2: the call starts 2,500 ms after the voice began, so it sees a cut sentence that begins the answer.
             Case("screenCut", "Почему небо голубое?", "Солнечный свет рассеивается в воздухе, и синий свет рассеивается", null, "screen", "", true),
             Case("sceneAnswers", "Так почему корабль всё-таки не тонет?", "Он полый внутри и вытесняет много воды, поэтому вода его держит.",
-                STEPS_SCENE, "none", "", true, EARLIER),
+                STEPS_SCENE, "none", "", true, SHIP_TALK),
             Case("markOption", "А что из этого тонет?", "Тонет гвоздь: он сплошной и тяжёлый для своего размера.", CHOICE_SCENE, "mark",
-                "$STEP_CONTROL: $NAIL", true, EARLIER),
-            Case("pressOption", "Покажи гвоздь.", "Смотри, вот гвоздь.", CHOICE_SCENE, "press", "$STEP_CONTROL: $NAIL", true, EARLIER),
+                "$STEP_CONTROL: $NAIL", true, SHIP_TALK),
+            Case("pressOption", "Покажи гвоздь.", "Смотри, вот гвоздь.", CHOICE_SCENE, "press", "$STEP_CONTROL: $NAIL", true, SHIP_TALK),
             // The words only promise the walk, so answered is false. A press does not use answered.
-            Case("continueSteps", "Продолжай", "Хорошо, идём дальше.", STEPS_SCENE, "press", CONTINUE_LABEL, false, EARLIER),
+            Case("continueSteps", "Продолжай", "Хорошо, идём дальше.", STEPS_SCENE, "press", CONTINUE_LABEL, false, SHIP_TALK),
             Case("clearSubject", "Ладно, хватит про корабли. Расскажи анекдот.",
-                "Встречаются два кота, и один говорит: «Мяу». А второй отвечает: «Мяу-мяу».", STEPS_SCENE, "clear", "", true, EARLIER),
+                "Встречаются два кота, и один говорит: «Мяу». А второй отвечает: «Мяу-мяу».", STEPS_SCENE, "clear", "", true, SHIP_TALK),
+            // Stage 5 live check, L1: the voice answered a comparison with no hand-off, and the follow screen is a data form.
+            Case("compareData", "Сравни Землю и Марс", "Земля почти вдвое шире Марса, у неё плотная атмосфера и жидкая вода, а Марс холодный и сухой.",
+                null, "screen", "", true, family = "data"),
         )
     }
 }

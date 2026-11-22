@@ -858,7 +858,8 @@ internal class LiveVoiceBridge(
         /** The failure codes of a request or a reply that does not fit a limit. */
         val TOO_BIG_CODES = setOf("widget_size", "widget_response_size", "response_size", "response_length", "tool_limit")
         /** The thresholds of the classifier rules K3 to K6 (plan "one scene"). */
-        const val COMMAND_MIN = 0.75
+        // «Дальше» came at 0.61 to 0.83 in the live check of stage 5, and no other last piece came above 0.3 (L3).
+        const val COMMAND_MIN = 0.6
         const val GO_TO_STEP_MIN = 0.6
         const val QUESTION_MIN = 0.8
         const val WALK_MIN = 0.5

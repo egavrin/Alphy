@@ -60,11 +60,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
@@ -91,6 +97,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -591,6 +598,8 @@ private fun heroEmojiSide(children: JSONArray): Int {
     "title" -> MaterialTheme.typography.titleLarge
     "headline" -> MaterialTheme.typography.headlineMedium
     "label" -> MaterialTheme.typography.labelLarge
+    // The source line of a data form (stage 5 look): one small line with a link icon before it.
+    "source" -> MaterialTheme.typography.labelSmall
     "number" -> MaterialTheme.typography.displaySmall.copy(fontFamily = MaterialTheme.typography.bodyLarge.fontFamily)
     "display" -> MaterialTheme.typography.displayMedium.copy(fontFamily = MaterialTheme.typography.bodyLarge.fontFamily)
     // A plain metric is a secondary value, so the number and display emphases stand out above it.
@@ -1159,12 +1168,23 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             Column(Modifier.padding(space(style?.optString("padding"), if (hero) 20 else 16)), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
                 val icon = node.optString("icon")
                 val title = showsToolHeading(text, heading)
-                if (icon.isNotEmpty() || title) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (icon.isNotEmpty()) IconBadge(icon, if (tone in setOf("", "default", "muted")) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                val badge = if (tone in setOf("", "default", "muted")) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                // A card with an icon and no title of its own, such as the nodata card of a data form, shows the icon at the left of its first heading (stage 5 look).
+                val besideHeading = icon.isNotEmpty() && !title && children?.optJSONObject(0)?.let {
+                    it.optString("type") == "text" && it.optJSONObject("style")?.optString("emphasis") == "title"
+                } == true
+                if (icon.isNotEmpty() && !besideHeading || title) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (icon.isNotEmpty()) IconBadge(icon, badge)
                     if (title) Text(text, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
                 }
                 val beside = if (hero && !centered && children != null) heroEmojiSide(children) else 0
-                if (beside > 1) BoxWithConstraints {
+                if (besideHeading) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        IconBadge(icon, badge)
+                        Box(Modifier.weight(1f)) { renderChildren(0..0) }
+                    }
+                    renderChildren(1 until checkNotNull(children).length())
+                } else if (beside > 1) BoxWithConstraints {
                     // A large emoji stands at the end of the texts that follow it. Below 300 dp it stays above them.
                     val wide = maxWidth >= 300.dp
                     Column(verticalArrangement = Arrangement.spacedBy(gap)) {
@@ -1224,7 +1244,10 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 Text(value,style=metric,color=toolInk(tone),textAlign=align,maxLines=if(compact) 2 else Int.MAX_VALUE,
                     overflow=TextOverflow.Ellipsis,autoSize=if(compact) WholeWordAutoSize(12.sp,base.fontSize,oneLineFirst=true) else null)
             } else if(node.has("bind") || showsToolHeading(text, heading)) {
-                if(type == "text") NativeReadableText(node,label,enabled,modifier,event)
+                if(type == "text" && style?.optString("emphasis") == "source") Row(modifier,horizontalArrangement=Arrangement.spacedBy(4.dp),verticalAlignment=Alignment.CenterVertically) {
+                    ToolGlyph("Link",Modifier.size(14.dp),toolInk(style?.optString("tone")))
+                    NativeReadableText(node,label,enabled,Modifier,event)
+                } else if(type == "text") NativeReadableText(node,label,enabled,modifier,event)
                 else Text(label,modifier,style=textStyle(style),color=toolInk(style?.optString("tone")),textAlign=align)
             }
         }
@@ -1820,10 +1843,16 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
         if(!namedByTitle && showsToolHeading(name, heading)) Text(name,style=MaterialTheme.typography.titleMedium,modifier=Modifier.semantics {heading()})
         if(rows.length() == 0) Text(node.optString("emptyText",miniAppString(R.string.tool_records_empty)),
             Modifier.padding(vertical = 12.dp), color = toolInk("muted"))
-        if(type == "table") BoxWithConstraints {
+        if(type == "table" && node.optString("variant") == "compare") NativeCompare(node,checkNotNull(columns),rows,selected,enabled,event)
+        else if(type == "table") BoxWithConstraints {
             val count=checkNotNull(columns).length()
-            // Columns share the width when each keeps 80 dp. A wider table scrolls sideways.
-            val cell=if(constraints.hasBoundedWidth && maxWidth/count >= 80.dp) maxWidth/count else 140.dp
+            val records=(0 until rows.length()).map {rows.getJSONObject(it)}
+            val fields=(0 until count).map {columns.getJSONObject(it).getString("field")}
+            // The label column takes 1.4 shares and each other column one share. Below 72 dp a share, the table scrolls sideways (stage 5 look).
+            val share=maxOf(if(constraints.hasBoundedWidth) maxWidth/(count+0.4f) else 0.dp,72.dp)
+            fun width(index: Int)=if(index == 0) share*1.4f else share
+            // A column where each cell starts with a number aligns to the right, and its head too.
+            val numeric=fields.map {field -> records.isNotEmpty() && records.all {leadingNumber(ToolUiCatalog.value(it,field).toString()) != null}}
             // The marked row and its marked cell (block 2 plan, D8). With visibleRows, more rows scroll inside the box, so the page does not scroll.
             val markColumn=node.optString("markColumn")
             // A compact width shows at most 6 rows, so a data form at its caps leaves its card above the strip (controller ruling, stage 5).
@@ -1832,31 +1861,54 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
             val box=if(node.has("visibleRows")) Modifier.heightIn(max=(TABLE_ROW_DP*shownRows).dp).testTag(TABLE_ROWS_TAG).verticalScroll(rowsScroll) else Modifier
             // The top and the bottom of the marked row in the box: a mark under the shown rows scrolls into the box.
             var markedRow by remember { mutableStateOf<IntRange?>(null) }
+            // A mark under the shown rows stops above the fade of the bottom edge.
+            val fade=with(LocalDensity.current) {16.dp.roundToPx()}
             LaunchedEffect(selected, markedRow, rowsScroll.viewportSize) {
                 val row=markedRow ?: return@LaunchedEffect
-                if(row.last > rowsScroll.value+rowsScroll.viewportSize) rowsScroll.scrollTo(row.last-rowsScroll.viewportSize)
+                if(row.last+fade > rowsScroll.value+rowsScroll.viewportSize) rowsScroll.scrollTo(row.last+fade-rowsScroll.viewportSize)
                 else if(row.first < rowsScroll.value) rowsScroll.scrollTo(row.first)
             }
-            Column(Modifier.horizontalScroll(rememberScrollState())) {
-                Row {repeat(count) {Text(columns.getJSONObject(it).getString("text"),Modifier.width(cell).padding(10.dp),style=MaterialTheme.typography.labelLarge)}}
-                Column(box) {
-                    repeat(rows.length()) {index -> val record=rows.getJSONObject(index)
-                        HorizontalDivider()
-                        val marked=node.has("selectedKeyBind") && selected == ToolUiCatalog.stableKey(record)
-                        val rowModifier=if(action.isNotEmpty()) Modifier.clickable(enabled=enabled,role=Role.Button) {event(action,ToolUiCatalog.stableKey(record))} else Modifier
-                        val markModifier=if(!node.has("selectedKeyBind")) Modifier else Modifier.semantics {this.selected=marked}
-                            .then(if(marked) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
-                        val place=if(marked) Modifier.onGloballyPositioned {val top=it.positionInParent().y.toInt(); markedRow=top..top+it.size.height} else Modifier
-                        Row(rowModifier.then(markModifier).then(place).heightIn(min=TABLE_ROW_DP.dp),verticalAlignment=Alignment.CenterVertically) {
-                            repeat(count) {
-                                val field=columns.getJSONObject(it).getString("field")
-                                val cellMarked=marked && field == markColumn
-                                Text(ToolUiCatalog.value(record,field).toString(),
-                                    (if(cellMarked) Modifier.background(MaterialTheme.colorScheme.primaryContainer).semantics {this.selected=true} else Modifier).width(cell).padding(10.dp),
-                                    fontWeight=if(cellMarked || marked && it == 0) FontWeight.Bold else null,
-                                    color=if(cellMarked) MaterialTheme.colorScheme.onPrimaryContainer else Color.Unspecified)
+            val scheme=MaterialTheme.colorScheme
+            val shape=RoundedCornerShape(16.dp)
+            val cellStyle=MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings="tnum")
+            // The sideways scroll gives no bounded width, so the hairlines and the fade take the width of the columns.
+            val total=(0 until count).fold(0.dp) {sum,it -> sum+width(it)}
+            Box(Modifier.clip(shape).border(1.dp,scheme.outlineVariant,shape)) {
+                Column(Modifier.horizontalScroll(rememberScrollState())) {
+                    Row(Modifier.background(scheme.surfaceContainerLow)) {
+                        repeat(count) {Text(columns.getJSONObject(it).getString("text"),Modifier.width(width(it)).padding(horizontal=12.dp,vertical=10.dp),
+                            style=MaterialTheme.typography.labelMedium,color=scheme.onSurfaceVariant,textAlign=if(numeric[it]) TextAlign.End else TextAlign.Start,
+                            maxLines=2,overflow=TextOverflow.Ellipsis)}
+                    }
+                    Box {
+                        Column(box) {
+                            records.forEach {record ->
+                                HorizontalDivider(Modifier.width(total),thickness=Dp.Hairline,color=scheme.outlineVariant)
+                                val marked=node.has("selectedKeyBind") && selected == ToolUiCatalog.stableKey(record)
+                                val rowModifier=if(action.isNotEmpty()) Modifier.clickable(enabled=enabled,role=Role.Button) {event(action,ToolUiCatalog.stableKey(record))} else Modifier
+                                val markModifier=if(!node.has("selectedKeyBind")) Modifier else Modifier.semantics {this.selected=marked}
+                                    .then(if(marked) Modifier.background(scheme.primaryContainer) else Modifier)
+                                val place=if(marked) Modifier.onGloballyPositioned {val top=it.positionInParent().y.toInt(); markedRow=top..top+it.size.height} else Modifier
+                                Row(rowModifier.then(markModifier).then(place).heightIn(min=TABLE_ROW_DP.dp),verticalAlignment=Alignment.CenterVertically) {
+                                    repeat(count) {
+                                        val cellMarked=marked && fields[it] == markColumn
+                                        val text=dataValue(ToolUiCatalog.value(record,fields[it]).toString())
+                                        Box(Modifier.width(width(it)).padding(horizontal=12.dp,vertical=6.dp),contentAlignment=if(numeric[it]) Alignment.CenterEnd else Alignment.CenterStart) {
+                                            // A value takes a second line before it loses a character: a cut number reads as a wrong number.
+                                            val align=if(numeric[it]) TextAlign.End else TextAlign.Start
+                                            // The marked cell is a pill in the accent color.
+                                            if(cellMarked) Text(text,Modifier.semantics {this.selected=true}.background(scheme.primary,RoundedCornerShape(10.dp)).padding(horizontal=8.dp,vertical=2.dp),
+                                                style=cellStyle,color=scheme.onPrimary,fontWeight=FontWeight.Medium,textAlign=align,maxLines=2,overflow=TextOverflow.Ellipsis)
+                                            else Text(text,style=cellStyle,color=if(marked) scheme.onPrimaryContainer else Color.Unspecified,
+                                                fontWeight=if(it == 0 || marked) FontWeight.Medium else null,textAlign=align,maxLines=2,overflow=TextOverflow.Ellipsis)
+                                        }
+                                    }
+                                }
                             }
                         }
+                        // Rows under the box: a fade at its bottom edge shows that the table goes on.
+                        if(rowsScroll.canScrollForward) Box(Modifier.align(Alignment.BottomStart).width(total).height(16.dp)
+                            .background(Brush.verticalGradient(listOf(Color.Transparent,scheme.surface))))
                     }
                 }
             }
@@ -1955,6 +2007,86 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
 internal const val TABLE_ROW_DP=48
 private const val COMPACT_TABLE_ROWS=6
 internal const val TABLE_ROWS_TAG="tool_table_rows"
+/** The tag of each bar under a value of a comparison (stage 5 look). */
+internal const val COMPARE_BAR_TAG="tool_compare_bar"
+private val LEADING_NUMBER=Regex("^[-−+]?\\d+(?:[    ]\\d{3})*(?:[.,]\\d+)?")
+private val GROUP_SPACE=Regex("[    ]")
+/** The number at the start of a data value, such as 12742 of "12 742 км", or null when the value starts with no number. */
+internal fun leadingNumber(text: String): Double? =
+    LEADING_NUMBER.find(text.trim())?.value?.replace(GROUP_SPACE,"")?.replace('−','-')?.replace(',','.')?.toDoubleOrNull()
+/** A data value as the stage shows it: an integer of 5 or more digits gets a thin space between groups of three ("12 742"). The stored value stays. */
+internal fun dataValue(text: String): String {
+    val parts=Regex("([-−]?)(\\d{5,})").matchEntire(text) ?: return text
+    return parts.groupValues[1]+parts.groupValues[2].reversed().chunked(3).joinToString(" ").reversed()
+}
+
+/**
+ * A comparison (a table node with the variant compare, stage 5 look): a head cell with the sign and the name of each thing, then one block
+ * for each row with its label and a value of each thing over a bar. A bar is the share of the value of the largest number of its row, and a
+ * row where a value has no number has no bars. A tap on a row marks it.
+ */
+@Composable private fun NativeCompare(node: JSONObject,columns: JSONArray,rows: JSONArray,selected: String,enabled: Boolean,event: (String,Any?) -> Unit) {
+    val scheme=MaterialTheme.colorScheme
+    val action=node.optString("action")
+    val signs=node.optJSONArray("signs")
+    val things=(1 until columns.length()).map {columns.getJSONObject(it)}
+    // The value line is 1.25 of its size, so a smaller value of autoSize also takes a lower line, and 6 rows fit the phone stage.
+    val valueStyle=MaterialTheme.typography.titleMedium.copy(fontFeatureSettings="tnum",fontWeight=FontWeight.Medium,lineHeight=1.25.em)
+    val nameStyle=MaterialTheme.typography.titleSmall.copy(fontWeight=FontWeight.Medium)
+    val measurer=rememberTextMeasurer()
+    Column {
+        Row(Modifier.padding(start=12.dp,end=12.dp,bottom=4.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            things.forEachIndexed {index,thing ->
+                val name=thing.getString("text")
+                Row(Modifier.weight(1f),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    // The sign of the thing, or the first letter of its name when it has none.
+                    val sign=signs?.optString(index).orEmpty().ifBlank {name.trim().take(1).uppercase()}
+                    Box(Modifier.size(32.dp).background(scheme.primaryContainer,CircleShape).clearAndSetSemantics {},contentAlignment=Alignment.Center) {
+                        Text(sign,style=MaterialTheme.typography.titleSmall,color=scheme.onPrimaryContainer,maxLines=1)
+                    }
+                    // A word of the name does not break: the name gets smaller, down to 11 sp, until its longest word fits one line.
+                    BoxWithConstraints(Modifier.weight(1f)) {
+                        val room=constraints.maxWidth
+                        val fit=remember(name,room,nameStyle) {
+                            generateSequence(nameStyle.fontSize.value) {it-1f}.takeWhile {it >= 11f}.firstOrNull {size ->
+                                name.split(' ').all {word -> measurer.measure(word,nameStyle.copy(fontSize=size.sp),softWrap=false).size.width <= room}
+                            } ?: 11f
+                        }
+                        Text(name,style=nameStyle.copy(fontSize=fit.sp,lineHeight=(fit*1.4f).sp),maxLines=2,overflow=TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+        repeat(rows.length()) {index ->
+            val record=rows.getJSONObject(index)
+            val key=ToolUiCatalog.stableKey(record)
+            val marked=node.has("selectedKeyBind") && selected == key
+            val values=things.map {ToolUiCatalog.value(record,it.getString("field")).toString()}
+            val numbers=values.map(::leadingNumber)
+            val top=if(numbers.all {it != null}) numbers.maxOf {checkNotNull(it)}.takeIf {it > 0} else null
+            val press=if(action.isNotEmpty()) Modifier.clickable(enabled=enabled,role=Role.Button) {event(action,key)} else Modifier
+            val mark=if(node.has("selectedKeyBind")) Modifier.semantics {this.selected=marked} else Modifier
+            val ink=if(marked) scheme.onPrimaryContainer else Color.Unspecified
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).then(if(marked) Modifier.background(scheme.primaryContainer) else Modifier)
+                .then(press).then(mark).padding(horizontal=12.dp,vertical=8.dp)) {
+                Text(ToolUiCatalog.value(record,columns.getJSONObject(0).getString("field")).toString(),style=MaterialTheme.typography.labelMedium,
+                    color=if(marked) scheme.onPrimaryContainer else scheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    values.forEachIndexed {thing,value ->
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                            Text(dataValue(value),style=valueStyle,color=ink,maxLines=1,autoSize=TextAutoSize.StepBased(11.sp,valueStyle.fontSize))
+                            if(top != null) {
+                                val number=checkNotNull(numbers[thing])
+                                Box(Modifier.testTag(COMPARE_BAR_TAG).fillMaxWidth((number/top).coerceIn(0.0,1.0).toFloat()).height(4.dp)
+                                    .background(if(number == top) scheme.primary else scheme.outlineVariant,RoundedCornerShape(2.dp)))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 /** A chart of at most this many points shows a label and a value at each point (block 2 plan, D8). */
 private const val LABELED_POINTS=8
 
@@ -2001,51 +2133,74 @@ private const val LABELED_POINTS=8
                     start = end
                 }
             }
-        } else {
+        } else Surface(color=scheme.surfaceContainerLow,shape=RoundedCornerShape(20.dp)) {
+          // The chart sits in its own card (stage 5 look).
+          Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             val range=ToolUiCatalog.chartRange(node,state)
             val labeled=categories.length() <= LABELED_POINTS
-            fun number(value: Any?)=if(value is Number && value.toDouble() % 1.0 == 0.0 && kotlin.math.abs(value.toDouble()) < 1e15) value.toLong().toString() else value.toString()
+            fun number(value: Double)=dataValue(if(value % 1.0 == 0.0 && abs(value) < 1e15) value.toLong().toString() else value.toString())
             // A labeled chart shows each value over its point, so the range line would say the same a second time.
             if(!labeled) Text("${range.first} — ${range.second}",style=MaterialTheme.typography.labelSmall)
-            else if(series.length() == 1) Row(Modifier.fillMaxWidth()) {
-                repeat(categories.length()) {Text(number(values.single().get(it)),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall,textAlign=TextAlign.Center,
-                    fontWeight=if(it == markedIndex) FontWeight.Bold else null,maxLines=1,overflow=TextOverflow.Ellipsis)}
-            }
+            // A bar starts at zero. A line leaves 15 % of its range free under its lowest point and over its highest point, and it goes under
+            // zero only when a value does, so a small change does not look like a fall to the base line.
+            val all=values.flatMap {points -> (0 until points.length()).map {points.getDouble(it)}}
+            val (low,high)=if(kind == "line" && labeled) {
+                val span=(all.max()-all.min()).takeIf {it > 0} ?: maxOf(1.0,abs(all.max())*0.1)
+                (all.min()-span*0.15).let {if(all.min() >= 0) maxOf(0.0,it) else it} to all.max()+span*0.15
+            } else range
             val tap=if(action.isNotEmpty() && enabled) Modifier.pointerInput(categories.toString()) {
                 detectTapGestures {offset -> event(action,categories.get((offset.x/(size.width.toFloat()/categories.length())).toInt().coerceIn(0,categories.length()-1)).toString())}
             } else Modifier
-            Canvas(Modifier.fillMaxWidth().height(180.dp).then(tap).semantics {contentDescription=description}) {
-                fun y(value: Double) = ((1.0-(value-range.first)/(range.second-range.first))*size.height).toFloat().coerceIn(0f,size.height)
-                val baseline=y(0.0)
+            val measurer=rememberTextMeasurer()
+            val valueStyle=MaterialTheme.typography.labelMedium.copy(fontFeatureSettings="tnum")
+            val ring=scheme.surfaceContainerLow
+            val ink=scheme.onSurfaceVariant
+            Canvas(Modifier.fillMaxWidth().height(160.dp).then(tap).semantics {contentDescription=description}) {
+                // The top keeps room for the value over the highest point.
+                val top=if(labeled && series.length() == 1) (valueStyle.lineHeight.toPx()+4.dp.toPx()) else 0f
+                // A line keeps the same room at the bottom for the value under a low point.
+                val bottom=if(kind == "bar") 0f else top
+                fun y(value: Double)=(top+(1.0-(value-low)/(high-low))*(size.height-top-bottom)).toFloat().coerceIn(top,size.height-bottom)
+                // Three light grid lines and one base line.
+                (1..3).forEach {line -> val at=top+(size.height-top)*(line-1)/3f; drawLine(axis.copy(alpha=.5f),Offset(0f,at),Offset(size.width,at),strokeWidth=1.dp.toPx())}
+                val baseline=if(kind == "line") size.height else y(0.0)
                 drawLine(axis,Offset(0f,baseline),Offset(size.width,baseline),strokeWidth=1.dp.toPx())
+                // A value over [edge], or under it with [below]. [side] 1 puts it right of x, -1 left of x, and 0 centers it.
+                fun value(text: String,x: Float,edge: Float,marked: Boolean,below: Boolean=false,side: Int=0) {
+                    val laid=measurer.measure(text,valueStyle.copy(color=if(marked) colors[0] else ink,fontWeight=if(marked) FontWeight.Medium else null))
+                    val left=when(side) {0 -> x-laid.size.width/2f; 1 -> x+2.dp.toPx(); else -> x-laid.size.width-2.dp.toPx()}
+                    val upper=if(below) edge else edge-laid.size.height
+                    drawText(laid,topLeft=Offset(left.coerceIn(0f,maxOf(0f,size.width-laid.size.width)),upper.coerceIn(0f,maxOf(0f,size.height-laid.size.height))))
+                }
                 values.forEachIndexed { s, points ->
                     // A labeled point sits over the middle of its label.
                     fun x(index: Int) = if(labeled) (index+0.5f)*size.width/points.length() else if(points.length() == 1) size.width/2 else index.toFloat()/(points.length()-1)*size.width
-                    if (kind == "area") {
-                        val area = Path().apply {
-                            moveTo(0f, baseline)
-                            if (points.length() == 1) {
-                                val top = y(points.getDouble(0))
-                                lineTo(0f, top)
-                                lineTo(size.width, top)
-                            } else repeat(points.length()) { index -> lineTo(x(index), y(points.getDouble(index))) }
-                            lineTo(size.width, baseline)
-                            close()
-                        }
-                        drawPath(area, colors[s], alpha = .28f)
-                    }
-                    repeat(points.length()) {i ->
+                    val shown=labeled && series.length() == 1
+                    if(kind == "bar") repeat(points.length()) {i ->
                         val current=y(points.getDouble(i))
-                        // With a mark, the marked point keeps its color and the others are lighter.
-                        val color=if(markedIndex < 0 || i == markedIndex) colors[s] else colors[s].copy(alpha=.4f)
-                        if(kind == "bar") {
-                            val group=size.width/points.length(); val width=group/(series.length()+1)
-                            val x=i*group+(s+0.5f)*width
-                            drawRect(color,Offset(x,minOf(current,baseline)),Size(width*0.85f,maxOf(abs(baseline-current),1f)))
-                        } else {
-                            val x=x(i)
-                            if(i > 0) drawLine(colors[s],Offset(x(i-1),y(points.getDouble(i-1))),Offset(x,current),strokeWidth=2.dp.toPx())
-                            drawCircle(colors[s],(if(i == markedIndex) 6 else 3).dp.toPx(),Offset(x,current))
+                        // With a mark, the marked bar keeps the accent and the others are lighter.
+                        val color=if(markedIndex < 0 || i == markedIndex) colors[s] else colors[s].copy(alpha=.3f)
+                        val group=size.width/points.length(); val gap=8.dp.toPx()
+                        val width=maxOf(1f,(group-gap)/series.length()); val x=i*group+gap/2+s*width
+                        val corner=CornerRadius(6.dp.toPx())
+                        drawPath(Path().apply {addRoundRect(RoundRect(Rect(x,minOf(current,baseline),x+width,maxOf(current,baseline)+0.5f),topLeft=corner,topRight=corner))},color)
+                        if(shown) value(number(points.getDouble(i)),x+width/2,minOf(current,baseline)-4.dp.toPx(),i == markedIndex)
+                    } else {
+                        val line=Path().apply {repeat(points.length()) {i -> if(i == 0) moveTo(x(0),y(points.getDouble(0))) else lineTo(x(i),y(points.getDouble(i)))}}
+                        val area=Path().apply {addPath(line); lineTo(x(points.length()-1),baseline); lineTo(x(0),baseline); close()}
+                        drawPath(area,colors[s],alpha=if(kind == "area") .28f else .12f)
+                        drawPath(line,colors[s],style=Stroke(3.dp.toPx(),join=StrokeJoin.Round,cap=StrokeCap.Round))
+                        repeat(points.length()) {i ->
+                            val point=Offset(x(i),y(points.getDouble(i)))
+                            // The marked dot is larger, with a ring in the color of the card.
+                            if(i == markedIndex) {drawCircle(colors[s],7.dp.toPx(),point); drawCircle(ring,7.dp.toPx(),point,style=Stroke(2.dp.toPx()))}
+                            else drawCircle(colors[s],4.dp.toPx(),point)
+                            // The value sits where the line is not: under a low point, beside a slope, and over a high point.
+                            val current=points.getDouble(i)
+                            val leftUp=i > 0 && points.getDouble(i-1) > current; val rightUp=i < points.length()-1 && points.getDouble(i+1) > current
+                            val below=(leftUp || rightUp) && (leftUp || i == 0) && (rightUp || i == points.length()-1)
+                            val side=if(below) 0 else if(leftUp) 1 else if(rightUp) -1 else 0
+                            if(shown) value(number(current),point.x,if(below) point.y+8.dp.toPx() else point.y-8.dp.toPx(),i == markedIndex,below,side)
                         }
                     }
                 }
@@ -2055,13 +2210,15 @@ private const val LABELED_POINTS=8
                     val label=categories.get(index).toString()
                     val press=if(action.isNotEmpty()) Modifier.clickable(enabled=enabled,role=Role.Button) {event(action,label)} else Modifier
                     val mark=if(node.has("selectedKeyBind")) Modifier.semantics {selected=index == markedIndex} else Modifier
-                    Text(label,Modifier.weight(1f).then(press).then(mark),style=MaterialTheme.typography.labelSmall,textAlign=TextAlign.Center,
-                        fontWeight=if(index == markedIndex) FontWeight.Bold else null,maxLines=2,overflow=TextOverflow.Ellipsis)
+                    Text(label,Modifier.weight(1f).then(press).then(mark).padding(horizontal=2.dp),style=MaterialTheme.typography.labelSmall,textAlign=TextAlign.Center,
+                        color=if(index == markedIndex) colors[0] else Color.Unspecified,
+                        fontWeight=if(index == markedIndex) FontWeight.Medium else null,maxLines=2,overflow=TextOverflow.Ellipsis)
                 }
             } else Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {Text(categories.get(0).toString(),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall); if(categories.length()>1) Text(categories.get(categories.length()-1).toString(),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall,textAlign=TextAlign.End)}
             // The heading already names one series with its own text, so that caption would show the title a second time (L3 decision 1).
             val named = series.length() == 1 && series.getJSONObject(0).getString("text") == node.getString("text")
             if (!named) repeat(series.length()) {Text(series.getJSONObject(it).getString("text"),color=colors[it],style=MaterialTheme.typography.labelMedium)}
+          }
         }
     }
 }

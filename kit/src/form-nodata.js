@@ -18,5 +18,6 @@ export const NODATA_FORM = {
     ? { ...tree, args: [tree.args[0], { ...tree.args[1], v: sentences(tree.args[1].v, DATA_BUDGET.nodataSentences) }] } : tree),
   start: () => ({ k: "lit", v: "" }),
   whole: (parts, lines, drawn) => (drawn("card") ? null : "nodata: the form needs a card with no fault"),
-  file: (head, parts, control, card, source) => dataFile(head, null, null, card, source),
+  // The card has a search icon at the left of its title (stage 5 look).
+  file: (head, parts, control, card, source) => dataFile(head, null, null, card, source, "Search"),
 };

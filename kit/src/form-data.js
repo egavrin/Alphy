@@ -80,11 +80,12 @@ export function sourceFault(tree) {
  * The app lines of a data form: the mark $/v, the main component, the card, the source, and the root in that order. main is the line of the
  * table or the chart, or null for nodata. A form with no source line shows none.
  */
-export function dataFile(head, main, start, card, source) {
+export function dataFile(head, main, start, card, source, icon) {
   const title = show(head.args[0]), out = [`app(${title}, lang=${show(head.named.lang)}, preset="clean", palette=${show(head.named.palette ?? { k: "lit", v: "blue" })})`];
   if (main) out.push(`$/v = ${show(start)}`, `data_view = ${main}`);
-  if (card) out.push(`need card = card(${show(card.args[0])}, ${show(card.args[1])})`);
-  if (source) out.push(`data_source = Text(${show({ k: "lit", v: `${source.args[0].v} · ${source.args[1].v}` })}, tone="muted")`);
+  if (card) out.push(`need card = card(${show(card.args[0])}, ${show(card.args[1])}${icon ? `, icon=${show({ k: "lit", v: icon })}` : ""})`);
+  // The source line is one small muted line with a link icon (stage 5 look).
+  if (source) out.push(`data_source = Text(${show({ k: "lit", v: `${source.args[0].v} · ${source.args[1].v}` })}, variant="source")`);
   const top = [main && "data_view", card && "card_view", source && "data_source"].filter(Boolean);
   // The first line alone is a frame of the stream (the preview step): its screen holds one divider under the title.
   if (!top.length) out.push("data_wait = Divider()");
@@ -92,10 +93,13 @@ export function dataFile(head, main, start, card, source) {
   return out.join("\n") + "\n";
 }
 
-/** The line Table(TITLE, COLUMNS, ROWS, $/v) of the table of a form, with column= for a marked cell (its index among the columns, from 0). */
-export function tableLine(head, columns, rows, column) {
+/**
+ * The line Table(TITLE, COLUMNS, ROWS, $/v) of the table of a form, with column= for a marked cell (its index among the columns, from 0).
+ * signs= makes the table a comparison: one sign for each thing, "" for none (stage 5 look).
+ */
+export function tableLine(head, columns, rows, column, signs) {
   const list = (items) => `[${items.map((text) => show({ k: "lit", v: text })).join(", ")}]`;
-  return `Table(${show(head.args[0])}, ${list(columns)}, [${rows.map(list).join(", ")}], $/v${column > 0 ? `, column=${column}` : ""})`;
+  return `Table(${show(head.args[0])}, ${list(columns)}, [${rows.map(list).join(", ")}], $/v${column > 0 ? `, column=${column}` : ""}${signs ? `, signs=${list(signs)}` : ""})`;
 }
 
 /** The value that $/v keeps: the label of the marked row, or "" for no mark. */

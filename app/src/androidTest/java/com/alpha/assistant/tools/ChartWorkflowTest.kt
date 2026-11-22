@@ -136,7 +136,9 @@ class ChartWorkflowTest {
         val canvas = assertVisible(label)
         val bounds = Rect().also(canvas::getBoundsInScreen)
         val density = robot.instrumentation.targetContext.resources.displayMetrics.density
-        assertTrue("Chart is not clipped: $bounds", bounds.height() >= (180 * density).toInt() && bounds.width() >= (120 * density).toInt())
+        // The plot of a chart in its card is 160 dp high (stage 5 look). A pie keeps 180 dp.
+        val least = if (kind == "pie") 180 else 160
+        assertTrue("Chart is not clipped: $bounds", bounds.height() >= (least * density).toInt() && bounds.width() >= (120 * density).toInt())
         robot.awaitFrames(2)
         val image = checkNotNull(robot.automation.takeScreenshot())
         try {

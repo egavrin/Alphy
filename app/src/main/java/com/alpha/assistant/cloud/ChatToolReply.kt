@@ -111,6 +111,10 @@ missing detail if the topic or requested action is unclear. Use create for a sep
 opens outline review. The user starts and saves the course from that review.
 """.trimIndent()
 
+    /** The family sentence of the routing text and of the follow text (block 2 plan, decision 1, and the stage 5 live check, L1 and L2). */
+    internal const val FAMILY_RULE = "Set family to data for a screen or a change that shows values side by side: a comparison of two or three things, a table of a set of things, or a chart of numbers. " +
+        "A request to show the present subject as a table, a chart, or a comparison has the family data. Set family to explain for each other screen, change, and kind."
+
     /** The routing text of a spoken request when the kind screen is on offer. The model chooses the kind, no word list does. */
     internal val voiceScreenInstructions = """
 The latest request comes from a spoken talk. The voice of the talk speaks your text aloud.
@@ -118,7 +122,7 @@ Choose kind screen when a thing to see or to try makes the answer clearer: a dra
 Choose answer for a plain question with a short fact. Choose create when the person asks for a tool or an app. Use the device plan for a command to the phone.
 For screen, text is one short spoken sentence in the language of the request: the short answer. It names no part, no step, and no control. The brief names the main thing that the screen shows and is never empty. Use search required when the screen needs current facts that change with time. Use search none for each other screen.
 Set show to true only for a screen that the person asks in words to see or to be shown, and set it to false for each other decision.
-Set family to data for a screen of values side by side: a comparison of two or three things, a table of a set of things, or a chart of numbers. Set family to explain for each other screen and for each other kind.
+$FAMILY_RULE
 A request to learn a subject gets a screen with one lesson, not a course.
 """.trimIndent()
 
@@ -174,6 +178,7 @@ Choose answer with search none for a question about these turns.
 The latest turn is a spoken turn that the voice already answers. Decide what the stage does. You write no speech.
 Choose none when the stage needs no change. none is the most frequent answer.
 Choose screen when a picture makes the answer clearer and the shown screen does not have it. The brief names the main thing that the screen shows.
+$FAMILY_RULE
 Choose mark when the answer is one option of SHOWN_SCREEN. Choose press when the turn asks to move a control of SHOWN_SCREEN or to choose one of its options. For mark and press, the target is the exact label of that option from the list.
 Choose clear when the subject changed and no screen helps.
 For none, screen, and clear, the target is empty. For none, mark, press, and clear, the brief is empty.
@@ -186,12 +191,13 @@ Words that begin the answer count as the answer, also when they stop in the midd
     internal const val SUBMIT_FOLLOW_DECISION = "submit_follow_decision"
     internal val followKinds = listOf("none", "screen", "mark", "press", "clear")
 
-    /** The strict schema of [SUBMIT_FOLLOW_DECISION] (decision 18), with the boolean of requirement C5. */
+    /** The strict schema of [SUBMIT_FOLLOW_DECISION] (decision 18), with the boolean of requirement C5 and the family of a screen (stage 5 live check, L1). */
     internal fun followSchema(): JSONObject = JSONObject().put("type", "object").put("additionalProperties", false)
-        .put("required", JSONArray(listOf("kind", "brief", "target", "answered")))
+        .put("required", JSONArray(listOf("kind", "brief", "target", "answered", "family")))
         .put("properties", JSONObject().put("kind", JSONObject().put("type", "string").put("enum", JSONArray(followKinds)))
             .put("brief", JSONObject().put("type", "string")).put("target", JSONObject().put("type", "string"))
-            .put("answered", JSONObject().put("type", "boolean")))
+            .put("answered", JSONObject().put("type", "boolean"))
+            .put("family", JSONObject().put("type", "string").put("enum", JSONArray(screenFamilies))))
 
     // The host notes of the spoken context.
     private const val HIDDEN_TEXT = "[The host does not send the text of this message.]"
@@ -311,10 +317,10 @@ Words that begin the answer count as the answer, also when they stop in the midd
         val show = json["show"]?.let { value ->
             (value as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: invalidDecision("decision.show", "$.show", jsonType(value))
         } == true && kind == "screen"
-        // The strict schema sends family with each kind too, and only a screen keeps data.
+        // The strict schema sends family with each kind too, and only a screen or a refine keeps data (stage 5 live check, L2).
         val family = if ("family" in json) string("family").also { if (it !in screenFamilies) invalidDecision("decision.family", "$.family", "string") } else "explain"
         val image = if ("image" in json) string("image") else ""
-        if (image.isBlank()) return Decision(kind, text, brief, search, show = show, family = if (kind == "screen") family else "explain")
+        if (image.isBlank()) return Decision(kind, text, brief, search, show = show, family = if (kind == "screen" || kind == "refine") family else "explain")
         if (kind != "answer" || image.length > 4096) invalidDecision("decision.image", "$.image", "string")
         val intent = try {
             val fields = JSONObject(image)

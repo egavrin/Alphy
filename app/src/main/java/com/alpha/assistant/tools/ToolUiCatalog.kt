@@ -93,8 +93,9 @@ object ToolUiCatalog {
         for(type in recordTypes) {
             val rowProperties=if(type == "table") emptySet() else setOf("rowActions","rowTemplate","emptyText","groupBy","swipeAction")
             // A table marks one row and one cell of it, and shows visibleRows rows in a box that scrolls (block 2 plan, D3 and D8).
+            // The variant compare with signs draws a comparison of the things of columns 1 on (stage 5 look).
             val viewportProperties=if(type in setOf("lazyList","lazyGrid")) setOf("viewportHeight","selectedKeyBind","scrollToKeyBind")+(if(type == "lazyList") setOf("stickyHeaders") else setOf("spanField"))
-                else if(type == "table") setOf("selectedKeyBind","markColumn","visibleRows") else emptySet()
+                else if(type == "table") setOf("selectedKeyBind","markColumn","visibleRows","variant","signs") else emptySet()
             val reorderProperties = if (type == "list" || type == "lazyList") setOf("reorder") else emptySet()
             add(entry(type,setOf("bind","action","columns")+rowProperties+viewportProperties+reorderProperties+(if(type == "lazyGrid") setOf("minCellWidth") else emptySet()),binding=setOf("list","array")))
         }
@@ -257,7 +258,7 @@ object ToolUiCatalog {
                             val style=node.getJSONObject("style"); require(ToolValueSchema.keys(style).all {it in definition.styles})
                             style.keys().forEach { key -> require(style.get(key) is String && style.getString(key) in when(key) {
                                 "tone" -> tones
-                                "emphasis" -> setOf("body","title","headline","label","number","display")
+                                "emphasis" -> setOf("body","title","headline","label","number","display","source")
                                 "align","crossAlign" -> setOf("start","center","end")
                                 "arrangement" -> setOf("start","center","end","between","around","evenly")
                                 "padding","gap" -> setOf("none","small","medium","large")
@@ -489,6 +490,9 @@ object ToolUiCatalog {
                         if(node.has("markColumn")) require(node.has("selectedKeyBind") && node.get("markColumn") is String &&
                             node.getJSONArray("columns").let {columns -> (0 until columns.length()).any {columns.getJSONObject(it).optString("field") == node.getString("markColumn")}})
                         if(node.has("visibleRows")) require(node.get("visibleRows") is Int && node.getInt("visibleRows") in 1..50)
+                        // A comparison has one sign for each thing: a short text, or "" for the first letter of its name.
+                        require(node.has("variant") == node.has("signs") && (!node.has("variant") || node.get("variant") == "compare" && node.get("signs").let {signs ->
+                            signs is JSONArray && signs.length() == node.getJSONArray("columns").length()-1 && (0 until signs.length()).all {signs.get(it).let {sign -> sign is String && sign.length <= 16}}}))
                     }
                     if(node.has("stickyHeaders")) require(node.get("stickyHeaders") is Boolean && (!node.getBoolean("stickyHeaders") || node.has("groupBy")))
                     if(node.has("spanField")) {

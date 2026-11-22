@@ -703,6 +703,7 @@ internal class StreamTalk(private val templates: List<Streamed>, private val pla
             TemplateTalk.CHANGE_REQUEST -> chatDecision("refine", "Готово.", TemplateTalk.CHANGE_BRIEF)
             NEXT_REQUEST -> chatDecision("press", "Готово.", "$STEP_CONTROL: ${nextStep(request)}")
             CONTINUE_REQUEST -> chatDecision("press", "Готово.", CONTINUE_LABEL)
+            AS_TABLE_REQUEST -> JSONObject(chatDecision("refine", "Показываю таблицей.", "The planets as a table")).put("family", "data").toString()
             else -> chatDecision("answer", "Fixture response")
         }, false))
     }
@@ -710,4 +711,9 @@ internal class StreamTalk(private val templates: List<Streamed>, private val pla
     /** The step after the step in the shown-screen line of [request], as the routing model reads «Дальше». */
     private fun nextStep(request: CloudRequest): String =
         STEPS[JSONObject(checkNotNull(request.shownScreen).removePrefix(ShownScreen.PREFIX)).getJSONObject("step").getInt("index")]
+
+    companion object {
+        /** A spoken change to see the present subject as a table: a refine of the family data (stage 5 live check, L2). */
+        const val AS_TABLE_REQUEST = "Покажи это таблицей"
+    }
 }

@@ -13,6 +13,7 @@ import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.data.Source
 import com.alpha.assistant.tools.AgentScriptProvider
+import com.alpha.assistant.tools.COMPARE_BAR_TAG
 import com.alpha.assistant.tools.TABLE_ROWS_TAG
 import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.appfile.AppFilePrompt
@@ -33,6 +34,7 @@ import com.alpha.assistant.voice.outputAudio
 import com.alpha.assistant.voice.outputDelta
 import android.os.SystemClock
 import kotlinx.coroutines.awaitCancellation
+import kotlin.math.abs
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -209,6 +211,44 @@ class StageDataWorkflowTest {
                 val box = robot.composedBoundsIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.TestTag) == TABLE_ROWS_TAG }
                 val row = robot.composedBoundsIn(scenario, STAGE, robot.hasText(LAST_ROW))
                 box != null && row != null && row.top >= box.top && row.bottom <= box.bottom
+            }
+        }
+    }
+
+    /**
+     * Stage 5 look: a comparison row with a number in each value has a bar under each value, and a row with a text value has none. An integer
+     * of 5 or more digits shows with a thin space between groups of three, and the marked row stays marked.
+     */
+    @Test fun aComparisonRowWithNumbersHasBarsAndATextRowHasNone() {
+        val compare = listOf("compare(\"Земля и Марс\", lang=\"ru\")", "control = mark(\"Диаметр, км\")", "t1 = thing(\"Земля\", \"🌍\")", "t2 = thing(\"Марс\")",
+            "r1 = row(\"Диаметр, км\", [\"12742\", \"6779\"])", "r2 = row(\"Кольца\", [\"нет\", \"нет\"])",
+            "card = card(\"Земля больше\", \"Диаметр Земли почти вдвое больше.\")").joinToString("\n", postfix = "\n")
+        shell.live(DataTalk(AgentScriptProvider(compare))) { scenario, model, _ ->
+            socket.say(DATA_REQUEST, "d1", 100)
+            shell.finalFile(model, shell.shown(model).id)
+            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, "12\u2009742") && selectedHolds(scenario, "Диаметр, км") }
+            var bars = 0
+            scenario.onActivity { activity -> bars = robot.nodes(activity).count { it.config.getOrNull(SemanticsProperties.TestTag) == COMPARE_BAR_TAG } }
+            assertEquals(2, bars)
+        }
+    }
+
+    /** Stage 5 look: a column where each cell starts with a number aligns to the right, and a text column to the left. */
+    @Test fun aNumberColumnAlignsToTheRight() {
+        val table = listOf("table(\"Планеты\", lang=\"ru\")", "head = head([\"Планета\", \"Год, дней\", \"Тип\"])", "r1 = row(\"Земля\", [\"365\", \"каменная\"])",
+            "r2 = row(\"Марс\", [\"687\", \"каменная\"])", "card = card(\"Год Марса длиннее\", \"Марс идёт вокруг Солнца почти два земных года.\")").joinToString("\n", postfix = "\n")
+        shell.live(DataTalk(AgentScriptProvider(table))) { scenario, model, _ ->
+            socket.say(DATA_REQUEST, "d1", 100)
+            shell.finalFile(model, shell.shown(model).id)
+            val dp = fixture.context.resources.displayMetrics.density
+            robot.waitUntil(30_000) {
+                val numberHead = robot.composedBoundsIn(scenario, STAGE, robot.hasText("Год, дней"))
+                val number = robot.composedBoundsIn(scenario, STAGE, robot.hasText("365"))
+                val textHead = robot.composedBoundsIn(scenario, STAGE, robot.hasText("Тип"))
+                val text = robot.composedBoundsIn(scenario, STAGE, robot.hasText("каменная"))
+                numberHead != null && number != null && textHead != null && text != null &&
+                    abs(numberHead.right - number.right) <= 12 * dp + 2 && number.left - numberHead.left > 30 * dp &&
+                    abs(text.left - textHead.left) <= 12 * dp + 2
             }
         }
     }
