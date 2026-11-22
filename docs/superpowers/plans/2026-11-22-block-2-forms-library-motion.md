@@ -1,0 +1,254 @@
+# Block 2 plan: data forms, the library first set, motion and diagrams (Alpha 21 to 23)
+
+**Goal:** three finished components after Alpha 20, each with its own push and prerelease: data in a form that fits it (stage 5), pictures from ready parts (stage 6), and a picture that moves by itself with a diagram form (stage 7).
+
+**Spec:** `docs/superpowers/specs/2026-11-22-voice-scene-and-forms-design.md`, sections 7.4, 9.3, 9.4, 11, 12, 14, 15, 16, and 17. The spec is the authority. This plan adds the exact values that section 18 leaves to the plan.
+
+**Base:** `origin/main` at `d662897` (Alpha 20). Records of block 1: `docs/superpowers/plans/2026-11-22-one-scene.md` and the ledger `.superpowers/sdd/2026-11-22-one-scene/ledger.md` (not in Git).
+
+**Form of this plan:** one requirement list with its tests for each stage, for one build job. It has no task steps. The job reads the code and chooses the files.
+
+## The owner's order
+
+Requirement, his words of 2026-11-22: «давай начнем тогда с первой, второй, третьей. Потом пятый, шестой, седьмой. И потом все остальное ... После каждой стадии делай следующий релиз. Планируй блоками по 3 ... Ты их один за одним делаешь, выпускаешь, пушишь и делаешь релиз. Как заканчиваешь, планируешь следующие 3 стадии. И точно в таком же порядке все выпускаешь.»
+
+- The push and the release of each stage have his word when every gate of the stage holds. A gate that misses its bar goes to him first.
+- His phone check comes after each release. A failed check becomes the first fix of the next stage.
+
+## How each stage runs
+
+Requirement: the delivery rules of 2026-11-22 (`~/.claude/CLAUDE.md`, "Delivery speed").
+
+1. One build job for the stage (Opus, effort xhigh), in the session worktree, under `.superpowers/sdd/2026-11-22-one-scene/job-rules.md`. The job writes the tests of a requirement before its code, builds, runs its tests one time at the end, and hands back one tested result with a report of at most 40 lines.
+2. The controller reads the whole product diff and sends one fix list to the same job.
+3. The controller runs the commit gate (Slopo, then the architecture scan, then the disposition file) for each commit.
+4. One set of paid checks for the release, with its budget stated before the first call and its spend after the last one.
+5. The version commit, the release candidate (a Sonnet job: release build type, signed with the debug keystore, `aapt dump badging` exit 0, no `application-debuggable`, the update check over the release before), the untangle review, the push, and the prerelease.
+6. The full device suite one time for the release, beside other work, with the error-level device log saved.
+
+Time target: about 1 hour for 1000 changed lines. A stage that takes more than three times its target stops, and the cause goes to the owner.
+
+## Global constraints
+
+From the spec (sections 5, 11.1, 14) and `AGENTS.md`. Each requirement below includes them.
+
+- Speed comes first. The first voice word, the first line of a first screen, and its controls do not get later (G9). The free stream gate (median at most 0.3 s) stays binding.
+- Strict text caps. A text outside the picture has a hard cap, and a long card text is cut at a sentence end.
+- The page of a template screen does not scroll at the phone size and at the fold size.
+- The app draws at font scale 1.0.
+- The model decides whether a turn gets a screen. No rule by keyword decides it.
+- A form never shows a value that no source has.
+- The voice never waits in silence for a screen.
+- Each form is drawn line by line while its call writes it. A fault leaves one line out, and one repair call writes only the faulty lines. A change by lines and the merge by name work for each form.
+- No compatibility with files of earlier development versions.
+- Expected results and acceptance decisions of a generated check stay in the host.
+- A published APK is a signed APK of the Gradle `release` build type.
+
+## Review focus
+
+The five conditions that the spec implies, that are most likely to reach a person, and that each need a test in the stage that owns the code:
+
+1. A searched data form with a number that no source excerpt holds (stage 5, requirement D6).
+2. A table with more rows than fit on a phone, and a row label longer than its cap (stage 5, D3).
+3. A request for a thing that the catalog does not have, and a search that is late or has no model loaded (stage 6, L5 and S4).
+4. A spoken command while a `play` scene runs, and a scene change while the glide of the change before it still runs (stage 7, M4 and M6).
+5. A new stepped control with more options than the classifier choices (stage 5, V4): today `LiveProtocol.MAX_STEPS = 6` copies `BUDGET.options` of the kit by hand.
+
+## Decisions of this plan
+
+Each is an Implementation choice inside the spec, unless it names a Requirement.
+
+1. **Families (spec 7.4, Requirement).** The routing decision of a `screen` names a family: `explain` or `data`. The early template call of a first screen stays the explain family. For `data`, the host stops the early call and starts the data template call with the brief of the routing call, and with the source excerpts when a search ran. The practice family comes with stage 9.
+2. **The mark of a data form is state.** A marked row, cell, or point is a value of the app, as the option of a choice is. A tap on a row or a point moves the mark. A spoken request moves it by the press path that exists (a routing press, or a follow `mark`). So the rows and the points are options in the line of the shown screen.
+3. **No invented data, checked by the host.** For a searched data form, the host compares each number of the form with the source excerpts. A number that no excerpt holds turns the form into `nodata` with its reason. A searched form holds no computed value. The spec gives the rule; the host check is the method.
+4. **A data form has one narration line `say`**: the point of the data. It has no steps, so it gets no scene item of the classifier.
+5. **The scene text of the classifier** holds only the title, the step labels, and the step sentences of a stepped scene, as in Alpha 20. No fetched data goes to the Decisions model in block 2.
+6. **The first areas of the library** are Human body (11 objects), Space (9), and Math figures (7): 27 objects. The spec says "about 30 objects of two areas", and no two areas of its list hold 30. Basis of the choice: the paid dialogues use these subjects (the heart, the Moon, the orbit, the theorem of Pythagoras), so the paired check has requests.
+7. **The search accuracy gate runs against the whole name list of spec 12.5** (about 150 names). Names with no drawing are entries of the test only. With 27 real entries and 24 candidates the gate would pass by count alone.
+8. **The review sheet of new objects** is accepted by the controller before the release, and the sheet goes to the owner with the release. He can reject an entry after it.
+9. **Speed is judged from the live check**, not from one more paid run: the first line and the controls of the first screen of `uxHeart` and `uxSteps`, against the same steps of the Alpha 20 record (`evidence/one-scene/live-3/`: first line 4.8 s, controls 8.7 s for `uxHeart`).
+10. **The spoken commands of a `play` scene** («быстрее», «медленнее», «стоп», «дальше») go by the routing press, as spec 9.4 says. The classifier keeps its commands for stepped scenes.
+
+## Decisions for the owner
+
+None blocks the code of stage 5.
+
+- **U1. The cap of the template model check.** `kit/modelcheck.js` holds the caps that he approved: `LIMIT = 689` calls in all and `TEMPLATE_LIMIT = 150` template calls. The record `evidence/modelcheck/spend.json` holds 651 calls, 126 of them template calls, so 38 calls are left. Block 2 needs at most 100 template calls for stage 5, 120 for stage 6, and 80 for stage 7: 300 in all. Unresolved decision: it blocks the paid model check of each stage, which is a gate of the release.
+- **U2. A limit for the classifier cost in a long talk.** One answer costs more as the talk grows (about $0.3 for 10 minutes and about $2 for 30 minutes by estimate). Options: no limit, as in Alpha 20; or the classifier goes off for the talk when one answer passes 4,000 input tokens (about 8 minutes), and the talk goes on as in Alpha 19. Until his word: no limit.
+- **U3. The search time on a phone (stage 6).** The spec measures the search on a phone. The controller may not install a test build on his phone. Proposal: the gate runs on the emulator, and the release build writes the measured search time and the load time of the embedding model to its release log line. It blocks only the wording of the gate of stage 6.
+
+---
+
+# Stage 5: Comparison, table, chart (Alpha 21)
+
+**What the owner gets (spec 15):** data in a form that fits it. An honest card when data is missing.
+
+## Requirements
+
+Data family (spec 7.4, 11):
+
+- **D1.** The routing decision of a screen names its family (decision 1). The data family has its own prompt section and its own forms: `compare`, `table`, `chart`, and `nodata`. The explain prompt does not grow.
+- **D2. `compare`:** two or three things side by side, with a sign or a name for each, and up to 6 rows with one value for each thing. One row can be marked. A card gives the point. Caps: 3 things, 6 rows.
+- **D3. `table`:** a header and rows, a caption, and one marked row or cell. Caps: 4 columns, 12 rows, 8 rows visible on a phone. More rows scroll inside the box of the table, and the page does not scroll.
+- **D4. `chart`:** bars or a line, with a label and a value at each point, and one marked point. Cap: 8 points.
+- **D5. `nodata`:** a short card with what is missing and what the person can say next. Cap: 2 sentences. The voice says the same.
+- **D6. Sources (spec 11.3).** Known facts: the data call alone. A fresh fact: the web search as today, then the data call with the source excerpts. The host check of decision 3 runs on each searched form. A form with fetched data shows the source as a site name and the time of the data.
+- **D7. The mark (decision 2).** A tap and a spoken request move it with no template call. The line of the shown screen names the options and the marked one.
+- **D8. Native parts (spec 11.4).** The native table gets a mark for a row and for a cell. The native chart gets a label at each point when it has 8 points or fewer.
+- **D9.** The rules of spec 11.1 hold for each new form: the stream, the one repair call, the change by lines, the merge by name, and the caps.
+- **D10.** The stage lifetime of Alpha 20 holds: a data form replaces a scene of an earlier subject, and the work card shows during its search and its build.
+
+Voice riders (the open list of Alpha 20):
+
+- **V1. «Продолжай» as a command.** The input question gets the choice `continue`. At a confidence of at least 0.75 the host walks the rest of the steps as the routing press does. A paid wording check comes first: text calls of the Decisions API on «Дальше», «Продолжай», «Давай дальше», «Продолжи», «Верни назад», «Повтори», «Покажи второй шаг», and two questions, each two times (at most 40 calls, about $0.01). The choice ships only when «Дальше» stays `next` and «Продолжай» gives `continue` in each call.
+- **V2. The start of the follow call.** It starts at the first sentence end of the voice, or 2,500 ms after the voice began its reply, the earlier of the two. In Alpha 20 one long sentence delayed a scene to 19 s after the speech.
+- **V3. The command bar.** The live check records the confidence of each command. No change of the 0.75 bar in this stage: two «Дальше» of three were below it in the Alpha 20 check, and three samples are too few.
+- **V4.** One test fails when `LiveProtocol.MAX_STEPS` and the option cap of the kit differ.
+- **V5. The locked tool database.** Read `os3/suite-20/errors-*.txt` of the Alpha 20 suite and the log of the `replay` failure (`os3/job/end-fa/`). Find the cause. Correct a fault of the test setup. Report a product fault with its evidence, and correct it only when the change is small and has a test.
+- **V6.** The rig helpers of `ClassifierRehearsalTest`, `FollowTurnRehearsalTest`, and `StageTapRehearsalTest` move to one shared place.
+
+## Tests, one behavior each
+
+- Kit: each form compiles from a file at its caps, a line over a cap is a fault with its name, a repair replaces only the faulty lines, a change by lines keeps the other lines, and the stream of each form draws line by line.
+- Kit: a table of 12 rows gives a box that scrolls and a page that does not. A long row label is cut at its cap.
+- Host: the routing schema holds the family. A `data` decision stops the early explain call and starts one data call. An `explain` decision keeps the early call.
+- Host: a searched form whose numbers are all in the excerpts stays. One number that no excerpt holds gives `nodata` with the reason. A known-facts form runs no check.
+- Stage: a tap on a row marks it, the shown screen names it, a routing press of a row moves the mark, and a follow `mark` moves it with no words.
+- Stage: a data form after a stepped scene deletes the scene item of the classifier.
+- Native: a marked row and a marked cell show, and a chart of 8 points shows its labels.
+- Voice riders: V1 (a `continue` command walks the rest and starts no routing call), V2 (a reply with no sentence end starts the follow call at 2,500 ms), V4.
+
+## Gates
+
+| Gate | Bar |
+| --- | --- |
+| Kit run and `--check` | 0 failures |
+| Fit gate (`StageTemplateFitTest`) for each new form at its caps, phone and fold | OK |
+| Stream gates 1a and 1b with a data form | 1b median at most 0.3 s |
+| Model check of the data family (needs U1): 20 held-out requests, known facts and searched | clean files at the first try at least 16 of 20; no invented value in a searched form; the call time reported |
+| G7 for this stage: a comparison, a table, and a chart each show in their own form in the live check | 3 of 3 |
+| G9 (decision 9) | no later than Alpha 20 by more than 0.5 s |
+
+## Paid budget
+
+- Model check: at most 100 template calls (U1), and 40 Decisions text calls for V1.
+- Live check: at most 600 s of voice, 60 chat calls, and $0.10 of Decisions calls. Dialogues: `uxCompare`, `uxFootball`, `uxKinds`, `uxHeart`, and `uxSteps`.
+
+---
+
+# Stage 6: The library, first set (Alpha 22)
+
+**What the owner gets (spec 15):** pictures from ready parts, with a measured effect on speed and look.
+
+## Requirements
+
+Registries and drawing (spec 12.5, 12.6):
+
+- **L1.** Three registries: shape kinds, generic elements, and ready objects. The grammar, the fault texts, the prompt text, the tests, and the review sheet come from the registries. No list of them is written by hand in the engine, the grammar, or the prompt.
+- **L2. New shape kinds:** `path` (through points, straight or smooth, open or closed), `arrow`, and `arc`. New properties: a gradient fill, a glow, an opacity, and a turn by an angle.
+- **L3.** A scene holds up to 20 shapes. A ready object or a generic element counts as one shape. On a phone the picture grows into the empty zone under the app. The fold layout keeps its two columns.
+- **L4. The generic elements of spec 12.5** (about 40, in 8 groups), each one entry with one draw rule and its numbers.
+- **L5. The ready objects of decision 6** (27). One data file for each object, in a directory of its area, with no code. An entry holds its id, its names and other words in Russian and English, one line on what it shows, its box, its layers of paths with a color role each, and its named parts with a label point. Limits: at most 40 path segments, color roles only, readable at the smallest size that a scene draws.
+- **L6.** A template line places an object or an element: its name, its place, its size, an optional label, an optional marked part, and for an element its numbers. An unknown name is a fault with that name, the screen still comes with an emoji or free shapes in the same call path, and the host writes the name to the release log line (the miss log of spec 12.8).
+- **L7. The build** makes the catalog, the vectors of the search, a review sheet with each entry in light and dark theme, and the catalog tests (unique names, the segment limit, roles only, a label point for each part).
+
+Search (spec 12.2, 12.3):
+
+- **S1.** The app picks 24 candidate objects for a request with no model call: the vector of the request against the vector of each entry (EmbeddingGemma, `semantic/SemanticRuntime.kt`), and a word of the request that equals a name or another word of an entry.
+- **S2.** The vectors of the entries come from the same model that the phone runs. The catalog keeps the signature of the model, and a new model makes new vectors.
+- **S3.** The prompt gets the 24 candidates (name, one line, parts) and all generic elements. Its size does not depend on the size of the catalog.
+- **S4.** The candidates are ready at most 150 ms after the request text is known. A late search, or a model that is not loaded, never delays the template call: the call starts with the generic elements only.
+- **S5.** The voice mode loads the embedding model when the mode starts.
+
+## Tests, one behavior each
+
+- Kit: each shape kind, each element, and each object draws from a template line. A line over a limit is a fault. An unknown name is a fault with the name, and the file still compiles to a screen.
+- Kit: the prompt text, the grammar, and the fault texts change when an entry is added to a registry, with no other edit.
+- Catalog tests of L7.
+- Host: a request that names an object in Russian or in English gets it among the candidates. A request with no fitting entry gets a screen with no library object.
+- Host: a search of 300 ms does not delay the template call start. With no embedding model, the word match alone gives candidates.
+- Host: a new model signature makes the old vectors unused.
+
+## Gates (spec 12.4)
+
+A gate that misses its bar goes to the owner first: the library does not ship then.
+
+| Gate | Bar |
+| --- | --- |
+| Search time, catalog of 5,000 entries (copies), warm (U3: on the emulator) | at most 150 ms for 95 of 100 requests |
+| Load time of the embedding model from the start of the voice mode | reported, and ready before the end of a first request of normal length |
+| Search accuracy (decision 7): 100 held-out requests, each with the objects that fit it | a fitting object among the 24 candidates for at least 90 |
+| Effect on the picture: a paired model check on 20 held-out requests, free shapes against the library (needs U1) | the pictures with the library judged better by the controller, pair by pair; clean files at the first try not fewer; the call time not longer |
+| A thing with no entry: 10 requests | a screen each time, in the same time |
+| The review sheet of the 27 objects, both themes (decision 8) | each entry reads at the smallest size, or it is drawn again or left out |
+| Fit gate, stream gates, G9 | as in stage 5 |
+
+## Paid budget
+
+- Model check: at most 120 template calls (U1).
+- Live check: at most 600 s of voice, 60 chat calls, and $0.10 of Decisions calls. Dialogues: `uxHeart`, `uxOrbit`, `uxPythagoras`, `uxWhy`, and `uxSteps`.
+
+## Size
+
+This stage is the largest of the block: the registries, about 40 elements, 27 objects, the build, and the search. The job fixes the entry format and the catalog format first. Then it may start one helper job for the object drawings, which share no file with the search code.
+
+---
+
+# Stage 7: Motion and diagrams (Alpha 23)
+
+**What the owner gets (spec 15):** a picture that moves by itself on the fast path. A diagram with all its parts named.
+
+## Requirements
+
+Motion (spec 9.3, 9.4):
+
+- **M1. The `play` control of `scene`:** a value that runs from its start to its end in a named count of seconds, again and again, with pause and play, and three speeds: slow, normal, and fast.
+- **M2.** The kit `animate` gets a loop and a pause. The host playback control that exists is reused.
+- **M3.** The template prompt no longer sends "a thing that moves by itself" to the full generation.
+- **M4.** A spoken «быстрее», «медленнее», «стоп», or «дальше» is a press of that control: one routing call, no template call (decision 10). The line of the shown screen holds the state of the control. A tap on the control is heard, as each tap is.
+- **M5. The smooth change (spec 9.3).** When a control changes, the numbers of the shapes glide to their new values in about 250 ms when both states have the same shapes. In each other case the two states cross-fade. The host does this between two frames, with no extra call into the app.
+- **M6.** A second change during a glide starts from the picture that shows at that moment. The last frame of a glide equals the new state.
+- **M7.** A walk and a `play` control in one scene: the narrator moves the steps, and the motion runs inside each step.
+
+Diagram (spec 11.2):
+
+- **G1. The `diagram` form:** one picture with all its parts named at once, up to 8 labels with leader lines. One part is marked. A card gives the fact of the marked part. The control is `steps` over the parts, with `say1..N`.
+- **G2.** A diagram uses the label element and the named parts of a ready object of stage 6. A diagram of a thing with no entry draws free shapes with labels.
+- **G3.** The walk, the spoken commands, the classifier, and the follow call of Alpha 20 work on a diagram as on each stepped scene.
+
+## Tests, one behavior each
+
+- Kit: a `play` scene compiles, loops, pauses, and runs at each speed. A file with `play` and `steps` compiles.
+- Kit: a `diagram` at its caps compiles, a ninth label is a fault, and the marked part follows the step.
+- Stage: a `play` scene runs with no press. A press of pause stops it, and the shown screen names the state. A routing press of «быстрее» changes the speed with no template call.
+- Stage: a change of a slider glides, and the last frame equals the new state. A change between different shape lists cross-fades. A second change during a glide ends in the second state.
+- Stage: a walk on a diagram marks each part with its sentence, and «Покажи третий шаг» marks part 3.
+- The model check asks for motion in 6 requests: each gives a template file, not the full generation.
+
+## Gates
+
+| Gate | Bar |
+| --- | --- |
+| Kit run and `--check`, fit gate, stream gates | as in stage 5 |
+| Model check of the explain family with `play` and `diagram` (needs U1): 20 held-out requests | clean files at the first try at least 16 of 20; each motion request is a template file; a picture of each first state shows the point for at least 5 of 6 (G3 of the spec) |
+| G8 of the spec: motion on the fast path, in the live check | controls on at most 12 s after the end of the speech |
+| The glide of M5 on the emulator | at most 300 ms from the press to the last frame |
+| G9 | as in stage 5 |
+
+## Paid budget
+
+- Model check: at most 80 template calls (U1).
+- Live check: at most 600 s of voice, 60 chat calls, and $0.10 of Decisions calls. Dialogues: `uxOrbit`, `uxTap`, `uxLesson`, `uxHeart`, and one new dialogue of a diagram (the parts of the eye).
+
+---
+
+## After the block
+
+- The plan of block 3 (stages 4, 8, 9: weather, photos, practice) is written when Alpha 23 is released. The terms of use of Open-Meteo and of Wikimedia Commons are read before it (spec 17).
+- Each stage ends with its open list in the ledger. The first rider of the next stage is a failed phone check of the owner.
+
+## Self-check
+
+- Spec coverage: section 15 rows 5, 6, and 7 map to the requirement lists D, L and S, and M and G. Spec 11.1 is in the global constraints. Spec 12.4 is the gate table of stage 6. Spec 12.7 (other sources of entries) and 12.8 (rounds) need no code in this block beyond the miss log of L6.
+- Not in this block, by the spec: `fact`, `forecast`, `photo`, `check`, `task`, packs that load with no release, and entries that the device makes.
+- Each paid set has its cap. U1 must have the owner's word before the first template call of a model check.
