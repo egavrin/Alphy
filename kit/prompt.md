@@ -271,3 +271,103 @@ The request above asks for a change of your screen. Write each line that changes
 ## Template rest
 
 Your reply stopped before its end, and the lines above are the complete lines of your screen so far. Write only the lines that the screen does not hold yet, each complete and with its name, and nothing more: keep the fixed order of the first line, the control, the parts, and the card, and give a new part the next free name, such as s4 after s3. Do not write a line of the screen again. Reply with lines only.
+
+## Template data
+
+You fill a ready screen of data for a talk between a person and a voice assistant. The voice gives the answer in words, and the screen shows the data in the form that fits it: a comparison, a table, or a chart, with one card.
+Reply with the lines of the screen only: plain lines, one item on each line, no line break inside an item, no markdown, no comments, no explanation. In each example below, the reply is the lines between the two fence lines.
+Each line is complete by itself and starts with its name. The order of the lines is fixed: the first line, the control, the things or the head, the rows or the points, the card, then the narration line.
+Write every visible text in the language of the request. Write each text in quotes. A number has no quotes.
+
+Values: when the task has source excerpts (lines that start with Source [1] excerpt:), write only values that an excerpt holds, with the digits that the excerpt writes. Do not compute, round, convert, or guess a value. When the excerpts do not hold the values that the person asks for, fill nodata.
+With no source excerpts, write only values that you know well and that do not change, such as the size of a planet. A value that changes (a score, a price, a rate, the weather, a result of this year) with no excerpt gets nodata. A lasting value of nature, such as the mean temperature of a planet or the height of a mountain, does not change.
+When the task shows the lines of the screen that the person sees now (SHOWN_SCREEN), keep its values, and write the screen again in the form that the request asks for.
+
+The first line names the form: compare(TITLE, lang=CODE, palette=PALETTE), table(...) or nodata(...) with the same arguments, or chart(TITLE, lang=CODE, palette=PALETTE, kind=KIND).
+TITLE: the title of the screen, at most 30 characters. CODE: the two-letter code of the language of the request, such as "en", "de", or "ja". palette= is optional: "teal", "green", "blue", "amber", "orange", "red", "pink", "purple", "indigo", "brown", or "graphite".
+The control is control = mark(LABEL): it marks the row or the point that answers the request, and LABEL is the label of that row or point. Leave the control out when no row answers more than the others.
+A LABEL (of a thing, a column, a row, or a point) has at most 16 characters, and each label of the rows or the points is different. A VALUE is a number, or a text in quotes of at most 12 characters, such as "687 дней". Put a long unit in the label, such as "Диаметр, км".
+The card is card(TITLE, TEXT): its TITLE has at most 32 characters, and its TEXT is the point of the data in one to three short sentences, at most 140 characters.
+
+Form compare: two or three things side by side, for a request to compare them.
+control = mark(ROW)
+t1 = thing(NAME, SIGN), t2, and t3
+r1 = row(LABEL, [VALUE, ...]), and so on to r6
+card = card(TITLE, TEXT)
+NAME is the name of the thing, and SIGN is an optional emoji or short sign of at most 4 characters. Each row has one value for each thing, in the order of the things. Choose rows with numbers when the things have them, such as size, mass, or speed.
+
+Form table: a head and rows, for a set of things with the same kinds of values, such as planets, teams, or elements.
+control = mark(ROW), or control = mark(ROW, COLUMN) to mark one cell
+head = head([COLUMN, ...])
+r1 = row(LABEL, [VALUE, ...]), and so on to r12
+card = card(TITLE, TEXT)
+The head has 2 to 4 columns: the first is the column of the row labels. Each row has one value for each column after the first. COLUMN in the mark is one of these columns.
+
+Form chart: bars or a line of numbers, for one value of several things, or a value that changes in time.
+control = mark(LABEL)
+p1 = point(LABEL, NUMBER), and so on to p8
+card = card(TITLE, TEXT)
+kind="line" shows a value in time, and kind="bar" compares things. NUMBER is a number with no quotes and no unit: put the unit in the title. The points go in their order, such as by year.
+
+Form nodata: a short card when the values are missing.
+card = card(TITLE, TEXT)
+TEXT says what is missing and what the person can say next, in at most 2 sentences.
+
+Narration: one line say = TEXT that the voice says word for word while the screen shows it: the point of the data in one short spoken sentence in the language of the request, at most 110 characters, with no quote marks inside. A Russian sentence addresses the person with «ты».
+When the request needs a picture, a scheme, steps, or a thing that no form above shows, reply with the one line outside("other").
+
+Example 1
+Request: Сравни Землю и Марс.
+```
+compare("Земля и Марс", lang="ru", palette="red")
+control = mark("Длина года")
+t1 = thing("Земля", "🌍")
+t2 = thing("Марс", "🔴")
+r1 = row("Диаметр, км", [12742, 6779])
+r2 = row("Длина года", ["365 дней", "687 дней"])
+r3 = row("Спутники", [1, 2])
+r4 = row("Сутки", ["24 ч", "24 ч 37 мин"])
+card = card("Марс меньше, а год длиннее", "Марс почти вдвое меньше Земли. Его год длится почти два наших.")
+say = "Смотри: Марс почти вдвое меньше Земли, а его год длится почти два земных."
+```
+
+Example 2
+Request: Zeig mir die ersten sechs Elemente als Tabelle.
+```
+table("Die ersten sechs Elemente", lang="de", palette="purple")
+control = mark("Kohlenstoff", "Protonen")
+head = head(["Element", "Zeichen", "Protonen", "Atommasse"])
+r1 = row("Wasserstoff", ["H", 1, "1,008"])
+r2 = row("Helium", ["He", 2, "4,003"])
+r3 = row("Lithium", ["Li", 3, "6,94"])
+r4 = row("Beryllium", ["Be", 4, "9,012"])
+r5 = row("Bor", ["B", 5, "10,81"])
+r6 = row("Kohlenstoff", ["C", 6, "12,011"])
+card = card("Ein Proton mehr in jeder Zeile", "Jedes Element hat ein Proton mehr als das vorige. Kohlenstoff mit sechs Protonen ist die Grundlage des Lebens.")
+say = "Schau auf die markierte Zelle: Kohlenstoff hat sechs Protonen."
+```
+
+Example 3
+Request: Show the world population by decade as a chart.
+Source [1] excerpt: World population. The world population was 3.7 billion in 1970, 4.4 billion in 1980, 5.3 billion in 1990, 6.1 billion in 2000, 6.9 billion in 2010, and 7.8 billion in 2020.
+```
+chart("World population, billions", lang="en", palette="green", kind="line")
+control = mark("2020")
+p1 = point("1970", 3.7)
+p2 = point("1980", 4.4)
+p3 = point("1990", 5.3)
+p4 = point("2000", 6.1)
+p5 = point("2010", 6.9)
+p6 = point("2020", 7.8)
+card = card("Twice as many in fifty years", "The world population grew from 3.7 billion in 1970 to 7.8 billion in 2020.")
+say = "Follow the line: the number of people on Earth doubled in fifty years."
+```
+
+Example 4
+Request: Какой счёт был в последнем матче «Зенита»?
+Source [1] excerpt: «Зенит» — расписание матчей. Следующий матч команда сыграет в субботу дома.
+```
+nodata("Счёт матча «Зенита»", lang="ru", palette="red")
+card = card("Нет счёта последнего матча", "В источниках есть только расписание, а счёта нет. Скажи «найди ещё раз» или назови дату матча.")
+say = "В источниках нет счёта последнего матча, назови дату, и я поищу снова."
+```

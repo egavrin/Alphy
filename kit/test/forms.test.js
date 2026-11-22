@@ -5,7 +5,7 @@ import { FORMS_BY_WORD } from "../src/forms.js";
 import { script } from "../build.js";
 
 test("each form has its own module", () => {
-  expect(Object.keys(FORMS_BY_WORD)).toEqual(["scene", "items", "cells"]);
+  expect(Object.keys(FORMS_BY_WORD)).toEqual(["scene", "items", "cells", "compare", "table", "chart", "nodata"]);
   expect(FORMS_BY_WORD.scene.part.test("s12")).toBe(true);
   expect(FORMS_BY_WORD.cells.part.test("s1")).toBe(false);
 });

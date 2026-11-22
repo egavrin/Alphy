@@ -29,13 +29,36 @@ private const val TOO_LONG="the plan has "
 internal data class AppFileCompilation(val status: String,val faults: List<String>,val notes: List<String>,val definition: String?,val language: String?,
     val hole: Boolean=false,val state: String?=null,val blockedBySavedData: Boolean=false,val savedDataMismatch: Boolean=false,
     val template: String?=null,val kept: String?=null,val expanded: String?=null,val leftOut: List<String> = emptyList(),
-    val frameJson: String?=null) {
+    val frameJson: String?=null,
+    /** The value of a searched data form that no source excerpt holds, which turned the form into nodata (kit checkData), or null. */
+    val rejected: String?=null) {
     /** The frame that the stage shows while the host check runs, read only when a caller needs it. Null with no definition. */
     val frame: StagePreviewFrame? get()=frameJson?.let {stagePreviewFrame(JSONObject(it),definition)}
     /** The text is longer than the compile step reads. A repair call cannot shorten it in a useful way. */
     val tooLong get()=faults.any {it.startsWith(TOO_LONG)}
     /** The saved data of the person stops the compile: one of the two flags of the kit. No reader tells the two apart. */
     val savedDataFault get()=blockedBySavedData || savedDataMismatch
+}
+
+/**
+ * The host check of a searched data form (block 2 plan, decision 3): each number of the form is in [excerpts], the titles and summaries of
+ * the sources, and a form that passes shows its source as [site] and [time] (D6). A known-facts form has no check.
+ */
+internal data class DataCheck(val excerpts: String,val site: String,val time: String) {
+    fun json(): JSONObject=JSONObject().put("excerpts",excerpts).put("site",site).put("time",time)
+
+    companion object {
+        /**
+         * The check of a form from [sources], or null with no source: the excerpts are the title and the summary of each source, as the
+         * generation prompt holds them. The site is the site name (or the host) of the first two sources, and the time is the search time [now].
+         */
+        fun of(sources: List<com.alpha.assistant.data.Source>,now: Long): DataCheck? {
+            val links=sources.distinctBy {it.url}.takeIf {it.isNotEmpty()} ?: return null
+            val sites=links.mapNotNull {source -> source.siteName?.takeIf {it.isNotBlank()} ?: runCatching {java.net.URI(source.url).host?.removePrefix("www.")}.getOrNull()}.distinct()
+            val time=java.text.SimpleDateFormat("dd.MM.yyyy HH:mm",java.util.Locale.ROOT).format(java.util.Date(now))
+            return DataCheck(links.joinToString("\n") {it.title+"\n"+it.summary},sites.take(2).joinToString(", ").ifEmpty {"—"}.take(100),time)
+        }
+    }
 }
 
 /** The stored app of a change, as the host keeps it: its app file, and its state schema and state as JSON text. */
@@ -57,18 +80,19 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
     /** A plan with the stored app of a change. Without read, no result is Outside. */
     suspend fun compile(appFile: String,previous: AppFilePrevious?=null): AppFileCompilation=(evaluate(appFile,null,false,previous) as AppFileRead.Plan).compilation
     /** A reply of a plan call. Plan.text is the plan as readPlanReply reads it, or the reply when the sandbox fails. */
-    suspend fun compileReply(reply: String): AppFileRead=evaluate(reply,null,true,null)
+    suspend fun compileReply(reply: String,check: DataCheck?=null): AppFileRead=evaluate(reply,null,true,null,check)
     /** A repair reply or a change reply merged into plan. Plan.text is the merged plan, or plan when no merge ran. */
-    suspend fun patch(plan: String,reply: String,previous: AppFilePrevious?=null): AppFileRead=evaluate(reply,plan,true,previous)
+    suspend fun patch(plan: String,reply: String,previous: AppFilePrevious?=null,check: DataCheck?=null): AppFileRead=evaluate(reply,plan,true,previous,check)
 
     /**
      * The frame of the complete lines [text] of a streamed reply (kit previewStep), merged into [plan] with the stored app [previous] of a
      * change. It runs in a new transient isolate with the deadline [APP_FILE_PREVIEW_MS]. A busy slot, a deadline, and a step with no frame
      * give null, so the stream skips this update.
      */
-    suspend fun preview(text: String,plan: String?,previous: AppFilePrevious?): StagePreviewFrame? {
+    suspend fun preview(text: String,plan: String?,previous: AppFilePrevious?,check: DataCheck?=null): StagePreviewFrame? {
         if(listOfNotNull(text,plan,previous?.appFile).any {it.length>APP_FILE_MAX_CHARS}) return null
         val input=JSONObject().put("text",text).put("plan",plan ?: JSONObject.NULL).put("previous",previousJson(previous))
+            .put("data",check?.json() ?: JSONObject.NULL)
         val hold=previewHoldMs.takeIf {it>0}?.let {"(()=>{const end=Date.now()+$it;while(Date.now()<end){}})();\n"}.orEmpty()
         val result=sandbox.evaluateScript(kit,"${hold}Promise.resolve(previewStep(JSON.parse(${JSONObject.quote(input.toString())}))).then(JSON.stringify)",
             APP_FILE_PREVIEW_MS,APP_FILE_RETURN_BYTES)
@@ -79,7 +103,7 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
         } catch(_: JSONException) {null} catch(_: IllegalStateException) {null} catch(_: IllegalArgumentException) {null}
     }
 
-    private suspend fun evaluate(text: String,plan: String?,read: Boolean,previous: AppFilePrevious?): AppFileRead {
+    private suspend fun evaluate(text: String,plan: String?,read: Boolean,previous: AppFilePrevious?,check: DataCheck?=null): AppFileRead {
         val given=plan ?: text
         // A longer text is a fault with no call of the sandbox, so its text never takes the memory of an isolate.
         listOfNotNull(plan,text).firstOrNull {it.length>APP_FILE_MAX_CHARS}?.let {return AppFileRead.Plan(given,overCap(it.length))}
@@ -88,7 +112,7 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
             return AppFileRead.Plan(given,failed("INVALID_REQUEST"))
         // All inputs come in as one JSON text, so they stay data.
         val input=JSONObject().put("text",text).put("plan",plan ?: JSONObject.NULL).put("read",read).put("cap",APP_FILE_MAX_CHARS)
-            .put("previous",previousJson(previous))
+            .put("previous",previousJson(previous)).put("data",check?.json() ?: JSONObject.NULL)
         val result=sandbox.evaluateScript(kit,"compileStep(JSON.parse(${JSONObject.quote(input.toString())})).then(JSON.stringify)",APP_FILE_COMPILE_MS,APP_FILE_RETURN_BYTES)
         if(result.status!="OK") return AppFileRead.Plan(given,failed(result.status))
         // A promise that the engine does not resolve gives an empty text, not JSON. An output without its faults or notes is not a result either.
@@ -116,7 +140,8 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
         return AppFileCompilation(if(definition!=null && faults.isEmpty()) "ok" else "faults",faults,texts("notes"),definition,
             text("language"),json.getBoolean("hole"),objectText("state"),
             blockedBySavedData=json.getBoolean("blockedBySavedData"),savedDataMismatch=json.getBoolean("savedDataMismatch"),
-            template=text("template"),kept=text("kept"),expanded=text("expanded"),leftOut=textsOrEmpty("leftOut"),frameJson=objectText("frame"))
+            template=text("template"),kept=text("kept"),expanded=text("expanded"),leftOut=textsOrEmpty("leftOut"),frameJson=objectText("frame"),
+            rejected=if(json.has("rejected")) text("rejected") else null)
     }
 
     companion object {

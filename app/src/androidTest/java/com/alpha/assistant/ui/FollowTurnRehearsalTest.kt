@@ -7,14 +7,13 @@ import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.MessageProvenance
 import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.ToolRecord
+import com.alpha.assistant.ui.LiveStageRig.Companion.ANSWER_REQUEST
+import com.alpha.assistant.ui.LiveStageRig.Companion.SAID
+import com.alpha.assistant.ui.LiveStageRig.Companion.stepped
 import com.alpha.assistant.ui.TemplateTalk.Companion.SCREEN_REQUEST
-import com.alpha.assistant.voice.FakeLiveAudio
-import com.alpha.assistant.voice.FakeLiveTransport
-import com.alpha.assistant.voice.LIVE_RATE
 import com.alpha.assistant.voice.LiveProtocol.MARK
 import com.alpha.assistant.voice.inputDelta
 import com.alpha.assistant.voice.liveDelegation
-import com.alpha.assistant.voice.outputAudio
 import com.alpha.assistant.voice.outputDelta
 import org.json.JSONObject
 import org.junit.After
@@ -29,12 +28,12 @@ import org.junit.Test
  * bridge, and session with a scripted chat and a scripted voice. The scripted chat answers each follow call with [StreamTalk.follow].
  */
 class FollowTurnRehearsalTest {
-    private val fixture = ShellFixture("stage-follow")
-    private val robot = ShellRobot("stage-follow")
-    private val socket = FakeLiveTransport()
-    private val audio = FakeLiveAudio()
-    private val shell = TemplateShell(fixture, robot, socket)
-    @After fun remove() = shell.remove()
+    private val rig = LiveStageRig("stage-follow")
+    private val fixture = rig.fixture
+    private val robot = rig.robot
+    private val socket = rig.socket
+    private val shell = rig.shell
+    @After fun remove() = rig.remove()
 
     @Test fun aVoiceOnlyTurnStartsOneFollowCall() = live { model, talk, _ ->
         said(model)
@@ -47,6 +46,16 @@ class FollowTurnRehearsalTest {
         during(1_000) { assertEquals(1, talk.follows.size) }
     }
 
+    /** Block 2 plan, V2: a reply with no sentence end and no reply end starts the follow call 2,500 ms after the voice began it. */
+    @Test fun aReplyWithNoSentenceEndStartsTheFollowCallAt2500Ms() = live { model, talk, _ ->
+        said(model)
+        voiceOnly("Почему небо голубое?", "Солнечный свет рассеивается в воздухе, и синий свет", 3_000)
+        during(2_000) { assertEquals(0, talk.follows.size) }
+        robot.waitUntil(3_000) { talk.follows.size == 1 }
+        assertEquals("Солнечный свет рассеивается в воздухе, и синий свет", talk.follows.single().turns.last().text)
+        during(1_000) { assertEquals(1, talk.follows.size) }
+    }
+
     /** A tap sentence and a typed turn are replies to a host text, so they start no follow call. */
     @Test fun aReplyToAHostTextStartsNoFollowCall() = live(StreamTalk(listOf(stepped()))) { model, talk, _ ->
         socket.say(SCREEN_REQUEST, "d1", 100)
@@ -54,11 +63,11 @@ class FollowTurnRehearsalTest {
         robot.waitUntil(30_000) { socket.thinking().isNotEmpty() }
         robot.click(NAIL)
         robot.waitUntil { socket.thinking().size == 2 }
-        speak(SAYS[1], 3_000)
+        rig.speak(SAYS[1], 3, 3_000)
         val count = shell.messages(model).size
         robot.instrumentation.runOnMainSync { model.editDraft(Draft(TYPED)); model.sendLiveTyped() }
         shell.waitForTheAnswer(model, count)
-        speak("Fixture response.", 6_000)
+        rig.speak("Fixture response.", 3, 6_000)
         during(1_500) { assertTrue(talk.follows.isEmpty()) }
     }
 
@@ -90,7 +99,7 @@ class FollowTurnRehearsalTest {
      */
     @Test fun followScreenShowsASceneWithNoOpenerAndNoWalk() = live(StreamTalk(listOf(stepped(), stepped()))) { model, talk, _ ->
         talk.follow = CloudEvent.Follow("screen", "Небо", "", answered = true)
-        val first = steppedScene(model)
+        val first = rig.steppedScene(model)
         val routed = talk.routed.size
         voiceOnly("Покажи ещё раз", "Корабль полый, поэтому плавает.", 3_000)
         robot.waitUntil(60_000) { model.stageToolId.let { it != null && it != first.id } && !model.tools.busy }
@@ -115,12 +124,12 @@ class FollowTurnRehearsalTest {
 
     /** Kinds mark and press select the option quietly with who voice, and the trace detail names the kind. */
     @Test fun followMarkAndPressSelectTheOption() = live(StreamTalk(listOf(stepped()))) { model, talk, phases ->
-        val scene = steppedScene(model)
+        val scene = rig.steppedScene(model)
         talk.follow = CloudEvent.Follow("mark", "", "$STEP_CONTROL: $NAIL")
         val texts = socket.commentary().size
         // A reply ends only after voiced audio, and only a reply start makes the spoken pair of the next turn.
         socket.emit(inputDelta("А гвоздь?", 3_000, 3_500))
-        speak("Гвоздь тонет.", 3_700)
+        rig.speak("Гвоздь тонет.", 3, 3_700)
         robot.waitUntil(10_000) { shipSubject(shell.stored(model, scene.id)) == NAIL }
         assertTrue(phases.contains("follow:mark"))
         // A quick follow call can show the mark before the reply ends (800 ms with no chunk) and before the turn of the session ends (1200 ms).
@@ -139,7 +148,7 @@ class FollowTurnRehearsalTest {
 
     /** A follow press of the continue control walks the rest of the steps as the routing press does: its first sentence goes out as thinking. */
     @Test fun followPressOfTheContinueControlWalksTheRest() = live(StreamTalk(listOf(stepped()))) { model, talk, phases ->
-        steppedScene(model)
+        rig.steppedScene(model)
         talk.follow = CloudEvent.Follow("press", "", CONTINUE_LABEL)
         voiceOnly(CONTINUE_REQUEST, "Сейчас.", 3_000)
         robot.waitUntil(10_000) { "" to MARK + SAYS[1] in socket.thinking() }
@@ -160,7 +169,7 @@ class FollowTurnRehearsalTest {
     @Test fun aVoiceOnlyTurnIsSavedAsASpokenPair() = live { model, talk, _ ->
         said(model)
         socket.emit(inputDelta(SMALL_TALK, 3_000, 3_500))
-        speak(SMALL_REPLY, 3_700)
+        rig.speak(SMALL_REPLY, 3, 3_700)
         robot.waitUntil { talk.follows.size == 1 }
         // The reply ends after the reply gap with no chunk, and the pair persists then.
         SystemClock.sleep(1_300)
@@ -208,25 +217,13 @@ class FollowTurnRehearsalTest {
     }
 
     private fun live(talk: StreamTalk = StreamTalk(listOf(Streamed(halves(SAID), gapMs = 30))), test: (ShellViewModel, StreamTalk, List<String>) -> Unit) =
-        shell.live(talk, audio = audio) { _, model, phases -> test(model, talk, phases) }
-
-    private fun stepped() = Streamed(halves(STEPPED) + halves(NARRATION_LINES.joinToString("\n")), gapMs = 30)
+        rig.live(talk, test)
 
     /** A scene with one narration line from the spoken screen request, after the voice said its line. */
     private fun said(model: ShellViewModel): ToolRecord {
-        socket.say(SCREEN_REQUEST, "d1", 100)
-        val scene = shell.shown(model)
-        robot.waitUntil(30_000) { socket.thinking().isNotEmpty() }
-        speak(socket.thinking().last().second.removePrefix(MARK), 1_500)
+        val scene = rig.steppedScene(model)
+        rig.speak(socket.thinking().last().second.removePrefix(MARK), 3, 1_500)
         SystemClock.sleep(1_300)
-        return scene
-    }
-
-    /** A stepped scene from the spoken screen request, after its walk started. */
-    private fun steppedScene(model: ShellViewModel): ToolRecord {
-        socket.say(SCREEN_REQUEST, "d1", 100)
-        val scene = shell.shown(model)
-        robot.waitUntil(30_000) { socket.thinking().isNotEmpty() }
         return scene
     }
 
@@ -236,18 +233,9 @@ class FollowTurnRehearsalTest {
         socket.emit(outputDelta(reply, atMs + 700, atMs + 1_200))
     }
 
-    /** The voice says [text] in one transcript piece with 600 ms of voiced audio. */
-    private fun speak(text: String, atMs: Long) {
-        socket.emit(outputDelta(text, atMs, atMs + 600))
-        socket.emit(outputAudio(3, LIVE_RATE * 6 / 10))
-    }
-
     private companion object {
-        const val ANSWER_REQUEST = "Какая погода"
         const val TYPED = "Который час"
         const val SMALL_TALK = "Как дела?"
         const val SMALL_REPLY = "Хорошо, спасибо."
-        /** [TALKING], whose control is a choice, with one narration line. */
-        val SAID get() = TALKING + "\nsay = \"Полый корабль вытесняет много воды и поэтому плавает.\""
     }
 }

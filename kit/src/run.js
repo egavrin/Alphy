@@ -21,6 +21,8 @@ export const MAX_STATE_BYTES = 49152;
 export const TYPED = new Set(["TextField", "NumberField", "DateField", "TimeField"]);
 /** A chart of Alphy draws at most 256 points (ToolUiCatalog), so the run-time writes the last 256. */
 export const MAX_POINTS = 256;
+/** The rows that a Table shows on a phone. More rows scroll inside its box, so the page does not scroll (block 2 plan, D3). */
+const VISIBLE_ROWS = 8;
 /** The alert at the end of the host's countdown, and the capabilities that it asks for (ForegroundTimerSpec.requests). */
 const ALERT = { vibrationMs: 600, toneMs: 600 };
 export const ALERT_CAPABILITIES = ["audio.tone", "vibration.play"];
@@ -42,7 +44,7 @@ const today = (kit) => kit.value({ k: "call", name: "today", args: [] }, {});
 
 const STYLES = { eyebrow: { emphasis: "label", tone: "accent" }, muted: { tone: "muted" } };
 /** What a row template of Alphy cannot hold (ToolUiCatalog: no list, dialog, sheet, or canvas in a row), and what keeps one state field for all rows. */
-const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Tabs", "Timer", "Drawing", "Model3d"]);
+const NOT_IN_ROW = new Set(["List", "Dialog", "Chart", "Table", "Tabs", "Timer", "Drawing", "Model3d"]);
 /** The components of a part that a later task builds: the fault names the kind of the need. */
 const LATER = { Picture: "picture", Link: "link" };
 /** The share of value in max in percent, from 0 to 100: 0 for a max of 0 or below and for a value that is not finite. */
@@ -180,6 +182,7 @@ const NODES = {
   Ring: (n, at) => ({ type: "progressRing", text: at.label(), size: "large", min: 0, max: 100, bind: at.computed("value", percent(n.props.value, n.props.max)),
     ...(n.props.text !== undefined && { children: [{ type: "text", ...at.text("text"), style: { emphasis: "display" } }] }) }),
   Chart: (n, at) => at.chart(),
+  Table: (n, at) => at.table(),
   Tabs: (n, at) => at.tabs(),
   // A canvas with one surface, which each reply draws again.
   Drawing: (n, at) => at.canvas(commandsOf(n.props.shapes), sideOf(n.props.width), sideOf(n.props.height)),
@@ -381,7 +384,25 @@ export function screen(kit, app, first = false) {
           viewOwners.push(line);
           return field;
         });
-        return { type: "chart", text, kind, categories, series: [{ text, bind: values }] };
+        // A chart with bind= marks one point: its label is the bound value, and a tap on a point sets it (data forms, block 2 plan D7).
+        const labels = points.map((point) => cast("string", point.label)), mark = node.props.bind && at.field((value) => (value === "" || labels.includes(value) ? value : undefined));
+        return { type: "chart", text, kind, categories, series: [{ text, bind: values }], ...(mark && { action: mark.action, selectedKeyBind: mark.bind }) };
+      },
+      // The rows of a table as a list that the run-time writes: the first cell of a row is its id. With bind= the bound value is the id of the
+      // marked row, and a tap on a row sets it. column= marks the cell of that column in the marked row. The table shows 8 rows, and more scroll in its box.
+      table: () => {
+        const columns = (Array.isArray(node.props.heads) ? node.props.heads : []).map((column) => at.plain(column).slice(0, 100) || " ");
+        const body = (Array.isArray(node.props.rows) ? node.props.rows : []).map((row) => (Array.isArray(row) ? row : [row]));
+        if (MESSAGES && (columns.length < 1 || columns.length > 8)) fault(`a Table has 1 to 8 columns, and this one has ${columns.length}`);
+        const field = name(`table:${key}:rows`, wished(`${key}_rows`)), cell = (index) => `c${index}`;
+        views[field] = body.map((row) => ({ id: at.plain(row[0]).slice(0, 128) || " ", ...Object.fromEntries(columns.map((_, index) => [cell(index), at.plain(row[index] ?? "")])) }));
+        viewSchemas[field] = { type: "list", maxItems: MAX_ROWS, fields: { id: "string", ...Object.fromEntries(columns.map((_, index) => [cell(index), "string"])) } };
+        viewOwners.push(line);
+        const ids = views[field].map((row) => row.id), mark = node.props.bind && at.field((value) => (value === "" || ids.includes(value) ? value : undefined));
+        const column = node.props.column;
+        return { type: "table", text: at.plain(node.props.label).slice(0, 100) || at.caption(), bind: field, columns: columns.map((text, index) => ({ text, field: cell(index) })),
+          visibleRows: VISIBLE_ROWS, ...(mark && { action: mark.action, selectedKeyBind: mark.bind }),
+          ...(mark && Number.isInteger(column) && column > 0 && column < columns.length && { markColumn: cell(column) }) };
       },
       // The open tab is a text of the state: its title. The run-time opens the first tab when that text names no tab, also after a title changes.
       tabs: () => {

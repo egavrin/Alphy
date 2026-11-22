@@ -81,18 +81,23 @@ internal object LiveProtocol {
     private const val INPUT_DELTA = "session.input_transcript.delta"
     private const val OUTPUT_DELTA = "session.output_transcript.delta"
 
-    /** The two classifier triggers of plan "one scene", K1, with the questions of the decisions probe of 2026-11-22. */
+    /**
+     * The two classifier triggers of plan "one scene", K1, with the questions of the decisions probe of 2026-11-22. The choice continue
+     * and the wording of next and continue are those of the wording check of block 2 plan, V1 (evidence/one-scene/continue-check, wording b).
+     */
     fun triggers(): JSONArray {
         val steps = JSONArray().apply { (1..MAX_STEPS).forEach { put(JSONObject().put("value", "$it")) }; put(JSONObject().put("value", "none")) }
         fun question(name: String, instructions: String, choices: JSONArray) =
             JSONObject().put("type", "choice").put("name", name).put("instructions", instructions).put("choices", choices)
         fun trigger(event: String, vararg questions: JSONObject) = JSONObject().put("type", "decisions").put("event_type", event)
             .put("decisions", JSONObject().put("questions", JSONArray(questions.toList())))
-        val commands = JSONArray().apply { listOf("next", "back", "repeat", "go_to", "none").forEach { put(JSONObject().put("value", it)) } }
+        val commands = JSONArray().apply { listOf("next", "continue", "back", "repeat", "go_to", "none").forEach { put(JSONObject().put("value", it)) } }
         return JSONArray()
             .put(trigger(INPUT_DELTA,
                 question(USER_COMMAND, "The user speaks to the assistant about the scene. Choose what the user's latest words ask the screen to do. " +
-                    "next: show the next step. back: show the previous step. repeat: say the present step again. " +
+                    "next: show one more step, the step after the present step (дальше, следующий). " +
+                    "continue: the user asks to continue or to go on (продолжай, продолжи): show all the remaining steps one after another to the end. " +
+                    "back: show the previous step. repeat: say the present step again. " +
                     "go_to: show a step that the user names by its number, its label, or its place (the first, the last, the start). " +
                     "none: everything else, such as a question about the subject, a new topic, small talk, or unfinished words.", commands),
                 question(USER_STEP, "Choose the number of the scene step that the user's latest words are about: a step that the user names, " +

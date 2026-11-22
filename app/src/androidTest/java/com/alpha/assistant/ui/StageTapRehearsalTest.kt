@@ -6,6 +6,8 @@ import androidx.test.runner.lifecycle.Stage
 import com.alpha.assistant.tools.SceneNarration
 import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.ToolRecord
+import com.alpha.assistant.ui.LiveStageRig.Companion.ANSWER_REQUEST
+import com.alpha.assistant.ui.LiveStageRig.Companion.stepped
 import com.alpha.assistant.ui.TemplateTalk.Companion.SCREEN_REQUEST
 import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
@@ -29,33 +31,34 @@ import kotlin.concurrent.thread
  * the audio of the voice. Each scene is [STEPPED] with [SAYS] as its narration.
  */
 class StageTapRehearsalTest {
-    private val fixture = ShellFixture("stage-tap")
-    private val robot = ShellRobot("stage-tap")
-    private val socket = FakeLiveTransport()
-    private val audio = FakeLiveAudio()
-    private val shell = TemplateShell(fixture, robot, socket)
+    private val rig = LiveStageRig("stage-tap")
+    private val fixture = rig.fixture
+    private val robot = rig.robot
+    private val socket = rig.socket
+    private val audio = rig.audio
+    private val shell = rig.shell
     /** The clock of a dialogue that a test watches with, closed after the test. */
     private var clock: DialogueRecorder? = null
-    @After fun remove() { clock?.close(); shell.remove() }
+    @After fun remove() { clock?.close(); rig.remove() }
 
     @Test fun aTapOnAStepWhileSilentSaysItsSentence() = live { model, talk ->
         val scene = scene(model)
         val calls = listOf(talk.calls.size, talk.routed.size)
         robot.click(NAIL)
-        robot.waitUntil { thinkings().size == 2 }
-        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), thinkings())
+        robot.waitUntil { rig.thinkings().size == 2 }
+        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), rig.thinkings())
         // A tap stops the walk (decision 11), and the chat gets no call.
         assertFalse(model.liveWalking)
         assertEquals(calls, listOf(talk.calls.size, talk.routed.size))
         // Review focus 5: the voice still says say1, which the stop skipped. The stage keeps the tapped step, and the speaker plays none of
         // it. The tapped sentence then plays in full.
-        speak(SAYS[0], marker = 7, atMs = 3_000)
+        rig.speak(SAYS[0], marker = 7, atMs = 3_000)
         SystemClock.sleep(REPLY_END_MS)
-        speak(SAYS[1], marker = 8, atMs = 5_000)
+        rig.speak(SAYS[1], marker = 8, atMs = 5_000)
         robot.waitUntil { played(8) }
         assertFalse("the speaker played the skipped say1", played(7))
         assertEquals(NAIL, shipSubject(shell.stored(model, scene.id)))
-        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), thinkings())
+        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), rig.thinkings())
     }
 
     @Test fun aTapWhileTheVoiceSpeaksSaysNothing() = live { model, talk ->
@@ -67,7 +70,7 @@ class StageTapRehearsalTest {
         robot.waitUntil { model.liveVoice.speaksNow }
         robot.click(NAIL)
         robot.waitUntil { shipSubject(shell.stored(model, scene.id)) == NAIL }
-        during(2_000) { assertEquals(listOf(MARK + SAYS[0]), thinkings()) }
+        during(2_000) { assertEquals(listOf(MARK + SAYS[0]), rig.thinkings()) }
         assertFalse(model.liveWalking)
         voice.join()
         ask(talk, ANSWER_REQUEST, "d2", 10_000)
@@ -78,17 +81,17 @@ class StageTapRehearsalTest {
     @Test fun aTapOnAChoiceSaysNothing() = live(StreamTalk(listOf(Streamed(halves(SAID), gapMs = 30), Streamed(listOf("$SHIP_S4\n"), gapMs = 0)))) { model, _ ->
         socket.say(SCREEN_REQUEST, "d1", 100)
         val scene = shell.shown(model)
-        robot.waitUntil(30_000) { thinkings().isNotEmpty() }
-        assertEquals(listOf(MARK + ONE_SAY), thinkings())
+        robot.waitUntil(30_000) { rig.thinkings().isNotEmpty() }
+        assertEquals(listOf(MARK + ONE_SAY), rig.thinkings())
         assertFalse(model.liveWalking)
         robot.click(NAIL)
         robot.waitUntil { shipSubject(shell.stored(model, scene.id)) == NAIL }
-        during(1_500) { assertEquals(listOf(MARK + ONE_SAY), thinkings()) }
+        during(1_500) { assertEquals(listOf(MARK + ONE_SAY), rig.thinkings()) }
         val count = shell.messages(model).size
         socket.say(TemplateTalk.CHANGE_REQUEST, "d2", 3_000)
         shell.waitForTheAnswer(model, count)
         robot.waitUntil { shell.stored(model, scene.id).revision == scene.revision + 1 }
-        during(1_500) { assertEquals(listOf(MARK + ONE_SAY), thinkings()) }
+        during(1_500) { assertEquals(listOf(MARK + ONE_SAY), rig.thinkings()) }
     }
 
     /**
@@ -102,7 +105,7 @@ class StageTapRehearsalTest {
         // The voice press ran, so the commentary is the sentence of the step and not PRESS_FAILED.
         robot.waitUntil(30_000) { "d2" to MARK + SAYS[1] in socket.commentary() }
         stays(model, scene, NAIL)
-        assertEquals(listOf(MARK + SAYS[0]), thinkings())
+        assertEquals(listOf(MARK + SAYS[0]), rig.thinkings())
         ask(talk, ANSWER_REQUEST, "d3", 8_000)
         assertEquals(listOf("voice:$STEP_CONTROL:$NAIL"), actionsOf(talk, ANSWER_REQUEST))
         // A new scene on the stage starts with no action.
@@ -118,13 +121,13 @@ class StageTapRehearsalTest {
      */
     @Test fun aNextInTheMiddleOfASentenceGoesToTheNextStep() = live { model, talk ->
         val scene = scene(model)
-        speak(SAYS[0], marker = 1, atMs = 2_000)
-        robot.waitUntil { thinkings().size == 2 }
+        rig.speak(SAYS[0], marker = 1, atMs = 2_000)
+        robot.waitUntil { rig.thinkings().size == 2 }
         socket.emit(outputDelta(SAYS[1].take(12), 4_000, 4_300))
         ask(talk, NEXT_REQUEST, "d2", 4_400)
         robot.waitUntil(30_000) { "d2" to MARK + SAYS[1] in socket.commentary() }
         stays(model, scene, NAIL)
-        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), thinkings())
+        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), rig.thinkings())
         ask(talk, ANSWER_REQUEST, "d3", 8_000)
         assertEquals(listOf("voice:$STEP_CONTROL:$NAIL"), actionsOf(talk, ANSWER_REQUEST))
     }
@@ -135,14 +138,14 @@ class StageTapRehearsalTest {
      */
     @Test fun aNextRightAfterASyncFireGoesToTheNextStep() = live { model, talk ->
         val scene = scene(model)
-        speak(SAYS[0], marker = 1, atMs = 2_000)
-        robot.waitUntil { thinkings().size == 2 }
-        speak(SAYS[1], marker = 2, atMs = 4_000)
-        robot.waitUntil { thinkings().size == 3 }
+        rig.speak(SAYS[0], marker = 1, atMs = 2_000)
+        robot.waitUntil { rig.thinkings().size == 2 }
+        rig.speak(SAYS[1], marker = 2, atMs = 4_000)
+        robot.waitUntil { rig.thinkings().size == 3 }
         ask(talk, NEXT_REQUEST, "d2", 5_000)
         robot.waitUntil(30_000) { "d2" to MARK + SAYS[2] in socket.commentary() }
         stays(model, scene, STEPS[2])
-        assertEquals(SAYS.map { MARK + it }, thinkings())
+        assertEquals(SAYS.map { MARK + it }, rig.thinkings())
         ask(talk, ANSWER_REQUEST, "d3", 8_000)
         assertEquals(listOf("narrator:$STEP_CONTROL:$NAIL", "voice:$STEP_CONTROL:${STEPS[2]}"), actionsOf(talk, ANSWER_REQUEST))
     }
@@ -157,8 +160,8 @@ class StageTapRehearsalTest {
             robot.waitUntil { shell.stored(model, scene.id).revision == scene.revision + 1 }
             assertEquals(CHANGED_SAY, SceneNarration.of(appFileOf(shell.stored(model, scene.id))).sentence(2))
             robot.click(NAIL)
-            robot.waitUntil { thinkings().size == 2 }
-            assertEquals(listOf(MARK + SAYS[0], MARK + CHANGED_SAY), thinkings())
+            robot.waitUntil { rig.thinkings().size == 2 }
+            assertEquals(listOf(MARK + SAYS[0], MARK + CHANGED_SAY), rig.thinkings())
         }
 
     /**
@@ -170,11 +173,11 @@ class StageTapRehearsalTest {
         // Walk fix: the clock of a live dialogue records each move of the step with its who.
         val recorder = DialogueRecorder().also { clock = it; it.watch(model) }
         assertEquals(STEPS[0], shipSubject(scene))
-        speak("Сейчас покажу, почему корабль плавает.", marker = 1, atMs = 2_000)
-        during(1_500) { assertEquals(STEPS[0], shipSubject(shell.stored(model, scene.id))); assertEquals(1, thinkings().size) }
+        rig.speak("Сейчас покажу, почему корабль плавает.", marker = 1, atMs = 2_000)
+        during(1_500) { assertEquals(STEPS[0], shipSubject(shell.stored(model, scene.id))); assertEquals(1, rig.thinkings().size) }
         // Step 1 is the answer step, which the stage already shows.
-        speak(SAYS[0], marker = 2, atMs = 4_000)
-        robot.waitUntil { thinkings().size == 2 }
+        rig.speak(SAYS[0], marker = 2, atMs = 4_000)
+        robot.waitUntil { rig.thinkings().size == 2 }
         robot.waitUntil { model.liveVoice.phase == LivePhase.LISTENING }
         val listening = fixture.context.getString(com.alpha.assistant.R.string.live_voice_listening)
         val speaking = fixture.context.getString(com.alpha.assistant.R.string.live_voice_speaking)
@@ -183,13 +186,13 @@ class StageTapRehearsalTest {
             assertNotEquals(LivePhase.IDLE, model.liveVoice.phase)
             assertTrue("the strip lost the speaking status", shows(speaking) && !shows(listening))
         }
-        speak(SAYS[1], marker = 3, atMs = 6_000)
-        robot.waitUntil { thinkings().size == 3 }
+        rig.speak(SAYS[1], marker = 3, atMs = 6_000)
+        robot.waitUntil { rig.thinkings().size == 3 }
         assertEquals(NAIL, shipSubject(shell.stored(model, scene.id)))
-        speak(SAYS[2], marker = 4, atMs = 8_000)
+        rig.speak(SAYS[2], marker = 4, atMs = 8_000)
         robot.waitUntil { shipSubject(shell.stored(model, scene.id)) == STEPS[2] }
         robot.waitUntil { !model.liveWalking }
-        assertEquals(SAYS.map { MARK + it }, thinkings())
+        assertEquals(SAYS.map { MARK + it }, rig.thinkings())
         // Review focus 1: the presses of the walk are the narrator's, so they do not stop it, and no action is a tap.
         ask(talk, ANSWER_REQUEST, "d2", 11_000)
         assertEquals(listOf("narrator:$STEP_CONTROL:$NAIL", "narrator:$STEP_CONTROL:${STEPS[2]}"), actionsOf(talk, ANSWER_REQUEST))
@@ -203,17 +206,17 @@ class StageTapRehearsalTest {
      */
     @Test fun aReplyEndInsideASentenceStillMovesTheStage() = live { model, _ ->
         val scene = scene(model)
-        speak("Сейчас покажу, почему корабль плавает.", marker = 1, atMs = 2_000)
+        rig.speak("Сейчас покажу, почему корабль плавает.", marker = 1, atMs = 2_000)
         socket.emit(outputDelta(" " + SAYS[0].take(4), 2_600, 2_700))
         robot.waitUntil { model.liveVoice.phase == LivePhase.SPEAKING }
         robot.waitUntil { model.liveVoice.phase == LivePhase.LISTENING }
         socket.emit(outputDelta(SAYS[0].drop(4), 2_700, 3_300))
         socket.emit(outputAudio(2, VOICED_600))
-        robot.waitUntil { thinkings().size == 2 }
-        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), thinkings())
+        robot.waitUntil { rig.thinkings().size == 2 }
+        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), rig.thinkings())
         assertTrue(model.liveWalking)
-        speak(SAYS[1], marker = 3, atMs = 4_000)
-        robot.waitUntil { thinkings().size == 3 }
+        rig.speak(SAYS[1], marker = 3, atMs = 4_000)
+        robot.waitUntil { rig.thinkings().size == 3 }
         stays(model, scene, NAIL)
     }
 
@@ -223,13 +226,13 @@ class StageTapRehearsalTest {
      */
     @Test fun aSentenceInTheReplyOfTheOpenerMovesTheStage() = live { model, _ ->
         val scene = scene(model)
-        speak("Сейчас покажу, почему корабль плавает.", marker = 1, atMs = 2_000)
+        rig.speak("Сейчас покажу, почему корабль плавает.", marker = 1, atMs = 2_000)
         socket.emit(outputDelta(" " + SAYS[0].take(4), 2_600, 2_700))
         socket.emit(outputDelta(SAYS[0].drop(4), 2_700, 3_300))
         socket.emit(outputAudio(2, VOICED_600))
-        robot.waitUntil { thinkings().size == 2 }
-        speak(SAYS[1], marker = 3, atMs = 4_000)
-        robot.waitUntil { thinkings().size == 3 }
+        robot.waitUntil { rig.thinkings().size == 2 }
+        rig.speak(SAYS[1], marker = 3, atMs = 4_000)
+        robot.waitUntil { rig.thinkings().size == 3 }
         stays(model, scene, NAIL)
     }
 
@@ -245,35 +248,24 @@ class StageTapRehearsalTest {
         // The host says the sentence of step 2 for the press, and the walk goes on from it.
         robot.waitUntil(30_000) { "d3" to MARK + SAYS[1] in socket.commentary() }
         assertTrue(model.liveWalking)
-        speak(SAYS[1], marker = 2, atMs = 8_000)
-        robot.waitUntil { thinkings().size == 2 }
+        rig.speak(SAYS[1], marker = 2, atMs = 8_000)
+        robot.waitUntil { rig.thinkings().size == 2 }
         assertEquals(NAIL, shipSubject(shell.stored(model, scene.id)))
-        speak(SAYS[2], marker = 3, atMs = 10_000)
+        rig.speak(SAYS[2], marker = 3, atMs = 10_000)
         robot.waitUntil { shipSubject(shell.stored(model, scene.id)) == STEPS[2] }
         robot.waitUntil { !model.liveWalking }
-        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[2]), thinkings())
+        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[2]), rig.thinkings())
     }
 
     private fun live(talk: StreamTalk = StreamTalk(listOf(stepped())), test: (ShellViewModel, StreamTalk) -> Unit) =
-        shell.live(talk, audio = audio) { _, model, _ -> test(model, talk) }
-
-    /** A new stepped scene with its narration, each line as two quick deltas. */
-    private fun stepped() = Streamed(halves(STEPPED) + halves(NARRATION_LINES.joinToString("\n")), gapMs = 30)
+        rig.live(talk) { model, _, _ -> test(model, talk) }
 
     /** The spoken screen request on an empty stage: the stored scene, after its walk started with the append of say1. */
     private fun scene(model: ShellViewModel): ToolRecord {
-        socket.say(SCREEN_REQUEST, "d1", 100)
-        val scene = shell.shown(model)
-        robot.waitUntil(30_000) { thinkings().isNotEmpty() }
-        assertEquals(listOf(MARK + SAYS[0]), thinkings())
+        val scene = rig.steppedScene(model)
+        assertEquals(listOf(MARK + SAYS[0]), rig.thinkings())
         assertTrue(model.liveWalking)
         return scene
-    }
-
-    /** The voice says [text] in one transcript piece with 600 ms of voiced audio of [marker] after a quiet run. */
-    private fun speak(text: String, marker: Int, atMs: Long) {
-        socket.emit(outputDelta(text, atMs, atMs + 600))
-        socket.emit(outputAudio(marker, VOICED_600))
     }
 
     /** The person says [text] as hand-off [id], and the routing call of it came. */
@@ -299,8 +291,6 @@ class StageTapRehearsalTest {
         during(1_500) { assertEquals(step, shipSubject(shell.stored(model, scene.id))) }
     }
 
-    private fun thinkings() = socket.sent.map(::JSONObject).filter { it.getString("type") == "session.thinking.append" }.map { it.getString("content") }
-
     private fun played(marker: Int) = audio.played.any { it.firstOrNull() == (marker * 1_000).toShort() }
 
     /** True when a node of the resumed activity shows [text], read on the main thread now. */
@@ -314,7 +304,6 @@ class StageTapRehearsalTest {
     }
 
     private companion object {
-        const val ANSWER_REQUEST = "Какая погода"
         const val OTHER_REQUEST = "Который час"
         const val ONE_SAY = "Полый корабль вытесняет много воды и поэтому плавает."
         /** The say2 of the change of [STEPPED] in the test of fix list item 4. */

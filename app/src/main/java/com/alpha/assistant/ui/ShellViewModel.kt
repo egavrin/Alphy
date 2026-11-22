@@ -51,6 +51,7 @@ import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.TestFixStatus
 import com.alpha.assistant.tools.appfile.AppFilePrompt
+import com.alpha.assistant.tools.appfile.DataCheck
 import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.tools.agent.ScreenFallback
 import com.alpha.assistant.tools.agent.ScreenRun
@@ -2007,8 +2008,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     testFix != null -> ChatToolReply.Decision("test_fix", "", "", "none")
                     else -> ChatToolReply.decode(completed.text, allowScreen = voiceScreen, allowPress = shownScreen != null)
                 }
-                // The early plan has no brief and no found facts, so only a screen with no search uses it.
-                if (!decoded.isScreen || decoded.search != "none") stopEarlyPlan(request)
+                // The early plan has no brief and no found facts, so only an explain screen with no search uses it. A data screen stops it, so its
+                // frame goes and the work card shows until the data call draws (block 2 plan, decision 1 and D10).
+                if (!decoded.isScreen || decoded.isData || decoded.search != "none") stopEarlyPlan(request)
                 if(answerFragment.isNotEmpty() && decoded.kind != "answer")
                     throw CloudFailure("decision_changed","The assistant changed the requested operation after streaming an answer.")
                 val reported = completed.provenance ?: inputProvenance
@@ -2159,15 +2161,18 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     // A spoken change of the stage app is a change by lines only when the kit made that app (plan D, Dc2).
                     val screenChange = changed != null && changed.id == stageTarget && tools.planStep() != null &&
                         ToolSpec.availablePersisted(changed)?.appFile != null
+                    // A spoken change of a data form is a new data screen with the shown form, such as the same planets as a chart (block 2 plan, D1).
+                    val dataChange = screenChange && withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }
+                        .isData(checkNotNull(ToolSpec.availablePersisted(checkNotNull(changed))?.appFile))
                     val bridge = liveBridge?.takeIf { liveVoice.active }
                     // The voice says the answer of a screen now: the screen comes later, or not at all (plan D, Db2).
-                    if (decoded.isScreen) bridge?.screenStarted(assistant.id, decoded.text)
-                    if (screenChange) bridge?.changeStarted(assistant.id)
+                    if (decoded.isScreen || dataChange) bridge?.screenStarted(assistant.id, decoded.text)
+                    if (screenChange && !dataChange) bridge?.changeStarted(assistant.id)
                     // The plan of the changed app goes after the brief as one untrusted line, so that a new screen keeps what the request does not change (ruling FX-3).
                     val shown = changed?.takeIf { screenChange }?.let(ToolSpec::availablePersisted)?.appFile
                         ?.let { "\n" + ShownScreen.PREFIX + JSONObject().put("appFile", it) }.orEmpty()
-                    fun prompt(host: String, brief: String = decoded.brief) = try {
-                        ChatToolReply.generationPrompt(user.text,brief,decoded.text,sources,selectedText,host)
+                    fun prompt(host: String, brief: String = decoded.brief, excerpts: List<Source> = sources) = try {
+                        ChatToolReply.generationPrompt(user.text,brief,decoded.text,excerpts,selectedText,host)
                     } catch (failure: CloudFailure) {
                         // The routing check of the brief does not count the dialogue text or the plan, so this is no error of the person.
                         throw if (host.isNotEmpty() && failure.code == "widget_size") ScreenFallback(AppFileNames.PROMPT_SIZE) else failure
@@ -2189,7 +2194,18 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                         throw failure
                     }
                     try {
-                        logged(if (decoded.isScreen) "screen" else if (screenChange) "change" else "app") {
+                        logged(if (decoded.isScreen || dataChange) "screen" else if (screenChange) "change" else "app") {
+                            if (decoded.isData || dataChange) {
+                                // The data call starts after the routing call, with the excerpts of a search and its host check (decision 3, D6).
+                                val brief = if (dataChange) decoded.brief + shown else decoded.brief
+                                // A change of a searched form keeps the excerpts of the search that made it, so its values stay checked and it keeps its source line (stage 5 fix 2).
+                                val checked = if (!dataChange) sources else (snapshot.conversations.find { it.id == conversationId }?.messages
+                                    ?.lastOrNull { it.toolId == changed?.id }?.sources.orEmpty() + sources).distinctBy { it.url }
+                                // The message keeps them too, so a later change of the new form is checked as well.
+                                if (checked.size > sources.size) updateMessage(request, assistant.id) { it.copy(sources = checked) }
+                                val check = DataCheck.of(checked, System.currentTimeMillis())
+                                return@logged generate(prompt(dialogue(), brief, checked), null, ScreenRun(null, prompt("", brief, checked), data = true, check = check))
+                            }
                             val input = prompt(if (decoded.isScreen) dialogue() else "")
                             // Only a screen with no search keeps it. It stays on the request, so a stop or the end can still cancel it.
                             val early = request.earlyPlan?.use()

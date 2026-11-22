@@ -9,7 +9,7 @@ import { report } from "./check.js";
 import { handle, kitOf, screen } from "./run.js";
 import { dataOf, emit } from "./emit.js";
 import { nextState } from "./change.js";
-import { buildTemplate, expandTemplate, isTemplateFile, mergeTemplate, readTemplate } from "./template.js";
+import { buildTemplate, checkData, expandTemplate, isTemplateFile, mergeTemplate, readTemplate } from "./template.js";
 
 /** The compile of an app file, and with no fault the expanded file and what the emitter gives. */
 function build(text) {
@@ -116,12 +116,15 @@ export function patchAppFile(plan, reply) {
  * A template plan (template.js) takes the reply by mergeTemplate in place of patchAppFile.
  * previous is {appFile, stateSchema, state} with stateSchema and state as JSON text, as the host sends them, or null. A text that is no
  * JSON makes the step reject. The result is {kind: "outside", word} or {kind: "plan", text, result}, where text is the merged text.
+ * data is {excerpts, site, time} for a new searched data screen, or null: the merged text then gets the host check of template.js checkData
+ * before the compile, and result.rejected is the value that no excerpt holds, or null.
  */
-export async function compileStep({ text, plan, read, previous, cap }) {
+export async function compileStep({ text, plan, read, previous, cap, data = null }) {
   const reply = read ? readPlanReply(text) : { kind: "plan", text };
   if (reply.kind !== "plan") return reply;
-  const merged = mergedOf(plan, reply.text);
-  return { kind: "plan", text: merged, result: merged.length > cap ? null : await compileAppFile(merged, storedOf(previous)) };
+  const { text: merged, rejected } = data ? checkData(mergedOf(plan, reply.text), data) : { text: mergedOf(plan, reply.text), rejected: null };
+  const result = merged.length > cap ? null : await compileAppFile(merged, storedOf(previous));
+  return { kind: "plan", text: merged, result: data && result ? { ...result, rejected } : result };
 }
 
 /** The reply merged into plan (null for a new screen), and the stored app previous with its schema and state read from JSON text. */
@@ -135,11 +138,13 @@ const storedOf = (previous) => previous && { appFile: previous.appFile, stateSch
  * of a template: a line with a fault is left out with no repair (a change keeps its stored version), and the first line alone gives the frame with
  * the picture card at its final size. A free plan gives holds "whole". An outside reply, a text with no usable first line, and each throw give none.
  */
-export async function previewStep({ text, plan = null, previous = null }) {
+export async function previewStep({ text, plan = null, previous = null, data = null }) {
   const gate = settings.gate;
   settings.gate = "off";
   try {
-    const reply = readPlanReply(text), { definition, frame } = reply.kind === "plan" ? await compileAppFile(mergedOf(plan, reply.text), storedOf(previous), true) : {};
+    // A searched data form shows only checked values, also while it streams: its frame has the host check of compileStep.
+    const merged = (text) => (data ? checkData(mergedOf(plan, text), data).text : mergedOf(plan, text));
+    const reply = readPlanReply(text), { definition, frame } = reply.kind === "plan" ? await compileAppFile(merged(reply.text), storedOf(previous), true) : {};
     // A preview has no result beside its frame, so the frame holds the definition.
     return frame ? { kind: "preview", frame: { definition, ...frame } } : { kind: "none" };
   } catch {

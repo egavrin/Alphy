@@ -10,9 +10,10 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PROMPT, changeText, repairText, templateChangeText, templateRepairText, templateRestText } from "./prompt.js";
 import { TEMPLATE_HEAD } from "./src/template.js";
+import { DATA_HEAD } from "./src/form-data.js";
 
 /** The modules of the bundle in dependency order: each one imports only modules before it. */
-const MODULES = ["icons", "dsl", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "change", "form-base", "form-scene", "form-items", "form-cells", "forms", "template", "compile"];
+const MODULES = ["icons", "dsl", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "change", "form-base", "form-scene", "form-items", "form-cells", "form-data", "form-compare", "form-table", "form-chart", "form-nodata", "forms", "template", "compile"];
 const at = (path) => fileURLToPath(new URL(path, import.meta.url));
 /** The host's sources of its icon names (ToolUiCatalog.icons): the shell glyphs and the domain icons. */
 const HOST_SOURCES = ["ToolUiCatalog", "ToolIcons"].map((name) => at(`../app/src/main/java/com/alpha/assistant/tools/${name}.kt`));
@@ -108,12 +109,14 @@ export async function bundle() {
  * The template prompt adds its section (template), the task texts of its repair and change calls with the same placeholders
  * (templateRepairTask, templateChangeTask), and templateHead, the source of the pattern that tells a template file from an app file (src/template.js).
  * templateRestTask is the task text of the call for the missing lines of a template call that stopped early, with {{task}} and {{plan}}.
+ * templateData is the section of the template call of the data family (block 2 plan, D1): it shares the repair, change, and rest task texts.
+ * dataHead is the source of the pattern of the first line of a data form (src/form-data.js DATA_HEAD).
  */
 export const promptAsset = () => ({ system: PROMPT.System, repair: PROMPT.Repair, dialogue: PROMPT.Dialogue, change: PROMPT.Change,
   repairTask: repairText({ task: "{{task}}", plan: "{{plan}}", faults: ["{{faults}}"] }), changeTask: changeText({ request: "{{request}}", plan: "{{plan}}" }),
   template: PROMPT.Template, templateRepairTask: templateRepairText({ task: "{{task}}", plan: "{{plan}}", faults: ["{{faults}}"] }),
   templateChangeTask: templateChangeText({ request: "{{request}}", plan: "{{plan}}" }), templateRestTask: templateRestText({ task: "{{task}}", plan: "{{plan}}" }),
-  templateHead: TEMPLATE_HEAD.source });
+  templateHead: TEMPLATE_HEAD.source, templateData: PROMPT["Template data"], dataHead: DATA_HEAD.source });
 
 /** The plan files of a directory. */
 export const plansIn = (directory) => readdirSync(directory).filter((name) => name.endsWith(".plan")).map((name) => join(directory, name));

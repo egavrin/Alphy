@@ -250,6 +250,10 @@ internal val DIALOGUES = listOf(
         untilStep = 2), probe("ux-steps-2", "Верни назад"), probe("ux-steps-3", "Повтори"), probe("ux-steps-4", "Покажи четвёртый шаг"),
         probe("ux-steps-5", "А почему кровь идёт в лёгкие?"), probe("ux-steps-6", "Дальше"),
         probe("ux-steps-7", "Продолжай")), maxCalls = RESEARCH_CALLS, adaptive = true),
+    // The data dialogue of stage 5 (block 2 plan, L1): known facts in a comparison, a table, and a chart, a question, and a mark by voice.
+    // The phrases are of the macOS voice Milena, as ux-steps has them.
+    research("ux-data", "Сравни Землю и Марс", "Покажи планеты таблицей", "Покажи это графиком", "А у какой планеты самый длинный год?",
+        "Отметь Марс"),
 ).associateBy { it.name }
 
 /** The rule of the kit for a template file (`TEMPLATE_HEAD` in kit/src/template.js), applied to its first line that is not empty. */

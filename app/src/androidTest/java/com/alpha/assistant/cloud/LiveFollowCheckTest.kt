@@ -28,6 +28,9 @@ class LiveFollowCheckTest {
     @Test fun smallTalk() = check(CASES.filter { it.name == "smallTalk" })
     @Test fun screenAnswered() = check(CASES.filter { it.name == "screenAnswered" })
     @Test fun screenWaiting() = check(CASES.filter { it.name == "screenWaiting" })
+    @Test fun screenCut() = check(CASES.filter { it.name == "screenCut" })
+    /** Block 2 plan, V2: the new case with the two cases that the new sentence of the instructions can change. */
+    @Test fun followStart() = check(CASES.filter { it.name in setOf("screenCut", "screenAnswered", "screenWaiting") })
     @Test fun sceneAnswers() = check(CASES.filter { it.name == "sceneAnswers" })
     @Test fun markOption() = check(CASES.filter { it.name == "markOption" })
     @Test fun pressOption() = check(CASES.filter { it.name == "pressOption" })
@@ -74,6 +77,8 @@ class LiveFollowCheckTest {
             Case("screenAnswered", "Почему небо голубое?",
                 "Солнечный свет рассеивается в воздухе, а синий свет рассеивается сильнее всего, поэтому небо голубое.", null, "screen", "", true),
             Case("screenWaiting", "Почему небо голубое?", "Сейчас объясню.", null, "screen", "", false),
+            // Block 2 plan, V2: the call starts 2,500 ms after the voice began, so it sees a cut sentence that begins the answer.
+            Case("screenCut", "Почему небо голубое?", "Солнечный свет рассеивается в воздухе, и синий свет рассеивается", null, "screen", "", true),
             Case("sceneAnswers", "Так почему корабль всё-таки не тонет?", "Он полый внутри и вытесняет много воды, поэтому вода его держит.",
                 STEPS_SCENE, "none", "", true, EARLIER),
             Case("markOption", "А что из этого тонет?", "Тонет гвоздь: он сплошной и тяжёлый для своего размера.", CHOICE_SCENE, "mark",

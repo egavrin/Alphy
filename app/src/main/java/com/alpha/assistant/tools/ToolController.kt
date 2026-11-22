@@ -321,7 +321,7 @@ class ToolController internal constructor(private val app: Application, private 
         // The stage previews of a screen run have the key of its early plan, whose frames it goes on with, else a key of their own: the end of
         // a key drops each later frame of it, and a later run of this operation (the new screen after a change fallback) shows its own frames.
         val previewKey = if (screen?.early != null) operationId else "$operationId:${previewRuns.incrementAndGet()}"
-        val run = screen?.let { ScreenRun(it.early, it.template, previewSink(previewKey, target?.id, trace).takeIf { previewStream }, scope) }
+        val run = screen?.let { ScreenRun(it.early, it.template, previewSink(previewKey, target?.id, trace).takeIf { previewStream }, scope, it.data, it.check) }
         var stored: ToolRecord? = null
         try {
             prepared()

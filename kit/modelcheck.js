@@ -9,6 +9,8 @@
 //                                                              SET T (template tuning), U (held-out screens), V (held-out changes), W (change pilot),
 //                                                              or a combination of these four, is the template check: PROMPT.Template, one repair call,
 //                                                              and a LABEL that starts with tpl-. A template set runs with no set of the free prompt.
+//                                                              SET X (data tuning) or Y (data held-out) is the check of the data family: PROMPT["Template
+//                                                              data"], the excerpts of each searched request in its task, and the host check (checkData).
 //   bun kit/modelcheck.js table LABEL...                       the numbers of each label, from its records; one line for a label of the template check
 // The key is OPENAI_API_KEY, else its line in ~/.env. The script sends it only to api.openai.com, and writes it nowhere.
 // Each call is counted in evidence/modelcheck/spend.json before it is sent. The count never passes LIMIT, and the calls of the labels
@@ -21,17 +23,19 @@ import { LINE, compileAppFile, compileStep, linesOf, needsIn, patchAppFile, read
 import { dataOf, runtime } from "./src/emit.js";
 import { MAX_STATE_BYTES, handle } from "./src/run.js";
 import { runtimeText } from "./build.js";
-import { PROMPT, PROMPT_HASH, TEMPLATE_HASH, changeText, repairText, taskText, templateChangeText, templateRepairText } from "./prompt.js";
+import { DATA_HASH, PROMPT, PROMPT_HASH, TEMPLATE_HASH, changeText, repairText, taskText, templateChangeText, templateRepairText } from "./prompt.js";
+import { numbersIn } from "./src/form-data.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const EVIDENCE = ROOT + "evidence/modelcheck/";
 /**
  * The calls that the owner approved for the model checks: 491 before task P4 (A0, H1, P2, task 2b, and P3), P4 adds at most 32 (its decision 4), and task B1b adds at most 28.
  * The approval of the design of 2026-11-21 (docs/superpowers/specs/2026-11-21-stage-templates-stream-design.md, section 7) adds at most 150 calls of the template check.
+ * The owner raised both caps by 2000 on 2026-11-22 (block 2 plan, stage 5). The cap of each stage stays in its dispatch.
  */
-export const LIMIT = 689;
-/** The calls of the template check, the labels that start with tpl-: at most 150, whatever the calls of the other labels are. */
-export const TEMPLATE_LIMIT = 150;
+export const LIMIT = 2689;
+/** The calls of the template check, the labels that start with tpl-: at most 2150, whatever the calls of the other labels are. */
+export const TEMPLATE_LIMIT = 2150;
 /** The saved reports of today's agent loop: final-30d43aa, and for the 11 cases that it lacks, the first showcase run of 2026-11-16. */
 const REPORTS = ["/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-17/final-30d43aa/", "/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-16/showcase1/"];
 /** The output limit of the agent call of the app (ToolEngine.kt 131072, capped by OpenAiProfile.maxOutputTokens). */
@@ -67,9 +71,14 @@ export const SET_F = JSON.parse(readFileSync(new URL("./test/fixtures/change-req
 /** The repair calls of a change case: the change call of the app sends one (task 2b, decision 1). */
 const CHANGE_REPAIRS = 1;
 
-/** The files of the sets of the template check (stage templates plan, decision 7): T tuning, U held-out screens, V held-out changes, W the change pilot. */
-const TEMPLATE_SETS = { T: "template-tuning.json", U: "template-holdout.json", V: "template-changes.json", W: "template-pilot.json" };
+/**
+ * The files of the sets of the template check (stage templates plan, decision 7): T tuning, U held-out screens, V held-out changes, W the change
+ * pilot, and the data family (block 2 plan, M1): X tuning and Y held-out.
+ */
+const TEMPLATE_SETS = { T: "template-tuning.json", U: "template-holdout.json", V: "template-changes.json", W: "template-pilot.json",
+  X: "template-data-tuning.json", Y: "template-data-final.json" };
 const isChangeSet = (set) => set === "V" || set === "W";
+export const isDataSet = (set) => set === "X" || set === "Y";
 /** The expect of a screen item that names only its type, as the items of set U do (stage templates plan, Task 7). */
 const EXPECT_OF_TYPE = { explain: "template", learn: "outside" };
 /**
@@ -316,16 +325,17 @@ function finish(record) {
  * counts its lines that a line of plan already has. steps holds the faults of each compile, as faultTable reads them. say counts the kept
  * narration lines (plan "one scene", Task 34).
  */
-async function templateRecord(item, { ask, model, effort }, input, plan, previous) {
+async function templateRecord(item, { ask, model, effort }, input, plan, previous, { system = PROMPT.Template, hash = TEMPLATE_HASH, data = null, family = false } = {}) {
   runtime.text ||= await runtimeText();
-  const calls = [], steps = [], send = senderOf({ ask, model, system: PROMPT.Template, calls });
+  const calls = [], steps = [], send = senderOf({ ask, model, system, calls });
   const started = performance.now(), first = await send(0, effort, input);
-  const record = { id: item.id, set: item.set, expect: item.expect, prompt: TEMPLATE_HASH, outcome: first.status, firstCallMs: Math.round(performance.now() - started), calls,
-    replied: { kind: first.status }, kept: null, faults: [], leftOut: [], repeated: 0, say: 0, steps };
+  const record = { id: item.id, set: item.set, expect: item.expect, prompt: hash, outcome: first.status, firstCallMs: Math.round(performance.now() - started), calls,
+    replied: { kind: first.status }, kept: null, faults: [], leftOut: [], repeated: 0, say: 0, steps, ...(family && { form: null, check: data }) };
   if (first.status !== "completed") return record;
   const stepOf = async (text, on) => {
-    const step = await compile({ text, plan: on, read: true, previous });
-    if (step.result) steps.push({ faults: step.result.faults });
+    const step = await compile({ text, plan: on, read: true, previous, data });
+    // A step of a searched data form keeps the value that the host check rejected, or null.
+    if (step.result) steps.push({ faults: step.result.faults, ...(data && { rejected: step.result.rejected ?? null }) });
     return step;
   };
   let next = await stepOf(first.text, plan);
@@ -341,8 +351,25 @@ async function templateRecord(item, { ask, model, effort }, input, plan, previou
   }
   const { result } = next;
   return Object.assign(record, { outcome: clean(next) ? `clean${calls.length - 1}` : result.template && result.definition ? "partial1" : "not",
-    kept: result.kept ?? null, faults: result.faults, leftOut: result.leftOut ?? [], say: linesOf(result.kept ?? "").filter((one) => /^say\d* = /.test(one)).length });
+    kept: result.kept ?? null, faults: result.faults, leftOut: result.leftOut ?? [], say: linesOf(result.kept ?? "").filter((one) => /^say\d* = /.test(one)).length,
+    ...(family && { form: result.template ?? null }) });
 }
+
+/** The time of the search that the check gives the host check of each searched request: a fixed time, so each record of a request is the same. */
+export const CHECK_TIME = "22.11.2026 12:00";
+/**
+ * The host check of a request with sources, as DataCheck.of builds it (AppFileCompiler.kt): the title and the summary of each source, its first
+ * two sites, and the search time. Null for a request with no source, which gets no check.
+ */
+export const dataCheckOf = (sources = []) => (sources.length ? { excerpts: sources.map((source) => `${source.title}\n${source.summary}`).join("\n"),
+  site: [...new Set(sources.map((source) => new URL(source.url).hostname.replace(/^www\./, "")))].slice(0, 2).join(", "), time: CHECK_TIME } : null);
+/**
+ * A request of the data family (block 2 plan, M1): taskText of its request, brief, reply, and sources, as the data call of the app sends it, with
+ * PROMPT["Template data"] as instructions, and the host check of its sources on each compile. A record also holds its form and its check.
+ */
+export const checkTemplateData = (item, options) => templateRecord(item, options,
+  taskText({ request: item.request, brief: item.brief ?? "", reply: item.reply ?? "", sources: item.sources ?? [] }), null, null,
+  { system: PROMPT["Template data"], hash: DATA_HASH, data: dataCheckOf(item.sources), family: true });
 
 /** A screen request of the template check: taskText of its request with no brief, as the early plan of a first screen sends it. */
 export const checkTemplate = (item, options) => templateRecord(item, options, taskText({ request: item.request, brief: "" }), null, null);
@@ -499,6 +526,40 @@ export function templateNumbers(records) {
   return { explainClean: outcome(explain, /^clean[01]$/), refusalsRight: outcome(records.filter(TEMPLATE_GROUPS.refusal), /^outside$/), explainRefused: outcome(explain, /^outside$/),
     medianFirstCallMs: median(explain.map((record) => record.firstCallMs)), changesOnlyChanged: records.filter((record) => TEMPLATE_GROUPS.change(record) && onlyChanged(record)).length };
 }
+/** The digits of each number of a text with no sign, so that 37,1 and 37.1, or 1 234 and 1234, are the same. */
+const digitsOf = (text) => numbersIn(text).map((number) => number.replace(/\D/g, ""));
+/**
+ * The kind of a value that the host check rejected: "reject?" when the excerpts hold each of its numbers in another writing, a candidate false
+ * reject that the controller reads, else "invented".
+ */
+export function rejectKind(value, excerpts) {
+  const known = new Set(digitsOf(excerpts));
+  return digitsOf(value).every((digits) => known.has(digits)) ? "reject?" : "invented";
+}
+/**
+ * The numbers of the bars of the data family (block 2 plan, gate of M1). A file is clean at the first try when the first reply compiles with no fault,
+ * the host check rejects none of its values, and its form fits the expect of its request: "data" a comparison, a table, or a chart, "nodata" a
+ * nodata card, "outside" an outside reply, and "any" each of these. Each rejected value is an invented value or a candidate false reject (rejectKind).
+ * The host check shows no rejected value, so a searched form on the screen holds no number that its excerpts do not hold.
+ */
+export function dataNumbers(records) {
+  const fits = (record) => record.expect === "any" || (record.expect === "outside" ? record.outcome === "outside"
+    : record.outcome !== "outside" && record.form !== null && (record.expect === "nodata") === (record.form === "nodata"));
+  const rejects = records.flatMap((record) => record.steps.filter((step) => step.rejected != null)
+    .map((step) => ({ id: record.id, value: step.rejected, kind: rejectKind(step.rejected, record.check?.excerpts ?? "") })));
+  // An outside first reply is clean when it fits: fits() takes it only for a request that expects outside or any.
+  return { size: records.length, cleanFirst: records.filter((record) => ["clean0", "outside"].includes(record.outcome) && record.steps[0]?.rejected == null && fits(record)).length,
+    invented: rejects.filter((reject) => reject.kind === "invented").length, falseRejects: rejects.filter((reject) => reject.kind === "reject?").length,
+    medianFirstCallMs: median(records.map((record) => record.firstCallMs)), notFitting: records.filter((record) => !fits(record)).map((record) => `${record.id} ${record.form ?? record.outcome}`), rejects };
+}
+/** The one line of a label of the data family. */
+function dataRow(label, records) {
+  const numbers = dataNumbers(records);
+  return `${label} (${records[0]?.prompt}, ${records.length} records): clean at the first try ${share(numbers.cleanFirst, numbers.size)}, invented values ${numbers.invented},`
+    + ` candidate false rejects ${numbers.falseRejects}, median first call ${numbers.medianFirstCallMs} ms | not fitting: ${numbers.notFitting.join(", ") || "none"}`
+    + ` | rejected: ${numbers.rejects.map((reject) => `${reject.id} "${reject.value}" ${reject.kind}`).join(", ") || "none"}`;
+}
+
 /** The one line of a label of the template check: the five numbers with the size of each group. */
 function templateRow(label, records) {
   const numbers = templateNumbers(records), size = (group) => records.filter(TEMPLATE_GROUPS[group]).length;
@@ -546,7 +607,7 @@ if (import.meta.main) {
     // A template run counts under its own cap only with a label that starts with tpl-, and a run of the free prompt never takes that cap.
     const template = [...set].filter((name) => Object.hasOwn(TEMPLATE_SETS, name));
     if (template.length ? template.length !== set.length || !isTemplateLabel(label) : isTemplateLabel(label)) {
-      console.log("refused: the sets T, U, V, and W run alone, with a label that starts with tpl-, and only they take such a label"); process.exit(2);
+      console.log("refused: the sets T, U, V, W, X, and Y run alone, with a label that starts with tpl-, and only they take such a label"); process.exit(2);
     }
     const items = (template.length ? template.flatMap(templateSet) : [...(set.includes("C") ? corpus() : []), ...(set.includes("D") ? SET_D : []), ...(set.includes("E") ? SET_E : []), ...(set.includes("F") ? SET_F : [])])
       .filter((item) => !ids.length || ids.includes(item.id))
@@ -560,13 +621,17 @@ if (import.meta.main) {
     runtime.text = await runtimeText();
     await pool(items, 4, async (item) => {
       const options = { ask: (body) => openai(body, `${label} ${item.id} ${body.reasoning.effort}`), model, effort, repairs };
-      const record = await (!template.length ? checkOne : isChangeSet(item.set) ? checkTemplateChange : checkTemplate)(item, options);
+      const record = await (!template.length ? checkOne : isDataSet(item.set) ? checkTemplateData : isChangeSet(item.set) ? checkTemplateChange : checkTemplate)(item, options);
       // A first call that the transport lost leaves no record, so that the next run of the label tries the request again.
       if (/^(http|failed)/.test(record.outcome)) { console.log(item.id, record.outcome, record.calls[0].error); return; }
       record.calls.forEach((call, index) => writeFileSync(`${EVIDENCE}${label}/${item.id}.${index}.txt`, call.text));
+      // The kept file of a data request, so that the controller can look at each form (gate 2c).
+      if (isDataSet(item.set) && record.kept) writeFileSync(`${EVIDENCE}${label}/${item.id}.plan`, record.kept);
       if (record.definition) record.look = looksOf({ x: record.definition }).x;
       writeFileSync(`${EVIDENCE}${label}/${item.id}.json`, JSON.stringify(record, null, 1));
-      if (template.length) console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.firstCallMs} ms`, record.replied.kind === "lines" ? `${record.replied.lines} lines, ${record.repeated} repeated` : record.replied.word ?? "", record.faults.slice(0, 2).join(" | ").slice(0, 200));
+      if (isDataSet(item.set)) console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.firstCallMs} ms`, record.form ?? record.replied.word ?? "",
+        record.steps.map((step) => step.rejected).filter((value) => value != null).map((value) => `rejected "${value}"`).join(" "), record.faults.slice(0, 2).join(" | ").slice(0, 200));
+      else if (template.length) console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.firstCallMs} ms`, record.replied.kind === "lines" ? `${record.replied.lines} lines, ${record.repeated} repeated` : record.replied.word ?? "", record.faults.slice(0, 2).join(" | ").slice(0, 200));
       else console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.calls[0].wallS}s`, `path ${record.pathS}s`, record.first.word ?? "", (record.steps.at(-1)?.faults ?? []).slice(0, 2).join(" | ").slice(0, 200));
     });
     console.log(`spent ${spent().calls}`);
@@ -574,6 +639,11 @@ if (import.meta.main) {
     const detail = rest.includes("--detail"), labels = rest.filter((label) => label !== "--detail");
     for (const label of labels) {
       const records = recordsOf(label);
+      if (records.some((record) => isDataSet(record.set))) {
+        console.log(dataRow(label, withItemExpect(records)));
+        if (detail) for (const [fault, row] of faultTable(records)) console.log(`  ${row.count} ${row.repaired} ${row.kept} ${row.last} | ${fault} | ${row.ids.join(" ")}`);
+        continue;
+      }
       if (records.some((record) => Object.hasOwn(TEMPLATE_SETS, record.set))) {
         console.log(templateRow(label, withItemExpect(records)));
         if (detail) for (const [fault, row] of faultTable(records)) console.log(`  ${row.count} ${row.repaired} ${row.kept} ${row.last} | ${fault} | ${row.ids.join(" ")}`);

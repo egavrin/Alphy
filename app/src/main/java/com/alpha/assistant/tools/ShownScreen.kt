@@ -87,8 +87,24 @@ internal data class ShownScreen(val toolId: String, val title: String, val appFi
                             controls += ShownControl(node.optString("text") + ": " + option.getString("text"), action, option.get("value"))
                         }
                     }
+                    // The rows of a table and the points of a chart that a tap marks are its options (block 2 plan, decision 2 and D7).
+                    "table" -> if (action.isNotEmpty()) runCatching { ToolUiCatalog.records(node, state) }.getOrNull()?.let { rows ->
+                        repeat(rows.length()) { index ->
+                            val key = ToolUiCatalog.stableKey(rows.getJSONObject(index))
+                            controls += ShownControl(node.optString("text") + ": " + key, action, key)
+                        }
+                    }
+                    "chart" -> if (action.isNotEmpty()) runCatching { ToolUiCatalog.value(state, node.getString("categories")) as JSONArray }.getOrNull()?.let { categories ->
+                        repeat(categories.length()) { index ->
+                            val category = categories.get(index).toString()
+                            controls += ShownControl(node.optString("text") + ": " + category, action, category)
+                        }
+                    }
                 }
                 val label = node.optString("text")
+                // The marked row or point is the value of a table or a chart with a mark.
+                if ((type == "table" || type == "chart") && node.has("selectedKeyBind") && label.isNotBlank())
+                    runCatching { ToolUiCatalog.value(state, node.getString("selectedKeyBind")) }.onSuccess { values += label to it }
                 if (isInput(type) && label.isNotBlank()) runCatching { ToolUiCatalog.value(state, node.getString("bind")) }.onSuccess { value ->
                     // A choice stores the value of an option, and the person sees the text of that option.
                     val options = node.optJSONArray("options")?.let { options -> List(options.length(), options::getJSONObject) }

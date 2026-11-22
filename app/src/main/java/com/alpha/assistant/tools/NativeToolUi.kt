@@ -11,6 +11,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -77,6 +78,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.contentDescription
@@ -1444,7 +1446,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             val timer = remember(node) { com.alpha.assistant.timer.ForegroundTimerSpec.parse(node) }
             com.alpha.assistant.timer.ForegroundTimerUi(text, timer, enabled, LocalForegroundTimer.current, modifier)
         } else NativeTimer(node, state, modifier)
-        "chart" -> NativeChart(node,state,modifier,heading)
+        "chart" -> NativeChart(node,state,enabled,modifier,heading,event)
         "video" -> NativeVideo(node, state, enabled, modifier)
         "image" -> {
             val handle = when {
@@ -1822,13 +1824,39 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
             val count=checkNotNull(columns).length()
             // Columns share the width when each keeps 80 dp. A wider table scrolls sideways.
             val cell=if(constraints.hasBoundedWidth && maxWidth/count >= 80.dp) maxWidth/count else 140.dp
+            // The marked row and its marked cell (block 2 plan, D8). With visibleRows, more rows scroll inside the box, so the page does not scroll.
+            val markColumn=node.optString("markColumn")
+            // A compact width shows at most 6 rows, so a data form at its caps leaves its card above the strip (controller ruling, stage 5).
+            val shownRows=node.optInt("visibleRows").let {if(LocalConfiguration.current.smallestScreenWidthDp < DIALOGUE_WIDE_DP) minOf(it,COMPACT_TABLE_ROWS) else it}
+            val rowsScroll=rememberScrollState()
+            val box=if(node.has("visibleRows")) Modifier.heightIn(max=(TABLE_ROW_DP*shownRows).dp).testTag(TABLE_ROWS_TAG).verticalScroll(rowsScroll) else Modifier
+            // The top and the bottom of the marked row in the box: a mark under the shown rows scrolls into the box.
+            var markedRow by remember { mutableStateOf<IntRange?>(null) }
+            LaunchedEffect(selected, markedRow, rowsScroll.viewportSize) {
+                val row=markedRow ?: return@LaunchedEffect
+                if(row.last > rowsScroll.value+rowsScroll.viewportSize) rowsScroll.scrollTo(row.last-rowsScroll.viewportSize)
+                else if(row.first < rowsScroll.value) rowsScroll.scrollTo(row.first)
+            }
             Column(Modifier.horizontalScroll(rememberScrollState())) {
                 Row {repeat(count) {Text(columns.getJSONObject(it).getString("text"),Modifier.width(cell).padding(10.dp),style=MaterialTheme.typography.labelLarge)}}
-                repeat(rows.length()) {index -> val record=rows.getJSONObject(index)
-                    HorizontalDivider()
-                    val rowModifier=if(action.isNotEmpty()) Modifier.clickable(enabled=enabled,role=Role.Button) {event(action,ToolUiCatalog.stableKey(record))} else Modifier
-                    Row(rowModifier.heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
-                        repeat(count) {Text(ToolUiCatalog.value(record,columns.getJSONObject(it).getString("field")).toString(),Modifier.width(cell).padding(10.dp))}
+                Column(box) {
+                    repeat(rows.length()) {index -> val record=rows.getJSONObject(index)
+                        HorizontalDivider()
+                        val marked=node.has("selectedKeyBind") && selected == ToolUiCatalog.stableKey(record)
+                        val rowModifier=if(action.isNotEmpty()) Modifier.clickable(enabled=enabled,role=Role.Button) {event(action,ToolUiCatalog.stableKey(record))} else Modifier
+                        val markModifier=if(!node.has("selectedKeyBind")) Modifier else Modifier.semantics {this.selected=marked}
+                            .then(if(marked) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
+                        val place=if(marked) Modifier.onGloballyPositioned {val top=it.positionInParent().y.toInt(); markedRow=top..top+it.size.height} else Modifier
+                        Row(rowModifier.then(markModifier).then(place).heightIn(min=TABLE_ROW_DP.dp),verticalAlignment=Alignment.CenterVertically) {
+                            repeat(count) {
+                                val field=columns.getJSONObject(it).getString("field")
+                                val cellMarked=marked && field == markColumn
+                                Text(ToolUiCatalog.value(record,field).toString(),
+                                    (if(cellMarked) Modifier.background(MaterialTheme.colorScheme.primaryContainer).semantics {this.selected=true} else Modifier).width(cell).padding(10.dp),
+                                    fontWeight=if(cellMarked || marked && it == 0) FontWeight.Bold else null,
+                                    color=if(cellMarked) MaterialTheme.colorScheme.onPrimaryContainer else Color.Unspecified)
+                            }
+                        }
                     }
                 }
             }
@@ -1923,8 +1951,19 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
         }
     } else row(swipeModifier)
 }
-@Composable private fun NativeChart(node: JSONObject, state: JSONObject, modifier: Modifier, heading: String?) {
+/** The row height of a table, and the tag of the box of its rows that scrolls when it has more than visibleRows rows (block 2 plan, D3). */
+internal const val TABLE_ROW_DP=48
+private const val COMPACT_TABLE_ROWS=6
+internal const val TABLE_ROWS_TAG="tool_table_rows"
+/** A chart of at most this many points shows a label and a value at each point (block 2 plan, D8). */
+private const val LABELED_POINTS=8
+
+@Composable private fun NativeChart(node: JSONObject, state: JSONObject, enabled: Boolean, modifier: Modifier, heading: String?, event: (String,Any?) -> Unit) {
     val categories=ToolUiCatalog.value(state,node.getString("categories")) as JSONArray
+    // A chart with a mark: the marked category, and a tap on a point or its label moves the mark.
+    val action=node.optString("action")
+    val marked=if(node.has("selectedKeyBind")) ToolUiCatalog.value(state,node.getString("selectedKeyBind")) as String else ""
+    val markedIndex=(0 until categories.length()).firstOrNull {categories.get(it).toString() == marked} ?: -1
     val series=node.getJSONArray("series")
     val values = List(series.length()) { index ->
         ToolUiCatalog.value(state, series.getJSONObject(index).getString("bind")) as JSONArray
@@ -1964,13 +2003,24 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
             }
         } else {
             val range=ToolUiCatalog.chartRange(node,state)
-            Text("${range.first} — ${range.second}",style=MaterialTheme.typography.labelSmall)
-            Canvas(Modifier.fillMaxWidth().height(180.dp).semantics {contentDescription=description}) {
+            val labeled=categories.length() <= LABELED_POINTS
+            fun number(value: Any?)=if(value is Number && value.toDouble() % 1.0 == 0.0 && kotlin.math.abs(value.toDouble()) < 1e15) value.toLong().toString() else value.toString()
+            // A labeled chart shows each value over its point, so the range line would say the same a second time.
+            if(!labeled) Text("${range.first} — ${range.second}",style=MaterialTheme.typography.labelSmall)
+            else if(series.length() == 1) Row(Modifier.fillMaxWidth()) {
+                repeat(categories.length()) {Text(number(values.single().get(it)),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall,textAlign=TextAlign.Center,
+                    fontWeight=if(it == markedIndex) FontWeight.Bold else null,maxLines=1,overflow=TextOverflow.Ellipsis)}
+            }
+            val tap=if(action.isNotEmpty() && enabled) Modifier.pointerInput(categories.toString()) {
+                detectTapGestures {offset -> event(action,categories.get((offset.x/(size.width.toFloat()/categories.length())).toInt().coerceIn(0,categories.length()-1)).toString())}
+            } else Modifier
+            Canvas(Modifier.fillMaxWidth().height(180.dp).then(tap).semantics {contentDescription=description}) {
                 fun y(value: Double) = ((1.0-(value-range.first)/(range.second-range.first))*size.height).toFloat().coerceIn(0f,size.height)
                 val baseline=y(0.0)
                 drawLine(axis,Offset(0f,baseline),Offset(size.width,baseline),strokeWidth=1.dp.toPx())
                 values.forEachIndexed { s, points ->
-                    fun x(index: Int) = if(points.length() == 1) size.width/2 else index.toFloat()/(points.length()-1)*size.width
+                    // A labeled point sits over the middle of its label.
+                    fun x(index: Int) = if(labeled) (index+0.5f)*size.width/points.length() else if(points.length() == 1) size.width/2 else index.toFloat()/(points.length()-1)*size.width
                     if (kind == "area") {
                         val area = Path().apply {
                             moveTo(0f, baseline)
@@ -1986,19 +2036,29 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
                     }
                     repeat(points.length()) {i ->
                         val current=y(points.getDouble(i))
+                        // With a mark, the marked point keeps its color and the others are lighter.
+                        val color=if(markedIndex < 0 || i == markedIndex) colors[s] else colors[s].copy(alpha=.4f)
                         if(kind == "bar") {
                             val group=size.width/points.length(); val width=group/(series.length()+1)
                             val x=i*group+(s+0.5f)*width
-                            drawRect(colors[s],Offset(x,minOf(current,baseline)),Size(width*0.85f,maxOf(abs(baseline-current),1f)))
+                            drawRect(color,Offset(x,minOf(current,baseline)),Size(width*0.85f,maxOf(abs(baseline-current),1f)))
                         } else {
                             val x=x(i)
                             if(i > 0) drawLine(colors[s],Offset(x(i-1),y(points.getDouble(i-1))),Offset(x,current),strokeWidth=2.dp.toPx())
-                            drawCircle(colors[s],3.dp.toPx(),Offset(x,current))
+                            drawCircle(colors[s],(if(i == markedIndex) 6 else 3).dp.toPx(),Offset(x,current))
                         }
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {Text(categories.get(0).toString(),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall); if(categories.length()>1) Text(categories.get(categories.length()-1).toString(),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall,textAlign=TextAlign.End)}
+            if(labeled) Row(Modifier.fillMaxWidth()) {
+                repeat(categories.length()) {index ->
+                    val label=categories.get(index).toString()
+                    val press=if(action.isNotEmpty()) Modifier.clickable(enabled=enabled,role=Role.Button) {event(action,label)} else Modifier
+                    val mark=if(node.has("selectedKeyBind")) Modifier.semantics {selected=index == markedIndex} else Modifier
+                    Text(label,Modifier.weight(1f).then(press).then(mark),style=MaterialTheme.typography.labelSmall,textAlign=TextAlign.Center,
+                        fontWeight=if(index == markedIndex) FontWeight.Bold else null,maxLines=2,overflow=TextOverflow.Ellipsis)
+                }
+            } else Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {Text(categories.get(0).toString(),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall); if(categories.length()>1) Text(categories.get(categories.length()-1).toString(),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall,textAlign=TextAlign.End)}
             // The heading already names one series with its own text, so that caption would show the title a second time (L3 decision 1).
             val named = series.length() == 1 && series.getJSONObject(0).getString("text") == node.getString("text")
             if (!named) repeat(series.length()) {Text(series.getJSONObject(it).getString("text"),color=colors[it],style=MaterialTheme.typography.labelMedium)}

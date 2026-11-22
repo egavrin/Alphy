@@ -3,10 +3,9 @@ package com.alpha.assistant.ui
 import android.os.SystemClock
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.tools.ToolRecord
+import com.alpha.assistant.ui.LiveStageRig.Companion.SAID
+import com.alpha.assistant.ui.LiveStageRig.Companion.stepped
 import com.alpha.assistant.ui.TemplateTalk.Companion.SCREEN_REQUEST
-import com.alpha.assistant.voice.FakeLiveAudio
-import com.alpha.assistant.voice.FakeLiveTransport
-import com.alpha.assistant.voice.LIVE_RATE
 import com.alpha.assistant.voice.LiveProtocol.MARK
 import com.alpha.assistant.voice.LiveProtocol.SPOKEN_STEP
 import com.alpha.assistant.voice.LiveProtocol.USER_COMMAND
@@ -16,7 +15,6 @@ import com.alpha.assistant.voice.inputDelta
 import com.alpha.assistant.voice.liveDecision
 import com.alpha.assistant.voice.liveDelegation
 import com.alpha.assistant.voice.liveItemCreated
-import com.alpha.assistant.voice.outputAudio
 import com.alpha.assistant.voice.outputDelta
 import org.json.JSONObject
 import org.junit.After
@@ -29,12 +27,11 @@ import org.junit.Test
  * scripted voice, and scripted `decision.event` messages. Each scene is [STEPPED] with [SAYS] as its narration.
  */
 class ClassifierRehearsalTest {
-    private val fixture = ShellFixture("stage-classifier")
-    private val robot = ShellRobot("stage-classifier")
-    private val socket = FakeLiveTransport()
-    private val audio = FakeLiveAudio()
-    private val shell = TemplateShell(fixture, robot, socket)
-    @After fun remove() { LiveVoiceBridge.FREE_ANSWER_MOVES = true; shell.remove() }
+    private val rig = LiveStageRig("stage-classifier")
+    private val robot = rig.robot
+    private val socket = rig.socket
+    private val shell = rig.shell
+    @After fun remove() { LiveVoiceBridge.FREE_ANSWER_MOVES = true; rig.remove() }
 
     /** K3: next, go_to, back, and repeat move the step and say its sentence with no routing call. The chat keeps the words and the sentence. */
     @Test fun spokenCommandsMoveTheStepWithNoRoutingCall() = live { model, talk ->
@@ -58,6 +55,20 @@ class ClassifierRehearsalTest {
             "assistant" to SAYS[1], "user" to REPEAT, "assistant" to SAYS[1]), shell.messages(model).takeLast(8).map { it.role to it.text })
     }
 
+    /**
+     * Block 2 plan, V1: a continue command walks the rest of the steps as the routing press does, and starts no routing call. The first
+     * sentence of the walk goes on the hand-off, and the chat keeps the words of the person with that sentence.
+     */
+    @Test fun aContinueCommandWalksTheRestWithNoRoutingCall() = live { model, talk ->
+        scene(model)
+        val routed = talk.routed.size
+        command(CONTINUE_REQUEST, "p1", "d2", 2_000, classified(USER_COMMAND, "continue", 0.9), classified(USER_STEP, "none", 0.5))
+        robot.waitUntil(10_000) { "d2" to MARK + SAYS[1] in socket.commentary() }
+        assertTrue(model.liveWalking)
+        during(1_000) { assertEquals(routed, talk.routed.size) }
+        assertEquals(listOf("user" to CONTINUE_REQUEST, "assistant" to SAYS[1]), shell.messages(model).takeLast(2).map { it.role to it.text })
+    }
+
     /** K3: back at the first step answers «Это первый шаг.» and moves nothing. */
     @Test fun backAtTheFirstStepSaysSo() = live { model, talk ->
         val scene = scene(model)
@@ -72,7 +83,7 @@ class ClassifierRehearsalTest {
     @Test fun aWeakCommandGoesToTheRoutingCall() = live { model, talk ->
         scene(model)
         command(NEXT_REQUEST, "p1", "d2", 2_000, classified(USER_COMMAND, "next", 0.7))
-        robot.waitUntil(10_000) { routedOf(talk, NEXT_REQUEST) == 1 }
+        robot.waitUntil(10_000) { rig.routedOf(talk, NEXT_REQUEST) == 1 }
     }
 
     /** K3: only the answer of the last piece counts. A middle piece says back at 0.83, and the last piece says none: nothing moves. */
@@ -137,7 +148,7 @@ class ClassifierRehearsalTest {
         socket.emit(liveDelegation("d3", 5_600))
         SystemClock.sleep(400)
         socket.emit(liveDecision("p2", true, classified(USER_COMMAND, "next", 0.9)))
-        robot.waitUntil(10_000) { routedOf(talk, NEXT_REQUEST) == 1 }
+        robot.waitUntil(10_000) { rig.routedOf(talk, NEXT_REQUEST) == 1 }
     }
 
     /**
@@ -155,7 +166,7 @@ class ClassifierRehearsalTest {
         robot.waitUntil(10_000) { "d2" to MARK + SAYS[1] in socket.commentary() }
         shows(model, scene, NAIL)
         during(1_000) { assertEquals(1, socket.commentary().count { it.first == "d2" }) }
-        assertEquals(listOf(MARK + SAYS[0]), thinkings())
+        assertEquals(listOf(MARK + SAYS[0]), rig.thinkings())
         assertEquals(routed, talk.routed.size)
     }
 
@@ -209,25 +220,25 @@ class ClassifierRehearsalTest {
     /** K5: in a walk, the voice starts the next sentence with changed words, and the classifier names its step: the step moves, and the next sentence goes out. */
     @Test fun aChangedWalkSentenceMovesByTheClassifier() = live { model, _ ->
         val scene = scene(model)
-        speak(SAYS[0], marker = 1, atMs = 2_000)
-        robot.waitUntil { thinkings().size == 2 }
+        rig.speak(SAYS[0], marker = 1, atMs = 2_000)
+        robot.waitUntil { rig.thinkings().size == 2 }
         socket.emit(outputDelta("Железный гвоздь весь сплошной, поэтому тонет.", 4_000, 4_600, "o2"))
         socket.emit(liveDecision("o2", false, classified(SPOKEN_STEP, "2", 0.6)))
-        robot.waitUntil { thinkings().size == 3 }
-        assertEquals(SAYS.map { MARK + it }, thinkings())
+        robot.waitUntil { rig.thinkings().size == 3 }
+        assertEquals(SAYS.map { MARK + it }, rig.thinkings())
         shows(model, scene, NAIL)
     }
 
     /** K5: in a walk, an answer for an earlier step or for a step two ahead moves nothing. */
     @Test fun aWalkIgnoresOtherSteps() = live { model, _ ->
         val scene = scene(model)
-        speak(SAYS[0], marker = 1, atMs = 2_000)
-        robot.waitUntil { thinkings().size == 2 }
+        rig.speak(SAYS[0], marker = 1, atMs = 2_000)
+        robot.waitUntil { rig.thinkings().size == 2 }
         socket.emit(outputDelta("Сначала вспомним.", 4_000, 4_400, "o2"))
         socket.emit(liveDecision("o2", false, classified(SPOKEN_STEP, "1", 0.9)))
         socket.emit(outputDelta(" А потом посмотрим.", 4_400, 4_800, "o3"))
         socket.emit(liveDecision("o3", false, classified(SPOKEN_STEP, "3", 0.9)))
-        during(1_000) { assertEquals(2, thinkings().size); assertEquals(STEPS[0], shipSubject(shell.stored(model, scene.id))) }
+        during(1_000) { assertEquals(2, rig.thinkings().size); assertEquals(STEPS[0], shipSubject(shell.stored(model, scene.id))) }
     }
 
     /** K6: a reply to a host text moves nothing. A free answer of the voice that names an earlier step moves the picture back. */
@@ -284,13 +295,28 @@ class ClassifierRehearsalTest {
             assertTrue(socket.itemCreates()[1].second.contains(OTHER_SAYS[0]))
         }
 
+    /** Block 2 plan, D10: a data form after a stepped scene deletes the scene item and sends none, because a data form has no steps. */
+    @Test fun aDataFormAfterASteppedSceneDeletesTheSceneItem() =
+        live(StreamTalk(listOf(stepped(), Streamed(halves(PLANETS_TABLE), gapMs = 30)))) { model, _ ->
+            val scene = scene(model)
+            val (create, _) = socket.itemCreates().single()
+            socket.emit(liveItemCreated(create, "item_1"))
+            socket.say(SCREEN_REQUEST, "d2", 3_000)
+            robot.waitUntil(60_000) { model.stageToolId.let { it != null && it != scene.id } && !model.tools.busy }
+            fun items() = socket.sent.map(::JSONObject).filter { it.getString("type").startsWith("decision.item.") }
+            robot.waitUntil(30_000) { items().size == 2 }
+            during(1_000) { assertEquals(listOf("decision.item.create", "decision.item.delete"), items().map { it.getString("type") }) }
+            assertEquals("item_1", items()[1].getString("item_id"))
+            assertTrue(appFileOf(shell.stored(model, checkNotNull(model.stageToolId))).orEmpty().startsWith("table("))
+        }
+
     /** K2: with no stepped scene on the stage, the host sends no scene item, and a command goes to the routing call. */
     @Test fun withNoSteppedSceneAnswersAreIgnored() = live(StreamTalk(listOf(Streamed(halves(SAID), gapMs = 30)))) { model, talk ->
         socket.say(SCREEN_REQUEST, "d1", 100)
         shell.shown(model)
-        robot.waitUntil(30_000) { thinkings().isNotEmpty() }
+        robot.waitUntil(30_000) { rig.thinkings().isNotEmpty() }
         command(SOME_NEXT, "p1", "d2", 3_000, classified(USER_COMMAND, "next", 0.95))
-        robot.waitUntil(10_000) { routedOf(talk, SOME_NEXT) == 1 }
+        robot.waitUntil(10_000) { rig.routedOf(talk, SOME_NEXT) == 1 }
         assertTrue(socket.itemCreates().isEmpty())
     }
 
@@ -299,27 +325,24 @@ class ClassifierRehearsalTest {
         live(StreamTalk(listOf(Streamed(halves(TALKING), gapMs = 30), Streamed(listOf("$STEPS_CONTROL\n") + NARRATION_LINES.map { "$it\n" }, gapMs = 0)))) { model, _ ->
             socket.say(SCREEN_REQUEST, "d1", 100)
             val scene = shell.shown(model)
-            assertTrue(thinkings().isEmpty())
+            assertTrue(rig.thinkings().isEmpty())
             val count = shell.messages(model).size
             socket.say(TemplateTalk.CHANGE_REQUEST, "d2", 2_000)
             shell.waitForTheAnswer(model, count)
-            robot.waitUntil(30_000) { thinkings().isNotEmpty() }
-            assertEquals(listOf(MARK + SAYS[0]), thinkings())
+            robot.waitUntil(30_000) { rig.thinkings().isNotEmpty() }
+            assertEquals(listOf(MARK + SAYS[0]), rig.thinkings())
             assertTrue(model.liveWalking)
             assertEquals(STEPS[0], shipSubject(shell.stored(model, scene.id)))
         }
 
     private fun live(talk: StreamTalk = StreamTalk(listOf(stepped())), test: (ShellViewModel, StreamTalk) -> Unit) =
-        shell.live(talk, audio = audio) { _, model, _ -> test(model, talk) }
-
-    private fun stepped() = Streamed(halves(STEPPED) + halves(NARRATION_LINES.joinToString("\n")), gapMs = 30)
+        rig.live(talk) { model, _, _ -> test(model, talk) }
 
     /** The spoken screen request on an empty stage: the stored scene, after its walk started and its scene item went to the classifier. */
     private fun scene(model: ShellViewModel): ToolRecord {
-        socket.say(SCREEN_REQUEST, "d1", 100)
-        val scene = shell.shown(model)
-        robot.waitUntil(30_000) { thinkings().isNotEmpty() && socket.itemCreates().isNotEmpty() }
-        assertEquals(listOf(MARK + SAYS[0]), thinkings())
+        val scene = rig.steppedScene(model)
+        robot.waitUntil(30_000) { socket.itemCreates().isNotEmpty() }
+        assertEquals(listOf(MARK + SAYS[0]), rig.thinkings())
         return scene
     }
 
@@ -330,21 +353,11 @@ class ClassifierRehearsalTest {
         socket.emit(liveDelegation(id, atMs + 600))
     }
 
-    /** The voice says [text] in one transcript piece with 600 ms of voiced audio of [marker]. */
-    private fun speak(text: String, marker: Int, atMs: Long) {
-        socket.emit(outputDelta(text, atMs, atMs + 600))
-        socket.emit(outputAudio(marker, LIVE_RATE * 6 / 10))
-    }
-
     /** The stored step of [scene] becomes [step] and stays it for 500 ms. */
     private fun shows(model: ShellViewModel, scene: ToolRecord, step: String) {
         robot.waitUntil(10_000) { shipSubject(shell.stored(model, scene.id)) == step }
         during(500) { assertEquals(step, shipSubject(shell.stored(model, scene.id))) }
     }
-
-    private fun routedOf(talk: StreamTalk, text: String) = talk.routed.count { it.decisionContext?.originalUserTurn?.text == text }
-
-    private fun thinkings() = socket.thinking().map { it.second }
 
     private companion object {
         const val GO_TO = "Покажи лодку"
@@ -354,7 +367,9 @@ class ClassifierRehearsalTest {
         const val STEPS_CONTROL = "control = steps(\"$STEP_CONTROL\", [\"Корабль\", \"$NAIL\", \"Лодка\"], \"Корабль\")"
         val OTHER_SAYS = listOf("Корабль лёгкий для своего размера.", "$NAIL тяжёлый для своего размера.", "Лодка лёгкая и плавает.")
         val OTHER_LINES = OTHER_SAYS.mapIndexed { index, say -> "say${index + 1} = \"$say\"" }
-        /** [TALKING], whose control is a choice, with one narration line. */
-        val SAID get() = TALKING + "\nsay = \"Полый корабль вытесняет много воды и поэтому плавает.\""
+        /** A table of the data family with its narration line (block 2 plan, D3). */
+        val PLANETS_TABLE = listOf("table(\"Планеты\", lang=\"ru\")", "control = mark(\"Марс\")", "head = head([\"Планета\", \"Год, дней\"])",
+            "r1 = row(\"Земля\", [365])", "r2 = row(\"Марс\", [687])", "card = card(\"Год Марса длиннее\", \"Марс идёт вокруг Солнца почти два земных года.\")",
+            "say = \"Смотри: год Марса почти вдвое длиннее земного.\"").joinToString("\n")
     }
 }

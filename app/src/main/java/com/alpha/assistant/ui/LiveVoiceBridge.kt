@@ -393,14 +393,17 @@ internal class LiveVoiceBridge(
 
     /**
      * The follow signal (plan "one scene", decisions 19 and 20): the first reply of a person turn with no hand-off and no host text after it
-     * makes the spoken pair, and the words of the voice go to the pair. Implementation choice: the follow call starts at the first sentence
-     * end of the voice, or at the reply end, so that the call sees whether the voice answered or only promised an answer (C5).
+     * makes the spoken pair, and the words of the voice go to the pair. The follow call starts at the first sentence end of the voice,
+     * [FOLLOW_START_MS] after the voice began its reply, or at the reply end, the earliest of the three (block 2 plan, V2). So the call sees
+     * whether the voice answered or only promised an answer (C5), and one long sentence does not delay the scene.
      */
     private fun followWords(text: String, replyStart: Boolean) {
         val turn = personTurn?.takeIf { !it.handOff && !it.acted && session.texts == it.texts } ?: return
         if (turn.pair == null) {
             if (!replyStart || turn.words.isBlank()) return
             turn.pair = model.startSpokenPair(turn.words.toString())
+            // A later turn closes this one, so the timer starts no call for it then.
+            model.viewModelScope.launch { delay(FOLLOW_START_MS); if (personTurn === turn) follow(turn) }
         }
         turn.said.append(text)
         model.appendSpokenWords(checkNotNull(turn.pair), text)
@@ -519,6 +522,13 @@ internal class LiveVoiceBridge(
         fun step(min: Double) = of(LiveProtocol.USER_STEP)?.takeIf { it.confidence >= min }?.choice?.toIntOrNull()?.takeIf { it in 1..screen.steps.size }
         val command = of(LiveProtocol.USER_COMMAND)
         if (command != null && command.choice in COMMANDS && command.confidence >= COMMAND_MIN) {
+            // V1: continue walks the rest of the steps as the routing press does. At the last step it goes to the routing call, as next does.
+            if (command.choice == "continue") {
+                if (present >= screen.steps.size) return false
+                val say = answer(turn, handOff, words)
+                rest(screen.toolId)?.let { say(LiveProtocol.MARK + it, it) } ?: say(PRESS_FAILED, PRESS_FAILED)
+                return true
+            }
             val target = when (command.choice) {
                 "next" -> present + 1
                 "back" -> present - 1
@@ -536,18 +546,26 @@ internal class LiveVoiceBridge(
 
     /** A spoken command (K3): the step moves with who voice, and the voice says its sentence. The chat keeps the words and the sentence. */
     private fun act(turn: PersonTurn, screen: ShownScreen, target: Int, handOff: String?, words: String) {
-        turn.acted = true
         narrator.stop(WalkStop.ANSWER)
-        turn.pair?.let(model::dropSpokenPair); turn.pair = null
-        model.cancelFollow()
-        fun say(text: String, saved: String) {
-            if (handOff != null) session.commentary(handOff, text) else session.thinking(text)
-            model.saveVoiceTurn(words, saved)
-        }
+        val say = answer(turn, handOff, words)
         if (target < 1) { say(FIRST_STEP, FIRST_STEP); return }
         val record = model.tools.tools.find { it.id == screen.toolId }
         val sentence = record?.let { SceneNarration.of(appFileOf(it)).sentence(target) } ?: screen.steps[target - 1]
         moveTo(screen, target, "command") { ran -> if (ran) say(LiveProtocol.MARK + sentence, sentence) else say(PRESS_FAILED, PRESS_FAILED) }
+    }
+
+    /**
+     * A command answers [turn]: its spoken pair and its follow call stop. The result says a sentence to the voice, on the hand-off when there
+     * is one, and the chat keeps the words of the person with the saved text.
+     */
+    private fun answer(turn: PersonTurn, handOff: String?, words: String): (String, String) -> Unit {
+        turn.acted = true
+        turn.pair?.let(model::dropSpokenPair); turn.pair = null
+        model.cancelFollow()
+        return { text, saved ->
+            if (handOff != null) session.commentary(handOff, text) else session.thinking(text)
+            model.saveVoiceTurn(words, saved)
+        }
     }
 
     /** Moves the stepped [screen] to [step] with who voice. [then] gets whether the stage shows the step. */
@@ -847,8 +865,10 @@ internal class LiveVoiceBridge(
         const val FREE_MIN = 0.6
         /** K3: the end of a phrase with no hand-off, and the wait for the answer of the newest piece at a hand-off. */
         const val PHRASE_END_MS = 1_000L
+        /** V2: the latest start of the follow call after the voice began its reply. */
+        const val FOLLOW_START_MS = 2_500L
         const val HAND_OFF_WAIT_MS = 300L
-        val COMMANDS = setOf("next", "back", "repeat", "go_to")
+        val COMMANDS = setOf("next", "continue", "back", "repeat", "go_to")
         /** The answer of «back» at the first step (K3). */
         const val FIRST_STEP = "Это первый шаг."
         /** The longest subject of the work card (decision 21). */

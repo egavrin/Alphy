@@ -965,7 +965,7 @@ class CloudWorkflowTest {
     private fun decision(text: String = "A sourced answer [1]", kind: String = "answer", search: String = "none", brief: String = "") =
         JSONObject().put("kind",kind).put("text",text).put("brief",brief).put("search",search).toString()
 
-    /** [show]: a spoken request with the kind screen on offer, whose schema also has the boolean show. */
+    /** [show]: a spoken request with the kind screen on offer, whose schema also has the boolean show and the family (block 2 plan, D1). */
     private fun Request.requireStrictDecision(image: Boolean = false, show: Boolean = false): JSONObject {
         assertEquals("/beta/chat/completions", path)
         assertEquals("deepseek-flash", json.getString("model"))
@@ -991,13 +991,14 @@ class CloudWorkflowTest {
         assertEquals("object", parameters.getString("type"))
         assertFalse(parameters.getBoolean("additionalProperties"))
         val strings = setOf("kind", "text", "brief", "search") + if (image) setOf("image") else emptySet()
-        val fields = strings + if (show) setOf("show") else emptySet()
+        val fields = strings + if (show) setOf("show", "family") else emptySet()
         val required = parameters.getJSONArray("required")
         assertEquals(fields, (0 until required.length()).map(required::getString).toSet())
         val properties = parameters.getJSONObject("properties")
         assertEquals(fields, properties.keys().asSequence().toSet())
         strings.forEach { assertEquals("string", properties.getJSONObject(it).getString("type")) }
         if (show) assertEquals("boolean", properties.getJSONObject("show").getString("type"))
+        if (show) assertEquals("[\"explain\",\"data\"]", properties.getJSONObject("family").getJSONArray("enum").toString())
         val policies = properties.getJSONObject("search").getJSONArray("enum")
         assertEquals(setOf("none", "optional", "required"), (0 until policies.length()).map(policies::getString).toSet())
         return properties
@@ -1727,7 +1728,9 @@ class CloudWorkflowTest {
         system(voice).put("content", system(voice).getString("content").replace("\n" + ChatToolReply.voiceScreenInstructions, ""))
         val parameters = voice.getJSONArray("tools").getJSONObject(0).getJSONObject("function").getJSONObject("parameters")
         assertNotNull(parameters.getJSONObject("properties").remove("show"))
+        assertNotNull(parameters.getJSONObject("properties").remove("family"))
         val required = parameters.getJSONArray("required")
+        assertEquals("family", required.remove(required.length() - 1))
         assertEquals("show", required.remove(required.length() - 1))
         assertEquals(typed.toString(), voice.toString())
     }
@@ -1767,6 +1770,33 @@ class CloudWorkflowTest {
         assertTrue("show" in (0 until required.length()).map(required::getString))
         assertFalse(ChatToolReply.decisionSchema(allowAutomation = false, allowWeatherLocation = false).getJSONObject("properties").has("show"))
         assertTrue("Set show to true" in ChatToolReply.voiceScreenInstructions)
+    }
+
+    /** Block 2 plan, D1: the routing decision of a screen names its family. Only a screen keeps data, and the encoded decision keeps it. */
+    @Test fun aScreenDecisionCarriesItsFamily() {
+        fun withFamily(json: String, family: Any) = JSONObject(json).put("show", false).put("family", family).toString()
+        fun rule(json: String, allowScreen: Boolean = true) =
+            (runCatching { ChatToolReply.decode(json, allowScreen) }.exceptionOrNull() as? CloudFailure)?.shape?.rule
+        val screen = screenDecision()
+        val answer = decision("Луна светит отражённым светом.")
+        val data = ChatToolReply.decode(withFamily(screen, "data"), allowScreen = true)
+        assertEquals("data", data.family)
+        assertTrue(data.isData)
+        assertEquals("explain", ChatToolReply.decode(withFamily(screen, "explain"), allowScreen = true).family)
+        assertEquals("explain", ChatToolReply.decode(screen, allowScreen = true).family)
+        // The strict schema sends family with each kind: another kind reads it as explain and stays valid.
+        assertEquals(ChatToolReply.Decision("answer", "Луна светит отражённым светом.", "", "none"), ChatToolReply.decode(withFamily(answer, "data"), allowScreen = true))
+        assertEquals("decision.family", rule(withFamily(screen, "practice")))
+        assertEquals("decision.fields", rule(JSONObject(answer).put("family", "explain").toString(), allowScreen = false))
+        // The encoded decision, which the app decodes again, keeps data. An explain screen encodes as before.
+        assertEquals(data, ChatToolReply.decode(ChatToolReply.encode(data), allowScreen = true))
+        assertEquals(screen, ChatToolReply.encode(ChatToolReply.decode(withFamily(screen, "explain"), allowScreen = true)))
+        val spoken = ChatToolReply.decisionSchema(allowAutomation = false, allowWeatherLocation = false, allowScreen = true)
+        assertEquals("[\"explain\",\"data\"]", spoken.getJSONObject("properties").getJSONObject("family").getJSONArray("enum").toString())
+        val required = spoken.getJSONArray("required")
+        assertTrue("family" in (0 until required.length()).map(required::getString))
+        assertFalse(ChatToolReply.decisionSchema(allowAutomation = false, allowWeatherLocation = false).getJSONObject("properties").has("family"))
+        assertTrue("Set family to data" in ChatToolReply.voiceScreenInstructions)
     }
 
     /** Task Db2: the strict schema of a spoken request makes the model send show with each kind, and each kind passes with one call. */

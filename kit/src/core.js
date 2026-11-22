@@ -17,7 +17,9 @@ export const CATALOG = {
   TextField: ["label", "bind"], NumberField: ["label", "bind"], Slider: ["label", "bind"], RangeSlider: ["label", "bind"],
   Toggle: ["label", "bind"], CheckBox: ["label", "bind"],
   Segmented: ["label", "bind", "options"], Select: ["label", "bind", "options"],
-  List: ["items", "template", "group"], Chart: ["items", "point", "value", "label"],
+  // A Chart and a Table with bind= mark one point or row: the bound value is its label, and a tap on a point or a row sets it (data forms).
+  // column= of a Table marks the cell of that column (from 0) in the marked row.
+  List: ["items", "template", "group"], Chart: ["items", "point", "value", "label", "bind"], Table: ["label", "heads", "rows", "bind", "column"],
   Tabs: ["titles", "groups", "label"], Dialog: ["title", "children"], DateField: ["label", "bind"], TimeField: ["label", "bind"],
   Picture: ["text", "found"], Choices: ["label", "bind", "options"],
   // The host's own countdown: it keeps its time and has its own buttons and alert (Alphy's foreground timer).

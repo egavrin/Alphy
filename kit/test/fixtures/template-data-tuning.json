@@ -1,0 +1,22 @@
+[
+ {"id": "x-cheetah-lion", "request": "Compare a cheetah and a lion.", "expect": "data"},
+ {"id": "x-planets-size", "request": "Покажи планеты Солнечной системы таблицей: диаметр и расстояние от Солнца.", "expect": "data"},
+ {"id": "x-terrestrial-temp", "request": "Нарисуй график средней температуры на планетах земной группы.", "expect": "data"},
+ {"id": "x-noble-gases", "request": "Покажи благородные газы таблицей: символ и номер.", "expect": "data"},
+ {"id": "x-elephant-giraffe", "request": "Сравни слона и жирафа.", "expect": "data"},
+ {"id": "x-rates-nodata", "request": "Покажи таблицей курс доллара и евро.", "expect": "nodata"},
+ {"id": "x-heart-outside", "request": "Покажи, как кровь течёт по сердцу.", "expect": "outside"},
+ {"id": "x-laliga-table", "request": "Покажи турнирную таблицу Ла Лиги.", "expect": "data",
+  "reply": "Источники не заменяют независимую проверку.\n\nНашёл данные о лидерах Ла Лиги, но не полную таблицу. По данным источника, «Барселона» опережает «Реал Мадрид» на три очка.",
+  "fixture": "derived", "from": "evidence/ux-2026-11-21/runs/lane-b/live-655d1dfac2fd/step-4.appfile.txt and replay.json step 4",
+  "sources": [{"title": "LaLiga table", "url": "https://sportnewsafrica.com/en/fixtures/laliga/table/",
+   "summary": "LaLiga standings as of 21 November 2026, 19:30 UTC: Barcelona 33 points, Real Madrid 30 points."}]},
+ {"id": "x-moscow-today-nodata", "request": "Покажи погоду в Москве на сегодня таблицей.", "expect": "nodata",
+  "reply": "Источники не заменяют независимую проверку.\n\nДля Москвы доступен источник с прогнозом погоды [1], но полученные данные не содержат прогноза на сегодня. Поэтому я не могу достоверно назвать температуру или осадки.",
+  "fixture": "derived", "from": "evidence/one-scene/live-3/live-3-uxWeather/live-311179c6706c/replay.json step 1",
+  "sources": [{"title": "Погода в Москве", "url": "https://yandex.ru/pogoda/ru/moscow",
+   "summary": "Прогноз погоды в Москве на 10 дней: температура воздуха, осадки, ветер и давление по часам."}]},
+ {"id": "x-moscow-population", "request": "Покажи на графике, как росло население Москвы.", "expect": "data", "fixture": "hand",
+  "sources": [{"title": "Население Москвы", "url": "https://ru.wikipedia.org/wiki/Население_Москвы",
+   "summary": "Численность населения Москвы: 2010 год — 11,5 млн человек, 2015 год — 12,2 млн, 2020 год — 12,7 млн, 2024 год — 13,1 млн."}]}
+]

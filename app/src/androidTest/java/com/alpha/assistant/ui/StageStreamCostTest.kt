@@ -24,7 +24,7 @@ import org.junit.Test
  *
  * The full suite skips this test: a timing check of 0.3 s fails by chance under host load. A gate run names its count of pairs of each file
  * with `-e stageStreamCostPairs 15`, and its proof adds `-e previewHoldMs 500` and must fail. Five pairs do not detect a hold of 500 ms: in
- * one run with that hold, the median of ship was 157 ms.
+ * one run with that hold, the median of ship was 157 ms. `-e stageStreamCostFiles table-caps` runs only the named files (block 2 plan, stage 5).
  */
 class StageStreamCostTest {
     private val robot = ShellRobot("stage-stream-cost")
@@ -37,7 +37,8 @@ class StageStreamCostTest {
         // A run with -e previewHoldMs 500 holds each preview script that long and must fail: the proof that the pairs see a delay (Step 2).
         AppFileCompiler.previewHoldMs = arguments.getString("previewHoldMs")?.toLong() ?: 0
         val misses = mutableListOf<String>()
-        for (name in FILES) {
+        val named = arguments.getString("stageStreamCostFiles")?.split(",")?.map(String::trim)
+        for (name in FILES.filter { named == null || it in named }) {
             val file = appFilePlan("template/$name")
             val differences = List(checkNotNull(pairs)) { pair ->
                 val order = if (pair % 2 == 0) listOf(true, false) else listOf(false, true)
@@ -57,8 +58,10 @@ class StageStreamCostTest {
 
     /** The time from the end of speech to controls_on of one spoken screen whose template reply is [file], with the stream on or off. */
     private fun controlsOn(file: String, stream: Boolean): Long {
-        // The deltas end with three narration lines, so the controls come on when the first one starts (plan "one scene", Task 27).
-        val lines = (file.lines().filter { it.isNotBlank() } + NARRATION_LINES).map { "$it\n" }
+        // The deltas end with three narration lines, so the controls come on when the first one starts (plan "one scene", Task 27). A form of
+        // the data family has its own narration line.
+        val data = file.lineSequence().first { it.isNotBlank() }.trimStart().substringBefore('(') in setOf("compare", "table", "chart", "nodata")
+        val lines = (file.lines().filter { it.isNotBlank() } + if (data) emptyList() else NARRATION_LINES).map { "$it\n" }
         val gaps = listOf(FIRST_MS) + List(lines.size - 1) { (LAST_MS - FIRST_MS) / (lines.size - 1) }
         val fixture = ShellFixture("stage-stream-cost")
         val socket = FakeLiveTransport()
@@ -82,8 +85,8 @@ class StageStreamCostTest {
     }
 
     private companion object {
-        /** The example files of design section 1 (Global Constraints). */
-        val FILES = listOf("ship", "word-parts", "majority")
+        /** The example files of design section 1 (Global Constraints), and a table at its caps (block 2 plan, stage 5). */
+        val FILES = listOf("ship", "word-parts", "majority", "table-caps")
         const val FIRST_MS = 1_700L
         const val LAST_MS = 4_500L
         /** The bar of gate 1b: the stream adds at most 0.3 s to controls on. */

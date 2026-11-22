@@ -1203,8 +1203,8 @@ The user reviews and approves the plan before any device action.
                 val candidate = ChatToolReply.decode(completed.text, allowScreen, allowPress)
                 requireSameOperation(decision, candidate)
                 if (candidate.isMiniApp) ChatToolReply.requireBriefFits(candidate.brief, allowance)
-                // The routing call reads the words of the request for show, so a grounded screen keeps the show of the routing decision.
-                accept(candidate.copy(show = decision.show && candidate.isScreen))
+                // The routing call reads the words of the request for show and family, so a grounded screen keeps them from the routing decision.
+                accept(candidate.copy(show = decision.show && candidate.isScreen, family = if (candidate.isScreen) decision.family else "explain"))
             }
         }
         session.checkActive(currentCoroutineContext())

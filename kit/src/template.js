@@ -13,6 +13,7 @@
 import { DslError, parseExpression, parseLine, show } from "./dsl.js";
 import { BUDGET, HEIGHT, SENTENCE_END, TEMPLATE_HEAD, WIDTH, colorFault, colored, cut, cutLong, headFault, isText, nodesIn, numberOf } from "./form-base.js";
 import { FORMS_BY_WORD } from "./forms.js";
+import { DATA_WORDS, checkedValues, numbersIn, rejectFile, sourceFault } from "./form-data.js";
 
 export { BUDGET, TEMPLATE_HEAD } from "./form-base.js";
 
@@ -27,8 +28,12 @@ function lineOf(raw) {
 }
 /** A narration line (plan "one scene", decision 2): say beside a slider, a choice, or no control, and say1 to sayN beside a steps control. */
 const NARRATION = /^say(?:[1-9]\d*)?$/;
-/** The place of each kind of line in the fixed order. The narration lines come last. */
-const rank = (name, word) => (name === word ? 0 : name === "control" ? 1 : name === "card" ? 3 : NARRATION.test(name) ? 4 : 2);
+/**
+ * The place of each kind of line in the fixed order. The narration lines come last. The head of a table and the things of a compare come before
+ * the rows, and the source line of a data form, which the host writes, comes after the card.
+ */
+const rank = (name, word) => (name === word ? 0 : name === "control" ? 1 : name === "head" || /^t[1-3]$/.test(name) ? 1.5 : name === "card" ? 3 : name === "source" ? 3.5
+  : NARRATION.test(name) ? 4 : 2);
 /**
  * A narration line: its sentence with each run of space as one space, cut to BUDGET.say, as say = "<JSON string>", so the host reads it as JSON.
  * Null for a line that is no text or has no sentence end inside the cap: a narration line draws nothing, so it is left out with no fault.
@@ -50,7 +55,7 @@ export function readTemplate(text) {
   const [first = "", ...rest] = text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#")), word = TEMPLATE_HEAD.exec(first)?.[1], form = FORMS_BY_WORD[word];
   const faults = [], lines = [], fault = (name, message) => { faults.push(`${name}: ${message}`); return message; };
   const read = (raw, parse) => { try { return parse(raw.trim()); } catch (failure) { if (failure instanceof DslError) return failure; throw failure; } };
-  const head = read(first, parseExpression), headless = head instanceof DslError ? head.message : headFault(head, word);
+  const head = read(first, parseExpression), headless = head instanceof DslError ? head.message : headFault(head, word, form.head) ?? form.headFault?.(head) ?? null;
   if (headless) fault(word, headless);
   lines.push({ name: word, raw: first.trim(), tree: headless ? null : head });
   for (const raw of rest) {
@@ -64,17 +69,18 @@ export function readTemplate(text) {
       lines.push({ name, raw: kept ?? raw.trim(), tree: kept && { k: "lit", v: name } });
       continue;
     }
-    if (name !== "control" && name !== "card" && !form.part.test(name)) { fault(name, `the template ${word} has no line ${name}. Its lines are ${form.lines}`); continue; }
+    if (name !== "control" && name !== "card" && !form.part.test(name) && !(name === "source" && form.family)) { fault(name, `the template ${word} has no line ${name}. Its lines are ${form.lines}`); continue; }
     if (lines.some((line) => line.name === name)) { fault(name, `this is a second line ${name}. Each line has its own name`); continue; }
     const entry = read(raw, parseLine);
     let tree = entry instanceof DslError ? null : entry.tree, message = entry instanceof DslError ? entry.message : null, source = raw.trim();
     if (tree && name === "control") message = entry.kind === "state" ? (isText(tree) || numberOf(tree) !== undefined ? null : "$/v = VALUE takes a number or a text in quotes") : form.controlFault(tree);
     else if (tree) {
       // The kept line has the cut text, so the stored file and a later change have it too.
-      const short = cutLong(tree, name, word);
-      if (short !== tree) { tree = short; source = `${name} = ${show(tree)}`; }
+      const long = cutLong(tree, name, word), short = form.cut ? form.cut(long, name) : long;
+      if (show(short) !== show(tree)) { tree = short; source = `${name} = ${show(tree)}`; }
       const shape = name !== "card" && word === "scene", path = nodesIn(tree, (node) => node.k === "path" && !readsV(node))[0];
-      message = (name === "card" ? form.cardFault(tree) : form.partFault(tree)) ?? (path ? `a line reads only $/v, the value of the control, and this line reads ${show(path)}` : null);
+      message = (name === "card" ? form.cardFault(tree) : name === "source" ? sourceFault(tree) : form.partFault(tree))
+        ?? (path ? `a line reads only $/v, the value of the control, and this line reads ${show(path)}` : null);
       if (shape && !message) message = colorFault(tree = colored(tree));
       // The choice of items shows their labels, so it cannot tell two items of one label apart.
       const twin = !message && word === "items" && name !== "card" && lines.find((line) => line.tree && FORMS_BY_WORD.items.part.test(line.name) && line.tree.args[0].v === tree.args[0].v);
@@ -82,6 +88,17 @@ export function readTemplate(text) {
     }
     if (message) fault(name, message);
     lines.push({ name, raw: source, tree: message ? null : tree });
+  }
+  // The faults that need more than one line, such as a row with fewer values than the columns of the form.
+  for (const [name, message] of form.context?.(lines) ?? []) {
+    const line = lines.find((one) => one.name === name && one.tree);
+    if (line) { fault(name, message); line.tree = null; }
+  }
+  // The voice of a nodata form says its card (D5): a file with no narration line gets say with the text of the card.
+  const card = lines.find((line) => line.name === "card" && line.tree);
+  if (word === "nodata" && !lines.some((line) => NARRATION.test(line.name)) && isText(card?.tree.args[1])) {
+    const say = narrationOf("say", `say = ${JSON.stringify(card.tree.args[1].v)}`);
+    if (say) lines.push({ name: "say", raw: say, tree: { k: "lit", v: "say" } });
   }
   lines.sort((a, b) => rank(a.name, word) - rank(b.name, word));
   return { word, lines, faults };
@@ -94,7 +111,7 @@ export function readTemplate(text) {
  */
 export function mergeTemplate(stored, reply) {
   let lines = stored.split("\n").map(lineOf).filter((line) => line && !line.gone);
-  const last = (test) => lines.reduce((found, line, index) => (test(line) ? index : found), -1), part = (line) => /^[si]\d+$/.test(line.name);
+  const last = (test) => lines.reduce((found, line, index) => (test(line) ? index : found), -1), part = (line) => /^(?:[sitrp]\d+|head)$/.test(line.name);
   for (const line of reply.split("\n").map(lineOf).filter(Boolean)) {
     if (line.gone) { lines = lines.filter((one) => one.head || one.name !== line.gone); continue; }
     const same = lines.findIndex((one) => (line.head ? one.head : !one.head && one.name === line.name));
@@ -103,6 +120,19 @@ export function mergeTemplate(stored, reply) {
     lines.splice(line.head ? 0 : part(line) ? Math.max(last(part), last((one) => one.name === "control"), head) + 1 : line.name === "control" ? head + 1 : lines.length, 0, line);
   }
   return lines.map((line) => line.raw).join("\n") + "\n";
+}
+
+/**
+ * The host check of a searched data form (block 2 plan, decision 3): each number of a data cell or of a point is in the source excerpts.
+ * A form that passes gets the host line source = source(SITE, TIME), so it shows its source. A form with a number that no excerpt holds
+ * becomes a nodata file with the reason (rejected is that value). A file that is no data form, or nodata, stays as it is.
+ */
+export function checkData(text, { excerpts, site, time }) {
+  const read = isTemplateFile(text) ? readTemplate(text) : null, head = read?.lines[0].tree;
+  if (!head || !DATA_WORDS.has(read.word) || read.word === "nodata") return { text, rejected: null };
+  const known = new Set(numbersIn(excerpts)), rejected = checkedValues(read).find((value) => numbersIn(value).some((number) => !known.has(number)));
+  if (rejected !== undefined) return { text: rejectFile(head, rejected), rejected };
+  return { text: mergeTemplate(text, `source = source(${show({ k: "lit", v: site })}, ${show({ k: "lit", v: time })})`), rejected: null };
 }
 
 /** The parts of a template that are drawn: each part line with no fault that is not left out. */
@@ -130,7 +160,8 @@ function startOf(read, leftOut) {
 export function expandTemplate(read, leftOut) {
   const [{ tree: head }] = read.lines, parts = drawnParts(read, leftOut), line = (name) => read.lines.find((one) => one.name === name && one.tree && !leftOut.has(name));
   if (!head) return null;
-  const control = line("control")?.tree, card = line("card")?.tree, title = show(head.args[0]);
+  const control = line("control")?.tree, card = line("card")?.tree, title = show(head.args[0]), form = FORMS_BY_WORD[read.word];
+  if (form.file) return form.file(head, parts, control, card, line("source")?.tree);
   const out = [`app(${title}, lang=${show(head.named.lang)}, preset="clean", palette=${show(head.named.palette ?? { k: "lit", v: "blue" })})`];
   // What the form gives in place of the defaults (forms.js TemplateForm expand).
   const own = FORMS_BY_WORD[read.word].expand?.(parts, control) ?? {}, shapes = own.shapes ?? parts.map((part) => show(part.tree));
@@ -198,6 +229,7 @@ export function buildTemplate(text, stored, build, preview = false) {
   // The first line's own fault is in faults already.
   const drawn = (test) => read.lines.some((line) => line.tree && !leftOut.has(line.name) && test(line)), cells = (line) => line.name === "control" && line.tree.k === "call";
   const whole = () => (!read.lines[0].tree ? faults[0] : preview ? null
+    : FORMS_BY_WORD[read.word].whole ? FORMS_BY_WORD[read.word].whole(drawnParts(read, leftOut), read.lines, (name) => drawn((line) => line.name === name))
     : read.word === "cells" ? (drawn(cells) ? null : "cells: the cells need a line control = slider(LABEL, 0, COUNT, 1, START) with no fault")
       : drawnParts(read, leftOut).length ? null : `${read.word}: the picture needs a ${read.word === "scene" ? "shape" : "item"} with no fault`);
   read = readTemplate(text);

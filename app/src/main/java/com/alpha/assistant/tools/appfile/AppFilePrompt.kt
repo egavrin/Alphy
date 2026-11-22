@@ -13,9 +13,13 @@ private val PLACEHOLDER=Regex("""\{\{(\w+)\}\}""")
 internal class AppFilePrompt(val system: String,
     /** The voice path puts it in the plan prompt of a new screen. */ val dialogue: String,
     private val repairTask: String,private val changeTask: String,val template: String,
-    private val templateRepairTask: String,private val templateChangeTask: String,private val templateRestTask: String,templateHead: String) {
+    private val templateRepairTask: String,private val templateChangeTask: String,private val templateRestTask: String,templateHead: String,
+    /** The section Template data: the instructions of a template call of the data family (block 2 plan, D1). */ val templateData: String,
+    dataHead: String) {
     /** TEMPLATE_HEAD of kit/src/template.js. */
     private val head=Regex(templateHead)
+    /** DATA_HEAD of kit/src/form-data.js. */
+    private val dataHead=Regex(dataHead)
     /** The text of a repair call, as repairText of kit/prompt.js builds it. */
     fun repairText(task: String,plan: String,faults: List<String>)=fill(repairTask,mapOf("task" to task,"plan" to plan.trimEnd(),"faults" to faults.joinToString("\n- ")))
     /** The text of a change call, as changeText of kit/prompt.js builds it. */
@@ -29,13 +33,16 @@ internal class AppFilePrompt(val system: String,
     fun templateRestText(task: String,plan: String)=fill(templateRestTask,mapOf("task" to task,"plan" to plan.trimEnd()))
     /** True for a template file, as isTemplateFile of kit/src/template.js tests it: on the first line that is not empty. */
     fun isTemplate(appFile: String)=head.containsMatchIn(appFile.lineSequence().firstOrNull {it.isNotBlank()}.orEmpty())
+    /** True for a form of the data family: compare, table, chart, or nodata. */
+    fun isData(appFile: String)=dataHead.containsMatchIn(appFile.lineSequence().firstOrNull {it.isNotBlank()}.orEmpty())
 
     companion object {
         @Volatile private var loaded: AppFilePrompt?=null
         /** The asset, read once. */
         fun load(context: Context): AppFilePrompt=loaded ?: JSONObject(context.assets.open(PROMPT_ASSET).use {it.readBytes().decodeToString()}).let {
             AppFilePrompt(it.getString("system"),it.getString("dialogue"),it.getString("repairTask"),it.getString("changeTask"),it.getString("template"),
-                it.getString("templateRepairTask"),it.getString("templateChangeTask"),it.getString("templateRestTask"),it.getString("templateHead"))
+                it.getString("templateRepairTask"),it.getString("templateChangeTask"),it.getString("templateRestTask"),it.getString("templateHead"),
+                it.getString("templateData"),it.getString("dataHead"))
         }.also {loaded=it}
         // One pass, so a placeholder text inside a request or a plan is not filled again. The text of the lambda is no replacement pattern, so $/x stays.
         private fun fill(template: String,values: Map<String,String>)=PLACEHOLDER.replace(template) {values[it.groupValues[1]] ?: it.value}

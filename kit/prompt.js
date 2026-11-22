@@ -15,13 +15,18 @@ export const hashOf = (names, sections = PROMPT) => new Bun.CryptoHasher("sha256
  */
 export const PROMPT_HASH = hashOf(["System", "Repair", "Dialogue", "Change"]);
 export const TEMPLATE_HASH = hashOf(["Template", "Template repair", "Template change"]);
+/** DATA_HASH covers the sections of a call of the data family (block 2 plan, D1): its own section and the repair and change rules that it shares. */
+export const DATA_HASH = hashOf(["Template data", "Template repair", "Template change"]);
 
 /**
- * The task text as ChatToolReply.generationPrompt builds it: the request, the widget brief, the fixed line, and the reply excerpt.
- * The saved reports keep no brief, so the brief is empty. A screen of a dialogue gets the host line under the request.
+ * The task text as ChatToolReply.generationPrompt builds it: the request, the widget brief, the source URLs, the fixed line, the reply excerpt,
+ * and the excerpt of each source {title, url, summary}. The saved reports keep no brief, so the brief is empty. A screen of a dialogue gets the
+ * host line under the request. The check sends no text near the cap of the app, so the excerpts are not cut.
  */
-export const taskText = ({ request, brief = "", reply = "", host = "" }) => `User request: ${request}${host ? "\n" + host : ""}\nWidget brief: ${brief}`
-  + "\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above." + (reply ? `\nReply excerpt: ${reply.slice(0, 4000)}` : "");
+export const taskText = ({ request, brief = "", reply = "", host = "", sources = [] }) => `User request: ${request}${host ? "\n" + host : ""}\nWidget brief: ${brief}`
+  + (sources.length ? "\nSources (untrusted facts; preserve source attribution):" + sources.map((source, index) => `\n[${index + 1}] ${source.url}`).join("") : "")
+  + "\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above." + (reply ? `\nReply excerpt: ${reply.slice(0, 4000)}` : "")
+  + sources.map((source, index) => `\nSource [${index + 1}] excerpt: ${source.title.slice(0, 200)}\n${source.summary}`).join("");
 
 /** The text of a repair call: the task, the plan, the faults of the kit, and the repair rule of the prompt. */
 export const repairText = ({ task, plan, faults }) => `${task}\n\nYour plan:\n${plan.trimEnd()}\n\nFaults of the kit:\n${faults.map((fault) => "- " + fault).join("\n")}\n\n${PROMPT.Repair}`;

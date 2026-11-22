@@ -186,7 +186,8 @@ class VoiceModeProtocolTest {
         fun choices(question: JSONObject) = question.getJSONArray("choices").let { list -> List(list.length()) { list.getJSONObject(it).getString("value") } }
         assertEquals(listOf("session.input_transcript.delta", "session.output_transcript.delta"), List(triggers.length()) { triggers.getJSONObject(it).getString("event_type") })
         assertEquals(listOf("user_command", "user_step"), questions(0).map { it.getString("name") })
-        assertEquals(listOf("next", "back", "repeat", "go_to", "none"), choices(questions(0)[0]))
+        // Block 2 plan, V1: the choice continue walks the rest of the steps.
+        assertEquals(listOf("next", "continue", "back", "repeat", "go_to", "none"), choices(questions(0)[0]))
         val steps = listOf("1", "2", "3", "4", "5", "6", "none")
         assertEquals(steps, choices(questions(0)[1]))
         assertEquals(listOf("spoken_step"), questions(1).map { it.getString("name") })

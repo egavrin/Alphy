@@ -16,6 +16,7 @@ import com.alpha.assistant.tools.appfile.AppFileCompiler
 import com.alpha.assistant.tools.appfile.AppFilePrevious
 import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.AppFileRead
+import com.alpha.assistant.tools.appfile.DataCheck
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -81,6 +82,8 @@ internal object AppFileNames {
     // The template call of a new screen and its outcome, with a detail of TEMPLATE_OUTCOMES.
     const val TEMPLATE_CALL_START = "template_call_start"
     const val TEMPLATE_OUTCOME = "template_outcome"
+    /** The host check of a searched data form turned it into nodata (block 2 plan, decision 3). The trace keeps no value of it. */
+    const val DATA_REJECTED = "data_rejected"
     /** Clean with no repair, clean after the repair, lines left out after the repair, outside, a whole fault, or a failed call or sandbox. */
     val TEMPLATE_OUTCOMES = setOf("clean0", "clean1", "partial1", "outside", "whole", "failed")
     // The plan call of a spoken request that starts beside its routing call (ToolController.startEarlyPlan), and its end.
@@ -107,7 +110,7 @@ internal object AppFileNames {
     val PREVIEW_HOLDS = setOf("frame", "parts", "card", "whole")
     val PHASES = setOf(PLAN_CALL_START, PLAN_FIRST_TEXT, PLAN_REPLY_END, COMPILE, REPAIR_CALL_START, CHANGE_CALL_START, PLAN_OUTCOME,
         EARLY_PLAN_START, EARLY_PLAN_USED, EARLY_PLAN_CANCELED, TEMPLATE_CALL_START, TEMPLATE_OUTCOME, STAGE_PREVIEW, STAGE_PREVIEW_GONE,
-        CONTROLS_ON, NARRATION_SAVED, NARRATION_DROPPED, FOLLOW) + HOST_CHECK_RETRIES.map { HOST_CHECK_RETRY + it } + PlanSkip.entries.map { it.phase }
+        CONTROLS_ON, NARRATION_SAVED, NARRATION_DROPPED, FOLLOW, DATA_REJECTED) + HOST_CHECK_RETRIES.map { HOST_CHECK_RETRY + it } + PlanSkip.entries.map { it.phase }
 
     // The reasons of a ScreenFallback that has no plan outcome. They are not on the trace.
     /** The plan step cannot run for this screen run, for example because the switch is off. */
@@ -151,9 +154,11 @@ internal sealed interface AppFileOutcome {
  * of a clean plan before its host check. It never blocks. Null: the run shows no frame.
  * [outlive]: the scope of the template call of a new screen, which can go on after the run (AppFileSteps).
  * [narration]: set by a run whose app came from a clean head, for the caller that stores the app (AppFileOutcome.Clean.narration).
+ * [data]: the template call has the section Template data (block 2 plan, D1). [check]: the host check of a searched data form, null for known facts.
  */
 internal class ScreenRun(val early: Deferred<AppFileOutcome>? = null, val template: String? = null,
-    val preview: ((StagePreviewFrame) -> Unit)? = null, val outlive: CoroutineScope? = null) {
+    val preview: ((StagePreviewFrame) -> Unit)? = null, val outlive: CoroutineScope? = null,
+    val data: Boolean = false, val check: DataCheck? = null) {
     @Volatile var narration: Deferred<String?>? = null
 }
 
@@ -209,11 +214,13 @@ internal class AppFileSteps(
      * A new screen of a spoken talk: sends [templateTask] to the template call. A reply outside sends [planTask] to the plan call ([plan]).
      * A template with a definition is the app with its kept text, also with lines that the kit left out after the repair.
      * [preview] gets the frame of the complete lines of the first template call while it streams (stage templates, Task 17).
+     * With [data], the template call has the section Template data, and [check] is the host check of each compile of a searched form.
      */
     suspend fun screen(templateTask: String, planTask: String, limits: AppFileLimits,
-        preview: ((StagePreviewFrame) -> Unit)? = null): AppFileOutcome {
+        preview: ((StagePreviewFrame) -> Unit)? = null, data: Boolean = false, check: DataCheck? = null): AppFileOutcome {
         phase(AppFileNames.TEMPLATE_CALL_START, null, null)
-        val outcome = templateSteps(templateTask, null, limits, preview) { compiler.compileReply(it) }
+        val instructions = if (data) prompt.templateData else prompt.template
+        val outcome = templateSteps(templateTask, null, limits, preview, instructions, check) { compiler.compileReply(it, check) }
         return if (outcome is AppFileOutcome.Outside) plan(planTask, limits) else outcome
     }
 
@@ -227,7 +234,7 @@ internal class AppFileSteps(
     suspend fun change(request: String, stored: AppFilePrevious, limits: AppFileLimits, template: Boolean,
         preview: ((StagePreviewFrame) -> Unit)? = null): AppFileOutcome {
         phase(AppFileNames.CHANGE_CALL_START, null, null)
-        if (template) templateSteps(prompt.templateChangeText(request, stored.appFile), stored, limits, preview) {
+        if (template) templateSteps(prompt.templateChangeText(request, stored.appFile), stored, limits, preview, prompt.template, null) {
             compiler.patch(stored.appFile, it, stored)
         }.let { if (it !is AppFileOutcome.Outside) return it }
         val free = if (!prompt.isTemplate(stored.appFile)) stored else {
@@ -245,12 +252,13 @@ internal class AppFileSteps(
      * [stored]: the stored template of a change. A new screen marks its outcome on the trace.
      * The first call streams its complete lines to [preview] ([streamed]). When the first call of a new screen stops after a complete first
      * line, one call asks for the missing lines, and the kit merges its reply by name (design section 2, case 3).
+     * [instructions] is the section of each call. [check] is the host check of a searched data form in each compile and frame.
      */
     private suspend fun templateSteps(task: String, stored: AppFilePrevious?, limits: AppFileLimits, preview: ((StagePreviewFrame) -> Unit)?,
-        read: suspend (String) -> AppFileRead): AppFileOutcome {
+        instructions: String, check: DataCheck?, read: suspend (String) -> AppFileRead): AppFileOutcome {
         fun end(detail: String, outcome: AppFileOutcome) = outcome.also { if (stored == null) phase(AppFileNames.TEMPLATE_OUTCOME, detail, null) }
         var calls = 1
-        val streamed = streamed(task, limits, stored, preview, read)
+        val streamed = streamed(task, limits, stored, preview, instructions, check, read)
         if (streamed is Streamed.Early) return end("clean0", streamed.outcome)
         val (reply, arrived) = streamed as Streamed.Reply
         val first = when (reply) {
@@ -258,9 +266,9 @@ internal class AppFileSteps(
             is AppFileReply.Failed -> {
                 if (stored != null || !prompt.isTemplate(arrived)) return end("failed", AppFileOutcome.Fallback(reply.reason))
                 calls++
-                when (val rest = templateCall(prompt.templateRestText(task, arrived), limits)) {
+                when (val rest = templateCall(instructions, prompt.templateRestText(task, arrived), limits)) {
                     is AppFileReply.Failed -> return end("failed", AppFileOutcome.Fallback(rest.reason))
-                    is AppFileReply.Text -> compiled { compiler.patch(arrived, rest.text, null) }
+                    is AppFileReply.Text -> compiled { compiler.patch(arrived, rest.text, null, check) }
                 }
             }
         }
@@ -268,15 +276,17 @@ internal class AppFileSteps(
         if (first is AppFileRead.Outside) return if (calls == 1) end("outside", AppFileOutcome.Outside(first.word))
             else end("whole", AppFileOutcome.Fallback(AppFileNames.TEMPLATE_WHOLE))
         first as AppFileRead.Plan
+        if (first.compilation.rejected != null) phase(AppFileNames.DATA_REJECTED, null, null)
         templateOutcome(first, false, stored, calls)?.let { return end(templateDetail(it, first, false), it) }
         // A reply that is no template file gets the repair too. The kit merges a repair into a plan of its own kind.
         phase(AppFileNames.REPAIR_CALL_START, null, null)
-        val repaired = when (val repair = templateCall(prompt.templateRepairText(task, first.text, first.compilation.faults), limits)) {
+        val repaired = when (val repair = templateCall(instructions, prompt.templateRepairText(task, first.text, first.compilation.faults), limits)) {
             is AppFileReply.Failed -> return end("failed", AppFileOutcome.Fallback(repair.reason))
-            is AppFileReply.Text -> compiled { compiler.patch(first.text, repair.text, stored) }
+            is AppFileReply.Text -> compiled { compiler.patch(first.text, repair.text, stored, check) }
         }
         if (repaired is AppFileRead.Outside) return end("whole", AppFileOutcome.Fallback(AppFileNames.TEMPLATE_WHOLE))
         repaired as AppFileRead.Plan
+        if (repaired.compilation.rejected != null) phase(AppFileNames.DATA_REJECTED, null, null)
         val outcome = checkNotNull(templateOutcome(repaired, true, stored, calls + 1))
         return end(templateDetail(outcome, repaired, true), outcome)
     }
@@ -296,16 +306,16 @@ internal class AppFileSteps(
      * A clean compile is the app at once, and the call goes on in [outlive] for the narration. Each other case waits for the end of the call.
      */
     private suspend fun streamed(input: String, limits: AppFileLimits, stored: AppFilePrevious?,
-        preview: ((StagePreviewFrame) -> Unit)?, read: suspend (String) -> AppFileRead): Streamed = coroutineScope {
+        preview: ((StagePreviewFrame) -> Unit)?, instructions: String, check: DataCheck?, read: suspend (String) -> AppFileRead): Streamed = coroutineScope {
         val stream = TemplateStream()
-        val loop = preview?.let { show -> launch { stream.collect { lines -> compiler.preview(lines, stored?.appFile, stored)?.let(show) } } }
+        val loop = preview?.let { show -> launch { stream.collect { lines -> compiler.preview(lines, stored?.appFile, stored, check)?.let(show) } } }
         val outlive = outlive?.takeIf { stored == null }
         if (outlive == null) {
-            val reply = try { templateCall(input, limits, stream::append) } finally { stream.close() }
+            val reply = try { templateCall(instructions, input, limits, stream::append) } finally { stream.close() }
             loop?.join()
             return@coroutineScope Streamed.Reply(reply, stream.completeLines())
         }
-        val call = outlive.async(Dispatchers.IO) { try { templateCall(input, limits, stream::append) } finally { stream.close() } }
+        val call = outlive.async(Dispatchers.IO) { try { templateCall(instructions, input, limits, stream::append) } finally { stream.close() } }
         var handed = false
         try {
             val head = stream.narration.await()
@@ -313,10 +323,13 @@ internal class AppFileSteps(
                 // The preview stops first, so the compile of the head meets no busy slot.
                 stream.stopCollect()
                 loop?.join()
-                val clean = (compiled { read(head) } as? AppFileRead.Plan)?.let { templateOutcome(it, false, null, 1) } as? AppFileOutcome.Clean
+                val plan = compiled { read(head) } as? AppFileRead.Plan
+                val clean = plan?.let { templateOutcome(it, false, null, 1) } as? AppFileOutcome.Clean
                 if (clean != null) {
+                    // The host check of a searched data form runs on the head too, and a rejected head is a stored nodata card.
+                    if (plan.compilation.rejected != null) phase(AppFileNames.DATA_REJECTED, null, null)
                     handed = true
-                    val narration = outlive.async(Dispatchers.IO) { try { narrated(call, clean.appFile) } finally { call.cancel() } }
+                    val narration = outlive.async(Dispatchers.IO) { try { narrated(call, clean.appFile, check) } finally { call.cancel() } }
                     return@coroutineScope Streamed.Early(AppFileOutcome.Clean(clean.appFile, clean.definition, clean.calls, clean.state, clean.frame, narration))
                 }
             }
@@ -330,16 +343,17 @@ internal class AppFileSteps(
      * The kept text of the whole reply of [call] when it adds only narration lines to [head], the kept text of the stored scene. Null for a
      * failed call, a faulty or busy compile, no narration, or another changed line: the stored definition must stay the one of [head].
      */
-    private suspend fun narrated(call: Deferred<AppFileReply>, head: String): String? {
+    private suspend fun narrated(call: Deferred<AppFileReply>, head: String, check: DataCheck?): String? {
         val reply = call.await() as? AppFileReply.Text ?: return null
         var tries = 0
         while (true) {
-            val compilation = (compiler.compileReply(reply.text) as? AppFileRead.Plan)?.compilation ?: return null
+            val compilation = (compiler.compileReply(reply.text, check) as? AppFileRead.Plan)?.compilation ?: return null
             // The host check of the head and the first events of the stored scene hold the slot at this time, and the voice says the opener
             // first, so the narration waits longer for the slot than a compile that the screen waits on.
             if (compilation.status == "BUSY" && tries++ < NARRATION_BUSY_TRIES) { delay(SANDBOX_RETRY_MS); continue }
             val kept = compilation.kept?.takeIf { compilation.status == "ok" && compilation.faults.isEmpty() && compilation.definition != null } ?: return null
-            return kept.takeIf { it != head && it.lines().filterNot(NARRATION_LINE::matches) == head.lines() }
+            // A nodata head gets the say line of its card (kit D5), and the narration of the reply replaces it.
+            return kept.takeIf { it != head && it.lines().filterNot(NARRATION_LINE::matches) == head.lines().filterNot(NARRATION_LINE::matches) }
         }
     }
 
@@ -349,9 +363,9 @@ internal class AppFileSteps(
         val NARRATION_LINE = Regex("""say(?:[1-9]\d*)? = .*""")
     }
 
-    private suspend fun templateCall(input: String, limits: AppFileLimits, onText: ((String) -> Unit)? = null): AppFileReply {
+    private suspend fun templateCall(instructions: String, input: String, limits: AppFileLimits, onText: ((String) -> Unit)? = null): AppFileReply {
         progress(ToolGenerationProgress.COMPLETING)
-        return call(CloudGenerationStage.APP_FILE_TEMPLATE, prompt.template, input, limits, onText)
+        return call(CloudGenerationStage.APP_FILE_TEMPLATE, instructions, input, limits, onText)
     }
 
     /**
@@ -478,7 +492,7 @@ internal suspend fun routeAppFile(
         var check: String? = null
         val steps = appFileSteps(checkNotNull(appFileCall))
         val outcome = screen?.early?.let { earlyOutcome(it, checkActive) }
-            ?: screen?.template?.let { steps.screen(it, request.prompt, checkNotNull(planStep), screen.preview) }
+            ?: screen?.template?.let { steps.screen(it, request.prompt, checkNotNull(planStep), screen.preview, screen.data, screen.check) }
             ?: steps.plan(request.prompt, checkNotNull(planStep))
         // Only an accepted screen keeps the call of its narration: each other end cancels it.
         val narration = (outcome as? AppFileOutcome.Clean)?.narration

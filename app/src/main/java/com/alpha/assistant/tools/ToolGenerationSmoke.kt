@@ -352,6 +352,8 @@ internal class ToolGenerationSmoke(
                     "routeStack" -> if(stack.size>1) listOf(JSONArray(stack)) else emptyList()
                     in ToolUiCatalog.choiceTypes -> node.getJSONArray("options").let {listOf(it.getJSONObject(0).get("value"),it.getJSONObject(it.length()-1).get("value"),current)}
                     "list","table","groupedList","lazyList","lazyGrid" -> ToolUiCatalog.records(node,values).let {rows -> (0 until rows.length()).take(1).plus(if(rows.length()>1)listOf(rows.length()-1) else emptyList()).map {ToolUiCatalog.stableKey(rows.getJSONObject(it))}}
+                    // A tap on a point of a marked chart sends its category (block 2 plan, D8).
+                    "chart" -> (ToolUiCatalog.value(values,node.getString("categories")) as JSONArray).let {categories -> (0 until categories.length()).take(1).plus(if(categories.length()>1)listOf(categories.length()-1) else emptyList()).map {categories.get(it).toString()}}
                     else -> listOf(null)
                 }
                 for(sample in samples)add(id,sample,path,key,ToolUiCatalog.isLiveInput(node))

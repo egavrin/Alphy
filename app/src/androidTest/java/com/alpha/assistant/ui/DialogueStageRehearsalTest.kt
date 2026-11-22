@@ -149,7 +149,8 @@ class DialogueStageRehearsalTest {
     @Test fun eachResearchStepHasItsRecording() {
         // ux-images-b reuses the recordings of ux-images in another order, so it has no fixtures of its own.
         val research = DIALOGUES.values.filter { it.name.startsWith("ux-") && it.name != "ux-images-b" }
-        assertEquals(research.map { it.name }.toString(), 13, research.size)
+        // ux-data is the dialogue of block 2 plan, stage 5 (L1).
+        assertEquals(research.map { it.name }.toString(), 14, research.size)
         for (dialogue in research) {
             assertEquals(dialogue.name, RESEARCH_CALLS, dialogue.maxCalls)
             // ux-steps (stage 3 of plan "one scene") has the seven lines of the person that its brief and the fix list give.

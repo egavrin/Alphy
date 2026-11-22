@@ -5,8 +5,8 @@
 import { show } from "./dsl.js";
 import { HEX, TONES } from "./core.js";
 
-/** The first line of a template file, with the template word as group 1. */
-export const TEMPLATE_HEAD = /^\s*(scene|items|cells)\s*\(/;
+/** The first line of a template file, with the template word as group 1: the explain family, then the data family (form-data.js). */
+export const TEMPLATE_HEAD = /^\s*(scene|items|cells|compare|table|chart|nodata)\s*\(/;
 /**
  * The content budget of each template: texts in characters, lists in items. A text inside the picture (a shape text, a sign) has no fault up to
  * floor(1.25 × cap), because it cannot change the height of the screen. A card text or an item text past its cap is cut after its last whole
@@ -67,9 +67,10 @@ export function cutLong(tree, name, word) {
   return !long || show(short) === show(long) ? tree : { ...tree, args: tree.args.map((arg, index) => (index === at ? short : arg)) };
 }
 
-export function headFault(tree, word) {
-  const [title, ...more] = tree.args ?? [], { lang, palette, ...other } = tree.named ?? {};
-  if (tree.k !== "call" || more.length || Object.keys(other).length) return `the first line is ${word}(TITLE, lang=CODE, palette=NAME), and palette= is optional`;
+/** The fault of the first line. extra names a named argument of the form beyond lang= and palette=, such as kind= of chart, which the form checks. */
+export function headFault(tree, word, extra) {
+  const [title, ...more] = tree.args ?? [], { lang, palette, [extra]: _own, ...other } = tree.named ?? {};
+  if (tree.k !== "call" || more.length || Object.keys(other).length) return `the first line is ${word}(TITLE, lang=CODE, palette=NAME${extra ? `, ${extra}=…` : ""}), and palette= is optional`;
   if (!(isText(lang) && /^[a-z]{2}$/.test(lang.v))) return 'lang= is the two-letter code of the language of the request, such as "en"';
   if (palette && !(isText(palette) && PALETTES.includes(palette.v))) return `palette= is one of ${PALETTES.join(", ")}, and ${show(palette)} is not one`;
   return textFault("the title", title, BUDGET.title);

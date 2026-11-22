@@ -70,14 +70,14 @@ Each is an Implementation choice inside the spec, unless it names a Requirement.
 8. **The review sheet of new objects** is accepted by the controller before the release, and the sheet goes to the owner with the release. He can reject an entry after it.
 9. **The spoken commands of a `play` scene** («быстрее», «медленнее», «стоп», «дальше») go by the routing press, as spec 9.4 says. The classifier keeps its commands for stepped scenes.
 
-## Decisions for the owner
+## Decisions of the owner on four questions (2026-11-22, after the first version of this plan)
 
-None blocks the code of stage 5.
+Each is a Requirement. His words are quoted.
 
-- **U1. The cap of the template model check.** `kit/modelcheck.js` holds the caps that he approved: `LIMIT = 689` calls in all and `TEMPLATE_LIMIT = 150` template calls. The record `evidence/modelcheck/spend.json` holds 651 calls, 126 of them template calls, so 38 calls are left. Block 2 needs at most 100 template calls for stage 5, 120 for stage 6, and 80 for stage 7: 300 in all. Unresolved decision: it blocks the paid model check of each stage, which is a gate of the release.
-- **U2. A limit for the classifier cost in a long talk.** One answer costs more as the talk grows (about $0.3 for 10 minutes and about $2 for 30 minutes by estimate). Options: no limit, as in Alpha 20; or the classifier goes off for the talk when one answer passes 4,000 input tokens (about 8 minutes), and the talk goes on as in Alpha 19. Until his word: no limit.
-- **U3. The search time on a phone (stage 6).** The spec measures the search on a phone. The controller may not install a test build on his phone. Proposal: the gate runs on the emulator, and the release build writes the measured search time and the load time of the embedding model to its release log line. It blocks only the wording of the gate of stage 6.
-- **U4. The speed gate G9.** The spec asks for a paired run against Alpha 17 on one emulator (12 runs of one step, at most 360 s of voice and 36 chat calls). Alpha 20 ran no paired run: its speed evidence is the free stream gates and the times of the live check. Proposal: judge G9 from the live check of each stage, against the same steps of the Alpha 20 record (`evidence/one-scene/live-3/`, `uxHeart`: first line 4.8 s, controls 8.7 s), with a bar of 0.5 s. Until his word, the paired run of the spec stays the gate, inside the one paid set of the stage.
+- **U1. The cap of the model check: up to 2,000 calls for each stage.** «используй, бюджет для вызовов может еще сделать, сколько тебе нужно ... Мы можем просто лимит сделать, там, не знаю, 2000 на стадию, например.» Before his word, `kit/modelcheck.js` held `LIMIT = 689` and `TEMPLATE_LIMIT = 150`, with 651 calls used, 126 of them template calls. Stage 5 raises both by 2,000. Each later stage raises them again by what it needs, inside 2,000 for the stage. The budget of each stage in this plan stays the working budget: the cap is not a target.
+- **U2. The classifier cost: no limit.** «Лимит для классифайер нормально. Потом, я думаю, там, типа, пару баксов за 30 минут достаточно.» The controller reads this as: the present cost is fine, about two dollars for 30 minutes of one talk is acceptable, so this block adds no limit. The reading went to him in the answer to his message.
+- **U3. The search time: no gate.** «если у нас есть эмбеддинги, мы это используем для поиска, нам, я думаю, не нужно проверять время. При небольшом количестве объектов, там до 1000 или пара тысяч, нам особо не нужно об этом думать. Да даже десятков тысяч, на самом деле.» Stage 6 keeps requirement S4 (the search never delays the template call) and writes the measured time to the ledger. It has no time bar and no run on a phone.
+- **U4. The speed gate: no paired run against Alpha 17.** «Не нужно сравнивать там спидгейт, у нас и так со скоростью пока нормально, мы просто не должны сделать хуже ... Но ты можешь прогнать, там, например, по сравнению там, с 20-й версией.» G9 is judged from the live check of each stage against the same steps of the Alpha 20 record (`evidence/one-scene/live-3/`, `uxHeart`: first line 4.8 s, controls 8.7 s). A first line or controls later by more than 0.5 s goes to him. The free stream gate stays binding.
 
 ---
 
@@ -127,16 +127,14 @@ Voice riders (the open list of Alpha 20):
 | Kit run and `--check` | 0 failures |
 | Fit gate (`StageTemplateFitTest`) for each new form at its caps, phone and fold | OK |
 | Stream gates 1a and 1b with a data form | 1b median at most 0.3 s |
-| Model check of the data family (needs U1). A tuning set of 10 requests and a final set of 20 held-out requests, known facts and searched. A searched request uses recorded source excerpts as a fixture. No tuning on the final set. | final set: clean files at the first try at least 16 of 20; no invented value in a searched form; at most 1 false reject of the host check; the call time reported |
+| Model check of the data family. A tuning set of 10 requests and a final set of 20 held-out requests, known facts and searched. A searched request uses recorded source excerpts as a fixture. No tuning on the final set. | final set: clean files at the first try at least 16 of 20; no invented value in a searched form; at most 1 false reject of the host check; the call time reported |
 | G7 for this stage: a comparison, a table, and a chart each show in their own form in the live check, on known facts (the new dialogue `uxData`) | 3 of 3 |
-| G9 (U4) | the bar of the spec by a paired run, or the bar of U4 when the owner takes the proposal |
+| G9 (U4): the first line and the controls of the first screen of `uxHeart` and `uxSteps` in the live check | no later than the Alpha 20 record by more than 0.5 s |
 
 ## Paid budget
 
-- Model check: at most 100 template calls (U1), 4 chat calls for the new case of `LiveFollowCheckTest`, and 40 Decisions text calls for V1.
+- Model check: at most 100 template calls (60 for tuning, 40 for the one final run), 4 chat calls for the new case of `LiveFollowCheckTest`, and 40 Decisions text calls for V1.
 - Live check: at most 600 s of voice, 60 chat calls, and $0.10 of Decisions calls. Dialogues: the new `uxData` (known facts: «Сравни Землю и Марс», «Покажи планеты таблицей», «Покажи это графиком», «А у какой самый длинный год?», a mark by voice), `uxCompare`, `uxFootball` (a searched table, which can end in `nodata`), `uxHeart`, and `uxSteps`.
-- The paired run of G9, when U4 has no answer: at most 360 s of voice and 36 chat calls more.
-
 ---
 
 # Stage 6: The library, first set (Alpha 22)
@@ -178,17 +176,16 @@ A gate that misses its bar goes to the owner first: the library does not ship th
 
 | Gate | Bar |
 | --- | --- |
-| Search time, catalog of 5,000 entries (copies), warm (U3: on the emulator) | at most 150 ms for 95 of 100 requests |
-| Load time of the embedding model from the start of the voice mode | reported, and ready before the end of a first request of normal length |
+| Search time and load time of the embedding model, on the emulator (U3) | reported in the ledger, no bar |
 | Search accuracy (decision 7): 100 held-out requests, each with the objects that fit it | a fitting object among the 24 candidates for at least 90 |
-| Effect on the picture: a paired model check on 20 held-out requests, free shapes against the library (needs U1) | the pictures with the library judged better by the controller, pair by pair; clean files at the first try not fewer; the call time not longer |
+| Effect on the picture: a paired model check on 20 held-out requests, free shapes against the library | the pictures with the library judged better by the controller, pair by pair; clean files at the first try not fewer; the call time not longer |
 | A thing with no entry: 10 requests | a screen each time, in the same time |
 | The review sheet of the 27 objects, both themes (decision 8) | each entry reads at the smallest size, or it is drawn again or left out |
 | Fit gate, stream gates, G9 | as in stage 5 |
 
 ## Paid budget
 
-- Model check: at most 120 template calls (U1).
+- Model check: at most 120 template calls.
 - Live check: at most 600 s of voice, 60 chat calls, and $0.10 of Decisions calls. Dialogues: `uxHeart`, `uxOrbit`, `uxPythagoras`, `uxWhy`, and `uxSteps`.
 
 ## Size
@@ -233,14 +230,14 @@ Diagram (spec 11.2):
 | Gate | Bar |
 | --- | --- |
 | Kit run and `--check`, fit gate, stream gates | as in stage 5 |
-| Model check of the explain family with `play` and `diagram` (needs U1): 20 held-out requests | clean files at the first try at least 16 of 20; each motion request is a template file; a picture of each first state shows the point for at least 5 of 6 (G3 of the spec) |
+| Model check of the explain family with `play` and `diagram`: 20 held-out requests | clean files at the first try at least 16 of 20; each motion request is a template file; a picture of each first state shows the point for at least 5 of 6 (G3 of the spec) |
 | G8 of the spec: motion on the fast path, in the live check | controls on at most 12 s after the end of the speech |
 | The glide of M5 on the emulator | at most 300 ms from the press to the last frame |
 | G9 | as in stage 5 |
 
 ## Paid budget
 
-- Model check: at most 80 template calls (U1).
+- Model check: at most 80 template calls.
 - Live check: at most 600 s of voice, 60 chat calls, and $0.10 of Decisions calls. Dialogues: `uxOrbit`, `uxTap`, `uxLesson`, `uxHeart`, and one new dialogue of a diagram (the parts of the eye).
 
 ---
@@ -254,4 +251,4 @@ Diagram (spec 11.2):
 
 - Spec coverage: section 15 rows 5, 6, and 7 map to the requirement lists D, L and S, and M and G. Spec 11.1 is in the global constraints. Spec 12.4 is the gate table of stage 6. Spec 12.7 (other sources of entries) and 12.8 (rounds) need no code in this block beyond the miss log of L6.
 - Not in this block, by the spec: `fact`, `forecast`, `photo`, `check`, `task`, packs that load with no release, and entries that the device makes.
-- Each paid set has its cap. U1 must have the owner's word before the first template call of a model check.
+- Each paid set has its working budget, inside the owner's cap of 2,000 model check calls for each stage (U1).

@@ -92,7 +92,9 @@ object ToolUiCatalog {
         }
         for(type in recordTypes) {
             val rowProperties=if(type == "table") emptySet() else setOf("rowActions","rowTemplate","emptyText","groupBy","swipeAction")
-            val viewportProperties=if(type in setOf("lazyList","lazyGrid")) setOf("viewportHeight","selectedKeyBind","scrollToKeyBind")+(if(type == "lazyList") setOf("stickyHeaders") else setOf("spanField")) else emptySet()
+            // A table marks one row and one cell of it, and shows visibleRows rows in a box that scrolls (block 2 plan, D3 and D8).
+            val viewportProperties=if(type in setOf("lazyList","lazyGrid")) setOf("viewportHeight","selectedKeyBind","scrollToKeyBind")+(if(type == "lazyList") setOf("stickyHeaders") else setOf("spanField"))
+                else if(type == "table") setOf("selectedKeyBind","markColumn","visibleRows") else emptySet()
             val reorderProperties = if (type == "list" || type == "lazyList") setOf("reorder") else emptySet()
             add(entry(type,setOf("bind","action","columns")+rowProperties+viewportProperties+reorderProperties+(if(type == "lazyGrid") setOf("minCellWidth") else emptySet()),binding=setOf("list","array")))
         }
@@ -101,7 +103,8 @@ object ToolUiCatalog {
         add(entry("progress",setOf("bind","min","max","indeterminate","variant","children"),Projection.TEXT,setOf("number")))
         add(entry("progressRing",setOf("bind","min","max","indeterminate","size","children"),Projection.TEXT,setOf("number")))
         add(entry("emoji",setOf("value","bind","size"),Projection.OMIT,setOf("string")))
-        add(entry("chart",setOf("kind","categories","series")))
+        // A chart with action marks one category: a tap on a point sends it, and selectedKeyBind holds it (block 2 plan, D8).
+        add(entry("chart",setOf("kind","categories","series","action","selectedKeyBind")))
         add(entry("image",setOf("bind","resourceId","assetSlot","fit"),binding=setOf("string")))
         add(entry("video", setOf("bind", "action"), binding = setOf("string"), action = true)
             .let { it.copy(properties = it.properties - "interactions") })
@@ -464,19 +467,28 @@ object ToolUiCatalog {
                         val item=collectionItem(checkNotNull(binding)); val rows=if(schemaOnly) JSONArray() else records(node,state)
                         item to rows
                     }
+                    // A bind that holds the key of one row: its value is a current row key or empty. A table has only the mark (block 2 plan, D8).
+                    val keyBinds=when(type) {"lazyList","lazyGrid" -> listOf("selectedKeyBind","scrollToKeyBind"); "table" -> listOf("selectedKeyBind"); else -> emptyList()}
+                    for(name in keyBinds) if(node.has(name)) {
+                        require(node.get(name) is String && schema(fields,node.getString(name)) == "string")
+                        if(!schemaOnly) {
+                            val key=value(state,node.getString(name)); require(key is String)
+                            require(key.isEmpty() || (0 until rows.length()).any {stableKey(rows.getJSONObject(it)) == key}) {"Collection key must be current or empty."}
+                        }
+                    }
                     if(type in setOf("lazyList","lazyGrid")) {
                         if(node.has("viewportHeight")) require(node.get("viewportHeight") is Int && node.getInt("viewportHeight") in 96..1024)
-                        for(name in listOf("selectedKeyBind","scrollToKeyBind")) if(node.has(name)) {
-                            require(node.get(name) is String && schema(fields,node.getString(name)) == "string")
-                            if(!schemaOnly) {
-                                val key=value(state,node.getString(name)); require(key is String)
-                                require(key.isEmpty() || (0 until rows.length()).any {stableKey(rows.getJSONObject(it)) == key}) {"Collection key must be current or empty."}
-                            }
-                        }
                         if(type == "lazyGrid") {
                             if(node.has("columns")) require(node.get("columns") is Int && node.getInt("columns") in 1..4)
                             if(node.has("minCellWidth")) require(node.get("minCellWidth") is Int && node.getInt("minCellWidth") in 48..512)
                         }
+                    }
+                    if(type == "table") {
+                        // A tap moves the mark of a table, so a table with a mark has an action.
+                        if(node.has("selectedKeyBind")) require(node.has("action"))
+                        if(node.has("markColumn")) require(node.has("selectedKeyBind") && node.get("markColumn") is String &&
+                            node.getJSONArray("columns").let {columns -> (0 until columns.length()).any {columns.getJSONObject(it).optString("field") == node.getString("markColumn")}})
+                        if(node.has("visibleRows")) require(node.get("visibleRows") is Int && node.getInt("visibleRows") in 1..50)
                     }
                     if(node.has("stickyHeaders")) require(node.get("stickyHeaders") is Boolean && (!node.getBoolean("stickyHeaders") || node.has("groupBy")))
                     if(node.has("spanField")) {
@@ -847,6 +859,13 @@ object ToolUiCatalog {
         trace.checking("chart_category_values","$location.categories","declared_category_values",categories,categories.length()) {
             if(!schemaOnly) ToolValueSchema.validate(categorySchema,categories)
         }
+        if(node.has("selectedKeyBind")) {
+            require(node.has("action") && node.get("selectedKeyBind") is String && schema(fields,node.getString("selectedKeyBind")) == "string")
+            if(!schemaOnly) {
+                val key=value(state,node.getString("selectedKeyBind")); require(key is String)
+                require(key.isEmpty() || (0 until categories.length()).any {categories.get(it).toString() == key}) {"Chart mark must be a current category or empty."}
+            }
+        }
     }
     fun chartRange(node: JSONObject, state: JSONObject): Pair<Double,Double> {
         var low=Double.POSITIVE_INFINITY; var high=Double.NEGATIVE_INFINITY
@@ -1019,6 +1038,7 @@ object ToolUiCatalog {
             "routeStack" -> "a route stack array".takeUnless { payload is JSONArray }
             "list","table","groupedList","lazyList","lazyGrid" ->
                 "a string row key with 1 to 128 characters".takeUnless { validStableKey(payload) }
+            "chart" -> "a category of the chart".takeUnless { payload is String }
             else -> "a supported action payload"
         }
     }
@@ -1061,6 +1081,7 @@ object ToolUiCatalog {
                 }
                 row != null && (rowAction == null || rowActionEnabled(rowAction,row))
             }
+            "chart" -> (value(state,node.getString("categories")) as JSONArray).let {categories -> (0 until categories.length()).any {categories.get(it).toString() == payload}}
             else -> true
         }) {"Invalid action value."}
         return node

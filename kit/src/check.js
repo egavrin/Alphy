@@ -131,7 +131,9 @@ function smokeRun(file, limit, clock) {
         let error;
         if (p.bind) {
           const now = Number(p.value) || 0, by = p.step ?? 1;
-          const sample = ["Toggle", "CheckBox"].includes(node.type) ? !p.value : ["Segmented", "Select"].includes(node.type) ? (p.options ?? []).find((option) => option !== p.value)
+          // The options of the mark of a Table or a Chart are the label of each row or point (data forms).
+          const options = node.type === "Table" ? (p.rows ?? []).map((row) => String(Array.isArray(row) ? row[0] : row)) : node.type === "Chart" ? (p.points ?? []).map((point) => String(point.label)) : p.options;
+          const sample = ["Toggle", "CheckBox"].includes(node.type) ? !p.value : ["Segmented", "Select", "Table", "Chart"].includes(node.type) ? (options ?? []).find((option) => option !== p.value)
             : node.type === "TextField" ? (p.value === "Test" ? "Test 2" : "Test") : node.type === "DateField" ? (p.value === "2026-01-02" ? "2026-01-03" : "2026-01-02")
             : node.type === "TimeField" ? (p.value === "08:30" ? "09:30" : "08:30")
             // A range moves to its bounds, as the smoke step of Alphy does: [min, max], or [min, min] when it is there.

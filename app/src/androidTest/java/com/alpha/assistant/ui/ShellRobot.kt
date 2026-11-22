@@ -270,6 +270,8 @@ internal class ShellFixture(prefix: String) {
         SystemClock.sleep(150)
         // Every step runs, even when an earlier one throws. The first failure is reported after all steps.
         val steps = listOf<() -> Unit>(
+            // The tool controller can still open its database in the background: deleting the file under that open locks the next test (stage 5, V5).
+            { model?.let { kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeoutOrNull(10_000) { it.tools.closeAndJoin() } } } },
             { store.close() },
             { context.deleteDatabase("$name.db"); context.deleteDatabase("$name.db-tools.db"); context.deleteDatabase("$name.db-tools.db-automations.db") },
             { keys.clear() },

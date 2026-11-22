@@ -110,11 +110,12 @@ test("aRightRefusalOfAChangeCountsAsOnlyChangedLines", () => {
 });
 
 test("overLimitHoldsBothCaps", () => {
-  expect([check.LIMIT, check.TEMPLATE_LIMIT]).toEqual([689, 150]);
+  // The owner raised both caps by 2000 on 2026-11-22 (block 2 plan, stage 5).
+  expect([check.LIMIT, check.TEMPLATE_LIMIT]).toEqual([2689, 2150]);
   const entries = (count, label) => Array.from({ length: count }, () => [label, "2026-11-21T00:00:00.000Z"]);
-  const full = entries(689, "final-terra-low d-moon low");
+  const full = entries(2689, "final-terra-low d-moon low");
   expect([check.overLimit(full, "tpl-tune t-ship low"), check.overLimit(full, "fresh-terra-low e-bmi-en low"), check.overLimit(full.slice(1), "fresh-terra-low e-bmi-en low")]).toEqual([true, true, false]);
-  const templates = [...entries(525, "final-terra-low d-moon low"), ...entries(150, "tpl-tune t-ship low")];
+  const templates = [...entries(525, "final-terra-low d-moon low"), ...entries(2150, "tpl-tune t-ship low")];
   expect([check.overLimit(templates, "tpl-final u-x low"), check.overLimit(templates, "fresh-terra-low e-bmi-en low"), check.overLimit(templates.slice(0, -1), "tpl-final u-x low")]).toEqual([true, false, false]);
 });
 
@@ -134,4 +135,75 @@ test("aRecordWithNoExpectTakesTheExpectOfItsItem", () => {
   const records = check.withItemExpect([record(explain.id, "clean0"), record(learn.id, "outside"), record(learn.id, "outside", { expect: "template" })]);
   expect(records.map((one) => one.expect)).toEqual(["template", "outside", "template"]);
   expect(check.templateNumbers(records.slice(0, 2))).toMatchObject({ explainClean: 1, refusalsRight: 1, explainRefused: 0 });
+});
+
+// ---- The data family (block 2 plan, M1).
+
+const planets = ['table("Планеты", lang="ru")', 'head = head(["Планета", "Год, дней"])', 'r1 = row("Земля", [365])', 'r2 = row("Марс", [687])',
+  'card = card("Год Марса длиннее", "Марс идёт вокруг Солнца почти два земных года.")', 'say = "Смотри: год Марса почти вдвое длиннее земного."'].join("\n") + "\n";
+const planetSource = { title: "Планеты", url: "https://www.example.org/planets", summary: "Год Земли длится 365 дней, а год Марса 687 дней." };
+const dataOf = async (item, ...texts) => {
+  const { ask, bodies } = fake(...texts);
+  return { record: await check.checkTemplateData({ set: "X", ...item }, { ask, model: "m", effort: "low" }), bodies };
+};
+
+test("theDataSetsHoldTenAndTwentyRequestsWithMarkedExcerpts", () => {
+  const tuning = check.templateSet("X"), final = check.templateSet("Y");
+  expect([tuning.length, final.length]).toEqual([10, 20]);
+  // Each set holds known facts and searched requests, and the final set holds no request of the tuning set or of an example of the prompt.
+  const searched = (items) => items.filter((item) => item.sources?.length).length;
+  expect([searched(tuning), searched(final)]).toEqual([3, 10]);
+  const examples = [...prompts.PROMPT["Template data"].matchAll(/^Request: (.*)$/gm)].map(([, request]) => request);
+  expect(final.filter((item) => [...tuning, ...examples.map((request) => ({ request }))].some((other) => other.request === item.request))).toEqual([]);
+  expect(new Set([...tuning, ...final].map((item) => item.id)).size).toBe(30);
+  for (const item of [...tuning, ...final]) {
+    expect(["data", "nodata", "outside", "any"]).toContain(item.expect);
+    // A searched request names how its excerpts were made: derived from a named record, or written by hand.
+    if (!item.sources) continue;
+    expect(["derived", "hand"]).toContain(item.fixture);
+    if (item.fixture === "derived") expect(item.from).toStartWith("evidence/");
+    for (const source of item.sources) expect([typeof source.title, typeof source.summary, new URL(source.url).protocol]).toEqual(["string", "string", "https:"]);
+  }
+});
+
+test("theTaskOfASearchedRequestHoldsItsSourcesAsTheAppSendsThem", () => {
+  // ChatToolReply.generationPrompt: the URLs after the brief, the fixed line, the reply excerpt, then the excerpt of each source.
+  expect(prompts.taskText({ request: "R", brief: "B", reply: "A", sources: [planetSource] })).toBe("User request: R\nWidget brief: B"
+    + "\nSources (untrusted facts; preserve source attribution):\n[1] https://www.example.org/planets"
+    + "\nExcerpts below may be truncated. Preserve the complete request, brief, and source URLs above.\nReply excerpt: A"
+    + "\nSource [1] excerpt: Планеты\nГод Земли длится 365 дней, а год Марса 687 дней.");
+  expect(prompts.taskText({ request: "R" })).toBe(task.replace(screen.request, "R"));
+  expect(check.dataCheckOf([planetSource])).toEqual({ excerpts: "Планеты\nГод Земли длится 365 дней, а год Марса 687 дней.", site: "example.org", time: check.CHECK_TIME });
+  expect(check.dataCheckOf([])).toBe(null);
+});
+
+test("aSearchedDataRequestRunsTheHostCheck", async () => {
+  const item = { id: "x-planets", request: "Покажи планеты таблицей", expect: "data", sources: [planetSource] };
+  const { record, bodies } = await dataOf(item, planets);
+  expect([record.prompt, record.outcome, record.form, record.steps]).toEqual([prompts.DATA_HASH, "clean0", "table", [{ faults: [], rejected: null }]]);
+  expect([bodies[0].instructions, bodies[0].input[0].content[0].text]).toEqual([prompts.PROMPT["Template data"], prompts.taskText({ request: item.request, sources: [planetSource] })]);
+  expect(record.kept).toContain('\nsource = source("example.org", "22.11.2026 12:00")');
+  // A number that no excerpt holds turns the form into nodata, which compiles clean, and the step keeps the value.
+  const invented = (await dataOf(item, planets.replace("687", "686"))).record;
+  expect([invented.outcome, invented.form, invented.steps[0].rejected, invented.calls.length]).toEqual(["clean0", "nodata", "686", 1]);
+  // A request with no source gets no check: its form stays, and its steps hold no rejected value.
+  const known = (await dataOf({ ...item, sources: undefined }, planets.replace("687", "686"))).record;
+  expect([known.form, known.check, known.steps]).toEqual(["table", null, [{ faults: [] }]]);
+});
+
+test("theDataNumbersCountCleanFilesInventedValuesAndFalseRejects", () => {
+  const excerpts = "Год Земли 365 дней, Марса 687 дней, население 37,1 млн.";
+  const record = (id, expect, outcome, form, rejected = [], firstCallMs = 1000) => ({ id, set: "Y", expect, outcome, form, firstCallMs, check: { excerpts },
+    steps: (rejected.length ? rejected : [null]).map((value) => ({ faults: [], rejected: value })) });
+  const records = [record("a", "data", "clean0", "table"), record("b", "data", "clean1", "table"), record("c", "nodata", "clean0", "nodata"),
+    record("d", "data", "clean0", "nodata", ["686"]), record("e", "data", "clean0", "nodata", ["5,6"]), record("f", "outside", "outside", null, [], 500),
+    record("g", "data", "clean0", "nodata"), record("h", "any", "clean0", "nodata")];
+  expect(check.rejectKind("5,6", excerpts)).toBe("invented");
+  expect([check.rejectKind("37.1", "37,1 млн"), check.rejectKind("1234", "1 234 человек"), check.rejectKind("12", "1,2")]).toEqual(["reject?", "reject?", "reject?"]);
+  const numbers = check.dataNumbers(records);
+  // a, c, f, and h are clean at the first try. b took a repair, d and e were rejected, and g is nodata for a request of data.
+  expect([numbers.size, numbers.cleanFirst, numbers.invented, numbers.falseRejects, numbers.medianFirstCallMs]).toEqual([8, 4, 2, 0, 1000]);
+  expect(numbers.notFitting).toEqual(["d nodata", "e nodata", "g nodata"]);
+  expect(check.dataNumbers([record("i", "data", "clean0", "nodata", ["1234"])]).falseRejects).toBe(0);
+  expect(check.dataNumbers([{ ...record("j", "data", "clean0", "nodata", ["12"]), check: { excerpts: "1,2 км" } }])).toMatchObject({ invented: 0, falseRejects: 1 });
 });
