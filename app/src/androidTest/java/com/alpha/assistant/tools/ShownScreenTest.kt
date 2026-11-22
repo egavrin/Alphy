@@ -193,14 +193,67 @@ class ShownScreenTest {
         val long = data(checkNotNull(ShownScreen.of(stored(slider))).copy(appFile = "x".repeat(9000)))
         assertFalse(long.has("appFile"))
         assertEquals("""[{"control":"Сила","value":3}]""", long.optJSONArray("values")?.toString())
+        // Plan "one scene", Task 28: the step and the actions stay too.
+        val tapped = listOf(SceneAction("tap", "Фаза", "Вдох"))
+        val stepped = data(checkNotNull(ShownScreen.of(stored(phases), actions = tapped)).copy(appFile = "x".repeat(9000)))
+        assertEquals(listOf(false, true, true), listOf(stepped.has("appFile"), stepped.has("step"), stepped.has("actions")))
         // Four notes of 2048 characters, the longest text of a state value, do not fit together.
         val notes = listOf("Первая", "Вторая", "Третья", "Четвёртая")
         val text = "app(\"Заметки\", lang=\"ru\")\nneed force = input(\"slider\", \"Сила\", 3, min=1, max=5, step=1)\n" +
             notes.indices.joinToString("\n") { "need n$it = input(\"text\", \"${notes[it]}\", \"\")" }
-        val full = data(ShownScreen.of(stored(text) { state -> notes.indices.forEach { state.put("n$it", "ы".repeat(2048)) } }))
+        val full = data(ShownScreen.of(stored(text) { state -> notes.indices.forEach { state.put("n$it", "ы".repeat(2048)) } }, actions = tapped))
         assertFalse(full.has("appFile"))
+        assertEquals("""[{"who":"tap","control":"Фаза","value":"Вдох"}]""", full.optJSONArray("actions")?.toString())
         val values = full.getJSONArray("values")
         assertEquals(listOf("Сила", "Первая", "Вторая", "Третья"), List(values.length()) { values.getJSONObject(it).getString("control") })
         assertEquals(3, values.getJSONObject(0).get("value"))
+    }
+
+    /** A steps scene of three steps that starts at its answer step «Выдох», with one narration line for each step. */
+    private val phases = """
+        scene("Как мы дышим?", lang="ru", palette="teal")
+        control = steps("Фаза", ["Вдох", "Выдох", "Пауза"], "Выдох")
+        s1 = circle(150, 110, ${'$'}/v == "Вдох" ? 70 : 40, "accent")
+        card = card("Лёгкие", "При вдохе лёгкие расширяются, при выдохе сжимаются.")
+        say1 = "Сначала вдох: лёгкие растут."
+        say2 = "Потом выдох: они сжимаются."
+        say3 = "В паузе всё замирает."
+    """.trimIndent() + "\n"
+
+    /** Plan "one scene", Task 28 (decision 9): a steps scene gives its present step, and a choice scene gives no step. */
+    @Test fun theLineHoldsTheStepOfAStepsScene(): Unit = runBlocking {
+        val line = checkNotNull(ShownScreen.of(stored(phases))).line()
+        assertTrue(line, "\"step\":{\"index\":2,\"count\":3,\"label\":\"Выдох\"}" in line)
+        val chosen = stored(phases) { state -> state.put(state.keys().asSequence().single { state.opt(it) == "Выдох" }, "Пауза") }
+        assertEquals(SceneStep(3, 3, "Пауза"), ShownScreen.of(chosen)?.step)
+        val choice = stored(phases.replace("steps(\"Фаза\", [\"Вдох\", \"Выдох\", \"Пауза\"], \"Выдох\")", "choice(\"Фаза\", [\"Вдох\", \"Выдох\", \"Пауза\"], \"Выдох\")")
+            .lines().filterNot { it.startsWith("say") }.joinToString("\n"))
+        assertFalse(data(ShownScreen.of(choice)).has("step"))
+        assertNull(ShownScreen.of(stored(slider))?.step)
+    }
+
+    /**
+     * Plan "one scene", Task 32 (decision 16): with its label, a steps scene before its last step lists the host control that walks the
+     * rest, after the steps. At the last step, and with no label, it does not.
+     */
+    @Test fun theContinueControlIsNotListedAtTheLastStep(): Unit = runBlocking {
+        val walk = ShownControl("Продолжить по шагам", ShownScreen.CONTINUE_ACTION, null)
+        val middle = checkNotNull(ShownScreen.of(stored(phases), continueLabel = walk.label))
+        assertEquals(listOf("Фаза: Вдох", "Фаза: Выдох", "Фаза: Пауза", walk.label), middle.controls.map { it.label })
+        assertEquals(walk, middle.controls.last())
+        assertEquals(listOf("Вдох", "Выдох", "Пауза"), middle.steps)
+        assertEquals("Фаза", middle.stepControl)
+        assertTrue(ShownScreen.of(stored(phases))!!.controls.none { it.actionId == ShownScreen.CONTINUE_ACTION })
+        val last = stored(phases) { state -> state.put(state.keys().asSequence().single { state.opt(it) == "Выдох" }, "Пауза") }
+        assertTrue(ShownScreen.of(last, continueLabel = walk.label)!!.controls.none { it.actionId == ShownScreen.CONTINUE_ACTION })
+    }
+
+    /** Plan "one scene", Task 28 (decision 9): the line keeps the last three actions, oldest first, and a screen with no action has no key. */
+    @Test fun theLineKeepsTheLastThreeActions() {
+        val actions = listOf(SceneAction("tap", "Фаза", "Вдох"), SceneAction("voice", "Фаза", "Выдох"), SceneAction("narrator", "Фаза", "Пауза"),
+            SceneAction("tap", "Сила", 4))
+        assertEquals("""[{"who":"voice","control":"Фаза","value":"Выдох"},{"who":"narrator","control":"Фаза","value":"Пауза"},{"who":"tap","control":"Сила","value":4}]""",
+            data(ShownScreen("t", "Луна", null, emptyList(), actions = actions)).getJSONArray("actions").toString())
+        assertFalse(data(ShownScreen("t", "Луна", null, emptyList())).has("actions"))
     }
 }

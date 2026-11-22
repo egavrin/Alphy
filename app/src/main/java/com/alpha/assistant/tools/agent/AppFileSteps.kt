@@ -17,7 +17,10 @@ import com.alpha.assistant.tools.appfile.AppFilePrevious
 import com.alpha.assistant.tools.appfile.AppFilePrompt
 import com.alpha.assistant.tools.appfile.AppFileRead
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -95,11 +98,14 @@ internal object AppFileNames {
     const val STAGE_PREVIEW = "stage_preview"
     const val STAGE_PREVIEW_GONE = "stage_preview_gone"
     const val CONTROLS_ON = "controls_on"
+    // The narration of a scene whose controls came on before its call ended (plan "one scene", decision 6): saved at the same revision, or dropped.
+    const val NARRATION_SAVED = "narration_saved"
+    const val NARRATION_DROPPED = "narration_dropped"
     /** The holds value of a frame (kit previewStep): the first line, parts, the card, or a whole compiled plan. */
     val PREVIEW_HOLDS = setOf("frame", "parts", "card", "whole")
     val PHASES = setOf(PLAN_CALL_START, PLAN_FIRST_TEXT, PLAN_REPLY_END, COMPILE, REPAIR_CALL_START, CHANGE_CALL_START, PLAN_OUTCOME,
         EARLY_PLAN_START, EARLY_PLAN_USED, EARLY_PLAN_CANCELED, TEMPLATE_CALL_START, TEMPLATE_OUTCOME, STAGE_PREVIEW, STAGE_PREVIEW_GONE,
-        CONTROLS_ON) + HOST_CHECK_RETRIES.map { HOST_CHECK_RETRY + it } + PlanSkip.entries.map { it.phase }
+        CONTROLS_ON, NARRATION_SAVED, NARRATION_DROPPED) + HOST_CHECK_RETRIES.map { HOST_CHECK_RETRY + it } + PlanSkip.entries.map { it.phase }
 
     // The reasons of a ScreenFallback that has no plan outcome. They are not on the trace.
     /** The plan step cannot run for this screen run, for example because the switch is off. */
@@ -125,9 +131,11 @@ internal sealed interface AppFileOutcome {
      * [definition] holds the key language of the compile, as a model definition does. [calls] counts the model calls.
      * [state]: the next state that the kit computed from the stored state of a change. Null for a new app.
      * [frame]: the frame of the compile, which the stage shows while the host check runs.
+     * [narration]: the template call of a new scene that goes on after its clean head (plan "one scene", decision 6). It gives the kept text
+     * of the whole reply with its narration lines, or null. Its owner cancels it when it does not save it.
      */
     class Clean(val appFile: String, val definition: JSONObject, val calls: Int, val state: String? = null,
-        val frame: StagePreviewFrame? = null) : AppFileOutcome
+        val frame: StagePreviewFrame? = null, val narration: Deferred<String?>? = null) : AppFileOutcome
     class Outside(val word: String) : AppFileOutcome
     /** [reason] is a reason of the trace detail fallback:<reason>. */
     class Fallback(val reason: String) : AppFileOutcome
@@ -139,9 +147,13 @@ internal sealed interface AppFileOutcome {
  * [template]: the task of the template call of a new screen (AppFileSteps.screen). Null: the run sends only the plan call.
  * [preview]: shows a frame on the stage (ToolController sets it). It gets the frame of each complete line of a template call and the frame
  * of a clean plan before its host check. It never blocks. Null: the run shows no frame.
+ * [outlive]: the scope of the template call of a new screen, which can go on after the run (AppFileSteps).
+ * [narration]: set by a run whose app came from a clean head, for the caller that stores the app (AppFileOutcome.Clean.narration).
  */
 internal class ScreenRun(val early: Deferred<AppFileOutcome>? = null, val template: String? = null,
-    val preview: ((StagePreviewFrame) -> Unit)? = null)
+    val preview: ((StagePreviewFrame) -> Unit)? = null, val outlive: CoroutineScope? = null) {
+    @Volatile var narration: Deferred<String?>? = null
+}
 
 /** The app-file call of the plan step and the change step: stage, instructions, input, limits, and a consumer of each text delta. */
 internal typealias AppFileCall = suspend (CloudGenerationStage, String, String, AppFileLimits, ((String) -> Unit)?) -> AppFileReply
@@ -163,10 +175,14 @@ internal sealed interface KitCheck {
 
 /** The wait before one more try of a sandbox step that met a busy slot or a deadline: an open app runs an event in the slot. */
 internal const val SANDBOX_RETRY_MS = 500L
+/** The tries of the narration compile after a busy slot: 8 s in all (plan "one scene", decision 6). */
+private const val NARRATION_BUSY_TRIES = 16
 
 /**
  * The plan step of a new app and the change step of a saved app with an app file: one model call, its compile in the sandbox,
  * and at most one repair call. [phase] marks the trace phases. [progress] shows the states that the loop shows at its start.
+ * [outlive]: a scope that outlives the run (the scope of ToolController). With it, the template call of a new screen runs there, so a clean head
+ * can become the app while the call goes on with the narration lines (plan "one scene", decision 6). Null: the run waits for the end of the call.
  */
 internal class AppFileSteps(
     private val compiler: AppFileCompiler,
@@ -174,10 +190,12 @@ internal class AppFileSteps(
     private val call: AppFileCall,
     private val phase: (String, String?, Long?) -> Unit,
     private val progress: (ToolGenerationProgress) -> Unit,
+    private val outlive: CoroutineScope? = null,
 ) {
     /** The steps with the compiler and the prompt of [sandbox]. */
-    constructor(sandbox: SandboxClient, call: AppFileCall, phase: (String, String?, Long?) -> Unit, progress: (ToolGenerationProgress) -> Unit) :
-        this(AppFileCompiler(sandbox.context, sandbox), AppFilePrompt.load(sandbox.context), call, phase, progress)
+    constructor(sandbox: SandboxClient, call: AppFileCall, phase: (String, String?, Long?) -> Unit, progress: (ToolGenerationProgress) -> Unit,
+        outlive: CoroutineScope? = null) :
+        this(AppFileCompiler(sandbox.context, sandbox), AppFilePrompt.load(sandbox.context), call, phase, progress, outlive)
 
     /** Sends [task] (the generation prompt of the request) to the plan call. */
     suspend fun plan(task: String, limits: AppFileLimits): AppFileOutcome {
@@ -230,7 +248,9 @@ internal class AppFileSteps(
         read: suspend (String) -> AppFileRead): AppFileOutcome {
         fun end(detail: String, outcome: AppFileOutcome) = outcome.also { if (stored == null) phase(AppFileNames.TEMPLATE_OUTCOME, detail, null) }
         var calls = 1
-        val (reply, arrived) = streamed(task, limits, stored, preview)
+        val streamed = streamed(task, limits, stored, preview, read)
+        if (streamed is Streamed.Early) return end("clean0", streamed.outcome)
+        val (reply, arrived) = streamed as Streamed.Reply
         val first = when (reply) {
             is AppFileReply.Text -> compiled { read(reply.text) }
             is AppFileReply.Failed -> {
@@ -259,19 +279,72 @@ internal class AppFileSteps(
         return end(templateDetail(outcome, repaired, true), outcome)
     }
 
+    /** The reply of the first template call and its complete lines, or the clean head of a new screen whose call goes on ([streamed]). */
+    private sealed interface Streamed {
+        data class Reply(val reply: AppFileReply, val arrived: String) : Streamed
+        class Early(val outcome: AppFileOutcome.Clean) : Streamed
+    }
+
     /**
      * The first template call with the stream of its text (stage templates, Task 17). The buffer always takes the text, so a stopped call
      * keeps its complete lines. With [preview], a loop shows the frame of the newest complete lines when it is free, over [stored] for a
      * change. The loop closes when the call ends, and the join waits only for the update in flight, so the compile after it meets no busy
      * slot. Gives the reply and the complete lines that arrived.
+     * With [outlive], a new screen compiles the complete lines before its first narration line when that line starts and they hold the card.
+     * A clean compile is the app at once, and the call goes on in [outlive] for the narration. Each other case waits for the end of the call.
      */
     private suspend fun streamed(input: String, limits: AppFileLimits, stored: AppFilePrevious?,
-        preview: ((StagePreviewFrame) -> Unit)?): Pair<AppFileReply, String> = coroutineScope {
+        preview: ((StagePreviewFrame) -> Unit)?, read: suspend (String) -> AppFileRead): Streamed = coroutineScope {
         val stream = TemplateStream()
         val loop = preview?.let { show -> launch { stream.collect { lines -> compiler.preview(lines, stored?.appFile, stored)?.let(show) } } }
-        val reply = try { templateCall(input, limits, stream::append) } finally { stream.close() }
-        loop?.join()
-        reply to stream.completeLines()
+        val outlive = outlive?.takeIf { stored == null }
+        if (outlive == null) {
+            val reply = try { templateCall(input, limits, stream::append) } finally { stream.close() }
+            loop?.join()
+            return@coroutineScope Streamed.Reply(reply, stream.completeLines())
+        }
+        val call = outlive.async(Dispatchers.IO) { try { templateCall(input, limits, stream::append) } finally { stream.close() } }
+        var handed = false
+        try {
+            val head = stream.narration.await()
+            if (head != null && CARD_LINE.containsMatchIn(head)) {
+                // The preview stops first, so the compile of the head meets no busy slot.
+                stream.stopCollect()
+                loop?.join()
+                val clean = (compiled { read(head) } as? AppFileRead.Plan)?.let { templateOutcome(it, false, null, 1) } as? AppFileOutcome.Clean
+                if (clean != null) {
+                    handed = true
+                    val narration = outlive.async(Dispatchers.IO) { try { narrated(call, clean.appFile) } finally { call.cancel() } }
+                    return@coroutineScope Streamed.Early(AppFileOutcome.Clean(clean.appFile, clean.definition, clean.calls, clean.state, clean.frame, narration))
+                }
+            }
+            val reply = call.await()
+            loop?.join()
+            Streamed.Reply(reply, stream.completeLines())
+        } finally { if (!handed) call.cancel() }
+    }
+
+    /**
+     * The kept text of the whole reply of [call] when it adds only narration lines to [head], the kept text of the stored scene. Null for a
+     * failed call, a faulty or busy compile, no narration, or another changed line: the stored definition must stay the one of [head].
+     */
+    private suspend fun narrated(call: Deferred<AppFileReply>, head: String): String? {
+        val reply = call.await() as? AppFileReply.Text ?: return null
+        var tries = 0
+        while (true) {
+            val compilation = (compiler.compileReply(reply.text) as? AppFileRead.Plan)?.compilation ?: return null
+            // The host check of the head and the first events of the stored scene hold the slot at this time, and the voice says the opener
+            // first, so the narration waits longer for the slot than a compile that the screen waits on.
+            if (compilation.status == "BUSY" && tries++ < NARRATION_BUSY_TRIES) { delay(SANDBOX_RETRY_MS); continue }
+            val kept = compilation.kept?.takeIf { compilation.status == "ok" && compilation.faults.isEmpty() && compilation.definition != null } ?: return null
+            return kept.takeIf { it != head && it.lines().filterNot(NARRATION_LINE::matches) == head.lines() }
+        }
+    }
+
+    private companion object {
+        val CARD_LINE = Regex("""(?m)^[ \t]*card[ \t]*=""")
+        /** A narration line as the kit keeps it (template.js). */
+        val NARRATION_LINE = Regex("""say(?:[1-9]\d*)? = .*""")
     }
 
     private suspend fun templateCall(input: String, limits: AppFileLimits, onText: ((String) -> Unit)? = null): AppFileReply {
@@ -379,7 +452,7 @@ internal suspend fun routeAppFile(
     byLines: () -> Unit,
     rebuild: suspend () -> AppAgentResult,
 ): AppAgentResult? {
-    fun appFileSteps(call: AppFileCall) = AppFileSteps(sandbox, call, request::phase) { request.progress?.invoke(it) }
+    fun appFileSteps(call: AppFileCall) = AppFileSteps(sandbox, call, request::phase, { request.progress?.invoke(it) }, request.screen?.outlive)
 
     // The plan step of a new app. A clean plan that passes the host checks is the app.
     // Each other outcome goes on with the loop of today, and the loop gets nothing of the plan.
@@ -400,23 +473,32 @@ internal suspend fun routeAppFile(
     if (request.base == null) skip?.let { request.phase(it.phase) }
     if (screen != null && !gate) throw ScreenFallback(AppFileNames.CLOSED)
     if (gate) {
+        var check: String? = null
         val steps = appFileSteps(checkNotNull(appFileCall))
         val outcome = screen?.early?.let { earlyOutcome(it, checkActive) }
             ?: screen?.template?.let { steps.screen(it, request.prompt, checkNotNull(planStep), screen.preview) }
             ?: steps.plan(request.prompt, checkNotNull(planStep))
-        checkActive()
-        // The stage shows the compiled plan while the host check runs, a template and a free plan alike (design section 3).
-        if (outcome is AppFileOutcome.Clean) outcome.frame?.let { screen?.preview?.invoke(it) }
-        var check: String? = null
-        val reason = when (outcome) {
-            is AppFileOutcome.Outside -> AppFileNames.OUTSIDE
-            is AppFileOutcome.Fallback -> outcome.reason
-            is AppFileOutcome.Clean -> when (val kit = kitApp(outcome)) {
-                is KitCheck.App -> return kit.result
-                // A template gets no repair call for a host check: the screen run falls back, and the release log keeps the check.
-                is KitCheck.Failed -> if (steps.prompt.isTemplate(outcome.appFile)) AppFileNames.TEMPLATE_CHECK.also { check = kit.fallback } else kit.fallback
+        // Only an accepted screen keeps the call of its narration: each other end cancels it.
+        val narration = (outcome as? AppFileOutcome.Clean)?.narration
+        var handed = false
+        val reason = try {
+            checkActive()
+            // The stage shows the compiled plan while the host check runs, a template and a free plan alike (design section 3).
+            if (outcome is AppFileOutcome.Clean) outcome.frame?.let { screen?.preview?.invoke(it) }
+            when (outcome) {
+                is AppFileOutcome.Outside -> AppFileNames.OUTSIDE
+                is AppFileOutcome.Fallback -> outcome.reason
+                is AppFileOutcome.Clean -> when (val kit = kitApp(outcome)) {
+                    is KitCheck.App -> {
+                        screen?.narration = narration
+                        handed = true
+                        return kit.result
+                    }
+                    // A template gets no repair call for a host check: the screen run falls back, and the release log keeps the check.
+                    is KitCheck.Failed -> if (steps.prompt.isTemplate(outcome.appFile)) AppFileNames.TEMPLATE_CHECK.also { check = kit.fallback } else kit.fallback
+                }
             }
-        }
+        } finally { if (!handed) narration?.cancel() }
         request.phase(AppFileNames.PLAN_OUTCOME, if (outcome is AppFileOutcome.Outside) "outside:${outcome.word}" else "fallback:$reason")
         if (screen != null) throw ScreenFallback(reason, check)
         // The shell logs a screen run with its decision kind. Each other build logs here, where it goes on to the loop (ruling FX-9).

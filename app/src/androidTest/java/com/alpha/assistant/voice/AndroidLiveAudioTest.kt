@@ -4,6 +4,7 @@ import android.Manifest
 import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -48,6 +49,32 @@ class AndroidLiveAudioTest {
         audio.flushPlayback()
         write("A 100 ms chunk after a flush")
         played("A 100 ms chunk after a flush", 1_000)
+    }
+
+    /**
+     * Plan "one scene", Task 30: the played frames never go down, stay at or below the written frames, reach them when the chunks have
+     * played, and count the frames that a flush dropped.
+     */
+    @Test fun playedFramesIsMonotonicAndBehindTheWrites() {
+        var given = 0L
+        val samples = mutableListOf<Long>()
+        val writer = thread(isDaemon = true) { repeat(20) { audio.play(voice(CHUNK)); synchronized(samples) { given += CHUNK } } }
+        while (writer.isAlive) {
+            // The count of this test grows after each write returns, so the write in flight can add one chunk.
+            synchronized(samples) { samples += audio.playedFrames(); assertTrue("played ${samples.last()} of $given", samples.last() <= given + CHUNK) }
+            SystemClock.sleep(20)
+        }
+        played("2 s of voice", 5_000)
+        samples += audio.playedFrames()
+        assertTrue("the played frames went down: $samples", samples.zipWithNext().all { (a, b) -> b >= a })
+        assertTrue("played ${samples.last()} of $given", samples.last() in given - CHUNK..given)
+        // A flush in the middle of 3 s of voice counts the dropped frames as played.
+        val more = thread(isDaemon = true) { repeat(30) { audio.play(voice(CHUNK)) } }
+        SystemClock.sleep(500)
+        audio.flushPlayback()
+        more.join(10_000)
+        audio.flushPlayback()
+        assertEquals(given + 30L * CHUNK, audio.playedFrames())
     }
 
     /** Writes one chunk. A write that the track did not take counts nothing, so the playback must be active after it. */

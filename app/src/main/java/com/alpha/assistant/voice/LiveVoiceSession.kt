@@ -20,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 
 internal enum class LivePhase { IDLE, CONNECTING, LISTENING, SPEAKING, MUTED }
 
@@ -27,6 +28,39 @@ internal enum class LivePhase { IDLE, CONNECTING, LISTENING, SPEAKING, MUTED }
 private const val TOUCH_TAIL_MS = 300L
 /** The gate opens this long after the down of a touch that stays down, because the sound comes at the down and at the end. */
 private const val TOUCH_HOLD_MS = 1_000L
+
+/** The sync rule of plan "one scene", decision 13: the quiet run before a voiced start, the fallback frame, and the wait for an onset. */
+private const val ONSET_QUIET_MS = 200L
+private const val ONSET_FALLBACK_MS = 450L
+private const val ONSET_WAIT_MS = 1_500L
+/** The received chunks that a later arm can still find: the chunks of the last 3 s. */
+private const val RECEIVED_KEEP_MS = 3_000L
+private const val SENTENCE_ENDS = ".!?…"
+
+/** [text] with no letter case, no punctuation, and single spaces, for the match of a spoken text with a sentence. */
+private fun plain(text: String) = text.lowercase().replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim()
+
+/**
+ * True when [heard], the transcript since the end of the last sentence, starts [sentence]: one is the start of the other, and [heard] has
+ * a letter or a digit (plan "one scene", decision 14).
+ */
+internal fun startsSentence(heard: String, sentence: String): Boolean {
+    val said = plain(heard)
+    val whole = plain(sentence)
+    return said.isNotEmpty() && whole.isNotEmpty() && (whole.startsWith(said) || said.startsWith(whole))
+}
+
+/** True when [heard] holds the whole of [sentence] from its start. */
+internal fun coversSentence(heard: String, sentence: String) = plain(sentence).let { it.isNotEmpty() && plain(heard).startsWith(it) }
+
+/** The text after the last sentence end of [text]. */
+internal fun afterSentenceEnd(text: String) = text.substring(text.indexOfLast { it in SENTENCE_ENDS } + 1)
+
+/** The text of [heard] after the shortest start of it that holds the whole of [sentence], with no punctuation at its start. */
+internal fun afterCovered(heard: String, sentence: String): String =
+    heard.indices.firstOrNull { coversSentence(heard.substring(0, it + 1), sentence) }?.let { end ->
+        heard.substring(end + 1).dropWhile { !it.isLetterOrDigit() && !it.isWhitespace() }
+    } ?: ""
 
 /**
  * The timers of spec 5.8 and 5.4.5. A user turn also ends after [turnGapMs] without input transcript deltas. A reply of Alphy ends
@@ -44,6 +78,13 @@ internal interface LiveVoiceHost {
     fun delegation(id: String, request: String)
     fun turn(turn: UserTurn)
     fun handOffRunning(): Boolean
+    /**
+     * Each output transcript piece of a reply with its server times, true for the first piece of a reply, and the uptime of its arrival in
+     * nanoseconds (plan "one scene", decision 12). A skipped sentence gives none ([LiveVoiceSession.skip]).
+     */
+    fun outputText(text: String, startMs: Long, endMs: Long, replyStart: Boolean, arrivedNanos: Long) {}
+    /** The first input transcript piece of a user turn. */
+    fun inputStarted() {}
     /** At `session.commentary.appended` for the client event id that [LiveVoiceSession.commentary] returned. */
     fun appended(eventId: String)
     /** Once at the end of each reply, as [LiveTiming] defines it. [endMs] is [LiveTranscript.outputEndMs]. */
@@ -107,6 +148,41 @@ internal class LiveVoiceSession(
     /** The uptime of the down of a touch on the stage while it is down, and the uptime at which the gate after its end opens ([touch]). */
     private var touchDownMs: Long? = null
     private var touchOpenMs = 0L
+    /** The user turn has an input transcript piece, so the next piece starts no turn ([LiveVoiceHost.inputStarted]). */
+    private var inputOpen = false
+    /** A received voiced chunk: its arrival, its first frame in [queuedFrames], and a quiet run of [ONSET_QUIET_MS] before it. */
+    private class Received(val arrivedNanos: Long, val frame: Long, val onset: Boolean)
+    private val received = ArrayDeque<Received>()
+    /** The frames queued for the speaker in this session. The player adds the frames that a flush skipped to [skippedFrames]. */
+    private var queuedFrames = 0L
+    private val skippedFrames = AtomicLong()
+    /** The quiet run since the last voiced chunk, and the arrival and the length of the last chunk, for the arrival gap. */
+    private var quietMs = 0L
+    private var lastChunkNanos = 0L
+    private var lastChunkMs = 0L
+    private var onsetJob: Job? = null
+    /** The sentence of a pending [skip], and true while it waits through the reply that was open at the skip (fix list item 2c of stage 2). */
+    private var skipSentence: String? = null
+    private var skipSpans = false
+    /**
+     * A started skip: its sentence, the transcript since the sentence start, the dropped pieces with the start and the reply start of the
+     * first, and true once the whole sentence came. [skipText] drops the transcript pieces. From the next voiced onset, [skipDrop] holds the
+     * audio in [skipHeld] until the whole sentence came, and then drops it. [skipResume]: a new text came after the sentence, so the next
+     * onset plays.
+     */
+    private var skipping: String? = null
+    private var skipHeard = ""
+    private var skipDropped = ""
+    private var skipStartMs = 0L
+    private var skipReplyStart = false
+    private var skipCovered = false
+    private var skipText = false
+    private var skipAudio = false
+    private var skipDrop = false
+    private var skipResume = false
+    private val skipHeld = ArrayList<ShortArray>()
+    /** The output transcript of the open reply since its last sentence end, for the match of a skip. */
+    private var sinceSentence = ""
     /** The client event ids of the appends, mutes, and unmutes of this session. An error for one keeps the mode (rulings R10, R37). */
     private val tolerated = HashSet<String>()
     /** The uptime of the session start, the last change of the user's speech, or the last output end (ruling R38). */
@@ -129,6 +205,8 @@ internal class LiveVoiceSession(
         transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null; tolerated.clear()
         started = false; userMuted = false; awayMuted = false; captureMuted = false; dropping = false; interrupted = false
         playbackSeenMs = Long.MIN_VALUE; held.clear(); touchDownMs = null; touchOpenMs = 0L
+        inputOpen = false; received.clear(); queuedFrames = 0; skippedFrames.set(0); quietMs = 0; lastChunkNanos = 0; lastChunkMs = 0
+        skipSentence = null; endSkip(); sinceSentence = ""
         active = true; status = ""; phase = LivePhase.CONNECTING
         scope.launch {
             try {
@@ -176,13 +254,97 @@ internal class LiveVoiceSession(
 
     /** Sends a hand-off result and returns its client event id. After the end it sends nothing, as hand-offs outlive it (spec 5.5.9). */
     fun commentary(delegationId: String, text: String): String {
+        skipSentence?.let { if (it in text) skipSentence = null }
         val id = LiveProtocol.newId()
         if (started) { tolerated += id; send(LiveProtocol.commentary(id, delegationId, text)); countSilence() }
         return id
     }
 
+    /** Alphy speaks now: a reply is open or the speaker plays, and the reply is not dropped (plan "one scene", decision 11). */
+    val speaksNow: Boolean get() = active && speaking() && !dropping
+
+    /**
+     * The sync rule of plan "one scene", decision 13. The target is the first voiced chunk received after [armedNanos] with a quiet run of
+     * [ONSET_QUIET_MS] before it: silent received frames or a gap in arrival. With no such chunk within [ONSET_WAIT_MS] of the arm, the
+     * target is the frame received [ONSET_FALLBACK_MS] after the arm. [fire] runs on the main thread when [LiveAudio.playedFrames] reaches
+     * the target, polled every 20 ms, and at once when the speaker already played it. A new call replaces a pending one.
+     */
+    fun onsetAfter(armedNanos: Long, fire: () -> Unit) {
+        cancelOnset()
+        val token = generation
+        onsetJob = scope.launch {
+            var target: Long? = null
+            var fallback: Long? = null
+            while (target == null) {
+                val now = SystemClock.elapsedRealtimeNanos()
+                target = received.firstOrNull { it.arrivedNanos > armedNanos && it.onset }?.frame
+                if (fallback == null && now - armedNanos >= ONSET_FALLBACK_MS * 1_000_000) fallback = queuedFrames
+                if (target == null && now - armedNanos >= ONSET_WAIT_MS * 1_000_000) target = fallback ?: queuedFrames
+                if (target == null) delay(20)
+            }
+            // The first frame of the target plays once the speaker played more than the frames before it. A target at the end of the
+            // received frames fires when they all played.
+            while (token == generation && !(playedFrames() > target || playedFrames() >= target && target >= queuedFrames)) delay(20)
+            if (token == generation) fire()
+        }
+    }
+
+    fun cancelOnset() { onsetJob?.cancel(); onsetJob = null }
+
+    /**
+     * Drops [sentence] once (plan "one scene", decision 15, and the fix list of stage 2, item 2). From the first output transcript piece
+     * that starts it, the transcript pieces go nowhere, and from the next voiced start by the sync rule, the audio is held. When the whole
+     * sentence came, the held audio is dropped, and so is the audio until a new text comes: that text goes to the host, and its audio plays
+     * from the next voiced start. When the transcript goes another way before the end of the sentence, the skip ends: the dropped text goes
+     * to the host and the held audio plays. It sends nothing. A pending skip ends at a thinking or commentary text that holds [sentence], and
+     * at the end of the first reply after the one that is open now, because the voice says a waiting sentence in the open reply or the next.
+     */
+    fun skip(sentence: String) { skipSentence = sentence; skipSpans = replyJob?.isActive == true || !replyEnded }
+
+    /** Ends a started skip, with no text and no audio of it. */
+    private fun endSkip() {
+        skipping = null; skipHeard = ""; skipDropped = ""; skipCovered = false
+        skipText = false; skipAudio = false; skipDrop = false; skipResume = false; skipHeld.clear()
+    }
+
+    /** A transcript piece of a started skip: it goes nowhere while it is part of the skipped sentence (fix list item 2a and 2b). */
+    private fun skipPiece(delta: String, startMs: Long, endMs: Long, replyStart: Boolean) {
+        val sentence = checkNotNull(skipping)
+        skipHeard += delta; skipDropped += delta
+        val rest = when {
+            skipCovered -> delta
+            coversSentence(skipHeard, sentence) -> { skipCovered = true; skipHeld.clear(); afterCovered(skipHeard, sentence) }
+            startsSentence(skipHeard, sentence) -> return
+            else -> {
+                // The reply went another way before the end of the sentence: its text goes to the host whole, and then its held audio plays.
+                val held = skipHeld.toList()
+                val dropped = skipDropped; val from = skipStartMs; val start = skipReplyStart
+                endSkip()
+                said(dropped, from, endMs, start)
+                live?.takeIf { held.isNotEmpty() && !dropping }?.let { queue(it, held, SystemClock.elapsedRealtimeNanos(), queuedFrames, onset = true) }
+                return
+            }
+        }
+        if (plain(rest).isEmpty()) return
+        // A new text after the sentence goes to the host, and its audio plays from the next voiced start. When the sentence opened the
+        // reply, the host got nothing of the reply before, so this text starts it.
+        skipText = false; skipResume = true
+        said(rest, startMs, endMs, replyStart || skipReplyStart)
+    }
+
+    /** A piece of the voice for the strip line and the host. */
+    private fun said(text: String, startMs: Long, endMs: Long, replyStart: Boolean) {
+        if (text.isEmpty()) return
+        speech = if (replyStart) text else speech + text
+        host?.outputText(text, startMs, endMs, replyStart, SystemClock.elapsedRealtimeNanos())
+    }
+
+    /** The frames that the speaker played in this session, with the queued frames that a flush skipped. */
+    private fun playedFrames() = (live?.playedFrames() ?: 0L) + skippedFrames.get()
+
     /** Quiet context for a typed turn (spec 5.7.2). */
     fun thinking(text: String) {
+        skipSentence?.let { if (it in text) skipSentence = null }
         if (!started) return
         val id = LiveProtocol.newId()
         tolerated += id
@@ -201,6 +363,7 @@ internal class LiveVoiceSession(
         speech = ""
         // An open reply of this session must not count as open in the next one.
         replyJob?.cancel(); held.clear()
+        cancelOnset(); skipSentence = null; endSkip()
         playback++
         connection?.let { if (socketOpen) it.send(LiveProtocol.close()); it.close() }
         connection = null
@@ -233,17 +396,32 @@ internal class LiveVoiceSession(
             }
             is LiveEvent.OutputAudio -> output(event.samples)
             is LiveEvent.InputTranscript -> {
+                if (!inputOpen && event.delta.isNotBlank()) { inputOpen = true; host?.inputStarted() }
                 refresh()
                 // A delta arrives after its own end, so its phrase began at or before this time (ruling R11).
                 val began = SystemClock.uptimeMillis() - (event.endMs - event.startMs)
                 transcript.input(event.delta, event.startMs, event.endMs, playbackSeenMs >= began || interrupted)
                 interrupted = false
                 gapJob?.cancel()
-                gapJob = after(timing.turnGapMs) { turn(transcript.endTurn()) }
+                gapJob = after(timing.turnGapMs) { inputOpen = false; turn(transcript.endTurn()) }
             }
             is LiveEvent.OutputTranscript -> {
+                val replyStart = replyEnded
+                if (replyStart) sinceSentence = ""
+                // A pending skip starts at the first piece that starts its sentence, also inside the reply before it (decision 15).
+                val before = afterSentenceEnd(sinceSentence)
+                skipSentence?.let { sentence ->
+                    if (skipping == null && startsSentence(before + event.delta, sentence)) {
+                        skipSentence = null; skipping = sentence; skipHeard = before; skipDropped = ""; skipCovered = false
+                        skipStartMs = event.startMs; skipReplyStart = replyStart; skipText = true; skipAudio = true
+                    }
+                }
+                sinceSentence = afterSentenceEnd(sinceSentence + event.delta)
                 // An empty delta must not empty the line, or the strip would lose its place.
-                if (event.delta.isNotEmpty()) { speech = if (replyEnded) event.delta else speech + event.delta; replyEnded = false }
+                if (event.delta.isNotEmpty()) {
+                    replyEnded = false
+                    if (skipText) skipPiece(event.delta, event.startMs, event.endMs, replyStart) else said(event.delta, event.startMs, event.endMs, replyStart)
+                }
                 turn(transcript.output(event.delta, event.startMs, event.endMs))
             }
             is LiveEvent.Delegation -> delegation(event)
@@ -297,7 +475,15 @@ internal class LiveVoiceSession(
         val device = live ?: return
         // The reply timer runs from the last voiced chunk until the reply ends.
         val open = replyJob?.isActive == true
+        // The quiet run before this chunk: silent received frames and a gap in arrival (decision 13).
+        val now = SystemClock.elapsedRealtimeNanos()
+        // The first chunk of a session follows the quiet before the session, so it is an onset.
+        val gapMs = if (lastChunkNanos == 0L) ONSET_QUIET_MS else maxOf(0L, (now - lastChunkNanos) / 1_000_000 - lastChunkMs)
+        lastChunkNanos = now
+        lastChunkMs = samples.size * 1000L / LIVE_RATE
+        while (received.isNotEmpty() && now - received.first().arrivedNanos > RECEIVED_KEEP_MS * 1_000_000) received.removeFirst()
         if (rms(samples) <= LIVE_VOICED_RMS) {
+            quietMs += gapMs + lastChunkMs
             if (open) {
                 if (!dropping) held += samples
                 // Ruling R27: a count of samples, not of arrival time, so network jitter cannot end a reply.
@@ -309,19 +495,41 @@ internal class LiveVoiceSession(
         }
         // The next reply starts at a voiced chunk after the last reply has ended, once the user has stopped (spec 5.4.5).
         if (dropping && !open && !detector.userSpeaking) { dropping = false; interrupted = false }
+        val onset = quietMs + gapMs >= ONSET_QUIET_MS
+        quietMs = 0
+        // A started skip holds or drops the audio from the next voiced start (decision 15). After a new text, the onset that follows a
+        // dropped start plays, so a transcript that runs ahead of the audio drops the start of the sentence first.
+        // shortcut: a new text whose audio comes before its transcript piece loses its words until the next onset; measure it on a phone.
+        if (onset && skipResume && skipDrop) endSkip()
+        else if (onset && skipAudio) skipDrop = true
+        if (skipDrop) {
+            if (!skipCovered) skipHeld += samples
+            held.clear()
+            silentSamples = 0
+            stall()
+            refresh()
+            return
+        }
         // shortcut: a chunk that the player has already taken can still play after a flush; lock it if the echo check hears it.
         if (!dropping) {
             // shortcut: ruling R26 writes the held pause only while the device still plays. A device that has run dry played the
             // pause as its underrun, so the pause is shorter by the backlog; measure the pause on a phone if replies sound rushed.
             // The phase and the barge-in check follow the open reply (R34), so a dry device changes neither.
             val chunks = if (device.playbackActive) held + samples else listOf(samples)
-            val epoch = playback
-            player.launch { for (chunk in chunks) if (epoch == playback) device.play(chunk) }
+            queue(device, chunks, now, queuedFrames + chunks.dropLast(1).sumOf { it.size.toLong() }, onset)
         }
         held.clear()
         silentSamples = 0
         stall()
         refresh()
+    }
+
+    /** Queues [chunks] for the speaker, with the voiced chunk at [frame] for the sync rule (decision 13). */
+    private fun queue(device: LiveAudio, chunks: List<ShortArray>, now: Long, frame: Long, onset: Boolean) {
+        val epoch = playback
+        received.addLast(Received(now, frame, onset))
+        queuedFrames += chunks.sumOf { it.size.toLong() }
+        player.launch { for (chunk in chunks) if (epoch == playback) device.play(chunk) else skippedFrames.addAndGet(chunk.size.toLong()) }
     }
 
     /** Ends the reply when the stream stops: [LiveTiming.replyGapMs] after its last chunk of any kind (ruling R27). */
@@ -335,6 +543,9 @@ internal class LiveVoiceSession(
         replyJob?.cancel(); replyJob = null
         held.clear()
         replyEnded = true
+        endSkip()
+        // A pending skip waits through the reply that was open at the skip, then through one more reply (fix list item 2c).
+        if (skipSentence != null) { if (skipSpans) skipSpans = false else skipSentence = null }
         host?.outputEnded(transcript.outputEndMs)
         heardMs = SystemClock.uptimeMillis()
         countSilence()
@@ -359,14 +570,16 @@ internal class LiveVoiceSession(
     /** The turn of the request reaches the host before its hand-off. */
     private fun handOff(event: LiveEvent.Delegation, request: String) {
         waiting = null
+        inputOpen = false
         turn(transcript.endTurn())
         host?.delegation(event.id, request)
     }
 
-    private fun turn(turn: UserTurn?) { if (turn != null) host?.turn(turn) }
+    private fun turn(turn: UserTurn?) { if (turn != null) { inputOpen = false; host?.turn(turn) } }
 
     /** Stops the playback at once and drops the rest of the current reply. */
     private fun flush() {
+        // shortcut: the frames of a write that the flush cuts short count in full; the target of a later onset can be one chunk early.
         playback++
         dropping = true
         held.clear()

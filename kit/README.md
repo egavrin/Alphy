@@ -97,7 +97,7 @@ s3 = text(150, 50, "Воздух внутри", "ink", 14, visible=$/v == "Ко�
 card = card("Вытеснение воды", "Полый корабль вытесняет достаточно воды, чтобы удержаться на плаву.")
 ```
 
-The lines of a template file:
+The lines of a template file (the narration lines are optional):
 
 - The first line names the template: `scene(TITLE, lang=CODE, palette=NAME)`, or `items(…)` or `cells(…)` with the same arguments.
   `isTemplateFile` tests `TEMPLATE_HEAD` on the first line that is not empty, so it tells a template file from an app file.
@@ -110,6 +110,10 @@ The lines of a template file:
   - A shape is `circle`, `rect`, `line`, `text`, or `polygon`, with only `visible=` and `stroke=` by name. The points of a polygon are an even count of at least 6 numbers.
   - An item is `item(LABEL, SIGN, TEXT)`. Each item has a label of its own, because the choice shows the labels.
 - The card: `card = card(TITLE, TEXT)` of `scene` and `cells`, and `card = card(TITLE)` of `items`, whose card shows the text of the chosen item.
+- The steps control `control = steps(LABEL, [STEP, …], ANSWER)` of `scene`, or `steps(LABEL, ANSWER)` of `items`, is a choice of 2 to 6 steps in their order. Its start is ANSWER, by default the last step. The host walks its steps with the voice (`docs/voice-integration.md`, section "The narration of a scene").
+- The narration lines come after the card: `say = TEXT` with a slider, a choice, or no control, and `say1 = TEXT` to `sayN = TEXT`, one sentence for each step of a steps control.
+  A narration line draws nothing, so it has no fault. The kit cuts its text to `BUDGET.say` (110 characters) after the last whole sentence, and keeps it as `sayK = "<JSON string>"`.
+  The kit leaves out with no fault a narration line with no sentence end inside the cap, `say` beside a steps control, `sayK` beside another control, and `sayK` past the count of steps. A second line of one name goes.
 - A line reads no value other than `$/v`, the value of the control.
 - The line `$/v = VALUE` in the place of the control holds the start value of a control that the kit left out (`kept` below).
 
@@ -136,6 +140,7 @@ A `cells` drawing shows rows of at most ten cells and the caption "K / N = P%".
 | A text in quotes of a shape | 28 |
 | Options, items, and shapes | 6, 6, and 12 |
 | Cells | 100 |
+| A narration line (`say`) | 110 |
 
 - A text inside the picture (the sign of an item, and a text in quotes of a shape) has no fault up to floor(1.25 × cap) (`INSIDE`). Such a text cannot change the height of the screen.
 - A text outside the picture has a hard cap.

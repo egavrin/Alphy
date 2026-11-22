@@ -15,7 +15,8 @@ import java.io.File
  * Gate 2c (Task 8b): the host check of the app on model-made template files. Each file of the folder tpl-hostcheck in the external files
  * directory of the app is the scripted template reply of a spoken screen request. A file passes when the app is stored with that file and
  * no template_check fallback ran. Each file prints one line with its outcome, and a miss also with the host check reason. With no folder
- * the test is skipped, so the full suite stays green. The controller pushes the files with adb before the run.
+ * the test is skipped, so the full suite stays green. The controller pushes the files with adb before the run. Each stored screen also leaves
+ * the picture first-state-<name>.png of its first state in that directory (plan "one scene", Task 34).
  */
 class StageTemplateHostCheckTest {
     private val robot = ShellRobot("stage-template-host")
@@ -44,7 +45,7 @@ class StageTemplateHostCheckTest {
                             generationLog().drop(logged).last { AppFileNames.TEMPLATE_CHECK in it }.substringAfter("outcome=").substringBefore(" ")
                         }
                         phases.any { it.startsWith(FALLBACK) } -> "a plan fallback: $outcomes"
-                        else -> when (val stored = appFileOf(shell.stored(model, checkNotNull(model.stageToolId)))?.trimEnd()) {
+                        else -> when (val stored = storedFile(shell, model, file)) {
                             null -> "stored with no app file"
                             text -> null
                             else -> "stored with other lines: " + text.lines().filterNot { it in stored.lines() }
@@ -56,6 +57,23 @@ class StageTemplateHostCheckTest {
             } finally { shell.remove() }
         }
         assertTrue("${misses.size} of ${files.size} files miss the host check: $misses", misses.size <= MAX_MISSES)
+    }
+
+    /**
+     * The stored app file of the stage app after its narration call ended: the host stores a scene with narration lines before them and saves
+     * them later (plan "one scene", decision 6). Before that, the picture of the first state of the screen.
+     */
+    private fun storedFile(shell: TemplateShell, model: ShellViewModel, file: File): String? {
+        val id = checkNotNull(model.stageToolId)
+        robot.waitUntil(30_000) { !model.tools.busy }
+        robot.awaitFrames(10)
+        val picture = checkNotNull(robot.instrumentation.uiAutomation.takeScreenshot())
+        try {
+            File(file.parentFile?.parentFile, "first-state-${file.nameWithoutExtension}.png").outputStream().use {
+                check(picture.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+            }
+        } finally { picture.recycle() }
+        return shell.finalFile(model, id)?.trimEnd()
     }
 
     /** The release log lines of this process (ToolGenerationDiagnostic.logGeneration), which name the host check of a template_check fallback. */

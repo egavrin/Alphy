@@ -44,7 +44,7 @@ class StageTemplateFitTest {
             try {
                 shell.live(talk) { scenario, model, _ ->
                     val faults = mutableListOf<String>()
-                    if (appFileOf(shell.screen(model)) != file) faults += "the stored app file is not the reply"
+                    if (shell.finalFile(model, shell.screen(model).id) != file) faults += "the stored app file is not the reply"
                     val template = if (free == null) Template(file) else null
                     if (template != null) robot.waitUntil(30_000) {
                         stageParts(scenario).any { it.isCanvasOf(template.title) } && robot.composedTextIn(scenario, STAGE, template.card.first())
@@ -125,7 +125,10 @@ class StageTemplateFitTest {
     private companion object {
         const val STAGE = "dialogue_stage"
         const val STRIP = "dialogue_strip"
-        /** The cap files of the three templates (kit/test/fixtures/template), at the caps, and with each text inside the picture at 1.25 times its cap (a text outside the picture has a hard cap). */
-        val FILES = listOf("scene-caps", "scene-caps125", "items-caps", "items-caps125", "cells-caps", "cells-caps125")
+        /**
+         * The cap files of the three templates (kit/test/fixtures/template), at the caps, and with each text inside the picture at 1.25 times its cap (a text outside the picture has
+         * a hard cap). The steps files have six steps and six narration lines at their caps (plan "one scene", Task 25).
+         */
+        val FILES = listOf("scene-caps", "scene-caps125", "items-caps", "items-caps125", "cells-caps", "cells-caps125", "steps-caps", "items-steps-caps")
     }
 }

@@ -333,10 +333,12 @@ internal class TemplateShell(private val fixture: ShellFixture, private val robo
     /**
      * Launches the shell with the plan step on and [talk], starts the voice mode, and answers `session.started`. [test] gets the trace phases
      * of each operation in their order, each as name or name:detail. [observe] gets each phase after the list, on the thread that marks it.
+     * [audio] is the speaker and the microphone of the mode.
      */
-    fun live(talk: ChatProvider, observe: (String) -> Unit = {}, test: (ActivityScenario<CloudTestActivity>, ShellViewModel, List<String>) -> Unit) =
+    fun live(talk: ChatProvider, observe: (String) -> Unit = {}, audio: FakeLiveAudio = FakeLiveAudio(),
+        test: (ActivityScenario<CloudTestActivity>, ShellViewModel, List<String>) -> Unit) =
         withPlanStep(fixture.context, AiProvider.OPENAI, true) {
-            fixture.install(chat = talk, liveVoice = fixture.liveVoice(socket, FakeLiveAudio()))
+            fixture.install(chat = talk, liveVoice = fixture.liveVoice(socket, audio))
             fixture.launch().use { scenario ->
                 val model = checkNotNull(fixture.model)
                 robot.waitUntil { !model.loading }
@@ -377,6 +379,13 @@ internal class TemplateShell(private val fixture: ShellFixture, private val robo
     }
 
     fun stored(model: ShellViewModel, id: String) = model.tools.tools.first { it.id == id }
+
+    /** The stored app file of [id] after its narration call ended: the host stores a scene before its narration lines and saves them later (plan "one scene", decision 6). */
+    fun finalFile(model: ShellViewModel, id: String): String? {
+        robot.waitUntil(30_000) { !model.tools.narrationPending(id) }
+        val record = stored(model, id)
+        return model.tools.savedNarration(record) ?: appFileOf(record)
+    }
 
     fun messages(model: ShellViewModel) = model.snapshot.selected?.messages.orEmpty()
 

@@ -52,6 +52,11 @@ internal interface LiveAudio {
     val playbackActive: Boolean
     /** The level of the last captured block, 0 to 1. */
     val level: Float
+    /**
+     * The frames that the speaker played since [open] (plan "one scene", decision 12). It never goes down and stays at or below the written
+     * frames. A flush counts the frames that it dropped as played.
+     */
+    fun playedFrames(): Long
     fun close()
 }
 
@@ -69,6 +74,10 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
     @Volatile private var track: AudioTrack? = null
     // Bumped by each flush, so frames of a write that the flush cut short are not counted.
     private var generation = 0
+    // The frames given to play() since open, the frames that the flushes counted as played, and the head at the last flush (playedFrames).
+    private var given = 0L
+    private var flushedBase = 0L
+    private var flushHead = 0L
     private var thread: Thread? = null
     private var opened = false
     private var routed = false
@@ -124,7 +133,8 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
 
     override fun play(samples: ShortArray) {
         val output = track ?: return
-        val before = synchronized(written) { generation }
+        // shortcut: a write that a flush cuts short counts its whole chunk as given, as the session counts it; the difference is one chunk.
+        val before = synchronized(written) { given += samples.size; generation }
         val count = output.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
         if (count > 0) synchronized(written) { if (generation == before) written.addAndGet(count.toLong()) }
     }
@@ -139,7 +149,14 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
             // The platform resets the head position to zero at a flush. The new count of written frames starts at the head, so it
             // also holds on a device that keeps counting.
             written.set(head(output))
+            flushedBase = given
+            flushHead = head(output)
         }
+    }
+
+    override fun playedFrames(): Long = synchronized(written) {
+        val output = track ?: return@synchronized flushedBase
+        minOf(given, flushedBase + maxOf(0L, head(output) - flushHead))
     }
 
     override val playbackActive: Boolean
@@ -158,6 +175,7 @@ internal class AndroidLiveAudio(context: Context) : LiveAudio {
         record?.release(); record = null
         track?.let { runCatching { it.stop() }; it.release() }; track = null
         written.set(0)
+        synchronized(written) { given = 0; flushedBase = 0; flushHead = 0 }
         level = 0f
         if (routed) {
             audioManager.clearCommunicationDevice()

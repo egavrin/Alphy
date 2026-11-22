@@ -172,10 +172,10 @@ The request above asks for a change of your app file. Write each line that chang
 
 You fill a ready screen for a talk between a person and a voice assistant. The voice gives the answer in words, and the screen shows the thing itself, with few words: one picture, one control that changes the picture, and one card.
 Reply with the lines of the screen only: plain lines, one item on each line, no line break inside an item, no markdown, no comments, no explanation. In each example below, the reply is the lines between the two fence lines.
-Each line is complete by itself and starts with its name. The order of the lines is fixed: the first line, the control, the parts of the picture, the card. Write one line for each part.
+Each line is complete by itself and starts with its name. The order of the lines is fixed: the first line, the control, the parts of the picture, the card, then the narration lines. Write one line for each part.
 Write every visible text in the language of the request. Write each text in quotes, also an option. A number has no quotes.
 
-When the person asks to explain or to show a thing, fill a template, also when the person asks for it in steps: the voice gives the steps, and a choice of the steps changes the picture.
+When the person asks to explain or to show a thing, fill a template, also when the person asks for it in steps.
 When the person asks to learn or to practice a thing with a check (a test, a quiz, questions, or tasks to solve), a timer, a list, a form, or a game, reply with the one line outside("learn").
 When the request needs a picture, a photo, a map, a device function, a 3D model, a thing that moves by itself, or any other thing that no template below shows, reply with the one line outside("other").
 
@@ -184,26 +184,32 @@ TITLE: the title of the screen, at most 30 characters. CODE: the two-letter code
 The control is the line control = ..., and its LABEL has at most 28 characters. The last line is the card: its TITLE has at most 32 characters, and its TEXT is one to three short sentences, at most 140 characters.
 
 Template scene: a scheme from plain shapes that one control changes, for a thing to understand, such as a motion, a position, a size, a path, a part, or a step that the person picks.
-control = slider(LABEL, MIN, MAX, STEP, START), or control = choice(LABEL, [OPTION, ...], START)
+control = slider(LABEL, MIN, MAX, STEP, START), or control = choice(LABEL, [OPTION, ...], START), or control = steps(LABEL, [STEP, ...], ANSWER)
 s1 = SHAPE, and so on to s12 = SHAPE
 card = card(TITLE, TEXT)
 A slider is a number that the person drags from MIN to MAX in steps of STEP, and START is its start value. A choice has 2 to 6 options, each at most 12 characters, and START is one of them. With no START the first option is the start.
+Steps are a sequence in their order, such as the stages of a process: 2 to 6 steps, each at most 12 characters. ANSWER is the step that shows the answer best, and the screen starts at it. With no ANSWER the last step is the answer. Use steps for a sequence, and a choice for things with no order.
 s1 to s12 are at most 12 shapes in a box 300 wide and 220 high. Use as few shapes as show the thing: most pictures need 4 to 8. x goes right and y goes down. At least one shape reads $/v, so that the control changes the picture.
 Shapes: circle(x, y, r, color), rect(x, y, w, h, color, radius), line(x1, y1, x2, y2, color, width), text(x, y, value, color, size), polygon([x1, y1, x2, y2, ...], color). A shape takes visible=test and stroke=true for the outline only. The center of a text is at x, y, and a text in quotes in a shape has at most 28 characters.
 Keep each shape inside the box, and put a text where no shape covers it. The point at angle a on a circle around cx, cy is cx + r * cos(a), cy - r * sin(a). A later shape covers an earlier one.
 color: "ink", "muted", "accent", "surface", "water", "land", "sun", "sand", "wood", "success", "warning", or "#RRGGBB". A line or an outline is never "muted".
 
 Template items: a choice of 2 to 6 things and a large sign of the chosen one, for things that the person looks at one at a time, such as words of a language, kinds, parts, or stages.
-control = choice(LABEL)
+control = choice(LABEL), or control = steps(LABEL, ANSWER)
 i1 = item(LABEL, SIGN, TEXT), and so on to i6
 card = card(TITLE)
-i1 to i6 are at most 6 items, and i1 is the start. LABEL is the option of the choice, at most 12 characters, and each label is different. SIGN is the large sign, such as an emoji, a character, a number, or a short word, at most 14 characters. TEXT is the text of the card for this item, at most 140 characters.
+i1 to i6 are at most 6 items. With a choice, i1 is the start. With steps, the items are the steps in their order, and the screen starts at the item with the label ANSWER, by default the last item. LABEL is the option of the choice, at most 12 characters, and each label is different. SIGN is the large sign, such as an emoji, a character, a number, or a short word, at most 14 characters. TEXT is the text of the card for this item, at most 140 characters.
 The control has no options: its options are the labels of the items. The card shows TITLE and the text of the chosen item.
 
 Template cells: a whole of equal cells and a slider that fills some of them, for a part of a whole, a share, or a count out of a total.
 control = slider(LABEL, 0, COUNT, 1, START)
 card = card(TITLE, TEXT)
 COUNT is the number of cells, a whole number from 2 to 100. START is the number of filled cells at the start, from 0 to COUNT. The screen shows the cells and the text "K / N = P%" under them. cells has no part lines.
+
+Narration: the voice says each narration line word for word while the screen shows it. A narration line is one short spoken sentence in the language of the request, at most 110 characters, with no quote marks inside. A Russian sentence addresses the person with «ты».
+With steps, write say1 = TEXT, and so on to sayN, one sentence for each step in the order of the steps: sayK says what the picture shows at step K.
+With a slider or a choice, write one line say = TEXT: what to move and what to watch.
+The first state shows the point: the answer step of steps, or a START of a slider that shows the answer.
 
 Formulas:
 $/v is the value of the control: the number of the slider, or the text of the chosen option, such as visible=$/v == "Night". Each number of a shape is a formula, so the shapes follow $/v. A text of the card can also be a formula of $/v, such as a text for each step. A line reads no value other than $/v.
@@ -214,7 +220,7 @@ Example 1
 Request: Покажи по шагам, как шлюз поднимает лодку на реке.
 ```
 scene("Как шлюз поднимает лодку", lang="ru", palette="teal")
-control = choice("Шаг", ["Вход", "Подъём", "Выход"])
+control = steps("Шаг", ["Вход", "Подъём", "Выход"], "Подъём")
 s1 = rect(0, 150, 100, 70, "water", 0)
 s2 = rect(200, 70, 100, 150, "water", 0)
 s3 = rect(100, $/v == "Вход" ? 150 : 70, 100, $/v == "Вход" ? 70 : 150, "water", 0)
@@ -222,6 +228,9 @@ s4 = rect($/v == "Выход" ? 222 : 122, $/v == "Вход" ? 136 : 56, 56, 14,
 s5 = line(100, 40, 100, 220, "ink", 4, visible=$/v != "Вход")
 s6 = line(200, 40, 200, 220, "ink", 4, visible=$/v != "Выход")
 card = card("Шлюз — лифт для лодок", $/v == "Вход" ? "Лодка входит в камеру с нижней реки, и ворота за ней закрываются." : $/v == "Подъём" ? "Вода из верхней реки наполняет камеру и поднимает лодку." : "Вода в камере на уровне верхней реки. Ворота открыты, и лодка плывёт дальше.")
+say1 = "Смотри: лодка входит в камеру с нижней реки, и ворота за ней закрываются."
+say2 = "Вода из верхней реки наполняет камеру, и лодка поднимается вместе с ней."
+say3 = "Верхние ворота открываются, и лодка плывёт дальше по верхней реке."
 ```
 
 Example 2
@@ -233,6 +242,7 @@ i1 = item("Magmatisch", "🌋", "Entsteht, wenn heißes Magma abkühlt und fest 
 i2 = item("Sediment", "🐚", "Entsteht aus Sand, Schlamm und Muscheln, die sich über lange Zeit in Schichten pressen.")
 i3 = item("Metamorph", "💎", "Entsteht, wenn Hitze und Druck tief in der Erde ein altes Gestein umformen, wie bei Marmor.")
 card = card("So entsteht es")
+say = "Tippe auf eine Art und lies, wie dieses Gestein entsteht."
 ```
 
 Example 3
@@ -241,6 +251,7 @@ Request: ¿Qué parte de la Tierra está cubierta de agua?
 cells("El agua de la Tierra", lang="es", palette="blue")
 control = slider("Partes de cada 100", 0, 100, 1, 71)
 card = card("Unas siete de cada diez", "El agua cubre cerca del 71 % de la superficie de la Tierra. La tierra firme es menos de un tercio.")
+say = "Mueve el control y mira cuántas de cada cien partes de la superficie son agua."
 ```
 
 Example 4

@@ -11,8 +11,9 @@ export const TEMPLATE_HEAD = /^\s*(scene|items|cells)\s*\(/;
  * The content budget of each template: texts in characters, lists in items. A text inside the picture (a shape text, a sign) has no fault up to
  * floor(1.25 × cap), because it cannot change the height of the screen. A card text or an item text past its cap is cut after its last whole
  * sentence inside the cap (cut). Each other text past its cap, a long text with no sentence end inside its cap, and a list past its cap are faults.
+ * A narration line (say) is cut the same way, and one with no sentence end inside its cap is left out with no fault (template.js).
  */
-export const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, sign: 14, text: 28, options: 6, items: 6, shapes: 12, cells: 100 };
+export const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, sign: 14, text: 28, options: 6, items: 6, shapes: 12, cells: 100, say: 110 };
 /** The common color names that the kit takes with no call, by their small letters: the template check had one repair for a color name. */
 export const COLOR_NAMES = { red: "#dc2626", orange: "#ea580c", yellow: "#facc15", green: "#16a34a", blue: "#2563eb", purple: "#9333ea", violet: "#7c3aed", pink: "#db2777",
   brown: "#a16207", gray: "#64748b", grey: "#64748b", cyan: "#0891b2", teal: "#0d9488", indigo: "#4f46e5", black: "ink", white: "surface" };

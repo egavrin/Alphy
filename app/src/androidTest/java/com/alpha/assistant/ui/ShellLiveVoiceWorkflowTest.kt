@@ -334,7 +334,8 @@ class ShellLiveVoiceWorkflowTest {
         early(StageProvider(plans = CompletableDeferred(), routing = CompletableDeferred())) { scenario, model, provider, phases ->
             socket.say(SCREEN_REQUEST, "d1", 100)
             robot.waitUntil(30_000) { provider.planCalls.isNotEmpty() && provider.calls.size == 2 }
-            scenario.onActivity { model.cancelRequest() }
+            // No idle wait: frames run without a pause during the generation, so on a slow emulator an idle wait can pass the 20 s first-text limit.
+            robot.instrumentation.runOnMainSync { model.cancelRequest() }
             assertTrue(provider.calls.all { (_, session) -> runCatching { session.check() }.isFailure })
             assertEquals(listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_CANCELED), phases)
             provider.routing.complete(Unit)
@@ -353,7 +354,8 @@ class ShellLiveVoiceWorkflowTest {
         robot.waitUntil(60_000) {
             provider.planCalls.isNotEmpty() && AppFileNames.EARLY_PLAN_USED in phases && messages(model).last().status == "generating"
         }
-        scenario.onActivity { model.cancelRequest() }
+        // No idle wait: frames run without a pause during the generation, so on a slow emulator an idle wait can pass the 20 s first-text limit.
+        robot.instrumentation.runOnMainSync { model.cancelRequest() }
         assertTrue(runCatching { provider.planCalls.single().second.check() }.isFailure)
         provider.plans.complete(Unit)
         robot.awaitFrames(5)
@@ -541,8 +543,9 @@ class ShellLiveVoiceWorkflowTest {
     }
 
     /** Plan D, Db2: a stop of a screen run stays a stop. The voice says the stop after the answer, and the mode goes on. */
-    @Test fun aStopOfAScreenStaysAStop() = gatedRequest(show = true) { scenario, model, gate ->
-        scenario.onActivity { model.cancelRequest() }
+    @Test fun aStopOfAScreenStaysAStop() = gatedRequest(show = true) { _, model, gate ->
+        // No idle wait: frames run without a pause during the generation, so on a slow emulator an idle wait can pass the 20 s first-text limit.
+        robot.instrumentation.runOnMainSync { model.cancelRequest() }
         robot.waitUntil { commentary().size == 2 }
         val message = messages(model).last()
         assertEquals("cancelled", message.status)
@@ -899,12 +902,15 @@ class ShellLiveVoiceWorkflowTest {
         val gate = CompletableDeferred<Unit>()
         val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))) + List(3) { Scripted.Text(OUTSIDE) } + LOOP)
         // The new screen of the change waits, so that the mode ends and starts again before the full generation.
-        onStage(provider = StageProvider(script = script, hold = 2 to gate)) { scenario, model, app ->
+        val provider = StageProvider(script = script, hold = 2 to gate)
+        onStage(provider = provider) { scenario, model, app ->
             val record = stored(model, app)
             val before = messages(model).size
             socket.say(T2_REQUEST, "d2", 2_000)
             robot.waitUntil(60_000) { script.calls.size == 2 }
-            scenario.onActivity { model.endLiveVoice() }
+            robot.waitUntil { provider.holding.isCompleted }
+            // No idle wait: frames run without a pause during the generation, so on a slow emulator an idle wait can pass the 20 s first-text limit.
+            robot.instrumentation.runOnMainSync { model.endLiveVoice() }
             robot.waitUntil { !model.liveVoice.active }
             restart(scenario, model)
             gate.complete(Unit)
@@ -1896,7 +1902,8 @@ class ShellLiveVoiceWorkflowTest {
     /** Starts the voice mode again and answers `session.started`. */
     private fun restart(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel) {
         val starts = socket.types().count { it == "session.start" }
-        scenario.onActivity { model.startLiveVoice() }
+        // No idle wait, as for a stop: a held generation call of the caller meets its first-text limit while an idle wait runs.
+        robot.instrumentation.runOnMainSync { model.startLiveVoice() }
         robot.waitUntil { socket.types().count { it == "session.start" } == starts + 1 }
         socket.emit(LIVE_STARTED)
         robot.waitUntil { model.liveVoice.phase == LivePhase.LISTENING }

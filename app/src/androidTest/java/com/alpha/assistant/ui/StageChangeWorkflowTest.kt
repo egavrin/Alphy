@@ -5,6 +5,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import com.alpha.assistant.R
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.ChatToolReply
@@ -152,6 +153,66 @@ class StageChangeWorkflowTest {
                 val changed = checkNotNull(game()).paddle
                 drag(0.8f, 0.2f)
                 robot.waitUntil { checkNotNull(game()).paddle != changed }
+            }
+        }
+    }
+
+    /**
+     * The owner's live check of 2026-11-22: the drawing session of the stage app can stop while a change of it runs, and the dimmed scene then
+     * showed «Сеанс остановлен» with «Повторить» until the changed app came. The stage game here stops its session [STOP_FRAMES] frames after
+     * the last touch, which is the only seam that stops a session while the change waits. The dimmed stage keeps the last drawing and shows
+     * no error. The changed app then draws again.
+     */
+    @Test fun aStoppedSessionShowsNoErrorWhileDimmed() {
+        val provider = GameChange { STOPPING_GAME }
+        val stopped = fixture.context.getString(R.string.tool_session_stopped)
+        withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+            fixture.install(chat = provider, liveVoice = fixture.liveVoice(socket, FakeLiveAudio()))
+            fixture.launch().use { scenario ->
+                val model = checkNotNull(fixture.model)
+                robot.waitUntil { !model.loading }
+                scenario.onActivity { model.startLiveVoice(voiceApproval = false) }
+                robot.waitUntil { socket.connected }
+                socket.emit(LIVE_STARTED)
+                robot.waitUntil { model.liveVoice.phase == LivePhase.LISTENING }
+                socket.say(APP_REQUEST, "d1", 100)
+                robot.waitUntil(60_000) { model.stageToolId != null && !model.tools.busy && game() != null }
+                val before = stored(model, checkNotNull(model.stageToolId))
+                robot.waitUntil { checkNotNull(game()).tick > 0 }
+                // The touch starts the count of the stop. The change request follows at once.
+                drag(0.8f, 0.2f)
+                val count = messages(model).size
+                // A session time after the first turn (100 to 600 ms), so the request holds only the change.
+                socket.say(CHANGE_REQUEST, "d2", 2_000)
+                robot.waitUntil(60_000) { provider.changeCalled.isCompleted && stageDimmed(robot) }
+                val dimmed = checkNotNull(game())
+                SystemClock.sleep(500)
+                assertTrue("the session stopped before the stage dimmed", checkNotNull(game()).tick > dimmed.tick)
+                // The session stops while the change waits: two reads 1 s apart show the same tick. No read shows the stopped line.
+                var shown = false
+                var last = -1
+                val end = SystemClock.uptimeMillis() + 60_000
+                while (SystemClock.uptimeMillis() < end) {
+                    if (stageHasText(robot, stopped)) shown = true
+                    val tick = checkNotNull(game()) { "the dimmed stage lost the last drawing" }.tick
+                    if (tick == last) break
+                    last = tick
+                    SystemClock.sleep(1_000)
+                }
+                during(1_500) { if (stageHasText(robot, stopped)) shown = true }
+                assertEquals("the session of the dimmed game did not stop", last, checkNotNull(game()).tick)
+                assertTrue("the change ended before the checks", stageDimmed(robot) && !provider.gate.isCompleted)
+                assertFalse("the dimmed stage showed «$stopped»", shown)
+                provider.gate.complete(Unit)
+                robot.waitUntil(60_000) { messages(model).size == count + 2 && messages(model).last().status !in unfinishedStatuses }
+                assertEquals(listOf("complete", before.revision + 1), messages(model).last().let { listOf(it.status, it.toolRevision) })
+                robot.waitUntil { !stageDimmed(robot) && game() != null }
+                // The stage keeps the last drawing of the stopped session (its tick is above STOP_FRAMES) until the changed app draws, and the
+                // ticks of the changed app start again from 0. So the check reads two ticks of the new drawing.
+                robot.waitUntil { checkNotNull(game()).tick != last }
+                val changed = checkNotNull(game()).tick
+                robot.waitUntil { checkNotNull(game()).tick > changed }
+                assertFalse(stageHasText(robot, stopped))
             }
         }
     }
@@ -476,7 +537,7 @@ class StageChangeWorkflowTest {
      * answers outside, so the app agent writes [ArkanoidFixture] and then its change. The first agent call of the change completes
      * [changeCalled] and waits for [gate]. A template call gets [NO_TEMPLATE]. The plan call beside a routing call waits for its cancel.
      */
-    private class GameChange : ChatProvider {
+    private class GameChange(private val game: () -> String = { ArkanoidFixture.spec() }) : ChatProvider {
         val changeCalled = CompletableDeferred<Unit>()
         val gate = CompletableDeferred<Unit>()
         private val loops = java.util.concurrent.atomic.AtomicInteger()
@@ -488,7 +549,7 @@ class StageChangeWorkflowTest {
                 if (stage != AGENT) return emit(CloudEvent.Text(OUTSIDE))
                 val change = request.turns.size == 1 && loops.incrementAndGet() > 1
                 if (change) { changeCalled.complete(Unit); gate.await() }
-                return emit(CloudEvent.Text(request.agentReply(if (loops.get() > 1) CHANGED_GAME else ArkanoidFixture.spec())))
+                return emit(CloudEvent.Text(request.agentReply(if (loops.get() > 1) CHANGED_GAME else game())))
             }
             emit(CloudEvent.RoundComplete(if (request.decisionContext?.originalUserTurn?.text == CHANGE_REQUEST)
                 chatDecision("refine", "Готово.", "Change the shown app") else chatDecision("create", "Готово.", "Make the app"), false))
@@ -501,6 +562,15 @@ class StageChangeWorkflowTest {
         val GAME_LABEL = Regex("Tick (\\d+) Paddle ([\\d.]+)")
         /** [ArkanoidFixture] with another description, as the app agent writes the change. */
         val CHANGED_GAME: String get() = JSONObject(ArkanoidFixture.spec()).put("description", "Move the paddle. Break all the bricks.").toString()
+        /** The frames after the last touch at which [STOPPING_GAME] throws, so the host stops its session. */
+        const val STOP_FRAMES = 600
+        /** [ArkanoidFixture] that throws [STOP_FRAMES] frames after the last touch. */
+        val STOPPING_GAME: String get() = JSONObject(ArkanoidFixture.spec()).let { spec ->
+            val source = spec.getString("source")
+            check("if(event.type==='frame')frames++;" in source && "let frames=0," in source)
+            spec.put("source", source.replace("let frames=0,", "let touched=-1,frames=0,").replace("if(event.type==='frame')frames++;",
+                "if(event.type==='pointer')touched=frames;if(event.type==='frame')frames++;if(touched>=0&&frames-touched>$STOP_FRAMES)throw new Error('stopped');"))
+        }.toString()
         const val APP_REQUEST = "Сделай приложение"
         const val CHANGE_REQUEST = "Измени его"
         /** The plan call beside the routing call starts before a brief exists, so its prompt has an empty brief line. */

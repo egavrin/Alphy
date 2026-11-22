@@ -321,7 +321,8 @@ class ToolController internal constructor(private val app: Application, private 
         // The stage previews of a screen run have the key of its early plan, whose frames it goes on with, else a key of their own: the end of
         // a key drops each later frame of it, and a later run of this operation (the new screen after a change fallback) shows its own frames.
         val previewKey = if (screen?.early != null) operationId else "$operationId:${previewRuns.incrementAndGet()}"
-        val run = screen?.let { ScreenRun(it.early, it.template, previewSink(previewKey, target?.id, trace).takeIf { previewStream }) }
+        val run = screen?.let { ScreenRun(it.early, it.template, previewSink(previewKey, target?.id, trace).takeIf { previewStream }, scope) }
+        var stored: ToolRecord? = null
         try {
             prepared()
             trace?.phase("draft_start")
@@ -348,6 +349,11 @@ class ToolController internal constructor(private val app: Application, private 
             previews.clear(operationId)
             val result = engine.accept(operationId,retainReceipt = true,canCommit = canCommit)
             accepted = true
+            stored = result
+            // A new revision stops the paid narration call of an earlier revision, whose save it would refuse (fix list item 6).
+            if (target != null) stopNarrations(result.id)
+            // The voice waits for the narration of this scene from now, before the message completes (plan "one scene", decision 14).
+            if (run?.narration != null) pendingNarrations += result.id
             // The last preview seeds the drawing of the stored revision on the stage (StagePreviews.committed).
             if (screen != null) stagePreviews.committed(previewKey, result.id, result.revision)
             committed(result)
@@ -374,6 +380,10 @@ class ToolController internal constructor(private val app: Application, private 
                 automaticJob = null
                 // The stage holds the stored app with its control on from now (stage templates, decision 11).
                 if (accepted && screen != null) trace?.phase(AppFileNames.CONTROLS_ON)
+                // The narration of the scene comes after its controls, and only a stored scene keeps its call (plan "one scene", decision 6).
+                val narration = run?.narration
+                val scene = stored
+                if (narration != null) if (scene != null) startNarration(operationId, scene, narration, trace) else narration.cancel()
             }
         }
     }
@@ -492,8 +502,74 @@ class ToolController internal constructor(private val app: Application, private 
         val frames = EarlyFrames(!previewBeforeRouting, { showPreview(operationId, it, null, trace) }) { endPreview(operationId, trace) }
         val sink = { frame: StagePreviewFrame -> scope.launch(Dispatchers.Main) { frames.offer(frame) }; Unit }.takeIf { previewStream }
         // The scope of the shell is a supervisor (viewModelScope), so a failed or cancelled plan does not end it.
-        val result = scope.async(Dispatchers.IO) { generationService.earlyPlan(key, template, prompt, session, limits, run?.let { it::phase }, sink) }
+        val result = scope.async(Dispatchers.IO) { generationService.earlyPlan(key, template, prompt, session, limits, run?.let { it::phase }, sink, scope) }
         return EarlyPlan(result, session, { name -> run?.phase(name) }, frames)
+    }
+
+    // The narration calls of stored scenes by operation, with the id of the tool (plan "one scene", decision 6). Main thread only.
+    private val narrations = mutableMapOf<String, Pair<String, Job>>()
+    // The tools whose narration call has not ended, and the kept text of each saved narration (plan "one scene", decision 14). Main thread only.
+    private val pendingNarrations = mutableSetOf<String>()
+    private val savedNarrations = mutableMapOf<String, Pair<Int, String>>()
+
+    /** Gets the id of each tool whose narration call ended, on the main thread, after the save or the drop (the voice mode, decision 14). */
+    internal var narrationEnded: ((String) -> Unit)? = null
+
+    /** True while the narration call of the stored scene [toolId] runs. */
+    internal fun narrationPending(toolId: String) = toolId in pendingNarrations
+
+    /**
+     * The kept text with the narration that this controller saved for the revision of [record], also before the list of tools reloads. A
+     * reload that holds the saved file, a new revision, and a delete end it (fix list item 4), so the stored file of [record] wins then.
+     */
+    internal fun savedNarration(record: ToolRecord): String? = savedNarrations[record.id]?.takeIf { it.first == record.revision }?.second
+
+    /**
+     * Waits on the main thread for the [narration] of the scene [accepted], then saves it at the same revision, or drops it. Marks the end on
+     * [trace]. A later run of the same operation replaces it.
+     */
+    private fun startNarration(operationId: String, accepted: ToolRecord, narration: Deferred<String?>, trace: ToolGenerationTrace?) {
+        val job = scope.launch(Dispatchers.Main.immediate, start = CoroutineStart.LAZY) {
+            var saved = false
+            try {
+                val kept = narration.await()
+                // The change of the store reloads the snapshots (watchStore).
+                if (kept != null) saved = withContext(Dispatchers.IO) { saveNarration(accepted, kept) }
+                if (saved && kept != null) savedNarrations[accepted.id] = accepted.revision to kept
+            } catch (failure: Exception) {
+                if (failure is CancellationException) throw failure
+                android.util.Log.w("AlphyGeneration", "narration dropped: ${failure.javaClass.simpleName}")
+            } finally {
+                narration.cancel()
+                if (narrations[operationId]?.second === currentCoroutineContext()[Job]) narrations.remove(operationId)
+                trace?.phase(if (saved) AppFileNames.NARRATION_SAVED else AppFileNames.NARRATION_DROPPED)
+                pendingNarrations -= accepted.id
+                narrationEnded?.invoke(accepted.id)
+            }
+        }
+        narrations.put(operationId, accepted.id to job)?.second?.cancel()
+        job.start()
+    }
+
+    /**
+     * The whole kept text with its narration, saved in place of the stored app file with no new revision. Only when the stored tool still
+     * holds the app file and the revision of [accepted]: a later change or another scene keeps its own file (review focus 2).
+     */
+    private suspend fun saveNarration(accepted: ToolRecord, kept: String): Boolean = ArtifactCoordinator.get(store, accepted.id).ordered {
+        val appFile = ToolSpec.parsePersisted(accepted.spec).appFile
+        saveSpec(store, accepted.id) { record ->
+            val spec = ToolSpec.parsePersisted(record.spec)
+            if (record.revision != accepted.revision || record.archived || spec.appFile != appFile) null
+            else record.copy(spec = spec.withAppFile(kept).json)
+        }
+    }
+
+    /** Stops the narration call of the operation [operationId], such as when the person cancels its message. Call on the main thread. */
+    internal fun stopNarration(operationId: String) { narrations.remove(operationId)?.second?.cancel() }
+
+    /** Stops each narration call, of the tool [toolId] only when it is set, such as at the end of the voice mode. Call on the main thread. */
+    internal fun stopNarrations(toolId: String? = null) {
+        narrations.entries.filter { toolId == null || it.value.first == toolId }.forEach { (id, entry) -> narrations.remove(id); entry.second.cancel() }
     }
 
     // The number of the last screen run with a preview key of its own (generateAutomatic).
@@ -1240,7 +1316,7 @@ class ToolController internal constructor(private val app: Application, private 
     suspend fun prepareDeletion(tool: ToolRecord): ToolDeletionSnapshot = withContext(Dispatchers.IO) {
         AutomationStore(app,automationDatabase).use { AutomationRuntime.deletionSnapshot(store,it,tool) }
     }
-    fun delete(snapshot: ToolDeletionSnapshot) { run {
+    fun delete(snapshot: ToolDeletionSnapshot) { stopNarrations(snapshot.tool.id); run {
         val complete=AutomationStore(app,automationDatabase).use { AutomationRuntime.deleteTool(store,it,snapshot) }
         withContext(Dispatchers.Main) {
             if(selectedId==snapshot.tool.id) {selectedId=null;selectedDraftId=null}
@@ -1490,6 +1566,10 @@ class ToolController internal constructor(private val app: Application, private 
         val actions = selected?.let(store::effects).orEmpty()
         withContext(Dispatchers.Main) {
             tools = loaded; drafts = pending
+            // A saved narration serves only until the list holds it: a reload with its file, a new revision, or a delete ends it.
+            savedNarrations.entries.removeAll { (id, saved) ->
+                loaded.none { it.id == id && it.revision == saved.first && ToolSpec.availablePersisted(it)?.appFile != saved.second }
+            }
             networkAccessHost = networkAccess
             if(store.changes.value==change) previews.reconcile(previewRequest,pending)
             if(selectedId==selected) {dependentRules = dependencies; effects = actions}
@@ -1511,17 +1591,26 @@ private fun ToolDraftPreview.matchesDraft(draft: ToolDraft,allowPending: Boolean
 internal class EarlyPlan(val result: Deferred<AppFileOutcome>, val session: CloudSession, private val phase: (String) -> Unit,
     private val frames: EarlyFrames? = null) {
     private var ended = false
+    private var used = false
 
     /** The outcome of the call for a screen run, marked used. A held frame shows now. */
     fun use(): Deferred<AppFileOutcome> = result.also {
+        used = true
         end(AppFileNames.EARLY_PLAN_USED)
         frames?.use()
     }
 
-    /** Stops the call and removes its frame. A plan that no screen run used is marked canceled, also when its call had ended. */
+    /**
+     * Stops the call and removes its frame. A plan that no screen run used is marked canceled, also when its call had ended. The narration
+     * call of a used clean head goes on with [session]: the screen run owns it (plan "one scene", decision 6).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun stop() {
         end(AppFileNames.EARLY_PLAN_CANCELED)
         frames?.stop()
+        val narration = if (result.isCompleted && !result.isCancelled) (runCatching { result.getCompleted() }.getOrNull() as? AppFileOutcome.Clean)?.narration else null
+        if (used && narration?.isActive == true) return
+        narration?.cancel()
         session.cancel()
         result.cancel()
     }

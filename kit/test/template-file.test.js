@@ -271,7 +271,8 @@ test("outsideStillReads", async () => {
 
 const len = (node) => [...node.v].length;
 test("theCapFixturesCompileClean", async () => {
-  for (const [name, factor] of [["scene-caps", 1], ["items-caps", 1], ["cells-caps", 1], ["scene-caps125", 1.25], ["items-caps125", 1.25], ["cells-caps125", 1.25]]) {
+  for (const [name, factor] of [["scene-caps", 1], ["items-caps", 1], ["cells-caps", 1], ["scene-caps125", 1.25], ["items-caps125", 1.25], ["cells-caps125", 1.25],
+    ["steps-caps", 1], ["items-steps-caps", 1]]) {
     // A text inside the picture (a shape text, a sign) is at floor(1.25 × cap) in a caps125 file. Each other text is at its cap in each file.
     const text = template(name), inside = (n) => Math.floor(n * factor), result = await compileAppFile(text);
     expect([name, result.faults, result.kept]).toEqual([name, [], text]);
@@ -289,6 +290,9 @@ test("theCapFixturesCompileClean", async () => {
       Object.assign(seen, { count: control.args[2].v, cardText: len(card.args[1]) });
       Object.assign(want, { count: 100, cardText: 140 });
     }
+    // A steps file has six narration lines at their cap (plan "one scene", Task 25).
+    const says = Object.keys(lines).filter((key) => /^say\d+$/.test(key)).map((key) => len(lines[key]));
+    expect([name, says]).toEqual([name, name.includes("steps") ? Array(6).fill(110) : []]);
     expect([name, seen]).toEqual([name, want]);
   }
 });

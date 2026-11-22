@@ -38,6 +38,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
@@ -185,11 +186,12 @@ class ToolGenerationService internal constructor(private val provider: ChatProvi
      * The plan step alone, with the sandbox and the call of a generation, for the plan call of a spoken request that starts
      * beside its routing call (ToolController.startEarlyPlan). A cancel of [session] stops the call.
      * The template call with [template] goes first, and its reply outside sends [prompt] to the plan call (AppFileSteps.screen).
-     * [preview] gets the frame of each complete line of the template call.
+     * [preview] gets the frame of each complete line of the template call. [outlive]: the scope where the template call can go on after a
+     * clean head, for its narration (AppFileSteps).
      */
     internal suspend fun earlyPlan(key: String, template: String, prompt: String, session: CloudSession, limits: AppFileLimits,
-        onPhase: ((String, String?, Long?) -> Unit)?, preview: ((StagePreviewFrame) -> Unit)? = null): AppFileOutcome =
-        AppFileSteps(sandbox, planCall(key, session, onPhase), onPhase ?: { _, _, _ -> }, {}).screen(template, prompt, limits, preview)
+        onPhase: ((String, String?, Long?) -> Unit)?, preview: ((StagePreviewFrame) -> Unit)? = null, outlive: CoroutineScope? = null): AppFileOutcome =
+        AppFileSteps(sandbox, planCall(key, session, onPhase), onPhase ?: { _, _, _ -> }, {}, outlive).screen(template, prompt, limits, preview)
 
     /** [onText] gets each text delta on the thread that reads the reply, after the size check. It must not block. */
     internal suspend fun response(key: String, turns: List<CloudTurn>, session: CloudSession, stage: CloudGenerationStage?,
@@ -402,9 +404,15 @@ internal suspend fun ToolGenerationService.appFileCall(key: String, session: Clo
             }
             // A blocked HTTP read holds the thread of the call, so the watcher runs on a different thread.
             val watcher = launch(Dispatchers.Default) {
-                reason.set(withTimeoutOrNull(limits.totalMs) {
-                    if (withTimeoutOrNull(limits.firstTextMs) { textStarted.await() } == null) AppFileNames.FIRST_TEXT_TIMEOUT else awaitCancellation()
-                } ?: AppFileNames.TOTAL_TIMEOUT)
+                try {
+                    reason.set(withTimeoutOrNull(limits.totalMs) {
+                        if (withTimeoutOrNull(limits.firstTextMs) { textStarted.await() } == null) AppFileNames.FIRST_TEXT_TIMEOUT else awaitCancellation()
+                    } ?: AppFileNames.TOTAL_TIMEOUT)
+                } catch (stop: CancellationException) {
+                    // A cancel of the caller, such as the end of a narration call that outlived its run, also frees a blocked read.
+                    if (!call.isCompleted) session.abortCall()
+                    throw stop
+                }
                 // The cancel comes first: a call that attaches its connection after the abort then stops at its next check.
                 call.cancel()
                 session.abortCall()

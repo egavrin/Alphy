@@ -53,12 +53,17 @@ class VoiceModeSessionTest {
         override fun appended(eventId: String) { calls += "appended:$eventId" }
         override fun outputEnded(endMs: Long) { calls += "outputEnded:$endMs" }
         override fun ended(status: String, settingsRequired: Boolean) { calls += "ended:$status:$settingsRequired" }
+        /** Each output transcript piece as text:startMs:endMs:replyStart, and the count of input starts (plan "one scene", Task 30). */
+        val pieces = CopyOnWriteArrayList<String>()
+        val inputStarts = AtomicInteger()
+        override fun outputText(text: String, startMs: Long, endMs: Long, replyStart: Boolean, arrivedNanos: Long) { pieces += "$text:$startMs:$endMs:$replyStart" }
+        override fun inputStarted() { inputStarts.incrementAndGet() }
     }
 
     private inner class Rig(timing: LiveTiming = TIMING, account: suspend () -> AiAccount? = { OPENAI }, transport: LiveTransport? = null,
-        endpoints: Endpoints = LOOPBACK, history: List<Message> = emptyList(), realTime: Boolean = false) {
+        endpoints: Endpoints = LOOPBACK, history: List<Message> = emptyList(), realTime: Boolean = false, lagMs: Long = 0) {
         val socket = FakeLiveTransport()
-        val audio = FakeLiveAudio(realTime)
+        val audio = FakeLiveAudio(realTime, lagMs)
         val host = Host(history)
         val session = LiveVoiceSession(context, scope, transport ?: socket, { audio }, account, endpoints, timing)
 
@@ -148,6 +153,224 @@ class VoiceModeSessionTest {
     private fun quiet() = random.pcmBlock(0.002)
     private fun loud() = random.pcmBlock(0.15)
     private fun text(id: Int) = context.getString(id)
+
+    // Plan "one scene", Task 30: the session members of decision 12 and the sync rule of decision 13.
+    @Test fun eachOutputPieceReachesTheHost() {
+        val rig = Rig().started()
+        rig.socket.emit(outputDelta("Первое ", 0, 300))
+        rig.socket.emit(outputDelta("второе ", 300, 600))
+        rig.socket.emit(outputDelta("третье.", 600, 900))
+        waitUntil("three pieces") { rig.host.pieces.size == 3 }
+        assertEquals(listOf("Первое :0:300:true", "второе :300:600:false", "третье.:600:900:false"), rig.host.pieces.toList())
+    }
+
+    @Test fun theFirstInputPieceOfATurnReachesTheHost() {
+        val rig = Rig(TIMING.copy(turnGapMs = 300)).started()
+        rig.socket.emit(inputDelta("Покажи ", 0, 300))
+        rig.socket.emit(inputDelta("шаги", 300, 600))
+        waitUntil("the turn") { rig.turns().size == 1 }
+        assertEquals(1, rig.host.inputStarts.get())
+        rig.socket.emit(inputDelta("Дальше", 2_000, 2_400))
+        waitUntil("the second turn") { rig.turns().size == 2 }
+        assertEquals(2, rig.host.inputStarts.get())
+    }
+
+    /** The speaker plays 1 s behind the writes. The onset after the arm is the second voiced run, after 300 ms of silent audio. */
+    @Test fun theChangeFiresWhenTheSpeakerPlaysTheOnset() {
+        val rig = Rig(lagMs = 1_000).started()
+        rig.socket.emit(outputAudio(1, VOICED_600))
+        repeat(3) { rig.socket.emit(silentAudio()) }
+        val fired = fire(rig) { rig.socket.emit(outputAudio(2, VOICED_600)) }
+        // The silent audio of a reply plays only before a voiced chunk while the device plays, so the second run starts at frame 9600.
+        assertOnset(fired, VOICED_600.toLong())
+        assertTrue("it fired at the arrival: ${fired.ms} ms after it", fired.ms >= 500)
+    }
+
+    @Test fun aGapOf150MsIsNoOnset() {
+        val rig = Rig().started()
+        rig.socket.emit(outputAudio(1, VOICED_600))
+        // A wait of 750 ms after a chunk of 600 ms is an arrival gap of 150 ms.
+        SystemClock.sleep(750)
+        val fired = fire(rig) { rig.socket.emit(outputAudio(2, VOICED_600)) }
+        // With no onset, the target is the frame received 0.45 s after the arm: the end of the second run.
+        assertTrue("fired at ${fired.ms} ms", fired.ms >= ONSET_WAIT_MS - 20)
+        assertTrue("played ${fired.played} at the fire", fired.played >= 2L * VOICED_600)
+    }
+
+    @Test fun anArrivalGapCountsAsSilence() {
+        val rig = Rig(lagMs = 1_000).started()
+        rig.socket.emit(outputAudio(1, VOICED_600))
+        // No chunk for 600 ms after the end of the first chunk.
+        SystemClock.sleep(1_200)
+        val fired = fire(rig) { rig.socket.emit(outputAudio(2, VOICED_600)) }
+        assertOnset(fired, VOICED_600.toLong())
+    }
+
+    /** A steady voiced stream with no quiet run: the target is the frame received 0.45 s after the arm, which the speaker already played. */
+    @Test fun withNoOnsetTheChangeFiresAtTheFallbackFrame() {
+        val rig = Rig().started()
+        val stream = thread { repeat(30) { rig.socket.emit(outputAudio(1, CHUNK_100)); SystemClock.sleep(100) } }
+        SystemClock.sleep(500)
+        var atFallback = 0L
+        val fired = fire(rig) { SystemClock.sleep(ONSET_FALLBACK_MS); atFallback = rig.audio.writtenFrames() }
+        stream.join()
+        assertTrue("fired at ${fired.ms} ms", fired.ms in ONSET_WAIT_MS - 20..ONSET_WAIT_MS + 100)
+        assertTrue("played ${fired.played} at the fire, $atFallback received at 0.45 s", fired.played >= atFallback - CHUNK_100)
+    }
+
+    @Test fun cancelOnsetStopsAFire() {
+        val rig = Rig().started()
+        rig.socket.emit(outputAudio(1, VOICED_600))
+        repeat(3) { rig.socket.emit(silentAudio()) }
+        val fires = AtomicInteger()
+        main { rig.session.onsetAfter(SystemClock.elapsedRealtimeNanos()) { fires.incrementAndGet() } }
+        main { rig.session.cancelOnset() }
+        rig.socket.emit(outputAudio(2, VOICED_600))
+        SystemClock.sleep(ONSET_WAIT_MS + 500)
+        assertEquals(0, fires.get())
+    }
+
+    /** The skipped sentence comes once as a new reply, and once inside the reply before it after 600 ms of silent audio. */
+    @Test fun aSkippedSentenceIsNeverPlayed() {
+        for (inside in listOf(false, true)) {
+            val rig = Rig(STREAM).started()
+            rig.socket.emit(outputDelta("Первое предложение.", 0, 900))
+            rig.socket.emit(outputAudio(1, VOICED_600))
+            if (!inside) waitUntil("the end of the first reply") { rig.outputEnds() == 1 }
+            main { rig.session.skip(SECOND) }
+            val sent = rig.socket.sent.size
+            rig.socket.emit(outputDelta(" Второе", 900, 1_200))
+            repeat(6) { rig.socket.emit(silentAudio()) }
+            rig.socket.emit(outputAudio(2, VOICED_600))
+            rig.socket.emit(outputDelta(" предложение.", 1_200, 1_800))
+            rig.socket.emit(outputAudio(2, VOICED_600))
+            waitUntil("the end of the reply") { rig.outputEnds() == (if (inside) 1 else 2) }
+            val case = if (inside) "inside the reply before" else "a new reply"
+            assertTrue("$case: a voiced chunk of the skipped sentence played: ${rig.markers()}", 2_000 !in rig.markers())
+            assertEquals(case, listOf("Первое предложение.:0:900:true"), rig.host.pieces.toList())
+            assertEquals("$case: the session sent an event after the skip", sent, rig.socket.sent.size)
+            main { rig.session.stop() }
+        }
+    }
+
+    @Test fun aSkipActsOnce() {
+        val rig = Rig().started()
+        main { rig.session.skip(SECOND) }
+        rig.socket.emit(outputDelta("Второе предложение.", 0, 600))
+        repeat(3) { rig.socket.emit(silentAudio()) }
+        rig.socket.emit(outputAudio(2, VOICED_600))
+        waitUntil("the end of the skipped reply") { rig.outputEnds() == 1 }
+        assertTrue(rig.markers().toString(), 2_000 !in rig.markers())
+        rig.socket.emit(outputDelta("Второе предложение.", 1_000, 1_600))
+        repeat(3) { rig.socket.emit(silentAudio()) }
+        rig.socket.emit(outputAudio(3, VOICED_600))
+        waitUntil("the end of the later reply") { rig.outputEnds() == 2 }
+        assertTrue(rig.markers().toString(), 3_000 in rig.markers())
+        assertEquals(listOf("Второе предложение.:1000:1600:true"), rig.host.pieces.toList())
+    }
+
+    /**
+     * Ruling 1 of stage 2: a skip of a sentence that is never said does no harm. A later other text plays, and the same sentence plays in
+     * full when the host sends it again.
+     */
+    @Test fun aSkipOfASentenceNeverSaidDropsNothingLater() {
+        val rig = Rig().started()
+        main { rig.session.skip(SECOND) }
+        rig.socket.emit(outputDelta("Другое предложение.", 0, 600))
+        rig.socket.emit(outputAudio(1, VOICED_600))
+        waitUntil("the other reply") { rig.outputEnds() == 1 }
+        main { rig.session.thinking(LiveProtocol.MARK + SECOND) }
+        rig.socket.emit(outputDelta(SECOND, 1_000, 1_600))
+        repeat(3) { rig.socket.emit(silentAudio()) }
+        rig.socket.emit(outputAudio(2, VOICED_600))
+        waitUntil("the sentence sent again") { rig.outputEnds() == 2 }
+        assertEquals(listOf(1_000, 2_000), rig.markers().filter { it != SILENT_SAMPLE.toInt() })
+        assertEquals(listOf("Другое предложение.:0:600:true", "$SECOND:1000:1600:true"), rig.host.pieces.toList())
+    }
+
+    /**
+     * Fix list item 2a: a reply whose first words are the first words of the skipped sentence goes another way. The skip stops there,
+     * the held audio plays, and the host gets the whole text.
+     */
+    @Test fun aSkipThatGoesAnotherWayPlaysItsReply() {
+        val rig = Rig().started()
+        main { rig.session.skip(SECOND) }
+        rig.socket.emit(outputDelta("Второе ", 0, 300))
+        repeat(3) { rig.socket.emit(silentAudio()) }
+        rig.socket.emit(outputAudio(2, VOICED_600))
+        rig.socket.emit(outputDelta("место заняла команда.", 300, 900))
+        rig.socket.emit(outputAudio(3, VOICED_600))
+        waitUntil("the end of the reply") { rig.outputEnds() == 1 }
+        assertEquals(listOf(2_000, 3_000), rig.markers().filter { it != SILENT_SAMPLE.toInt() })
+        assertEquals(listOf("Второе место заняла команда.:0:900:true"), rig.host.pieces.toList())
+    }
+
+    /**
+     * Fix list item 2b: a reply holds the skipped sentence and then a new text, in a later piece or in the same piece. The skip ends at the
+     * end of its sentence: the new text reaches the host, and its audio plays from the next voiced onset.
+     */
+    @Test fun aSkipEndsAtTheEndOfItsSentence() {
+        for (samePiece in listOf(false, true)) {
+            val rig = Rig().started()
+            main { rig.session.skip(SECOND) }
+            if (samePiece) rig.socket.emit(outputDelta("$SECOND Новый ответ.", 0, 1_500))
+            else rig.socket.emit(outputDelta(SECOND, 0, 900))
+            repeat(3) { rig.socket.emit(silentAudio()) }
+            rig.socket.emit(outputAudio(2, VOICED_600))
+            if (!samePiece) rig.socket.emit(outputDelta(" Новый ответ.", 900, 1_500))
+            repeat(3) { rig.socket.emit(silentAudio()) }
+            rig.socket.emit(outputAudio(3, VOICED_600))
+            waitUntil("the end of the reply") { rig.outputEnds() == 1 }
+            val case = if (samePiece) "in the same piece" else "in a later piece"
+            assertEquals(case, listOf(3_000), rig.markers().filter { it != SILENT_SAMPLE.toInt() })
+            // The skipped sentence opened the reply, so the first text that the host gets starts the reply in both cases.
+            assertEquals(case, listOf(if (samePiece) " Новый ответ.:0:1500:true" else " Новый ответ.:900:1500:true"), rig.host.pieces.toList())
+            main { rig.session.stop() }
+        }
+    }
+
+    /**
+     * Fix list item 2c: a pending skip waits through the reply that is open at the skip and through the next reply. A later reply with
+     * the sentence plays it in full, with no new text of the host.
+     */
+    @Test fun aPendingSkipEndsAfterTheNextReply() {
+        for (openAtSkip in listOf(false, true)) {
+            val rig = Rig().started()
+            if (openAtSkip) { rig.socket.emit(outputDelta("Первое.", 0, 300)); rig.socket.emit(outputAudio(1, VOICED_600)) }
+            main { rig.session.skip(SECOND) }
+            if (openAtSkip) waitUntil("the end of the open reply") { rig.outputEnds() == 1 }
+            val ends = rig.outputEnds()
+            rig.socket.emit(outputDelta("Другое.", 1_000, 1_300))
+            rig.socket.emit(outputAudio(4, VOICED_600))
+            waitUntil("the end of the next reply") { rig.outputEnds() == ends + 1 }
+            rig.socket.emit(outputDelta(SECOND, 2_000, 2_600))
+            rig.socket.emit(outputAudio(5, VOICED_600))
+            waitUntil("the end of the later reply") { rig.outputEnds() == ends + 2 }
+            val case = if (openAtSkip) "a skip in an open reply" else "a skip between replies"
+            assertTrue("$case: ${rig.markers()}", 5_000 in rig.markers())
+            assertEquals(case, "$SECOND:2000:2600:true", rig.host.pieces.last())
+            main { rig.session.stop() }
+        }
+    }
+
+    /** The time of a fire after the arm and the frames that the speaker had played at it. */
+    private class Fired(val ms: Long, val played: Long)
+
+    /** Arms the sync rule now, runs [after] on this thread, and waits for the fire. */
+    private fun fire(rig: Rig, after: () -> Unit): Fired {
+        val fired = java.util.concurrent.CompletableFuture<Fired>()
+        // The arm is on the main thread after the events that the test sent before it, as the narrator arms there at a transcript piece.
+        main {
+            val armed = SystemClock.elapsedRealtimeNanos()
+            rig.session.onsetAfter(armed) { fired.complete(Fired((SystemClock.elapsedRealtimeNanos() - armed) / 1_000_000, rig.audio.playedFrames())) }
+        }
+        after()
+        return fired.get(5, TimeUnit.SECONDS)
+    }
+
+    /** The fire came when the speaker played [frame], within 40 ms. */
+    private fun assertOnset(fired: Fired, frame: Long) =
+        assertTrue("played ${fired.played} at the fire, the onset at $frame", fired.played in frame..frame + 40L * LIVE_RATE / 1000)
 
     @Test fun startSendsSessionStartWithHistory() {
         val history = listOf(Message("m1", "user", "Привет", 1, "complete"), Message("m2", "assistant", "Здравствуйте", 2, "complete"))
@@ -775,6 +998,12 @@ class VoiceModeSessionTest {
             replyGapMs = 300)
         /** The reply gap of ruling R27, pinned here: 600 ms of silent audio in a reply must not end it. */
         val STREAM = TIMING.copy(replyGapMs = 800)
+        /** 600 ms and 100 ms of voiced audio in one chunk, and the times of the sync rule (LiveVoiceSession). */
+        const val VOICED_600 = LIVE_RATE * 6 / 10
+        const val CHUNK_100 = LIVE_RATE / 10
+        const val ONSET_FALLBACK_MS = 450L
+        const val ONSET_WAIT_MS = 1_500L
+        const val SECOND = "Второе предложение."
         /** 200 ms of audio in each voiced chunk of [Stream]. */
         const val REPLY_SAMPLES = LIVE_RATE / 5
         /** 100 ms of audio: the chunk of the GPT-Live output stream. */

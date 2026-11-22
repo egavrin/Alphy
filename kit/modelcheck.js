@@ -313,14 +313,15 @@ function finish(record) {
  * The outcome is clean0 or clean1, partial1 (a line is left out or keeps its stored version after the repair), not (no screen after the repair),
  * outside, or the status of a first call that did not complete. firstCallMs runs from the send of the first call to the end of its reply.
  * replied is the first reply as the kit reads it: {kind: "outside", word}, or {kind: "lines", lines} with the count of its lines, and repeated
- * counts its lines that a line of plan already has. steps holds the faults of each compile, as faultTable reads them.
+ * counts its lines that a line of plan already has. steps holds the faults of each compile, as faultTable reads them. say counts the kept
+ * narration lines (plan "one scene", Task 34).
  */
 async function templateRecord(item, { ask, model, effort }, input, plan, previous) {
   runtime.text ||= await runtimeText();
   const calls = [], steps = [], send = senderOf({ ask, model, system: PROMPT.Template, calls });
   const started = performance.now(), first = await send(0, effort, input);
   const record = { id: item.id, set: item.set, expect: item.expect, prompt: TEMPLATE_HASH, outcome: first.status, firstCallMs: Math.round(performance.now() - started), calls,
-    replied: { kind: first.status }, kept: null, faults: [], leftOut: [], repeated: 0, steps };
+    replied: { kind: first.status }, kept: null, faults: [], leftOut: [], repeated: 0, say: 0, steps };
   if (first.status !== "completed") return record;
   const stepOf = async (text, on) => {
     const step = await compile({ text, plan: on, read: true, previous });
@@ -340,7 +341,7 @@ async function templateRecord(item, { ask, model, effort }, input, plan, previou
   }
   const { result } = next;
   return Object.assign(record, { outcome: clean(next) ? `clean${calls.length - 1}` : result.template && result.definition ? "partial1" : "not",
-    kept: result.kept ?? null, faults: result.faults, leftOut: result.leftOut ?? [] });
+    kept: result.kept ?? null, faults: result.faults, leftOut: result.leftOut ?? [], say: linesOf(result.kept ?? "").filter((one) => /^say\d* = /.test(one)).length });
 }
 
 /** A screen request of the template check: taskText of its request with no brief, as the early plan of a first screen sends it. */

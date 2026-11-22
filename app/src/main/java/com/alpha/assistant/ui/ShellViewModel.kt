@@ -183,6 +183,10 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     internal val livePresses: Flow<VoicePress>? get() = liveBridge?.presses
     /** A touch on the stage of the voice mode starts or ends (plan "one scene", Task 6). */
     internal fun liveStageTouch(down: Boolean) { liveBridge?.stageTouch(down) }
+    /** The voice walks the steps of a scene (plan "one scene", decision 17). */
+    internal val liveWalking: Boolean get() = liveBridge?.walking == true
+    /** The last actions on the stage app for the routing line (plan "one scene", decision 10). */
+    internal val liveActions: List<com.alpha.assistant.tools.SceneAction> get() = liveBridge?.actions.orEmpty()
     /** The uptime until which a screen or an app that Alphy opens is expected in front (spec 5.8.1, [expectAlphyScreen]). */
     internal var alphyScreenUntil = 0L
     /** The activity class that started the voice mode. The shell and the assistant sheet share this model ([ownsLiveVoice]). */
@@ -1662,7 +1666,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     !assistant.requiresRefinement && tools.planStep() != null
                 // The screen of the stage app goes to the routing call as untrusted data, unless the app was deleted or archived (plan D, Dc1).
                 val stage = next.voiceTarget?.takeIf { voiceScreen }?.let { id -> tools.tools.find { it.id == id && !it.archived } }
-                val shownScreen = stage?.let { ShownScreen.of(it, tools.privateResults(it.id)) }?.line()
+                val continueLabel = getApplication<Application>().getString(R.string.stage_continue_steps)
+                val shownScreen = stage?.let { ShownScreen.of(it, tools.privateResults(it.id), withContext(Dispatchers.Main) { liveActions }, continueLabel) }?.line()
                 fun validateOperation(decision: ChatToolReply.Decision) {
                     if(decision.isMiniApp) {
                         if(knownTools == null) throw CloudFailure("tool_storage",toolStorageWarning)
@@ -1968,12 +1973,14 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     // The state can change after the routing call, so the controls are read again from the app that the stage shows now.
                     // A label that names no single control runs nothing (review focus 2).
                     val record = tools.tools.find { it.id == stageToolId && it.id == stage?.id }
-                    val control = record?.let(ShownScreen::of)?.controls?.singleOrNull { it.label == decoded.brief }
+                    val control = record?.let { ShownScreen.of(it, continueLabel = continueLabel) }?.controls?.singleOrNull { it.label == decoded.brief }
                     val bridge = liveBridge?.takeIf { liveVoice.active }
                     // The voice speaks the text when the message completes, after the press (ruling OD-D3): the routing text only after a tap that ran.
+                    // A step of a stepped scene says its sentence, and «Продолжай» walks the rest of the steps (plan "one scene", decision 16).
                     val text = when {
                         control == null || bridge == null -> LiveVoiceBridge.PRESS_MISSING
-                        bridge.press(checkNotNull(record).id, control) -> decoded.text
+                        control.actionId == ShownScreen.CONTINUE_ACTION -> bridge.rest(checkNotNull(record).id) ?: decoded.text
+                        bridge.press(checkNotNull(record).id, control) -> bridge.stepSentence(record.id, control) ?: decoded.text
                         else -> LiveVoiceBridge.PRESS_FAILED
                     }
                     updateMessage(request, assistant.id) { it.copy(text = text, status = "complete", provenance = replyProvenance) }
@@ -2139,6 +2146,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         stopEarlyPlan(request)
     }
     fun cancelRequest(messageId: String) {
+        // The stored scene of a complete message can still wait on its narration call (plan "one scene", decision 6).
+        val message = snapshot.conversations.firstNotNullOfOrNull { c -> c.messages.find { it.id == messageId } }
+        tools.stopNarration(message?.toolOperationId ?: messageId)
         if(active?.assistantId == messageId) {
             cancelRequest()
         } else {

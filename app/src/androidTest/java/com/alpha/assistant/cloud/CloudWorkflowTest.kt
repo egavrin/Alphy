@@ -2077,6 +2077,53 @@ class CloudWorkflowTest {
         assertFalse("press" in kinds(false))
     }
 
+    /**
+     * Plan "one scene", Task 28 (decision 5): the screen text of a spoken request is one short spoken sentence. The owner's live check of
+     * 2026-11-22: each spoken routing text addresses the person with «ты», as the voice does. A typed request gets neither text.
+     */
+    @Test fun theScreenTextIsOneSentence() = kotlinx.coroutines.runBlocking {
+        val bodies = mutableListOf<JSONObject>()
+        Server { request, output ->
+            bodies += request.json
+            output.classification(decision("Which part should I show?", kind = "clarify"))
+        }.use { server ->
+            for (spoken in listOf(false, true)) CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
+                cleanChatRequest("Explain how a rainbow forms").let { if (spoken) it.copy(voiceScreen = true, spokenContext = emptyList()) else it }, CloudSession()) {}
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+        }
+        val (typed, spoken) = bodies.map { it.getJSONArray("messages").getJSONObject(0).getString("content") }
+        assertTrue("For screen, text is one short spoken sentence in the language of the request: the short answer. It names no part, no step, and no control." in spoken)
+        assertFalse("one to three" in spoken)
+        assertTrue(ChatToolReply.SPOKEN_ADDRESS in spoken)
+        assertFalse(ChatToolReply.SPOKEN_ADDRESS in typed || "«ты»" in typed)
+    }
+
+    /**
+     * The owner's live check of 2026-11-22: «Что сейчас на экране» got a text that asked for a screenshot. The routing text chooses answer for
+     * a question about the shown screen, and the answer step gets SHOWN_SCREEN as untrusted data with the rule to describe it in «ты».
+     */
+    @Test fun aQuestionAboutTheShownScreenGetsItsAnswerFromIt() {
+        val line = lessonScreen().line()
+        Server { request, output ->
+            if (request.answering) output.answer("На экране Луна и кнопка «Дальше».") else output.classification(decision("На экране Луна."))
+        }.use { server ->
+            kotlinx.coroutines.runBlocking {
+                CloudChatProvider(deepSeek, Endpoints { server.url }).respond("alpha-test-only",
+                    cleanChatRequest("Что сейчас на экране?").copy(voiceScreen = true, shownScreen = line, spokenContext = emptyList()), CloudSession()) {}
+            }
+            assertTrue(server.failures.toString(), server.failures.isEmpty())
+            val (routing, answer) = server.requests.map { it.json.turns() }
+            assertTrue("Choose answer when the request asks what the screen shows now, or asks about a control or a value on it." in routing.first().second)
+            assertTrue("never ask for a screenshot" in ChatToolReply.shownScreenInstructions)
+            // The screen is the user turn before the data of the answer step. Its text stays out of the instructions.
+            assertEquals("user" to line, answer[answer.size - 2])
+            val rules = answer.first().second
+            assertTrue(ChatToolReply.SHOWN_SCREEN_ANSWER in rules && "never ask for a screenshot" in rules)
+            assertTrue(ChatToolReply.SPOKEN_ADDRESS in rules)
+            assertFalse(injected in rules || ShownScreen.PREFIX.trim() in rules)
+        }
+    }
+
     /** The owner's turns T7 and T8 of 2026-11-20 as the chat stores them: a change that came, then a change that failed. */
     private val failedChange = listOf(
         Message("t7", "user", "Покажем ли больше информации про Энцелад", 1, "sent", provenance = MessageProvenance.CLEAN),

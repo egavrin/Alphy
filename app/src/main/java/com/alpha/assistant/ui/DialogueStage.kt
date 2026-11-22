@@ -194,6 +194,8 @@ private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId !=
 @StringRes private fun liveStatus(model: ShellViewModel): Int? = when {
     model.liveVoice.phase == LivePhase.CONNECTING -> R.string.live_voice_connecting
     model.liveVoice.phase == LivePhase.SPEAKING -> R.string.live_voice_speaking
+    // Between two sentences of a walk, the strip keeps the speaking status (plan "one scene", decision 17).
+    model.liveWalking && model.liveVoice.phase == LivePhase.LISTENING -> R.string.live_voice_speaking
     model.liveVoiceWorking -> R.string.live_voice_working
     model.liveVoice.phase == LivePhase.MUTED -> null
     else -> R.string.live_voice_listening

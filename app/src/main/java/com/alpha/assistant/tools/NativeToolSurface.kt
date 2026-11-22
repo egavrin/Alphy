@@ -385,6 +385,8 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
             for (id in spec.surfaces.keys) enqueue(GraphicsContract.event(event, surfaceId = id))
         }
     }
+    // With no touch, as on the stage during a change, a stopped session keeps its last drawing and shows no error until the touch comes back.
+    val shownError = error.takeIf { input }
     val recovery: @Composable (Int) -> Unit = { failure ->
         StatusLine(Glyph.Close, scheme.error, stringResource(failure))
         TextButton(onClick = { attempt++; error = null }, enabled = enabled && !covered,
@@ -412,16 +414,16 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
     }
     if(immersive) Box(Modifier.fillMaxSize().onGloballyPositioned {screenBounds=it.boundsInRoot()}) {
         stage(spec.surfaces.keys.toList(), spec.title, Modifier, true)
-        if(!controlsExpanded && error==null)IconButton(onClick={controlsExpanded=true},modifier=Modifier.align(menuAlignment).windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.systemGestures.only(WindowInsetsSides.Horizontal))).size(48.dp).onGloballyPositioned {menuBounds=it.boundsInRoot()}.semantics {contentDescription=showControls}) {
+        if(!controlsExpanded && shownError==null)IconButton(onClick={controlsExpanded=true},modifier=Modifier.align(menuAlignment).windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.systemGestures.only(WindowInsetsSides.Horizontal))).size(48.dp).onGloballyPositioned {menuBounds=it.boundsInRoot()}.semantics {contentDescription=showControls}) {
             Surface(shape = MaterialTheme.shapes.small, color = scheme.surfaceContainerHigh, contentColor = scheme.onSurface) {
                 AlphaIcon(Glyph.Menu, Modifier.padding(6.dp), color = LocalContentColor.current)
             }
         }
-        if(controlsExpanded || error!=null)Surface(Modifier.align(Alignment.TopCenter).safeDrawingPadding().windowInsetsPadding(WindowInsets.systemGestures),color=MaterialTheme.colorScheme.surface) {
+        if(controlsExpanded || shownError!=null)Surface(Modifier.align(Alignment.TopCenter).safeDrawingPadding().windowInsetsPadding(WindowInsets.systemGestures),color=MaterialTheme.colorScheme.surface) {
             Column(Modifier.verticalScroll(rememberScrollState()).semantics {contentDescription=gameControls}) {
                 TextButton(onClick={controlsExpanded=false},modifier=Modifier.align(Alignment.End).heightIn(min=48.dp)) {Text(stringResource(R.string.tool_game_controls_close))}
                 topControls()
-                val failure = error
+                val failure = shownError
                 if (failure != null) recovery(failure)
                 else if (spec.hostControls.playback) playbackControls()
             }
@@ -429,7 +431,7 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
     } else {
         val inline = canvasSurfaceIds(spec.ui).isNotEmpty()
         val playback: @Composable () -> Unit = {
-            val failure = error
+            val failure = shownError
             if (failure != null) recovery(failure)
             else if (slotWait) StatusLine(Glyph.History, LocalContentColor.current, stringResource(R.string.tool_session_waiting))
             else {

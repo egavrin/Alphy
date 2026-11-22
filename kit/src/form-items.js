@@ -2,9 +2,9 @@
 // that shows the text of the chosen item. The drawing shows the sign and the label of the chosen item.
 
 import { show } from "./dsl.js";
-import { BUDGET, INSIDE, textFault } from "./form-base.js";
+import { BUDGET, INSIDE, isText, textFault } from "./form-base.js";
 
-const CONTROL = "choice(LABEL): its options are the labels of the items";
+const CONTROL = "choice(LABEL), or steps(LABEL, ANSWER): its options are the labels of the items";
 
 /** The form of items (forms.js TemplateForm). */
 export const ITEMS_FORM = {
@@ -15,7 +15,7 @@ export const ITEMS_FORM = {
   controlFault(tree) {
     const args = tree.args ?? [], form = `the control of items is ${CONTROL}`;
     if (tree.k !== "call" || Object.keys(tree.named).length) return form;
-    if (!(tree.name === "choice" && args.length === 1)) return form;
+    if (!(tree.name === "choice" && args.length === 1 || tree.name === "steps" && args.length <= 2 && args.length >= 1 && (!args[1] || isText(args[1])))) return form;
     return textFault("the label", args[0], BUDGET.control);
   },
   partFault(tree) {
@@ -37,6 +37,9 @@ export const ITEMS_FORM = {
       cardText: "$/now/text",
     };
   },
-  /** The value that $/v keeps when the control is left out: the label of the first item, or 0 with no item. */
-  start: (parts) => parts[0]?.tree.args[0] ?? { k: "lit", v: 0 },
+  /**
+   * The start of $/v: the answer of a steps control, by default the label of the last item (decision 3), else the label of the first item,
+   * or 0 with no item.
+   */
+  start: (parts, control) => (control?.name === "steps" ? control.args[1] ?? parts.at(-1)?.tree.args[0] : parts[0]?.tree.args[0]) ?? { k: "lit", v: 0 },
 };

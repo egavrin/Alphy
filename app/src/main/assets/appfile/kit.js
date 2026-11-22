@@ -3792,8 +3792,9 @@ const TEMPLATE_HEAD = /^\s*(scene|items|cells)\s*\(/;
  * The content budget of each template: texts in characters, lists in items. A text inside the picture (a shape text, a sign) has no fault up to
  * floor(1.25 × cap), because it cannot change the height of the screen. A card text or an item text past its cap is cut after its last whole
  * sentence inside the cap (cut). Each other text past its cap, a long text with no sentence end inside its cap, and a list past its cap are faults.
+ * A narration line (say) is cut the same way, and one with no sentence end inside its cap is left out with no fault (template.js).
  */
-const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, sign: 14, text: 28, options: 6, items: 6, shapes: 12, cells: 100 };
+const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, sign: 14, text: 28, options: 6, items: 6, shapes: 12, cells: 100, say: 110 };
 /** The common color names that the kit takes with no call, by their small letters: the template check had one repair for a color name. */
 const COLOR_NAMES = { red: "#dc2626", orange: "#ea580c", yellow: "#facc15", green: "#16a34a", blue: "#2563eb", purple: "#9333ea", violet: "#7c3aed", pink: "#db2777",
   brown: "#a16207", gray: "#64748b", grey: "#64748b", cyan: "#0891b2", teal: "#0d9488", indigo: "#4f46e5", black: "ink", white: "surface" };
@@ -3885,7 +3886,7 @@ const { SCENE_FORM } = (() => {
 
 
 
-const CONTROL = "slider(LABEL, MIN, MAX, STEP, START) with numbers, or choice(LABEL, [OPTION, …], START)";
+const CONTROL = "slider(LABEL, MIN, MAX, STEP, START) with numbers, choice(LABEL, [OPTION, …], START), or steps(LABEL, [STEP, …], ANSWER)";
 
 /** The form of scene (forms.js TemplateForm). */
 const SCENE_FORM = {
@@ -3899,11 +3900,12 @@ const SCENE_FORM = {
     if (tree.k !== "call" || Object.keys(tree.named).length) return form;
     if (tree.name === "slider") {
       if (args.length !== 5 || args.slice(1).some((arg) => numberOf(arg) === undefined)) return form;
-    } else if (tree.name === "choice") {
-      const options = args[1]?.items;
+    } else if (tree.name === "choice" || tree.name === "steps") {
+      // A steps control is a choice whose start is its answer step, by default the last step (decision 3).
+      const options = args[1]?.items, what = tree.name === "steps" ? "steps" : "options";
       if (args.length < 2 || args.length > 3 || !options || (args[2] && !isText(args[2]))) return form;
-      if (options.length > BUDGET.options) return `the choice has ${options.length} options, and its cap is ${BUDGET.options}. Keep the ones that matter most`;
-      if (options.length < 2) return "a choice needs at least 2 options";
+      if (options.length > BUDGET.options) return `the ${tree.name} control has ${options.length} ${what}, and its cap is ${BUDGET.options}. Keep the ones that matter most`;
+      if (options.length < 2) return `a ${tree.name} control needs at least 2 ${what}`;
       const fault = options.map((option, index) => textFault(`option ${index + 1}`, option, BUDGET.option)).find(Boolean);
       if (fault) return fault;
     } else return form;
@@ -3936,7 +3938,7 @@ const { ITEMS_FORM } = (() => {
 
 
 
-const CONTROL = "choice(LABEL): its options are the labels of the items";
+const CONTROL = "choice(LABEL), or steps(LABEL, ANSWER): its options are the labels of the items";
 
 /** The form of items (forms.js TemplateForm). */
 const ITEMS_FORM = {
@@ -3947,7 +3949,7 @@ const ITEMS_FORM = {
   controlFault(tree) {
     const args = tree.args ?? [], form = `the control of items is ${CONTROL}`;
     if (tree.k !== "call" || Object.keys(tree.named).length) return form;
-    if (!(tree.name === "choice" && args.length === 1)) return form;
+    if (!(tree.name === "choice" && args.length === 1 || tree.name === "steps" && args.length <= 2 && args.length >= 1 && (!args[1] || isText(args[1])))) return form;
     return textFault("the label", args[0], BUDGET.control);
   },
   partFault(tree) {
@@ -3969,8 +3971,11 @@ const ITEMS_FORM = {
       cardText: "$/now/text",
     };
   },
-  /** The value that $/v keeps when the control is left out: the label of the first item, or 0 with no item. */
-  start: (parts) => parts[0]?.tree.args[0] ?? { k: "lit", v: 0 },
+  /**
+   * The start of $/v: the answer of a steps control, by default the label of the last item (decision 3), else the label of the first item,
+   * or 0 with no item.
+   */
+  start: (parts, control) => (control?.name === "steps" ? control.args[1] ?? parts.at(-1)?.tree.args[0] : parts[0]?.tree.args[0]) ?? { k: "lit", v: 0 },
 };
 
 return { ITEMS_FORM };
@@ -4058,6 +4063,7 @@ const { isTemplateFile, readTemplate, mergeTemplate, expandTemplate, buildTempla
 //   control = choice("Предмет", ["Корабль", "Гвоздь"])                 the one control. A part reads its value as $/v
 //   s1 = rect(0, 110, 300, 110, "water", 0)                            the parts: s1 to s12 are shapes (scene), i1 to i6 items (items)
 //   card = card("Вытеснение воды", "Полый корабль ...")                 the card
+//   say = "Выбери предмет и смотри на воду."                           the narration: say for one sentence, say1 to sayN for steps
 //
 // The code of each template form is in a module of its own (forms.js), and what each form uses is in form-base.js.
 
@@ -4076,8 +4082,20 @@ function lineOf(raw) {
   const line = raw.trim(), word = TEMPLATE_HEAD.exec(line)?.[1], gone = /^delete\s+(\S+)$/.exec(line)?.[1], name = /^(\$\/v|[\p{L}_][\p{L}\p{N}_]*)\s*=(?!=)/u.exec(line)?.[1];
   return word ? { name: word, head: true, raw: line } : gone ? { gone } : name ? { name: name === "$/v" ? "control" : name, raw: line } : null;
 }
-/** The place of each kind of line in the fixed order. */
-const rank = (name, word) => (name === word ? 0 : name === "control" ? 1 : name === "card" ? 3 : 2);
+/** A narration line (plan "one scene", decision 2): say beside a slider, a choice, or no control, and say1 to sayN beside a steps control. */
+const NARRATION = /^say(?:[1-9]\d*)?$/;
+/** The place of each kind of line in the fixed order. The narration lines come last. */
+const rank = (name, word) => (name === word ? 0 : name === "control" ? 1 : name === "card" ? 3 : NARRATION.test(name) ? 4 : 2);
+/**
+ * A narration line: its sentence with each run of space as one space, cut to BUDGET.say, as say = "<JSON string>", so the host reads it as JSON.
+ * Null for a line that is no text or has no sentence end inside the cap: a narration line draws nothing, so it is left out with no fault.
+ */
+function narrationOf(name, raw) {
+  let tree;
+  try { tree = parseLine(raw.trim())?.tree; } catch (failure) { if (failure instanceof DslError) return null; throw failure; }
+  const text = isText(tree) ? cut(tree.v.replace(/\s+/gu, " ").trim(), BUDGET.say) : "";
+  return [...text].length <= BUDGET.say && SENTENCE_END.test(text) ? `${name} = ${JSON.stringify(text)}` : null;
+}
 
 /**
  * The lines of a template file in the fixed order (the first line, the control, the parts in their order, the card), and the fault of each
@@ -4096,6 +4114,13 @@ function readTemplate(text) {
     const one = lineOf(raw), name = one?.name;
     if (!one || one.head) { fault(word, `${JSON.stringify(raw.trim().slice(0, 40))} is not a line of the template. Its lines are the first line, ${form.lines}`); continue; }
     if (one.gone) { fault(one.gone, "a template file has no delete line. Only a repair or a change reply deletes a line"); continue; }
+    // A narration line has no fault: one that the kit cannot keep is left out, and a second line of a name goes.
+    if (NARRATION.test(name)) {
+      if (lines.some((line) => line.name === name)) continue;
+      const kept = narrationOf(name, raw);
+      lines.push({ name, raw: kept ?? raw.trim(), tree: kept && { k: "lit", v: name } });
+      continue;
+    }
     if (name !== "control" && name !== "card" && !form.part.test(name)) { fault(name, `the template ${word} has no line ${name}. Its lines are ${form.lines}`); continue; }
     if (lines.some((line) => line.name === name)) { fault(name, `this is a second line ${name}. Each line has its own name`); continue; }
     const entry = read(raw, parseLine);
@@ -4144,12 +4169,13 @@ const drawnParts = (read, leftOut) => read.lines.filter((line) => line.tree && !
  * control line that the kit can read.
  */
 function startOf(read, leftOut) {
-  const form = FORMS_BY_WORD[read.word];
-  if (form.start) return form.start(drawnParts(read, leftOut));
-  const line = read.lines.find((one) => one.name === "control");
+  const form = FORMS_BY_WORD[read.word], line = read.lines.find((one) => one.name === "control");
+  if (form.start) return form.start(drawnParts(read, leftOut), !leftOut.has("control") && line?.tree?.k === "call" ? line.tree : undefined);
   let tree = line?.tree;
   try { tree ??= line && parseLine(line.raw)?.tree; } catch { tree = null; }
-  const start = tree?.k !== "call" ? tree : tree.name === "slider" ? tree.args[4] : tree.name === "choice" ? tree.args[2] ?? tree.args[1]?.items?.[0] : null;
+  // A steps control starts at its answer step, by default the last step (decision 3).
+  const start = tree?.k !== "call" ? tree : tree.name === "slider" ? tree.args[4] : tree.name === "choice" ? tree.args[2] ?? tree.args[1]?.items?.[0]
+    : tree.name === "steps" ? tree.args[2] ?? tree.args[1]?.items?.at(-1) : null;
   return isText(start) || numberOf(start) !== undefined ? start : { k: "lit", v: 0 };
 }
 
@@ -4216,6 +4242,13 @@ function buildTemplate(text, stored, build, preview = false) {
     if (!preview && control && read.word === "scene" && !read.lines.some((line) => line.tree && line.name !== "control" && !leftOut.has(line.name) && nodesIn(line.tree, readsV).length)) {
       faults.push("control: the control changes nothing on the screen, because no line reads $/v. Make a part read $/v, such as visible=$/v > 2");
       leftOut.add("control");
+    }
+    // A narration line of the wrong kind is left out with no fault: say beside steps, sayK beside another control, or sayK above the count of steps.
+    const steps = read.lines.find((line) => line.name === "control" && line.tree?.name === "steps" && !leftOut.has("control"))?.tree;
+    const count = !steps ? 0 : read.word === "items" ? drawnParts(read, leftOut).length : steps.args[1].items.length;
+    for (const line of read.lines) {
+      const index = NARRATION.test(line.name) ? Number(line.name.slice(3)) : NaN;
+      if (index === 0 ? steps : index > count) leftOut.add(line.name);
     }
     kept = keptOf(read, leftOut);
   };

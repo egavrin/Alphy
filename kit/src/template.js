@@ -6,11 +6,12 @@
 //   control = choice("Предмет", ["Корабль", "Гвоздь"])                 the one control. A part reads its value as $/v
 //   s1 = rect(0, 110, 300, 110, "water", 0)                            the parts: s1 to s12 are shapes (scene), i1 to i6 items (items)
 //   card = card("Вытеснение воды", "Полый корабль ...")                 the card
+//   say = "Выбери предмет и смотри на воду."                           the narration: say for one sentence, say1 to sayN for steps
 //
 // The code of each template form is in a module of its own (forms.js), and what each form uses is in form-base.js.
 
 import { DslError, parseExpression, parseLine, show } from "./dsl.js";
-import { HEIGHT, TEMPLATE_HEAD, WIDTH, colorFault, colored, cutLong, headFault, isText, nodesIn, numberOf } from "./form-base.js";
+import { BUDGET, HEIGHT, SENTENCE_END, TEMPLATE_HEAD, WIDTH, colorFault, colored, cut, cutLong, headFault, isText, nodesIn, numberOf } from "./form-base.js";
 import { FORMS_BY_WORD } from "./forms.js";
 
 export { BUDGET, TEMPLATE_HEAD } from "./form-base.js";
@@ -24,8 +25,20 @@ function lineOf(raw) {
   const line = raw.trim(), word = TEMPLATE_HEAD.exec(line)?.[1], gone = /^delete\s+(\S+)$/.exec(line)?.[1], name = /^(\$\/v|[\p{L}_][\p{L}\p{N}_]*)\s*=(?!=)/u.exec(line)?.[1];
   return word ? { name: word, head: true, raw: line } : gone ? { gone } : name ? { name: name === "$/v" ? "control" : name, raw: line } : null;
 }
-/** The place of each kind of line in the fixed order. */
-const rank = (name, word) => (name === word ? 0 : name === "control" ? 1 : name === "card" ? 3 : 2);
+/** A narration line (plan "one scene", decision 2): say beside a slider, a choice, or no control, and say1 to sayN beside a steps control. */
+const NARRATION = /^say(?:[1-9]\d*)?$/;
+/** The place of each kind of line in the fixed order. The narration lines come last. */
+const rank = (name, word) => (name === word ? 0 : name === "control" ? 1 : name === "card" ? 3 : NARRATION.test(name) ? 4 : 2);
+/**
+ * A narration line: its sentence with each run of space as one space, cut to BUDGET.say, as say = "<JSON string>", so the host reads it as JSON.
+ * Null for a line that is no text or has no sentence end inside the cap: a narration line draws nothing, so it is left out with no fault.
+ */
+function narrationOf(name, raw) {
+  let tree;
+  try { tree = parseLine(raw.trim())?.tree; } catch (failure) { if (failure instanceof DslError) return null; throw failure; }
+  const text = isText(tree) ? cut(tree.v.replace(/\s+/gu, " ").trim(), BUDGET.say) : "";
+  return [...text].length <= BUDGET.say && SENTENCE_END.test(text) ? `${name} = ${JSON.stringify(text)}` : null;
+}
 
 /**
  * The lines of a template file in the fixed order (the first line, the control, the parts in their order, the card), and the fault of each
@@ -44,6 +57,13 @@ export function readTemplate(text) {
     const one = lineOf(raw), name = one?.name;
     if (!one || one.head) { fault(word, `${JSON.stringify(raw.trim().slice(0, 40))} is not a line of the template. Its lines are the first line, ${form.lines}`); continue; }
     if (one.gone) { fault(one.gone, "a template file has no delete line. Only a repair or a change reply deletes a line"); continue; }
+    // A narration line has no fault: one that the kit cannot keep is left out, and a second line of a name goes.
+    if (NARRATION.test(name)) {
+      if (lines.some((line) => line.name === name)) continue;
+      const kept = narrationOf(name, raw);
+      lines.push({ name, raw: kept ?? raw.trim(), tree: kept && { k: "lit", v: name } });
+      continue;
+    }
     if (name !== "control" && name !== "card" && !form.part.test(name)) { fault(name, `the template ${word} has no line ${name}. Its lines are ${form.lines}`); continue; }
     if (lines.some((line) => line.name === name)) { fault(name, `this is a second line ${name}. Each line has its own name`); continue; }
     const entry = read(raw, parseLine);
@@ -92,12 +112,13 @@ const drawnParts = (read, leftOut) => read.lines.filter((line) => line.tree && !
  * control line that the kit can read.
  */
 function startOf(read, leftOut) {
-  const form = FORMS_BY_WORD[read.word];
-  if (form.start) return form.start(drawnParts(read, leftOut));
-  const line = read.lines.find((one) => one.name === "control");
+  const form = FORMS_BY_WORD[read.word], line = read.lines.find((one) => one.name === "control");
+  if (form.start) return form.start(drawnParts(read, leftOut), !leftOut.has("control") && line?.tree?.k === "call" ? line.tree : undefined);
   let tree = line?.tree;
   try { tree ??= line && parseLine(line.raw)?.tree; } catch { tree = null; }
-  const start = tree?.k !== "call" ? tree : tree.name === "slider" ? tree.args[4] : tree.name === "choice" ? tree.args[2] ?? tree.args[1]?.items?.[0] : null;
+  // A steps control starts at its answer step, by default the last step (decision 3).
+  const start = tree?.k !== "call" ? tree : tree.name === "slider" ? tree.args[4] : tree.name === "choice" ? tree.args[2] ?? tree.args[1]?.items?.[0]
+    : tree.name === "steps" ? tree.args[2] ?? tree.args[1]?.items?.at(-1) : null;
   return isText(start) || numberOf(start) !== undefined ? start : { k: "lit", v: 0 };
 }
 
@@ -164,6 +185,13 @@ export function buildTemplate(text, stored, build, preview = false) {
     if (!preview && control && read.word === "scene" && !read.lines.some((line) => line.tree && line.name !== "control" && !leftOut.has(line.name) && nodesIn(line.tree, readsV).length)) {
       faults.push("control: the control changes nothing on the screen, because no line reads $/v. Make a part read $/v, such as visible=$/v > 2");
       leftOut.add("control");
+    }
+    // A narration line of the wrong kind is left out with no fault: say beside steps, sayK beside another control, or sayK above the count of steps.
+    const steps = read.lines.find((line) => line.name === "control" && line.tree?.name === "steps" && !leftOut.has("control"))?.tree;
+    const count = !steps ? 0 : read.word === "items" ? drawnParts(read, leftOut).length : steps.args[1].items.length;
+    for (const line of read.lines) {
+      const index = NARRATION.test(line.name) ? Number(line.name.slice(3)) : NaN;
+      if (index === 0 ? steps : index > count) leftOut.add(line.name);
     }
     kept = keptOf(read, leftOut);
   };

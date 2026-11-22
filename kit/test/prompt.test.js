@@ -213,6 +213,20 @@ test("eachTemplateExampleCompilesClean", async () => {
   expect(outside.length).toBeGreaterThan(0);
 });
 
+test("each example of Template compiles clean with its narration", async () => {
+  // Plan "one scene", Task 26: each template example teaches the narration lines, and one of them is a steps scene with one say line for each step.
+  let stepped = 0;
+  for (const [request, reply] of TEMPLATE_EXAMPLES) {
+    const step = await compileStep({ text: reply, plan: null, read: true, previous: null, cap: 65536 });
+    if (step.kind === "outside") continue;
+    const says = step.result.kept.split("\n").filter((line) => line.startsWith("say"));
+    expect([request, step.result.faults, step.result.leftOut, says.length > 0]).toEqual([request, [], [], true]);
+    const steps = /^control = steps\("[^"]*", \[(.*?)\]/m.exec(reply);
+    if (steps) { stepped++; expect([request, says.length]).toEqual([request, steps[1].split(",").length]); }
+  }
+  expect(stepped).toBe(1);
+});
+
 test("theTemplateSectionStatesTheBudget", () => {
   // The rules state each cap: the text caps 30, 28, 32, 140, 12, 14, and the list caps 6, 12, 100. The examples do not count.
   const rules = TEMPLATE.replace(/```[\s\S]*?```/g, "");
@@ -241,7 +255,7 @@ test("theBundleReadsATemplate", async () => {
 test("theRestSectionChangesNoHash", () => {
   // The hashes of the free records and of the records of gate 2b: the rest section came after them.
   const { PROMPT_HASH, TEMPLATE_HASH, hashOf } = prompts, rest = SECTIONS["Template rest"];
-  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "6595f0dbb072"]);
+  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "5e96d3de2523"]);
   expect(rest?.length).toBeGreaterThan(100);
   const copy = { ...SECTIONS, "Template rest": `${rest} Write it.` };
   expect([hashOf(["System", "Repair", "Dialogue", "Change"], copy), hashOf(["Template", "Template repair", "Template change"], copy)]).toEqual([PROMPT_HASH, TEMPLATE_HASH]);

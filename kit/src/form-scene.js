@@ -3,7 +3,7 @@
 
 import { BUDGET, INSIDE, SHAPES, isText, numberOf, textCardFault, textFault } from "./form-base.js";
 
-const CONTROL = "slider(LABEL, MIN, MAX, STEP, START) with numbers, or choice(LABEL, [OPTION, …], START)";
+const CONTROL = "slider(LABEL, MIN, MAX, STEP, START) with numbers, choice(LABEL, [OPTION, …], START), or steps(LABEL, [STEP, …], ANSWER)";
 
 /** The form of scene (forms.js TemplateForm). */
 export const SCENE_FORM = {
@@ -17,11 +17,12 @@ export const SCENE_FORM = {
     if (tree.k !== "call" || Object.keys(tree.named).length) return form;
     if (tree.name === "slider") {
       if (args.length !== 5 || args.slice(1).some((arg) => numberOf(arg) === undefined)) return form;
-    } else if (tree.name === "choice") {
-      const options = args[1]?.items;
+    } else if (tree.name === "choice" || tree.name === "steps") {
+      // A steps control is a choice whose start is its answer step, by default the last step (decision 3).
+      const options = args[1]?.items, what = tree.name === "steps" ? "steps" : "options";
       if (args.length < 2 || args.length > 3 || !options || (args[2] && !isText(args[2]))) return form;
-      if (options.length > BUDGET.options) return `the choice has ${options.length} options, and its cap is ${BUDGET.options}. Keep the ones that matter most`;
-      if (options.length < 2) return "a choice needs at least 2 options";
+      if (options.length > BUDGET.options) return `the ${tree.name} control has ${options.length} ${what}, and its cap is ${BUDGET.options}. Keep the ones that matter most`;
+      if (options.length < 2) return `a ${tree.name} control needs at least 2 ${what}`;
       const fault = options.map((option, index) => textFault(`option ${index + 1}`, option, BUDGET.option)).find(Boolean);
       if (fault) return fault;
     } else return form;

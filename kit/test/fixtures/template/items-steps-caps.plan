@@ -1,0 +1,15 @@
+items("Parts of a cell and their jobs", lang="en", palette="green")
+control = steps("Part of the cell to look at.", "Cell nucleus")
+i1 = item("Cell nucleus", "DNA + proteins", "This part does one main job in the cell and works with the other parts, so the whole cell can live, grow, make new parts, and divide in two.")
+i2 = item("Mitochondria", "ATP power unit", "This part does one main job in the cell and works with the other parts, so the whole cell can live, grow, make new parts, and divide in two.")
+i3 = item("Cell surface", "lipid two-ways", "This part does one main job in the cell and works with the other parts, so the whole cell can live, grow, make new parts, and divide in two.")
+i4 = item("Protein shop", "RNA + proteins", "This part does one main job in the cell and works with the other parts, so the whole cell can live, grow, make new parts, and divide in two.")
+i5 = item("Golgi bodies", "sort and ship.", "This part does one main job in the cell and works with the other parts, so the whole cell can live, grow, make new parts, and divide in two.")
+i6 = item("Chloroplasts", "green sun trap", "This part does one main job in the cell and works with the other parts, so the whole cell can live, grow, make new parts, and divide in two.")
+card = card("What this part does in the cell.")
+say1 = "At step 1 the picture shows how the cell moves and what it means for the whole of the thing that you see here."
+say2 = "At step 2 the picture shows how the cell moves and what it means for the whole of the thing that you see here."
+say3 = "At step 3 the picture shows how the cell moves and what it means for the whole of the thing that you see here."
+say4 = "At step 4 the picture shows how the cell moves and what it means for the whole of the thing that you see here."
+say5 = "At step 5 the picture shows how the cell moves and what it means for the whole of the thing that you see here."
+say6 = "At step 6 the picture shows how the cell moves and what it means for the whole of the thing that you see here."

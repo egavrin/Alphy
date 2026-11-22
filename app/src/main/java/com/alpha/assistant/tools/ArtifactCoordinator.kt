@@ -530,6 +530,19 @@ internal class ArtifactCoordinator private constructor() {
         if(quietControl!=controlVersion) {quietVersion=next.stateVersion;quietControl=controlVersion}
         updateInputView()
     }
+    /**
+     * Saves the spec that [change] gives for the stored tool [id] with no new revision, and keeps it as the durable record, so an open host
+     * goes on with no reopen. The state stays the same. A null from [change] saves nothing and gives false.
+     */
+    fun saveSpec(store: ToolStore,id: String,change: (ToolRecord)->ToolRecord?): Boolean {
+        flush(store)
+        val old=store.tool(id) ?: return false
+        val next=change(old) ?: return false
+        require(next==old.copy(spec=next.spec))
+        store.commitTool(next,old,false)
+        if(durable==old) {durable=next;live=next;updateInputView()}
+        return true
+    }
     fun close(store: ToolStore,revision: Int) {
         if(durable?.revision!=revision)return
         try {flush(store)} catch(failed: Exception) {failure=failed.message ?: "The local snapshot could not commit.";throw failed} finally {

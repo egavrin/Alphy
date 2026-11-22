@@ -1,5 +1,6 @@
 package com.alpha.assistant.tools.agent
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 
 /**
@@ -12,8 +13,18 @@ internal class TemplateStream {
     private val signal = Channel<Unit>(Channel.CONFLATED)
     @Volatile private var closed = false
 
+    /**
+     * The complete lines before the first narration line, when that line starts (plan "one scene", decision 6), or null when the call ends
+     * with no narration line.
+     */
+    val narration = CompletableDeferred<String?>()
+
     fun append(delta: String) {
-        synchronized(buffer) { buffer.append(delta) }
+        val head = synchronized(buffer) {
+            buffer.append(delta)
+            if (narration.isCompleted) null else NARRATION.find(buffer)?.let { buffer.substring(0, it.range.first) }
+        }
+        head?.let(narration::complete)
         signal.trySend(Unit)
     }
 
@@ -33,8 +44,20 @@ internal class TemplateStream {
         }
     }
 
+    /** Ends [collect] after the run in flight. The text goes on to take the deltas. */
+    fun stopCollect() {
+        closed = true
+        signal.trySend(Unit)
+    }
+
     fun close() {
         closed = true
         signal.close()
+        narration.complete(null)
+    }
+
+    private companion object {
+        /** The start of a narration line: say, a step number or an equals sign, at the start of a line. */
+        val NARRATION = Regex("""(?m)^[ \t]*say(?:\d|[ \t]*=)""")
     }
 }

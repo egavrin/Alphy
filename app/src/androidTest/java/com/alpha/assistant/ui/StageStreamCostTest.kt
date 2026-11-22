@@ -16,7 +16,8 @@ import org.junit.Test
 
 /**
  * Gate 1b (Task 20): the stream of a new screen adds at most 0.3 s to controls on. For each example file, a count of pairs of spoken screens
- * with the same scripted deltas (one line in each delta, the first at 1.7 s, the last at 4.5 s, even gaps between), one turn with
+ * with the same scripted deltas (one line in each delta, the first at 1.7 s, the last at 4.5 s, even gaps between, and three narration
+ * lines at the end), one turn with
  * previewStream on and one with it off, in alternating order. Each turn runs in a new shell on an empty stage, and the recorder gives the time
  * from the end of speech to controls_on. Each pair prints one JSON line, and each file one line with the median of its differences. The bar
  * applies to that median, because the difference of one pair with no hold went from -785 ms to +537 ms under host load (2026-11-21).
@@ -56,7 +57,8 @@ class StageStreamCostTest {
 
     /** The time from the end of speech to controls_on of one spoken screen whose template reply is [file], with the stream on or off. */
     private fun controlsOn(file: String, stream: Boolean): Long {
-        val lines = file.lines().filter { it.isNotBlank() }.map { "$it\n" }
+        // The deltas end with three narration lines, so the controls come on when the first one starts (plan "one scene", Task 27).
+        val lines = (file.lines().filter { it.isNotBlank() } + NARRATION_LINES).map { "$it\n" }
         val gaps = listOf(FIRST_MS) + List(lines.size - 1) { (LAST_MS - FIRST_MS) / (lines.size - 1) }
         val fixture = ShellFixture("stage-stream-cost")
         val socket = FakeLiveTransport()

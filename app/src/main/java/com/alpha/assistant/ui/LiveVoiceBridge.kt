@@ -2,6 +2,7 @@ package com.alpha.assistant.ui
 
 import android.app.Application
 import android.content.Context
+import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -17,7 +18,12 @@ import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.surfaces.AssistCapture
 import com.alpha.assistant.surfaces.AssistantCapture
+import com.alpha.assistant.tools.SceneAction
+import com.alpha.assistant.tools.SceneNarration
 import com.alpha.assistant.tools.ShownControl
+import com.alpha.assistant.tools.ShownScreen
+import com.alpha.assistant.tools.ToolRecord
+import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.voice.ApprovalWindow
 import com.alpha.assistant.voice.LiveProtocol
@@ -37,6 +43,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.delay
+import org.json.JSONObject
 
 /**
  * The chat side of the voice mode (spec 5.5 to 5.8). Each hand-off goes to the chat agent as a normal message, and its result goes
@@ -94,16 +102,146 @@ internal class LiveVoiceBridge(
     /** A hand-off or typed turn is queued or runs. A reader sees it change when one starts and when it ends. */
     val working: Boolean get() = tracked.any { message(it)?.status in unfinishedStatuses }
 
-    /** Runs [control] of the stage app [toolId] as a tap. False when no stage ran the tap within [PRESS_WAIT_MS]. */
-    suspend fun press(toolId: String, control: ShownControl): Boolean {
+    /** The last actions on the stage app, oldest first (plan "one scene", decision 10). A new stage app clears them. */
+    val actions: List<SceneAction> get() = recent.toList()
+    private val recent = ArrayDeque<SceneAction>()
+    /** The stage app that the watcher reads, and the value of each of its inputs by label. */
+    private var watchedTool: String? = null
+    private var watchedValues: Map<String, Any?> = emptyMap()
+    /**
+     * The control and the who of each own press that has not changed its input yet, with its uptime, oldest first: the next change of that
+     * control is this who (decision 10). A list, so a voice press right after a press of the walk does not take the who of the walk.
+     */
+    private val expected = ArrayDeque<Pair<SceneAction, Long>>()
+    private var lastTapMs = 0L
+    /** The new scene of a hand-off whose start waits for its narration call or for the list of tools (decision 14). */
+    private var sceneWaits: String? = null
+
+    /** The walk of a new stepped scene (plan "one scene", decisions 14 to 17). Branch (b) of Task 24, by ruling 1 of stage 2. */
+    private val narrator = StageNarrator(send = { session.thinking(it) }, press = ::pressStep, cardText = ::cardText,
+        onsetAfter = session::onsetAfter, cancelOnset = session::cancelOnset, skip = session::skip, skipAfterSpeech = true,
+        scope = model.viewModelScope)
+
+    /** A walk goes on: the strip keeps the speaking status, and a reply end opens no approval window (decision 17). */
+    val walking: Boolean get() = narrator.walking
+
+    /**
+     * Runs [control] of the stage app [toolId] as a tap. False when no stage ran the tap within [PRESS_WAIT_MS]. [who] is "voice" for a
+     * routing press and «Дальше», and "narrator" for a press of a walk: the next change of that control is an action of [who].
+     */
+    suspend fun press(toolId: String, control: ShownControl, who: String = "voice"): Boolean {
+        val own = SceneAction(who, control.label, control.value) to SystemClock.uptimeMillis()
+        expected.addLast(own)
         val press = VoicePress(toolId, control)
+        var ran = false
         try {
-            if (pressed.subscriptionCount.value > 0 && pressed.tryEmit(press)) withTimeoutOrNull(PRESS_WAIT_MS) { press.ran.await() }
+            if (pressed.subscriptionCount.value > 0 && pressed.tryEmit(press)) ran = withTimeoutOrNull(PRESS_WAIT_MS) { press.ran.await() } == true
         } finally {
-            // A stage that takes the press later finds it failed, so no tap runs after the voice said that it failed.
+            // A stage that takes the press later, or after a cancel of a press of a stopped walk, finds it failed, so no tap runs.
             press.ran.complete(false)
+            if (!ran) expected.remove(own)
         }
-        return press.ran.await()
+        return ran
+    }
+
+    /**
+     * The sentence that the voice says for a press of a step of the stepped scene [toolId] by [control] («Дальше», decision 16), or null for
+     * any other press. A press of a step stops a walk.
+     */
+    fun stepSentence(toolId: String, control: ShownControl): String? {
+        val record = model.tools.tools.find { it.id == toolId } ?: return null
+        val screen = ShownScreen.of(record) ?: return null
+        val step = screen.stepControl?.let { control.label.removePrefix("$it: ").takeIf { label -> label != control.label } } ?: return null
+        val index = screen.steps.indexOf(step).takeIf { it >= 0 } ?: return null
+        narrator.stop(WalkStop.ANSWER)
+        return SceneNarration.of(appFileOf(record)).sentence(index + 1)
+    }
+
+    /** «Продолжай» (decision 16): the walk of the rest of the steps of [toolId], and the sentence that the voice says first, or null. */
+    fun rest(toolId: String): String? {
+        val record = model.tools.tools.find { it.id == toolId } ?: return null
+        val screen = ShownScreen.of(record) ?: return null
+        val present = screen.step?.index ?: return null
+        return narrator.rest(toolId, screen.steps, SceneNarration.of(appFileOf(record)), present)
+    }
+
+    /** The app file of [record], or the kept text with the narration that the controller saved at its revision, before the list of tools reloads. */
+    private fun appFileOf(record: ToolRecord) = model.tools.savedNarration(record) ?: ToolSpec.availablePersisted(record)?.appFile
+
+    /** The press of [step] of the scene of the walk, as a narrator action. It returns when the list of tools shows the step. */
+    private suspend fun pressStep(step: String): Boolean {
+        val toolId = narrator.scene ?: return false
+        fun screen() = model.tools.tools.find { it.id == toolId }?.let { ShownScreen.of(it) }
+        val screen = screen() ?: return false
+        if (screen.step?.label == step) return true
+        val control = screen.controls.find { it.label == "${screen.stepControl}: $step" } ?: return false
+        if (!press(toolId, control, "narrator")) return false
+        // The stage commits the tap, and the list of tools reloads after the store changes.
+        return withTimeoutOrNull(PRESS_WAIT_MS) { while (screen()?.step?.label != step) delay(20); true } == true
+    }
+
+    /** The text of the card of the scene of the walk now: the texts in its card after the title (decision 14). */
+    private fun cardText(): String? {
+        val record = narrator.scene?.let { id -> model.tools.tools.find { it.id == id } } ?: return null
+        fun nodes(node: JSONObject): List<JSONObject> = listOf(node) + node.optJSONArray("children")?.let { children ->
+            List(children.length()) { children.getJSONObject(it) }.flatMap(::nodes) }.orEmpty()
+        val card = runCatching { nodes(JSONObject(record.ui)).lastOrNull { it.optString("type") == "card" } }.getOrNull() ?: return null
+        val texts = nodes(card).drop(1).mapNotNull { node -> node.optString("text").takeIf { it.isNotBlank() } }
+        return texts.drop(1).ifEmpty { texts }.joinToString(" ").takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * The watcher of the stage app (decision 10). Each change of an input is one action: of the who of an own press, else a tap. Changes of
+     * one control by tap less than 1 s apart replace the last action, so a slider drag is one action. A new stage app adds no action.
+     */
+    private fun observe(record: ToolRecord?) {
+        if (record == null) return
+        sceneWaits?.takeIf { it == record.id }?.let { beginScene(it) }
+        val screen = ShownScreen.of(record) ?: return
+        val values = screen.values.toMap()
+        if (record.id != watchedTool) { watchedTool = record.id; watchedValues = values; recent.clear(); expected.clear(); return }
+        val previous = watchedValues
+        watchedValues = values
+        for ((label, value) in values) if (previous.containsKey(label) && previous[label] != value) changed(record, screen, label, value)
+    }
+
+    private fun changed(record: ToolRecord, screen: ShownScreen, label: String, value: Any?) {
+        val now = SystemClock.uptimeMillis()
+        expected.removeAll { now - it.second >= EXPECT_MS }
+        // The oldest own press of this control with this value, else the oldest of this control.
+        fun mine(action: SceneAction) = action.control == label || action.control.startsWith("$label: ")
+        val own = expected.firstOrNull { mine(it.first) && it.first.value == value } ?: expected.firstOrNull { mine(it.first) }
+        own?.let(expected::remove)
+        val who = own?.first?.who ?: "tap"
+        if (who == "tap" && now - lastTapMs < TAP_MERGE_MS && recent.lastOrNull()?.let { it.who == "tap" && it.control == label } == true) recent.removeLast()
+        recent.addLast(SceneAction(who, label, value))
+        while (recent.size > ShownScreen.MAX_ACTIONS) recent.removeFirst()
+        if (who != "tap") return
+        lastTapMs = now
+        // A tap stops a walk (decision 11). A tap on a step while the voice is silent says the sentence of that step (ruling 3 of stage 2:
+        // the touch gate holds only the microphone, so it does not hold this append).
+        if (narrator.walking) narrator.stop(WalkStop.TAP)
+        if (label != screen.stepControl || session.speaksNow) return
+        val sentence = screen.step?.let { step -> SceneNarration.of(appFileOf(record)).sentence(step.index) } ?: return
+        session.thinking(LiveProtocol.MARK + sentence)
+    }
+
+    /** A new scene of a hand-off came on the stage (decision 14): it starts when its narration call ended and the list of tools holds it. */
+    private fun sceneCame(toolId: String) {
+        narrator.stop(WalkStop.ANSWER)
+        sceneWaits = toolId
+        beginScene(toolId)
+    }
+
+    /** A stepped scene starts its walk. A scene with one narration line says it once. Each other scene says nothing. */
+    private fun beginScene(toolId: String) {
+        if (sceneWaits != toolId || model.tools.narrationPending(toolId)) return
+        val record = model.tools.tools.find { it.id == toolId } ?: return
+        sceneWaits = null
+        val narration = SceneNarration.of(appFileOf(record))
+        val screen = ShownScreen.of(record) ?: return
+        if (narration.stepped && screen.steps.isNotEmpty()) narrator.start(toolId, screen.steps, narration)
+        else narration.say?.let { session.thinking(LiveProtocol.MARK + it) }
     }
 
     /** A touch on the stage starts ([down]) or ends. A press by voice is no touch. The session hears no microphone sound for its time. */
@@ -111,6 +249,7 @@ internal class LiveVoiceBridge(
 
     fun start(firstSpeech: Boolean) {
         session.start(this, firstSpeech)
+        model.tools.narrationEnded = { toolId -> beginScene(toolId) }
         watch = model.viewModelScope.launch {
             // The session reads the account only at its start, so a later provider change or key removal ends it here (spec 5.8).
             launch {
@@ -120,6 +259,8 @@ internal class LiveVoiceBridge(
             }
             // onHide, onLockscreenShown, and a new press end the system session of the press, and its voice mode (spec 5.11.6, 5.11.7).
             assistantInvocation?.let { id -> launch { snapshotFlow { AssistantCapture.isOpen(id) }.first { !it }; session.stop() } }
+            // The stage app that the person and the voice change (plan "one scene", decision 10).
+            launch { snapshotFlow { model.stageToolId?.let { id -> model.tools.tools.find { it.id == id } } }.collect(::observe) }
             snapshotFlow { model.snapshot to model.agent.plan }.collect { report() }
         }
     }
@@ -163,7 +304,14 @@ internal class LiveVoiceBridge(
 
     override fun history(): List<Message> = model.snapshot.selected?.messages.orEmpty()
 
+    override fun outputText(text: String, startMs: Long, endMs: Long, replyStart: Boolean, arrivedNanos: Long) =
+        narrator.output(text, replyStart, arrivedNanos)
+
+    override fun inputStarted() = narrator.stop(WalkStop.SPEECH)
+
     override fun delegation(id: String, request: String) {
+        // A new hand-off stops a walk (decision 14).
+        narrator.stop(WalkStop.ANSWER)
         // Rule 7: the hand-off of an approval or rejection turn gets the rule-5 text, and the chat saves nothing.
         answered?.takeIf { spokenAnswer(request) == it.first }?.let { answered = null; session.commentary(id, it.second); return }
         if (request.isBlank()) { session.commentary(id, NOT_HEARD); return }
@@ -213,10 +361,20 @@ internal class LiveVoiceBridge(
     // shortcut: the window opens at the first output end after the acknowledgment (rule 3), which can be the tail of an earlier
     // line or early after a late transcript delta. Add a transcript-based end if the live check (6.3) shows an early window.
     override fun outputEnded(endMs: Long) {
+        narrator.replyEnded()
+        // A reply end inside a walk is a gap between two sentences, so it opens no approval window (decision 17).
+        if (narrator.walking) return
         approval?.takeIf { it.acknowledged && it.window == null }?.let { it.window = ApprovalWindow(it.plan.id, it.plan.revision, endMs) }
     }
 
-    override fun ended(status: String, settingsRequired: Boolean) { watch?.cancel(); watch = null; capture = null; stageToolId = null }
+    // The end of the mode also stops each narration call that a stored scene waits on (plan "one scene", decision 6).
+    override fun ended(status: String, settingsRequired: Boolean) {
+        narrator.stop(WalkStop.END)
+        watch?.cancel(); watch = null; capture = null; stageToolId = null
+        model.tools.stopNarrations()
+        model.tools.narrationEnded = null
+        sceneWaits = null
+    }
 
     /** Sends the mini-app progress and the result of each tracked message once (spec 5.5.5 to 5.5.8, 5.7.2), and puts the app of each complete one on the stage. */
     private fun report() {
@@ -230,7 +388,8 @@ internal class LiveVoiceBridge(
             if (id in screens) {
                 if (message.status == "generating") continue
                 screens -= id
-                if (message.status == "complete") continue
+                // A new scene of this screen can walk its steps or say its narration line (plan "one scene", decision 14).
+                if (message.status == "complete") { message.toolId?.takeIf { message.toolRevision == 1 }?.let(::sceneCame); continue }
             }
             // The words of a change never come before its screen. A stop or a failure still goes on to the failure text.
             if (id in changes) {
@@ -344,6 +503,10 @@ internal class LiveVoiceBridge(
         const val PRESS_FAILED = "Нажать не получилось."
         /** The time for the stage to run or refuse a press. A loaded phone can need some frames, and the voice waits only on a failure. */
         const val PRESS_WAIT_MS = 2_000L
+        /** An own press names the next change of its control within this time (decision 10). */
+        const val EXPECT_MS = 5_000L
+        /** Changes of one control by tap less than this apart are one action (decision 10). */
+        const val TAP_MERGE_MS = 1_000L
         /** The full generation of a screen that the fast path did not give starts (ruling FX-4). */
         const val FULL_WAIT = "Быстро не получилось. Экран соберётся заново, это займёт около минуты."
         /** The reason groups of a failed full generation, each with [FULL_HINT] after it (ruling FX-5). */
