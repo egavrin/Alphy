@@ -26,6 +26,7 @@ import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.LIVE_STARTED
 import com.alpha.assistant.voice.LivePhase
+import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.outputAudio
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
@@ -88,7 +89,7 @@ class VoiceModeScreenWorkflowTest {
             robot.waitFor(robot.text(R.string.live_voice_working))
             checkNotNull(fixture.provider.gate).complete(Unit)
             // Plan D: the voice retells a text answer, and the stage shows no card for it.
-            robot.waitUntil { "d1" to "Ответ Alphy: Fixture response." in socket.commentary() }
+            robot.waitUntil { "d1" to "${LiveProtocol.MARK}Fixture response." in socket.commentary() }
             assertFalse(inStage(scenario, "Fixture response"))
             assertNotNull(model.snapshot.selectedId)
             robot.waitFor(robot.text(R.string.live_voice_listening))

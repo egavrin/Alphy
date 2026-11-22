@@ -40,6 +40,7 @@ import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.LIVE_STARTED
 import com.alpha.assistant.voice.LivePhase
+import com.alpha.assistant.voice.LiveProtocol
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
@@ -207,7 +208,7 @@ class StageTemplateWorkflowTest {
             robot.waitUntil(60_000) { model.stageToolId != null && model.stageToolId != calc.id }
             robot.waitUntil { socket.commentary().count { it.first == "d2" } == 2 }
             robot.awaitFrames(5)
-            assertEquals(listOf("d2" to "Ответ Alphy: $SCREEN_TEXT", "d2" to FULL_WAIT), socket.commentary().filter { it.first == "d2" })
+            assertEquals(listOf("d2" to "${LiveProtocol.MARK}$SCREEN_TEXT", "d2" to FULL_WAIT), socket.commentary().filter { it.first == "d2" })
             check(model, talk.stages.drop(1), phases)
         }
     }
@@ -227,7 +228,7 @@ class StageTemplateWorkflowTest {
         const val HULL = "s2 = text(\"a\", 90, \"$HULL_TEXT\", \"ink\", 14)"
         /** A first line with a palette that the kit does not have: a whole fault. */
         const val SKY_HEAD = "scene(\"Почему корабль не тонет?\", lang=\"ru\", palette=\"sky\")"
-        const val FULL_WAIT = "Быстро не получилось. Alphy собирает экран заново, это займёт около минуты."
+        const val FULL_WAIT = LiveVoiceBridge.FULL_WAIT
     }
 }
 

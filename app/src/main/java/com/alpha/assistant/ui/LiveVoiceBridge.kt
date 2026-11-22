@@ -189,9 +189,10 @@ internal class LiveVoiceBridge(
             it.id == window.planId && it.revision == window.revision && it.phase == AgentPhase.REVIEW && !agent.busy
         }
         val text = when {
-            plan == null -> onScreen(agent.plan?.phase)
+            // The card disables its execute button while the agent is busy, so a busy plan in REVIEW names no button.
+            plan == null -> onScreen(agent.plan?.takeIf { !agent.busy }?.phase)
             answer == SpokenAnswer.APPROVE -> { agent.execute(plan); if (agent.busy) STARTED else onScreen(agent.plan?.phase) }
-            else -> { agent.dismiss(plan); if (agent.plan == null) CANCELLED else onScreen(agent.plan?.phase) }
+            else -> { agent.dismiss(plan); if (agent.plan == null) CANCELLED else onScreen(null) }
         }
         val decided = answer to text
         answered = decided
@@ -363,7 +364,7 @@ internal class LiveVoiceBridge(
 
         /**
          * The line of a card that waits for a tap, with the label of its button (plan of 2026-11-22, decision 8): a refinement choice,
-         * or the plan card in [phase]. Each other phase, and no plan, asks for the execute button.
+         * or the plan card in [phase]. Only REVIEW names the execute button. Each other phase, and no plan, names no button.
          */
         fun onScreenLine(context: Context, phase: AgentPhase?, refinement: Boolean = false): String {
             fun press(label: Int) = "Нажми «${context.getString(label)}» на экране."
@@ -372,8 +373,8 @@ internal class LiveVoiceBridge(
                 phase == AgentPhase.NEEDS_PERMISSION -> press(R.string.agent_permission_allow)
                 phase == AgentPhase.WAITING_FOR_CAMERA -> press(R.string.agent_continue_camera)
                 phase == AgentPhase.NEEDS_SELECTION -> "Выбери вариант на экране."
-                phase == AgentPhase.UNAVAILABLE -> "Подробности на экране."
-                else -> "Подтверди на экране: нажми «${context.getString(R.string.agent_execute)}»."
+                phase == AgentPhase.REVIEW -> "Подтверди на экране: нажми «${context.getString(R.string.agent_execute)}»."
+                else -> "Подробности на экране."
             }
         }
     }

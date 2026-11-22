@@ -31,6 +31,7 @@ import com.alpha.assistant.ui.TemplateTalk.Companion.SCREEN_BRIEF
 import com.alpha.assistant.ui.TemplateTalk.Companion.SCREEN_REQUEST
 import com.alpha.assistant.ui.TemplateTalk.Companion.SCREEN_TEXT
 import com.alpha.assistant.voice.FakeLiveTransport
+import com.alpha.assistant.voice.LiveProtocol
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import org.json.JSONObject
@@ -341,13 +342,13 @@ class StageStreamWorkflowTest {
         const val GONE = "stage_preview_gone"
         const val APP_REQUEST = "Сделай калькулятор чаевых"
         const val ANSWER_REQUEST = "Какая погода"
-        const val ANSWER_SPOKEN = "Ответ Alphy: Fixture response."
+        const val ANSWER_SPOKEN = "${LiveProtocol.MARK}Fixture response."
         const val SHIP_CARD = "Вытеснение воды"
         /** A figure label of the calc app. */
         const val CALC_LABEL = "Per person"
         /** A first line with a palette that the kit does not have: a whole fault. */
         const val SKY_HEAD = "scene(\"Почему корабль не тонет?\", lang=\"ru\", palette=\"sky\")"
-        const val FULL_WAIT = "Быстро не получилось. Alphy собирает экран заново, это займёт около минуты."
+        const val FULL_WAIT = LiveVoiceBridge.FULL_WAIT
     }
 }
 

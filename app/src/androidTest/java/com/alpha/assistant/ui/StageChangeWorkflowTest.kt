@@ -26,6 +26,7 @@ import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.LIVE_STARTED
 import com.alpha.assistant.voice.LivePhase
+import com.alpha.assistant.voice.LiveProtocol
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import org.json.JSONObject
@@ -182,7 +183,7 @@ class StageChangeWorkflowTest {
             // The changed scene, at full alpha with its control on.
             robot.waitUntil { shipCanvasTexts(robot) == listOf(AIR, NAIL_SINKS) && stageControlOn(robot) && !stageDimmed(robot) }
             robot.waitUntil { socket.commentary().any { it.first == "d2" } }
-            assertEquals(listOf("d2" to "Ответ Alphy: Готово."), socket.commentary().filter { it.first == "d2" })
+            assertEquals(listOf("d2" to "${LiveProtocol.MARK}Готово."), socket.commentary().filter { it.first == "d2" })
             assertEquals(ship.replace("card = ", "$S4_TEXT\ncard = ").lines().joinToString("\n") { if (it.startsWith("card = ")) CARD_CHANGE else it },
                 appFileOf(saved(model, before)))
         }
@@ -389,8 +390,8 @@ class StageChangeWorkflowTest {
         /** A first line of another template kind: the stored parts do not fit it, so no part can show. */
         const val ITEMS_HEAD = "items(\"Почему корабль не тонет?\", lang=\"ru\")"
         const val OUTSIDE = "outside(\"game\")"
-        const val FULL_WAIT = "Быстро не получилось. Alphy собирает экран заново, это займёт около минуты."
-        const val FULL_NO_ANSWER = "Экран не собран: сервис ИИ не ответил. Скажите запрос полностью, одной фразой."
+        const val FULL_WAIT = LiveVoiceBridge.FULL_WAIT
+        const val FULL_NO_ANSWER = LiveVoiceBridge.FULL_NO_ANSWER + LiveVoiceBridge.FULL_HINT
         /** The calc plan with a fault in the line of perPerson. */
         val BROKEN_PLAN get() = appFilePlan("calc").replace("/ \$/people, example", "/ , example")
         const val NAIL_SINKS = "Гвоздь тонет"

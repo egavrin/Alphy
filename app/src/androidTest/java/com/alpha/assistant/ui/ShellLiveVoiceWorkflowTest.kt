@@ -1219,6 +1219,35 @@ class ShellLiveVoiceWorkflowTest {
         }
     }
 
+    /** Task 3 fix round 1: the screen line names the execute button only for a plan in REVIEW, where the card shows that button. */
+    @Test fun theScreenLineNamesNoButtonWhenNoneWaits() {
+        val execute = fixture.context.getString(R.string.agent_execute)
+        assertEquals(DETAILS, onScreen(null))
+        assertEquals(DETAILS, onScreen(AgentPhase.RUNNING))
+        assertTrue(onScreen(AgentPhase.REVIEW), execute in onScreen(AgentPhase.REVIEW))
+    }
+
+    /** Task 3 fix round 1: while a change of the plan runs, the card disables its execute button, so a «да» names no button. */
+    @Test fun aBusyPlanNamesNoButton() = reviewed { scenario, model, review ->
+        val gate = CompletableDeferred<Unit>().also { fixture.provider.gate = it }
+        scenario.onActivity { model.agent.revise(review, "Use green") }
+        robot.waitUntil { model.agent.busy }
+        answer("да", 6_000)
+        robot.waitUntil { commentary().size == 2 }
+        assertEquals(listOf("d1" to PROPOSAL_ADD, "d1" to DETAILS), commentary())
+        gate.complete(Unit)
+    }
+
+    /** Task 3 fix round 1: a «да» after a tap on the execute button names no button. */
+    @Test fun aTappedPlanNamesNoButton() = reviewed { scenario, model, review ->
+        scenario.onActivity { model.agent.execute(review) }
+        answer("да", 6_000)
+        robot.waitUntil { model.agent.plan?.phase == AgentPhase.COMPLETED }
+        SystemClock.sleep(500)
+        val execute = fixture.context.getString(R.string.agent_execute)
+        assertTrue(commentary().toString(), commentary().none { execute in it.second })
+    }
+
     /** Sends [text] as a typed message of the voice mode and returns the content of its single thinking append. */
     private fun typedThinking(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel, text: String): String {
         scenario.onActivity { model.editDraft(Draft(text)); model.sendLiveTyped() }
@@ -1933,6 +1962,8 @@ class ShellLiveVoiceWorkflowTest {
         const val STARTED = "Запускаю."
         const val CANCELLED = "Действие отменено."
         const val DONE = "Готово. План завершён."
+        /** The screen line when no button of the plan card waits. */
+        const val DETAILS = "Подробности на экране."
 
         /** A memory-add step as the proposal reads its card: the label, the «after» text, and the non-reversible note. */
         fun added(fact: String) = "Добавить факт, После: $fact, Нельзя отменить через Alphy"
