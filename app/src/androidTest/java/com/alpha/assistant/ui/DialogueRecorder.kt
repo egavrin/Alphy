@@ -12,6 +12,7 @@ import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.voice.LIVE_VOICED_RMS
 import com.alpha.assistant.voice.LiveConnection
 import com.alpha.assistant.voice.LiveListener
+import com.alpha.assistant.voice.LivePhase
 import com.alpha.assistant.voice.LiveTransport
 import com.alpha.assistant.voice.rms
 import org.json.JSONArray
@@ -36,6 +37,7 @@ internal data class DialogueMark(val name: String, val detail: String?, val atNa
  * - `call_start`, `call_end`: a chat call, with its stage or `routing`. `kind`: the kind of a routing decision.
  * - each trace phase of a generation, and `screen_visible`: the stage shows a new app (`new`) or a new revision (`revision`).
  * - `state_commit`: the first state commit of the stage app, with no new revision, after a hand-off.
+ * - `voice_phase`: the phase of the voice mode changed, with the new phase, such as `SPEAKING`.
  */
 internal class DialogueRecorder(private val clock: () -> Long = SystemClock::elapsedRealtimeNanos) : Closeable {
     private val marks = CopyOnWriteArrayList<DialogueMark>()
@@ -106,12 +108,16 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
             }
         }
         var shown: Triple<String, Int, Int>? = null
+        var phase: String? = null
         poll = Executors.newSingleThreadScheduledExecutor { Thread(it, "dialogue-clock").apply { isDaemon = true } }.apply {
             scheduleWithFixedDelay({
                 var now: Triple<String, Int, Int>? = null
+                var voice: String? = null
                 instrumentation.runOnMainSync {
                     now = model.stageToolId?.let { id -> model.tools.tools.firstOrNull { it.id == id }?.let { Triple(id, it.revision, it.stateVersion) } }
+                    voice = model.liveVoice.phase.name
                 }
+                if (voice != phase) { phase = voice; mark(VOICE_PHASE, voice) }
                 val stage = now
                 if (stage != null && (stage.first != shown?.first || stage.second != shown?.second))
                     mark("screen_visible", if (stage.first == shown?.first) "revision" else "new")
@@ -173,6 +179,11 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
                 .put("first_part_visible", ms(previews.firstOrNull { it.detail in setOf("parts", "card", "whole") }))
                 .put("picture_complete", ms(previews.firstOrNull { it.detail == "card" || it.detail == "whole" }) ?: controls)
                 .put("controls_on", controls).put("preview_updates", previews.size).put("previews_gone", window.count { it.name == STAGE_PREVIEW_GONE })
+                // The UX study of 2026-11-21: each commentary to the voice (in the order of `lines`), and the last end of the voice phase
+                // SPEAKING, the end of the spoken answer.
+                .put("speechEndToCommentaryMs", ms(lines.firstOrNull())).put("commentaryMs", JSONArray(lines.map { (it.atNanos - end) / 1_000_000 }))
+                .put("speechEndToVoiceEndMs", ms(window.filter { it.name == VOICE_PHASE }.zipWithNext()
+                    .lastOrNull { (from, to) -> from.detail == SPEAKING && to.detail != SPEAKING }?.second))
         }
         return JSONObject().put("requests", JSONArray(requests)).put("calls", calls(all))
             .put("chatCalls", all.count { it.name == "call_start" })
@@ -189,6 +200,8 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
         const val STAGE_PREVIEW = "stage_preview"
         const val STAGE_PREVIEW_GONE = "stage_preview_gone"
         const val CONTROLS_ON = "controls_on"
+        const val VOICE_PHASE = "voice_phase"
+        val SPEAKING = LivePhase.SPEAKING.name
 
         /**
          * The class of a commentary of the app, from the prefixes that the bridge puts before a reply: `answer` (a reply), `question`

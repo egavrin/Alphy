@@ -17,9 +17,12 @@ import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.data.Source
 import com.alpha.assistant.tools.Scripted
 import com.alpha.assistant.tools.appfile.plan as appFilePlan
+import com.alpha.assistant.voice.LIVE_RATE
 import com.alpha.assistant.voice.ScriptedLiveServer
+import com.alpha.assistant.voice.wavSamples
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -137,6 +140,85 @@ class DialogueStageRehearsalTest {
         assertTrue(steps.toString(), steps[0].getInt("preview_updates") >= 1)
         assertEquals(steps.toString(), List(5) { 0 }, steps.drop(1).map { it.getInt("preview_updates") })
         assertEquals((1..6).joinToString { "passed at step $it" }, report.getJSONObject("coverage").getString("answer"))
+    }
+
+    /**
+     * The UX study of 2026-11-21: each research dialogue has 5 probe steps and the cap [RESEARCH_CALLS], and the fixture of each step
+     * is a 16 kHz mono PCM16 recording of more than 0.5 s in the test assets, so a missing file cannot stop a paid run.
+     */
+    @Test fun eachResearchStepHasItsRecording() {
+        // ux-images-b reuses the recordings of ux-images in another order, so it has no fixtures of its own.
+        val research = DIALOGUES.values.filter { it.name.startsWith("ux-") && it.name != "ux-images-b" }
+        assertEquals(research.map { it.name }.toString(), 12, research.size)
+        for (dialogue in research) {
+            assertEquals(dialogue.name, RESEARCH_CALLS, dialogue.maxCalls)
+            assertEquals(dialogue.name, List(5) { PROBE }, dialogue.steps.map { it.goal })
+            dialogue.steps.forEachIndexed { i, step ->
+                val fixture = checkNotNull(step.speech).fixture
+                assertEquals("${dialogue.name}-${i + 1}", fixture)
+                val samples = wavSamples(InstrumentationRegistry.getInstrumentation().context.assets.open("voice/$fixture.wav").use { it.readBytes() })
+                assertTrue(fixture, samples.size > LIVE_RATE / 2)
+            }
+        }
+        val tap = DIALOGUES.getValue("ux-tap").steps
+        assertEquals(listOf(true, true, false, false, false), tap.map { it.tapWhileSpeaking })
+        assertEquals(listOf(false, false, true, false, false), tap.map { it.touch })
+    }
+
+    /**
+     * The UX study of 2026-11-21: a research dialogue on the scripted voice and the scripted chat. Step 1 gets a spoken answer and
+     * leaves the stage empty, and step 2 still runs. Step 2 shows a screen with a choice, and the driver taps an option while the voice
+     * speaks the long reply. Step 3 touches the other option while the step runs. Each step is observed, with frames.
+     */
+    @Test fun aResearchDialogueRunsPastAnEmptyStageAndTapsWhileTheVoiceSpeaks() {
+        val dialogue = Dialogue("ux-rehearsal", listOf(probe("ux-tap-4", "Что сейчас на экране?"),
+            probe("ux-tap-1", "Объясни, как работает рычаг.", tapWhileSpeaking = true), probe("ux-tap-3", "Сделай груз тяжелее.", touch = true)),
+            RESEARCH_CALLS, adaptive = true)
+        val directory = File(files, "dialogue-rehearsal/${dialogue.name}").apply { deleteRecursively() }
+        // Steps 1 and 3 get the spoken answer of the scripted chat, so they bring no screen.
+        val report = run(dialogue, mapOf(2 to StepReplies(screen(LONG_ANSWER), listOf(TEMPLATE to Scripted.Text(SHIP)))), directory)
+        assertEquals(report.toString(), "complete", report.getString("phase"))
+        val steps = rows(report)
+        assertEquals(steps.toString(), List(3) { "observed" }, steps.map { it.getString("verdict") })
+        assertFalse(steps[0].toString(), steps[0].getJSONObject("screen").getBoolean("shown"))
+        assertTrue(steps[0].toString(), steps[0].has("appHead") && steps[0].isNull("appHead"))
+        assertEquals(steps[1].toString(), SHIP.lines().first(), steps[1].getString("appHead"))
+        assertTrue(File(directory, "step-2.appfile.txt").readText().startsWith(SHIP.lines().first()))
+        val tap = steps[1].getJSONObject("tap")
+        assertEquals(tap.toString(), listOf("Гвоздь", "choice", "SPEAKING"), listOf(tap.optString("label"), tap.optString("kind"), tap.optString("phaseBefore")))
+        assertTrue(tap.toString(), tap.getLong("atMs") > 0 && tap.getLong("speakingMs") >= 1_500 && tap.getInt("spokeCharsBefore") > 0)
+        assertEquals(tap.toString(), 16, tap.getJSONArray("phasesAfter").length())
+        assertTrue(tap.toString(), tap.getJSONObject("sentTypes").optInt("session.input_audio.append") > 0 && tap.getJSONObject("receivedTypes").length() > 0)
+        assertFalse(tap.toString(), tap.getBoolean("newHandOff"))
+        // The tap chose «Гвоздь», so the touch of step 3 finds «Корабль» as the option that is not selected.
+        assertEquals(steps[2].toString(), "Корабль", steps[2].getString("touched"))
+        for (row in steps) {
+            val frames = row.getJSONArray("frames").let { f -> (0 until f.length()).map(f::getString) }
+            // The first frame comes while the person speaks, so its time is negative.
+            assertTrue(row.toString(), frames.size >= 2 && frames.first().startsWith("step-${row.getInt("step")}--"))
+            assertTrue(row.toString(), frames.all { File(directory, "frames/$it").length() > 0 } && !row.has("framesError"))
+        }
+        assertTrue(steps[1].toString(), steps[1].getLong("speechEndToVoiceEndMs") > steps[1].getLong("speechEndToCommentaryMs"))
+        assertTrue(report.toString(), report.getJSONObject("display").has("nightMode"))
+    }
+
+    /** The UX study of 2026-11-21: on a template screen with a slider, the tap while the voice speaks moves the slider. */
+    @Test fun aTapWhileTheVoiceSpeaksMovesASlider() {
+        val dialogue = Dialogue("ux-slider-rehearsal", listOf(probe("ux-tap-1", "Объясни, как работает рычаг.", tapWhileSpeaking = true)),
+            RESEARCH_CALLS, adaptive = true)
+        val directory = File(files, "dialogue-rehearsal/${dialogue.name}").apply { deleteRecursively() }
+        val label = "Расстояние до скрепки"
+        // The slider shows its label with its value, such as "Расстояние до скрепки: 60".
+        val values = ConcurrentHashMap.newKeySet<String>()
+        val report = run(dialogue, mapOf(1 to StepReplies(screen(LONG_ANSWER), listOf(TEMPLATE to Scripted.Text(TEMPLATES.getValue("tpl-a").first)))),
+            directory) { _, node -> node.config.getOrNull(SemanticsProperties.Text)?.forEach { if (it.text.startsWith("$label: ")) values += it.text } }
+        assertEquals(report.toString(), "complete", report.getString("phase"))
+        val row = rows(report).single()
+        val tap = row.getJSONObject("tap")
+        assertEquals(tap.toString(), listOf(label, "slider"), listOf(tap.optString("label"), tap.optString("kind")))
+        assertEquals(row.toString(), "observed", row.getString("verdict"))
+        // The slider moved from its first value to the far end of its range.
+        assertTrue(values.toString(), values.size >= 2)
     }
 
     /**
@@ -285,6 +367,13 @@ class DialogueStageRehearsalTest {
         /** In the no-screen probe the template call streams slower and the routing ends inside it, as in the live routing of 3.1 to 5.5 s. */
         const val GONE_DELTA_MS = 500L
         const val GONE_ROUTING_MS = 2_500L
+        /**
+         * A reply of 51 words: the scripted voice speaks 200 ms for each word, so it speaks for more than 10 s, through the tap and most
+         * of the 8 s after it.
+         */
+        const val LONG_ANSWER = "Рычаг — это твёрдая палка, которая может поворачиваться вокруг неподвижной точки опоры. Если приложить силу к " +
+            "длинному плечу рычага, то на коротком плече получится сила во много раз больше. Поэтому длинной палкой легко поднять тяжёлый " +
+            "камень, а ножницы и плоскогубцы помогают резать и сжимать даже очень твёрдые вещи без большого усилия."
         val FRESH_SOURCE = Source("Ураган", "https://example.com/hurricane", "Последний ураган сезона ослаб до шторма")
 
         /** A routing decision of a screen that the person did not ask to see, with the spoken [answer]. */

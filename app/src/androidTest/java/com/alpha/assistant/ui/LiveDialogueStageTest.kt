@@ -54,6 +54,41 @@ class LiveDialogueStageTest {
 
     @Test fun noScreen() = live("no-screen", "noScreen")
 
+    // The UX study of 2026-11-21 (evidence/ux-2026-11-21/matrix.md): 12 research dialogues of probe steps. Each step is an
+    // observation with no verdict, so a run ends complete unless a hard stop ends it. The host sets the theme and the size with adb.
+    @Test fun uxHeart() = live("ux-heart", "uxHeart")
+
+    @Test fun uxWhy() = live("ux-why", "uxWhy")
+
+    @Test fun uxOrbit() = live("ux-orbit", "uxOrbit")
+
+    @Test fun uxPythagoras() = live("ux-pythagoras", "uxPythagoras")
+
+    @Test fun uxWeather() = live("ux-weather", "uxWeather")
+
+    @Test fun uxFootball() = live("ux-football", "uxFootball")
+
+    @Test fun uxImages() = live("ux-images", "uxImages")
+
+    @Test fun uxImagesB() = live("ux-images-b", "uxImagesB")
+
+    @Test fun uxCompare() = live("ux-compare", "uxCompare")
+
+    @Test fun uxTap() = live("ux-tap", "uxTap")
+
+    @Test fun uxLesson() = live("ux-lesson", "uxLesson")
+
+    @Test fun uxMixed() = live("ux-mixed", "uxMixed")
+
+    @Test fun uxKinds() = live("ux-kinds", "uxKinds")
+
+    // The speed dialogues of the paired run of each stage (plan 2026-11-22, the speed form): one probe step each.
+    @Test fun speedHeart() = live("speed-heart", "speedHeart")
+
+    @Test fun speedPythagoras() = live("speed-pythagoras", "speedPythagoras")
+
+    @Test fun speedOrbit() = live("speed-orbit", "speedOrbit")
+
     /** Runs the dialogue [name] as the test method [method]. */
     private fun live(name: String, method: String = name) {
         val runId = InstrumentationRegistry.getArguments().getString("liveRunId")

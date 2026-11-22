@@ -170,6 +170,12 @@ class DialogueRecorderTest {
         assertEquals("passed at step 1", templateCoverage.getString("change"))
         assertEquals("passed at step 3", templateCoverage.getString("learn"))
         assertEquals("passed at step 5, passed at step 6, failed at step 7", templateCoverage.getString("answer"))
+        // The UX study of 2026-11-21: a probe step and the step inserted right after it are observed, never failed. A step after them is
+        // judged again.
+        val probes = listOf(row(1, PROBE, "plain"), row(2, PROBE, "question"), row(3, "yes", "plain"), row(4, PROBE, "error"),
+            row(5, "retry", "error"), row(6, "screen", "plain"))
+        judge(probes, listOf(PROBE, "screen"))
+        assertEquals(listOf("observed", "observed", "observed", "observed", "observed", "failed"), probes.map { it.getString("verdict") })
         assertTrue(isTemplateAppFile("\n  scene(\"Почему корабль не тонет?\", lang=\"ru\")\ncontrol = slider(\"Размер\", 0, 10, 1, 4)"))
         assertTrue(listOf("items(\"Части слова\", lang=\"ru\")", "cells (\"What is a majority?\", lang=\"en\")").all(::isTemplateAppFile))
         assertFalse(isTemplateAppFile(appFilePlan("lesson")))

@@ -1,5 +1,6 @@
 package com.alpha.assistant.ui
 
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -7,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.Bundle
 import android.os.SystemClock
 import android.text.Layout
 import android.text.StaticLayout
@@ -45,9 +47,13 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.Closeable
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /** A recorded request: its file in the test assets `voice/` and its words. */
@@ -57,11 +63,12 @@ internal class Speech(val fixture: String, val words: String)
  * One step of a dialogue as data: what the person says ([speech], none for the picture of the stage before the request), whether
  * the voice model is expected to hand it off ([handOff], reported), whether the stage must show an app after it ([screen], asserted),
  * and the expected start of the request text of the hand-off ([requestStarts], reported). [goal]: the element of the owner's talk
- * that the step holds (lane V). [touch]: the driver taps a button of the stage app [TOUCH_MS] after the end of the speech, as the
- * person who changes a value while the change runs.
+ * that the step holds (lane V). [touch]: the driver taps a control of the stage app [TOUCH_MS] after the end of the speech, as the
+ * person who changes a value while the change runs. [tapWhileSpeaking]: the driver taps a control of the stage app while the voice
+ * speaks the reply of the step and records the 8 s after the tap (the field `tap` of the step row).
  */
 internal class DialogueStep(val speech: Speech?, val handOff: Boolean, val screen: Boolean, val requestStarts: String? = null,
-    val goal: String? = null, val touch: Boolean = false)
+    val goal: String? = null, val touch: Boolean = false, val tapWhileSpeaking: Boolean = false)
 
 /**
  * A dialogue. [maxCalls] is a hard cost stop: the chat call after it is refused before it is sent. An [adaptive] dialogue (lane V)
@@ -136,6 +143,27 @@ private fun template(name: String, explain: String, change: String, learn: Strin
 /** A first turn of the no-screen probe: the person wants a spoken answer, and the stage must stay empty. */
 private fun answer(fixture: String, words: String) = DialogueStep(Speech(fixture, words), handOff = true, screen = false, goal = "answer")
 
+/** The goal of a research step. */
+internal const val PROBE = "probe"
+
+/**
+ * The cap of each research dialogue of the UX study of 2026-11-21 (`evidence/ux-2026-11-21/matrix.md`): 5 steps and at most 2
+ * inserted steps.
+ */
+internal const val RESEARCH_CALLS = 45
+
+/**
+ * A research step of the UX study of 2026-11-21: a recorded observation, never a verdict. The hand-off is reported only, an empty
+ * stage after the step does not end the dialogue, and [judge] gives the step and the step inserted after it the verdict `observed`.
+ */
+internal fun probe(fixture: String, words: String, tapWhileSpeaking: Boolean = false, touch: Boolean = false) =
+    DialogueStep(Speech(fixture, words), handOff = true, screen = false, goal = PROBE, touch = touch, tapWhileSpeaking = tapWhileSpeaking)
+
+/** A research dialogue: one probe step for each of [lines], with the fixture `<name>-<step>`. [taps] and [touches] are step numbers. */
+private fun research(name: String, vararg lines: String, taps: Set<Int> = emptySet(), touches: Set<Int> = emptySet()) =
+    Dialogue(name, lines.mapIndexed { i, words -> probe("$name-${i + 1}", words, i + 1 in taps, i + 1 in touches) }, maxCalls = RESEARCH_CALLS,
+        adaptive = true)
+
 /**
  * The three live dialogues of design part 4: «Шаг 1» the stage, «Шаг 2» the request, «Шаг 3» a press, «Шаг 4» a change. Then the
  * three adaptive dialogues of lane V on new subjects, which hold the failure classes of the owner's talk of 2026-11-20.
@@ -180,6 +208,40 @@ internal val DIALOGUES = listOf(
         answer("no-screen-leap-year", "Сколько дней в високосном году?"), answer("no-screen-ocean", "Какой океан самый большой?"),
         answer("no-screen-name", "А как тебя зовут?"), answer("no-screen-skills", "Что ты умеешь делать?")), NO_SCREEN_CALLS,
         adaptive = true, newTalks = true),
+    // The 12 research dialogues of the UX study of 2026-11-21, with the lines of evidence/ux-2026-11-21/matrix.md word for word.
+    research("ux-heart", "Объясни, как работает сердце.", "А почему у сердца четыре камеры?", "Покажи, как кровь течёт по сердцу.", "Дальше.",
+        "Я не понял. Объясни проще."),
+    research("ux-why", "Почему небо голубое?", "Что такое чёрная дыра?", "А покажи это на картинке.", "Почему летом жарко, а зимой холодно?",
+        "Как образуется радуга?"),
+    research("ux-orbit", "Покажи, как Земля вращается вокруг Солнца.", "Пусть она движется сама, без остановки.", "Добавь Луну.",
+        "Ускорь в два раза.", "А теперь покажи, почему бывает солнечное затмение."),
+    research("ux-pythagoras", "Объясни теорему Пифагора.", "Покажи доказательство по шагам.", "Дальше.", "Дальше.",
+        "Дай пример с числами три, четыре и пять."),
+    research("ux-weather", "Какая погода в Москве сегодня?", "А что будет на неделе?", "Сравни с Сочи.", "Покажи это таблицей.",
+        "Что мне надеть завтра?"),
+    research("ux-football", "Как сыграл Реал Мадрид в последнем матче?", "Кто забил голы?", "Покажи турнирную таблицу Ла Лиги.",
+        "Когда следующий матч Реала?", "Сравни Реал и Барселону."),
+    research("ux-images", "Покажи, как выглядит снежный барс.", "Найди в интернете фотографию снежного барса и покажи её.",
+        "Расскажи про Эйфелеву башню.", "Покажи её фотографию.", "Покажи на карте, где она находится."),
+    research("ux-compare", "Сравни Марс и Землю.", "Покажи это в таблице.", "Добавь Венеру.", "Какая из них самая горячая?",
+        "Нарисуй график температуры этих планет."),
+    // Lines 3, 4, 5, 2 of ux-images, which did not run when the voice mode closed after its line 1 (lane B report).
+    Dialogue("ux-images-b", listOf(probe("ux-images-3", "Расскажи про Эйфелеву башню."), probe("ux-images-4", "Покажи её фотографию."),
+        probe("ux-images-5", "Покажи на карте, где она находится."),
+        probe("ux-images-2", "Найди в интернете фотографию снежного барса и покажи её.")), maxCalls = RESEARCH_CALLS, adaptive = true),
+    research("ux-tap", "Объясни, как работает рычаг.", "Объясни подробнее, что такое плечо рычага.", "Сделай груз тяжелее.",
+        "Что сейчас на экране?", "Нажми следующую кнопку.", taps = setOf(1, 2), touches = setOf(3)),
+    research("ux-lesson", "Научи меня считать до пяти по-испански.", "Проверь меня.", "Уно, дос, трес.", "Дальше.", "Повтори последнее слово."),
+    research("ux-mixed", "Привет! Расскажи, как работает вакцина.", "А чем вакцина отличается от лекарства?",
+        "Ладно, другая тема. Как сварить яйцо всмятку?", "Поставь таймер на четыре минуты.", "Вернись к вакцине."),
+    research("ux-kinds", "Какие бывают облака? Покажи.", "Объясни, как умножать в столбик.", "Explain how a volcano erupts.",
+        "Покажи устройство клетки растения.", "Составь план тренировки на неделю."),
+    // The speed dialogues of the paired run of each stage (plan 2026-11-22, the speed form): line 1 of ux-heart, ux-pythagoras, and
+    // ux-orbit as one probe step. They reuse those recordings, so they have no fixtures of their own.
+    Dialogue("speed-heart", listOf(probe("ux-heart-1", "Объясни, как работает сердце.")), maxCalls = RESEARCH_CALLS, adaptive = true),
+    Dialogue("speed-pythagoras", listOf(probe("ux-pythagoras-1", "Объясни теорему Пифагора.")), maxCalls = RESEARCH_CALLS, adaptive = true),
+    Dialogue("speed-orbit", listOf(probe("ux-orbit-1", "Покажи, как Земля вращается вокруг Солнца.")), maxCalls = RESEARCH_CALLS,
+        adaptive = true),
 ).associateBy { it.name }
 
 /** The rule of the kit for a template file (`TEMPLATE_HEAD` in kit/src/template.js), applied to its first line that is not empty. */
@@ -226,7 +288,13 @@ internal fun judge(rows: List<JSONObject>, goals: List<String>): JSONObject {
         !row.optBoolean("previewLeft") else row?.optString("outcome") in setOf("changed", "pressed", "reason")
     rows.forEachIndexed { i, row ->
         val yes = rows.getOrNull(i + 1)?.takeIf { it.optString("goal") == "yes" }
-        row.put("verdict", if (passed(row) || row.optString("outcome") == "question" && passed(yes)) "passed" else "failed")
+        // A probe step and the step inserted right after it are observations, so the pass bar does not judge them.
+        val probe = row.optString("goal") == PROBE || row.optString("goal") in setOf("retry", "yes") && rows.getOrNull(i - 1)?.optString("goal") == PROBE
+        row.put("verdict", when {
+            probe -> "observed"
+            passed(row) || row.optString("outcome") == "question" && passed(yes) -> "passed"
+            else -> "failed"
+        })
     }
     // The goals of the plan of 2026-11-21: a spoken change keeps a template file, a request to learn gets a free plan, and a turn with
     // no screen gets a spoken answer with no app on the stage.
@@ -298,7 +366,8 @@ internal fun storedReplies(stored: JSONObject): Map<Int, StepReplies> = stored.g
  * `sheet.png`. [stored]: the `replay.json` of the run whose words a replay puts under its pictures (ruling OD-D2 b). The files hold no
  * key and no header. An adaptive dialogue inserts a step after an outcome of [followUp], runs all its steps, and throws at the end
  * when a step fails [PASS_BAR]. The hard stops of [hard] (no voice mode, the call cap, a late hand-off, an empty stage after a step
- * with no inserted step) still end it at once, also after a spoken reason.
+ * with no inserted step) still end it at once, also after a spoken reason. During each spoken step it saves frames ([Frames]), and
+ * after each step it writes the app file of the stage to `step-N.appfile.txt`.
  */
 internal class DialogueRun(private val dialogue: Dialogue, private val directory: File, private val mode: String,
     private val reportName: String = "report.json", private val count: Int = dialogue.steps.size, private val stored: JSONObject? = null) {
@@ -325,6 +394,10 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
     @Volatile private var capped = false
     /** The name of the first session error that the stage showed in this step. */
     private var stageError: String? = null
+    /** One screenshot at a time: the frame thread and [picture] share the UiAutomation. */
+    private val shots = Any()
+    /** The socket events (direction, type) of the window after a tap ([tapWhileSpeaking]), or null outside the window. */
+    @Volatile private var socketLog: ConcurrentLinkedQueue<Pair<String, String>>? = null
     private val sessionErrors by lazy {
         listOf(R.string.tool_session_stopped, R.string.tool_session_locked, R.string.tool_javascript_timeout, R.string.tool_session_save_failed)
             .associate { robot.text(it) to fixture.context.resources.getResourceEntryName(it) }
@@ -360,7 +433,8 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
             scenario.onActivity { activity ->
                 val c = activity.resources.configuration
                 report.put("display", JSONObject().put("widthDp", c.screenWidthDp).put("heightDp", c.screenHeightDp)
-                    .put("smallestWidthDp", c.smallestScreenWidthDp).put("densityDpi", c.densityDpi).put("fontScale", c.fontScale.toDouble()))
+                    .put("smallestWidthDp", c.smallestScreenWidthDp).put("densityDpi", c.densityDpi).put("fontScale", c.fontScale.toDouble())
+                    .put("nightMode", (c.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES))
                 model.startLiveVoice()
             }
             robot.waitUntil(15_000) { main { model.liveVoice.phase } == LivePhase.LISTENING }
@@ -383,8 +457,12 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
                     val samples = wavSamples(robot.instrumentation.context.assets.open("voice/${speech.fixture}.wav").use { it.readBytes() })
                     feeder.say(samples).also(recorder::speechEnd)
                 }
-                val touched = if (current.touch && end != null) touch(model, end) else null
-                val late = settle(scenario, model, end)
+                val frames = end?.let(::Frames)
+                val (touched, tap, late) = try {
+                    Triple(if (current.touch && end != null) touch(model, end) else null,
+                        if (current.tapWhileSpeaking && end != null) tapWhileSpeaking(scenario, model, end, began) else null,
+                        settle(scenario, model, end))
+                } finally { frames?.close() }
                 picture(model)
                 val after = main { stage(model) }
                 val times = end?.let { recorder.report().getJSONArray("requests").getJSONObject(spoken++) } ?: JSONObject()
@@ -402,6 +480,9 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
                     .put("templateFile", isTemplateAppFile(appFiles[step])).put("previewLeft", main { model.tools.stagePreviews.current != null })
                     // The voice session and the chat of the step, so a dialogue of new talks shows a new one for each step.
                     .put("voiceSession", sessions.get()).put("talk", main { model.snapshot.selectedId })
+                    // The UX study of 2026-11-21: the head of the app file on the stage, the frames in time order, and the tap.
+                    .put("appHead", appFiles[step]?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(APP_HEAD_CHARS) ?: JSONObject.NULL)
+                    .put("frames", JSONArray(frames?.names.orEmpty())).put("framesError", frames?.error).put("tap", tap)
                 var next: DialogueStep? = null
                 if (dialogue.adaptive) {
                     val reply = request?.let { asked -> main { messages(model).dropWhile { it.id != asked.id }.firstOrNull { it.role == "assistant" } } }
@@ -459,9 +540,7 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         val deadline = start + (if (dialogue.adaptive) FULL_STEP_MS else STEP_MS) * 1_000_000
         var since = SystemClock.elapsedRealtimeNanos()
         while (SystemClock.elapsedRealtimeNanos() < deadline && !capped) {
-            if (dialogue.adaptive && stageError == null) robot.composedIn(scenario, STAGE) { config ->
-                config.getOrNull(SemanticsProperties.Text)?.firstNotNullOfOrNull { sessionErrors[it.text.trimEnd()] }?.also { stageError = it } != null
-            }
+            noteStageError(scenario)
             val now = SystemClock.elapsedRealtimeNanos()
             val marks = recorder.marks()
             val commentary = marks.lastOrNull { it.name == "commentary" && it.atNanos > start }?.atNanos
@@ -483,27 +562,152 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         return late
     }
 
-    /**
-     * Taps the first button of the stage app that shows on the screen, [TOUCH_MS] after the planned [end] of the speech, so the tap
-     * comes after the hand-off and while the change runs. Returns its label, or null when no button of the app shows.
-     */
-    private fun touch(model: ShellViewModel, end: Long): String? {
-        SystemClock.sleep(maxOf(0L, (end - SystemClock.elapsedRealtimeNanos()) / 1_000_000 + TOUCH_MS))
-        val buttons = main { model.stageToolId?.let { id -> model.tools.tools.firstOrNull { it.id == id } }?.let(ShownScreen::of) }
-            ?.controls.orEmpty().filter { it.value == null }
-        return buttons.firstNotNullOfOrNull { button ->
-            generateSequence(robot.find(button.label)) { it.parent }.firstOrNull { it.isClickable }
-                ?.takeIf { it.isVisibleToUser && it.isEnabled && it.performAction(AccessibilityNodeInfo.ACTION_CLICK) }?.let { button.label }
+    /** Notes the first session error that the stage shows in this step of an adaptive dialogue. It can show for a moment only. */
+    private fun noteStageError(scenario: ActivityScenario<CloudTestActivity>) {
+        if (dialogue.adaptive && stageError == null) robot.composedIn(scenario, STAGE) { config ->
+            config.getOrNull(SemanticsProperties.Text)?.firstNotNullOfOrNull { sessionErrors[it.text.trimEnd()] }?.also { stageError = it } != null
         }
     }
 
-    private fun picture(model: ShellViewModel) {
+    /**
+     * Presses a control of the stage app ([press]) [TOUCH_MS] after the planned [end] of the speech, so the tap comes after the
+     * hand-off and while the change runs. Returns its label, or null when no control of the app shows.
+     */
+    private fun touch(model: ShellViewModel, end: Long): String? {
+        SystemClock.sleep(maxOf(0L, (end - SystemClock.elapsedRealtimeNanos()) / 1_000_000 + TOUCH_MS))
+        return press(model)?.first
+    }
+
+    /**
+     * Presses the first control of the stage app that shows and is enabled, through its accessibility node: a button, else an option of
+     * a choice that is not selected, else a slider, which goes to the far end of its range. Returns the label and the kind (`button`,
+     * `choice`, `slider`), or null when no control shows.
+     */
+    private fun press(model: ShellViewModel): Pair<String, String>? {
+        val tool = main { model.stageToolId?.let { id -> model.tools.tools.firstOrNull { it.id == id } } } ?: return null
+        val controls = main { ShownScreen.of(tool) }?.controls.orEmpty()
+        // shortcut: an option label is "<name>: <option>", so a name with ": " in it misses its options; read the ui tree if one does.
+        val taps = controls.filter { it.value == null }.map { it.label to "button" } +
+            controls.filter { it.value != null }.map { it.label.substringAfter(": ") to "choice" }
+        taps.firstNotNullOfOrNull { (label, kind) ->
+            generateSequence(robot.find(label)) { it.parent }.firstOrNull { it.isClickable }
+                ?.takeIf { it.isVisibleToUser && it.isEnabled && !it.isSelected && !it.isChecked && it.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+                ?.let { label to kind }
+        }?.let { return it }
+        return runCatching { sliders(JSONObject(tool.ui)) }.getOrDefault(emptyList()).firstNotNullOfOrNull { label ->
+            // The label is on a child of the seek bar, which holds the range.
+            generateSequence(robot.find(label)) { it.parent }.firstOrNull { it.rangeInfo != null }?.takeIf { it.isVisibleToUser && it.isEnabled }?.let { node ->
+                val range = node.rangeInfo
+                val target = if (range.current < (range.min + range.max) / 2) range.max else range.min
+                val value = Bundle().apply { putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, target) }
+                if (node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, value)) label to "slider" else null
+            }
+        }
+    }
+
+    /** The labels of the sliders of the ui tree [node], in tree order. */
+    private fun sliders(node: JSONObject): List<String> {
+        val children = node.optJSONArray("children") ?: JSONArray()
+        return listOfNotNull(node.optString("text").takeIf { node.optString("type") == "slider" && it.isNotBlank() }) +
+            (0 until children.length()).flatMap { sliders(children.getJSONObject(it)) }
+    }
+
+    /**
+     * The tap while the voice speaks (UX study of 2026-11-21, the owner's point H3). It waits until the voice has spoken for
+     * [TAP_SPEAKING_MS] after the reply of Alphy to the voice (a commentary of the class answer or question), or after the end of the
+     * speech when no hand-off came by then. From then on, while the voice speaks, it presses the first control that shows ([press]).
+     * It records the [TAP_WATCH_MS] after the press: the output transcript, the voice phase each [TAP_SAMPLE_MS], the types of the
+     * socket events each way, and a new hand-off. With no press it records the reason: the voice stopped first, the wait ended at
+     * [TAP_WAIT_MS], or the call cap.
+     */
+    private fun tapWhileSpeaking(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel, end: Long, began: Long): JSONObject {
+        val record = JSONObject()
+        val deadline = end + TAP_WAIT_MS * 1_000_000
+        var speakingSince: Long? = null
+        var ready = false
+        while (true) {
+            val now = SystemClock.elapsedRealtimeNanos()
+            noteStageError(scenario)
+            val marks = recorder.marks()
+            val delegation = marks.firstOrNull { it.name == "delegation" && it.atNanos > end }?.atNanos
+            val from = if (delegation == null) end else marks.firstOrNull { it.name == "commentary" && it.atNanos > delegation && it.detail in REPLIES }?.atNanos
+            val phase = main { model.liveVoice.phase }
+            speakingSince = if (phase == LivePhase.SPEAKING) speakingSince ?: now else null
+            val spoken = if (from != null && speakingSince != null) now - maxOf(from, speakingSince) else -1L
+            record.put("phaseBefore", phase.name).put("atMs", (now - end) / 1_000_000).put("handOff", delegation != null)
+            if (spoken >= TAP_SPEAKING_MS * 1_000_000) {
+                ready = true
+                val log = ConcurrentLinkedQueue<Pair<String, String>>().also { socketLog = it }
+                val pressed = press(model)
+                if (pressed != null) return watchTap(scenario, model, record.put("label", pressed.first).put("kind", pressed.second)
+                    .put("speakingMs", spoken / 1_000_000), now, began, log)
+                socketLog = null
+            } else if (ready) return record.put("reason", "no control of the stage app showed while the voice spoke")
+            if (now > deadline || capped) return record.put("reason", if (capped) "the call cap" else
+                "the voice did not speak for $TAP_SPEAKING_MS ms after the reply within ${TAP_WAIT_MS / 1000} s")
+            SystemClock.sleep(100)
+        }
+    }
+
+    /** Records the [TAP_WATCH_MS] after the press at [at] into [record]: see [tapWhileSpeaking]. */
+    private fun watchTap(scenario: ActivityScenario<CloudTestActivity>, model: ShellViewModel, record: JSONObject, at: Long, began: Long,
+        log: ConcurrentLinkedQueue<Pair<String, String>>): JSONObject {
+        val phases = JSONArray()
+        for (i in 1..TAP_WATCH_MS / TAP_SAMPLE_MS) {
+            SystemClock.sleep(maxOf(0L, (at + i * TAP_SAMPLE_MS * 1_000_000 - SystemClock.elapsedRealtimeNanos()) / 1_000_000))
+            phases.put(main { model.liveVoice.phase.name })
+            noteStageError(scenario)
+        }
+        socketLog = null
+        val watchEnd = at + TAP_WATCH_MS * 1_000_000
+        fun spoke(from: Long, to: Long) = heard.filter { it.who == SPOKE && it.atNanos >= from && it.atNanos < to }.joinToString("") { it.text }
+        fun types(direction: String) = JSONObject().apply {
+            log.filter { it.first == direction }.groupingBy { it.second }.eachCount().forEach { (type, count) -> put(type, count) }
+        }
+        val after = spoke(at, watchEnd)
+        return record.put("spokeCharsBefore", spoke(began, at).length).put("spokeCharsAfter", after.length).put("spokeAfter", after)
+            .put("phasesAfter", phases).put("sentTypes", types("sent")).put("receivedTypes", types("received"))
+            .put("newHandOff", recorder.marks().any { it.name == "delegation" && it.atNanos >= at && it.atNanos < watchEnd })
+    }
+
+    /**
+     * The frames of one spoken step (UX study of 2026-11-21): from the start of its speech until [close], one half-size JPEG each
+     * [FRAME_MS] as `frames/step-N-<ms>.jpg`, where <ms> is the signed time since the planned [end] of the speech, zero-padded. A name
+     * sorts by its time only for the same sign, so [names] lists the frames in time order. [error] is the first failed frame, or null.
+     */
+    private inner class Frames(private val end: Long) : Closeable {
+        val names = CopyOnWriteArrayList<String>()
+        @Volatile var error: String? = null; private set
+        private val number = step
+        private val stop = CountDownLatch(1)
+        private val thread = Thread({
+            val folder = File(directory, "frames").apply { mkdirs() }
+            val start = SystemClock.elapsedRealtimeNanos()
+            var count = 0
+            do {
+                val name = "step-$number-${"%+07d".format((SystemClock.elapsedRealtimeNanos() - end) / 1_000_000)}.jpg"
+                try {
+                    val half = shot { Bitmap.createScaledBitmap(it, it.width / 2, it.height / 2, true) }
+                    try { File(folder, name).outputStream().use { check(half.compress(Bitmap.CompressFormat.JPEG, 80, it)) } } finally { half.recycle() }
+                    names += name
+                } catch (failure: Exception) { if (error == null) error = "$name: $failure".take(300) }
+                count++
+            } while (!stop.await(start + count * FRAME_MS * 1_000_000 - SystemClock.elapsedRealtimeNanos(), TimeUnit.NANOSECONDS))
+        }, "dialogue-frames").apply { isDaemon = true; start() }
+
+        override fun close() { stop.countDown(); thread.join(10_000) }
+    }
+
+    /** Takes one screenshot under [shots] and gives it to [use]. */
+    private fun <T> shot(use: (Bitmap) -> T): T = synchronized(shots) {
         val shot = checkNotNull(robot.automation.takeScreenshot())
-        try {
-            File(directory, "step-$step.png").outputStream().use { check(shot.compress(Bitmap.CompressFormat.PNG, 100, it)) }
-        } finally { shot.recycle() }
+        try { use(shot) } finally { shot.recycle() }
+    }
+
+    private fun picture(model: ShellViewModel) {
+        shot { image -> File(directory, "step-$step.png").outputStream().use { check(image.compress(Bitmap.CompressFormat.PNG, 100, it)) } }
         // The app file of the stage after the step, for a replay and for the reader of the run.
-        appFile(model)?.let { appFiles[step] = it }
+        appFile(model)?.let { appFiles[step] = it; File(directory, "step-$step.appfile.txt").writeText(it) }
     }
 
     /** The stored app file of the app that the stage shows, or null. */
@@ -572,6 +776,7 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         val session = sessions.incrementAndGet()
         val connection = inner.connect(url, key, object : LiveListener {
             override fun onText(text: String) {
+                socketLog?.add("received" to type(text))
                 if ("transcript.delta" in text || "\"usage\"" in text) runCatching { JSONObject(text) }.getOrNull()?.let { event ->
                     when (val type = event.optString("type")) {
                         INPUT, OUTPUT -> heard += Heard(SystemClock.elapsedRealtimeNanos(), if (type == INPUT) HEARD else SPOKE, event.optString("delta"))
@@ -585,6 +790,7 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         })
         object : LiveConnection by connection {
             override fun send(text: String): Boolean {
+                socketLog?.add("sent" to type(text))
                 if ("\"session.commentary.append\"" in text.take(60)) runCatching { JSONObject(text).optString("content") }.getOrNull()
                     ?.let { heard += Heard(SystemClock.elapsedRealtimeNanos(), ALPHY, it) }
                 return connection.send(text)
@@ -592,12 +798,17 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         }
     }
 
+    /** The type of a socket event, never its body. */
+    private fun type(text: String) = runCatching { JSONObject(text).optString("type") }.getOrNull()?.ifEmpty { null } ?: "unknown"
+
     private fun write() {
         val clock = recorder.report()
         if (dialogue.adaptive) report.put("passBar", PASS_BAR).put("maxCalls", dialogue.maxCalls)
             .put("coverage", judge(rows, dialogue.steps.take(count).mapNotNull { it.goal }))
         report.put("steps", JSONArray(rows)).put("checks", checks).put("calls", clock.getJSONObject("calls"))
             .put("chatCalls", clock.getInt("chatCalls")).put("voiceSeconds", voiceSeconds)
+            // The largest delay of a speech block behind its time: the frames must not slow the speech of the person.
+            .put("feederMaxLagMs", feeder.maxLagMs)
         stored?.let { report.put("wordsFrom", it.optString("source")) }
         atomic(reportName, report.toString(2))
         val first = recorder.marks().firstOrNull()?.atNanos ?: 0L
@@ -659,6 +870,16 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         const val QUIET_MS = 2_000L
         /** After the hand-off (about 1 s) and inside the routing call (2 to 5 s), so the state commit comes while the change runs. */
         const val TOUCH_MS = 2_000L
+        /** The UX study of 2026-11-21: a frame each 1.5 s, and the tap after 1.5 s of the spoken reply, watched for 8 s, a sample each 0.5 s. */
+        const val FRAME_MS = 1_500L
+        const val TAP_SPEAKING_MS = 1_500L
+        const val TAP_WATCH_MS = 8_000L
+        const val TAP_SAMPLE_MS = 500L
+        /** Inside [FULL_STEP_MS] with room for the watch, so the wait for the tap never makes a late hand-off. */
+        const val TAP_WAIT_MS = 90_000L
+        const val APP_HEAD_CHARS = 160
+        /** The classes of a commentary ([DialogueRecorder.lineOf]) that are a reply of Alphy. */
+        val REPLIES = setOf("answer", "question")
         const val SPOKEN_CHARS = 280
         const val HEARD = "heard"
         const val SPOKE = "spoke"
