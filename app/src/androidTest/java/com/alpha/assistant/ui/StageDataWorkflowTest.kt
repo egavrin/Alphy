@@ -253,6 +253,27 @@ class StageDataWorkflowTest {
         }
     }
 
+    /**
+     * Stage 5 look: a number stays on one line. A table of four columns with long numbers on a phone gives each number column the width of
+     * its longest number, so no number wraps and the pill of the marked cell cuts none.
+     */
+    @Test fun aNumberOfAWideTableStaysOnOneLine() {
+        val table = listOf("table(\"Largest countries\", lang=\"en\")", "control = mark(\"Russia\", \"Population\")",
+            "head = head([\"Country\", \"Area, km²\", \"Population\", \"GDP, \$ bn\"])", "r1 = row(\"Russia\", [17098246, 146150000, 2021])",
+            "r2 = row(\"China\", [9596961, 1409670000, 17795])", "card = card(\"Russia is the largest\", \"Russia covers more than 17 million square kilometres.\")")
+            .joinToString("\n", postfix = "\n")
+        shell.live(DataTalk(AgentScriptProvider(table))) { scenario, model, _ ->
+            socket.say(DATA_REQUEST, "d1", 100)
+            shell.finalFile(model, shell.shown(model).id)
+            val dp = fixture.context.resources.displayMetrics.density
+            val numbers = listOf("17 098 246", "146 150 000", "9 596 961", "1 409 670 000", "17 795")
+            robot.waitUntil(30_000) { numbers.all { robot.composedBoundsIn(scenario, STAGE, robot.hasText(it)) != null } }
+            // One line of a cell is under 28 dp high, with the pill around it. Two lines are over 36 dp.
+            val heights = numbers.associateWith { checkNotNull(robot.composedBoundsIn(scenario, STAGE, robot.hasText(it))).height() / dp }
+            assertEquals("one line each: $heights", emptyList<String>(), heights.filterValues { it > 28 }.keys.toList())
+        }
+    }
+
     /** A tap on the row or the point with [text]: the click action of the nearest node around it that has one. */
     private fun tap(scenario: ActivityScenario<CloudTestActivity>, text: String) = scenario.onActivity { activity ->
         val node = robot.nodes(activity).first { robot.hasText(text)(it.config) }

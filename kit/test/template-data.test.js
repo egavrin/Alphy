@@ -144,6 +144,15 @@ test("the host check holds in the stream too: a searched frame shows no value th
   expect(JSON.stringify(second.frame.ui)).not.toContain('"categories"');
 });
 
+test("a data form shows a whole number of 5 or more digits in groups of three, and the file keeps the value", async () => {
+  const text = 'table("Ocean areas", lang="en")\nhead = head(["Ocean", "Area, km²", "Depth, m"])\nr1 = row("Pacific", [165250000, "10994"])\nr2 = row("12345", [-15558000, 5450])\ncard = card("Largest", "The Pacific is the largest ocean.")\n';
+  const { text: merged, result } = await step({ text });
+  const shown = JSON.stringify(result.definition.initialState);
+  expect(["165\u2009250\u2009000", "10\u2009994", "-15\u2009558\u2009000", '"5450"'].filter((value) => !shown.includes(value))).toEqual([]);
+  // The label of a row is its id, so it stays as written. The file stays as the model wrote it.
+  expect([shown.includes('"12345"'), merged.includes("165250000")]).toEqual([true, true]);
+});
+
 test("the host check reads numbers by their digits", () => {
   expect(numbersIn("12 742 км, 12,742, 12742 и 12 742")).toEqual(["12742", "12742", "12742", "12742"]);
   expect(numbersIn("3,5 и 3.50, счёт 2:1, −5 °C")).toEqual(["3.5", "3.5", "2", "1", "5"]);

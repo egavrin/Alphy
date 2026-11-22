@@ -216,6 +216,7 @@ The context faults are a mark that names no row, point, or column, two rows of o
 A form expands to the native `Table` or `Chart` node, with no drawing. The mark is the state `$/v`: the node binds it with `selectedKeyBind`, and a tap on a row or a point sets it through the `action` of the node.
 Each table node has `visibleRows` 8. The host shows at most 6 of them on a compact width (smallest width under 600 dp), so a form at its caps does not scroll the page on a phone. More rows, and rows that wrap, scroll inside their box. `markColumn` names the column of the marked cell.
 A comparison is the line `Table(…, signs=[SIGN, …])`: its columns are the label column and the names of the things, and `signs` holds one sign for each thing (`""` for none). The run-time gives the table node `variant: "compare"` and `signs`, and the native side draws a head cell for each thing and a block for each row with bars (stage 5 look).
+In the compiled rows of a table or a comparison of a data form, a value that is a whole number of 5 or more digits has a thin space between groups of three (`tableLine`). The file keeps the value as the model wrote it, and the label of a row stays as written. A `Table` of another app shows each cell as written.
 The source line of a searched form is `Text("SITE · TIME", variant="source")`, a small muted line with a link icon. The card of a nodata form has `icon="Search"`.
 Each line of a data form gives a frame of the preview step, so a table grows by rows.
 

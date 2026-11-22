@@ -4153,7 +4153,10 @@ function dataFile(head, main, start, card, source, icon) {
  */
 function tableLine(head, columns, rows, column, signs) {
   const list = (items) => `[${items.map((text) => show({ k: "lit", v: text })).join(", ")}]`;
-  return `Table(${show(head.args[0])}, ${list(columns)}, [${rows.map(list).join(", ")}], $/v${column > 0 ? `, column=${column}` : ""}${signs ? `, signs=${list(signs)}` : ""})`;
+  // A value that is a whole number of 5 or more digits shows a thin space between groups of three ("12 742"). The file keeps the value.
+  // Only a data form does this: in another app, such digits can be a code. The label of a row is its id, so it stays as written.
+  const shown = ([label, ...values]) => [label, ...values.map((text) => text.replace(/^([-−]?)(\d{5,})$/, (all, sign, digits) => sign + digits.replace(/\B(?=(\d{3})+$)/g, " ")))];
+  return `Table(${show(head.args[0])}, ${list(columns)}, [${rows.map(shown).map(list).join(", ")}], $/v${column > 0 ? `, column=${column}` : ""}${signs ? `, signs=${list(signs)}` : ""})`;
 }
 
 /** The value that $/v keeps: the label of the marked row, or "" for no mark. */

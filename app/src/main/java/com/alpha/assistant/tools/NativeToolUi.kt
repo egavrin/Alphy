@@ -97,6 +97,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
@@ -1848,9 +1849,6 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
             val count=checkNotNull(columns).length()
             val records=(0 until rows.length()).map {rows.getJSONObject(it)}
             val fields=(0 until count).map {columns.getJSONObject(it).getString("field")}
-            // The label column takes 1.4 shares and each other column one share. Below 72 dp a share, the table scrolls sideways (stage 5 look).
-            val share=maxOf(if(constraints.hasBoundedWidth) maxWidth/(count+0.4f) else 0.dp,72.dp)
-            fun width(index: Int)=if(index == 0) share*1.4f else share
             // A column where each cell starts with a number aligns to the right, and its head too.
             val numeric=fields.map {field -> records.isNotEmpty() && records.all {leadingNumber(ToolUiCatalog.value(it,field).toString()) != null}}
             // The marked row and its marked cell (block 2 plan, D8). With visibleRows, more rows scroll inside the box, so the page does not scroll.
@@ -1871,12 +1869,39 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
             val scheme=MaterialTheme.colorScheme
             val shape=RoundedCornerShape(16.dp)
             val cellStyle=MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings="tnum")
+            val smallStyle=MaterialTheme.typography.bodySmall.copy(fontFeatureSettings="tnum")
+            val headStyle=MaterialTheme.typography.labelMedium
+            val measurer=rememberTextMeasurer()
+            val density=LocalDensity.current
+            val boxWidth=if(constraints.hasBoundedWidth) maxWidth else null
+            // A number stays on one line, so its column has the width of its longest number. A text column needs TABLE_TEXT_DP at most,
+            // because a text wraps. A head needs its longest word. When the columns do not fit the box, the cells use the small style with
+            // less padding. When they still do not fit, the table scrolls sideways (stage 5 look).
+            val fit=remember(columns.toString(),rows.toString(),markColumn,boxWidth,cellStyle,smallStyle,headStyle,density) {
+                fun wide(text: String,style: TextStyle)=with(density) {measurer.measure(text,style,softWrap=false,maxLines=1).size.width.toDp()}+1.dp
+                // The least width and the full width of each column: the full width holds each cell on one line.
+                fun needs(style: TextStyle,pad: Dp)=(0 until count).map {index ->
+                    val head=columns.getJSONObject(index).getString("text").split(' ').maxOf {wide(it,headStyle)}
+                    val cell=(records.maxOfOrNull {wide(ToolUiCatalog.value(it,fields[index]).toString(),style.copy(fontWeight=FontWeight.Medium))} ?: 0.dp)+
+                        if(fields[index] == markColumn) 16.dp else 0.dp
+                    maxOf(head,if(numeric[index]) cell else minOf(cell,TABLE_TEXT_DP.dp))+pad*2 to maxOf(head,cell)+pad*2
+                }
+                fun least(columns: List<Pair<Dp,Dp>>)=columns.fold(0.dp) {sum,it -> sum+it.first}
+                val normal=needs(cellStyle,12.dp)
+                val small=boxWidth != null && least(normal) > boxWidth
+                val chosen=if(small) needs(smallStyle,8.dp) else normal
+                // Spare width goes to each text column first, up to its full width. Each column takes an equal part of the rest.
+                var spare=if(boxWidth == null) 0.dp else (boxWidth-least(chosen)).coerceAtLeast(0.dp)
+                val grown=chosen.map {(least,full) -> minOf(spare,full-least).let {add -> spare-=add; least+add}}
+                TableFit(if(small) smallStyle else cellStyle,if(small) 8.dp else 12.dp,grown.map {it+spare/count})
+            }
+            fun width(index: Int)=fit.widths[index]
             // The sideways scroll gives no bounded width, so the hairlines and the fade take the width of the columns.
-            val total=(0 until count).fold(0.dp) {sum,it -> sum+width(it)}
+            val total=fit.widths.fold(0.dp) {sum,it -> sum+it}
             Box(Modifier.clip(shape).border(1.dp,scheme.outlineVariant,shape)) {
                 Column(Modifier.horizontalScroll(rememberScrollState())) {
                     Row(Modifier.background(scheme.surfaceContainerLow)) {
-                        repeat(count) {Text(columns.getJSONObject(it).getString("text"),Modifier.width(width(it)).padding(horizontal=12.dp,vertical=10.dp),
+                        repeat(count) {Text(columns.getJSONObject(it).getString("text"),Modifier.width(width(it)).padding(horizontal=fit.pad,vertical=10.dp),
                             style=MaterialTheme.typography.labelMedium,color=scheme.onSurfaceVariant,textAlign=if(numeric[it]) TextAlign.End else TextAlign.Start,
                             maxLines=2,overflow=TextOverflow.Ellipsis)}
                     }
@@ -1892,15 +1917,17 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
                                 Row(rowModifier.then(markModifier).then(place).heightIn(min=TABLE_ROW_DP.dp),verticalAlignment=Alignment.CenterVertically) {
                                     repeat(count) {
                                         val cellMarked=marked && fields[it] == markColumn
-                                        val text=dataValue(ToolUiCatalog.value(record,fields[it]).toString())
-                                        Box(Modifier.width(width(it)).padding(horizontal=12.dp,vertical=6.dp),contentAlignment=if(numeric[it]) Alignment.CenterEnd else Alignment.CenterStart) {
-                                            // A value takes a second line before it loses a character: a cut number reads as a wrong number.
+                                        val text=ToolUiCatalog.value(record,fields[it]).toString()
+                                        Box(Modifier.width(width(it)).padding(horizontal=fit.pad,vertical=6.dp),contentAlignment=if(numeric[it]) Alignment.CenterEnd else Alignment.CenterStart) {
+                                            // A number stays on one line and loses no character: a cut number reads as a wrong number. A text takes a second line.
                                             val align=if(numeric[it]) TextAlign.End else TextAlign.Start
+                                            val lines=if(numeric[it]) 1 else 2
+                                            val over=if(numeric[it]) TextOverflow.Visible else TextOverflow.Ellipsis
                                             // The marked cell is a pill in the accent color.
                                             if(cellMarked) Text(text,Modifier.semantics {this.selected=true}.background(scheme.primary,RoundedCornerShape(10.dp)).padding(horizontal=8.dp,vertical=2.dp),
-                                                style=cellStyle,color=scheme.onPrimary,fontWeight=FontWeight.Medium,textAlign=align,maxLines=2,overflow=TextOverflow.Ellipsis)
-                                            else Text(text,style=cellStyle,color=if(marked) scheme.onPrimaryContainer else Color.Unspecified,
-                                                fontWeight=if(it == 0 || marked) FontWeight.Medium else null,textAlign=align,maxLines=2,overflow=TextOverflow.Ellipsis)
+                                                style=fit.style,color=scheme.onPrimary,fontWeight=FontWeight.Medium,textAlign=align,maxLines=lines,softWrap=!numeric[it],overflow=over)
+                                            else Text(text,style=fit.style,color=if(marked) scheme.onPrimaryContainer else Color.Unspecified,
+                                                fontWeight=if(it == 0 || marked) FontWeight.Medium else null,textAlign=align,maxLines=lines,softWrap=!numeric[it],overflow=over)
                                         }
                                     }
                                 }
@@ -2007,6 +2034,10 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
 internal const val TABLE_ROW_DP=48
 private const val COMPACT_TABLE_ROWS=6
 internal const val TABLE_ROWS_TAG="tool_table_rows"
+/** The most that a text column of a table needs before spare width: a longer text wraps to a second line. */
+private const val TABLE_TEXT_DP=96
+/** The text style, the side padding of a cell, and the width of each column of a table. */
+private class TableFit(val style: TextStyle,val pad: Dp,val widths: List<Dp>)
 /** The tag of each bar under a value of a comparison (stage 5 look). */
 internal const val COMPARE_BAR_TAG="tool_compare_bar"
 private val LEADING_NUMBER=Regex("^[-−+]?\\d+(?:[    ]\\d{3})*(?:[.,]\\d+)?")
@@ -2014,7 +2045,10 @@ private val GROUP_SPACE=Regex("[    ]")
 /** The number at the start of a data value, such as 12742 of "12 742 км", or null when the value starts with no number. */
 internal fun leadingNumber(text: String): Double? =
     LEADING_NUMBER.find(text.trim())?.value?.replace(GROUP_SPACE,"")?.replace('−','-')?.replace(',','.')?.toDoubleOrNull()
-/** A data value as the stage shows it: an integer of 5 or more digits gets a thin space between groups of three ("12 742"). The stored value stays. */
+/**
+ * The value of a chart point as its label shows it: an integer of 5 or more digits gets a thin space between groups of three ("12 742").
+ * A table shows each cell as written, because its digits can be a code. The kit groups the numbers of a data form (form-data.js tableLine).
+ */
 internal fun dataValue(text: String): String {
     val parts=Regex("([-−]?)(\\d{5,})").matchEntire(text) ?: return text
     return parts.groupValues[1]+parts.groupValues[2].reversed().chunked(3).joinToString(" ").reversed()
@@ -2074,7 +2108,7 @@ internal fun dataValue(text: String): String {
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     values.forEachIndexed {thing,value ->
                         Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                            Text(dataValue(value),style=valueStyle,color=ink,maxLines=1,autoSize=TextAutoSize.StepBased(11.sp,valueStyle.fontSize))
+                            Text(value,style=valueStyle,color=ink,maxLines=1,autoSize=TextAutoSize.StepBased(11.sp,valueStyle.fontSize))
                             if(top != null) {
                                 val number=checkNotNull(numbers[thing])
                                 Box(Modifier.testTag(COMPARE_BAR_TAG).fillMaxWidth((number/top).coerceIn(0.0,1.0).toFloat()).height(4.dp)
