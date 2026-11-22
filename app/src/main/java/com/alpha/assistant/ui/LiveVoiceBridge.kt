@@ -217,7 +217,8 @@ internal class LiveVoiceBridge(
         val planReady = string(R.string.agent_plan_ready)
         for ((delegation, id) in handOffs) {
             val message = changed(id) ?: continue
-            if (message.status == "complete") message.toolId?.let { stageToolId = it }
+            // The person needs a full silence time to see the screen, and a screen that the voice announced at its start sends no text.
+            if (message.status == "complete") message.toolId?.let { stageToolId = it; session.countSilence() }
             val full = message.status !in unfinishedStatuses && fulls.remove(id)
             // The voice said the answer of a screen at its start. A stop or a failure still goes on to the failure text.
             if (id in screens) {

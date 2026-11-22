@@ -378,9 +378,9 @@ internal class LiveVoiceSession(
      * Counts the 60 s without user speech again. At its end, Alphy's own reply (an open reply or playback, ruling R34) restarts the
      * count. A running hand-off also restarts it until [LiveTiming.handOffHoldMs] after the last user speech or Alphy output (ruling
      * R38). The output end, a commentary, and a thinking text also restart it, because the user needs time to hear a result (spec
-     * 5.8, ruling R12).
+     * 5.8, ruling R12). The bridge restarts it when a screen comes on the stage, which can come with no text (O1 of 2026-11-21).
      */
-    private fun countSilence() {
+    fun countSilence() {
         silenceJob?.cancel()
         if (!started || userSpeaking) return
         silenceJob = after(timing.silenceMs) {
