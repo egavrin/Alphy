@@ -1660,7 +1660,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                     !assistant.requiresRefinement && tools.planStep() != null
                 // The screen of the stage app goes to the routing call as untrusted data, unless the app was deleted or archived (plan D, Dc1).
                 val stage = next.voiceTarget?.takeIf { voiceScreen }?.let { id -> tools.tools.find { it.id == id && !it.archived } }
-                val shownScreen = stage?.let(ShownScreen::of)?.line()
+                val shownScreen = stage?.let { ShownScreen.of(it, tools.privateResults(it.id)) }?.line()
                 fun validateOperation(decision: ChatToolReply.Decision) {
                     if(decision.isMiniApp) {
                         if(knownTools == null) throw CloudFailure("tool_storage",toolStorageWarning)

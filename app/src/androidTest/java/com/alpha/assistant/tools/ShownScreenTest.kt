@@ -24,7 +24,7 @@ class ShownScreenTest {
 
     /**
      * lesson.plan: each button by its text and each option of the mode choice as «<label>: <option>». The number field of the angle is
-     * no control. «Назад» is disabled at the first step, so it is not on the screen until the state enables it.
+     * no control, but it has a value. «Назад» is disabled at the first step, so it is not on the screen until the state enables it.
      */
     @Test fun lessonControlsAreItsButtonsAndChoiceOptions(): Unit = runBlocking {
         val text = plan("lesson")
@@ -32,7 +32,8 @@ class ShownScreenTest {
         val mode = listOf(ShownControl("Вращение Луны: С вращением", "mode_field", "С вращением"),
             ShownControl("Вращение Луны: Без вращения", "mode_field", "Без вращения"), ShownControl("Один круг", "lap_button", null))
         val rest = listOf(ShownControl("Дальше", "lesson_next", null), ShownControl("Да", "ask_opt0", null), ShownControl("Нет", "ask_opt1", null))
-        assertEquals(ShownScreen("shown", "Почему Луна не отворачивается?", text, mode + rest), ShownScreen.of(start))
+        assertEquals(ShownScreen("shown", "Почему Луна не отворачивается?", text, mode + rest,
+            listOf("Положение на орбите" to 40, "Вращение Луны" to "С вращением")), ShownScreen.of(start))
         val second = stored(text) { it.getJSONObject("v").put("lesson_back_enabled", true) }
         assertEquals(mode + ShownControl("Назад", "lesson_back", null) + rest, ShownScreen.of(second)?.controls)
     }
@@ -97,5 +98,109 @@ class ShownScreenTest {
         val longer = ShownScreen.PREFIX + JSONObject().put("title", "Луна")
             .put("controls", org.json.JSONArray(many.take(kept.length() + 1).map { it.label })).toString()
         assertTrue(longer.length > 8000)
+    }
+
+    /** A slider scene of the voice mode that starts at 3. */
+    private val slider = """
+        scene("Сила и пружина", lang="ru", palette="blue")
+        control = slider("Сила", 1, 5, 1, 3)
+        s1 = rect(20, 100, 40 * ${'$'}/v, 20, "accent", 4)
+        card = card("Закон Гука", "Чем больше сила, тем сильнее растягивается пружина.")
+    """.trimIndent() + "\n"
+
+    /** The data of the line of [screen], which has at most 8000 characters. */
+    private fun data(screen: ShownScreen?): JSONObject {
+        val line = checkNotNull(screen).line()
+        assertTrue(line, line.startsWith(ShownScreen.PREFIX) && line.length <= ShownScreen.MAX_LINE)
+        return JSONObject(line.removePrefix(ShownScreen.PREFIX))
+    }
+
+    /**
+     * Task 4 (decision 9): the line holds the present value of each bound input in the order of the UI, sliders included, with the label that
+     * the person sees. An app that declares a capability takes no press, but its values are on the screen too.
+     */
+    @Test fun theLineHoldsEachValue(): Unit = runBlocking {
+        val start = checkNotNull(ShownScreen.of(stored(slider))).line()
+        assertTrue(start, "\"values\":[{\"control\":\"Сила\",\"value\":3}]" in start)
+        // The choice starts at «Вдох», and the person chose «Выдох».
+        val breath = """
+            scene("Как мы дышим?", lang="ru", palette="teal")
+            control = choice("Фаза", ["Вдох", "Выдох"], "Вдох")
+            s1 = circle(150, 110, ${'$'}/v == "Вдох" ? 70 : 40, "accent")
+            card = card("Лёгкие", "При вдохе лёгкие расширяются, при выдохе сжимаются.")
+        """.trimIndent() + "\n"
+        val chosen = stored(breath) { state -> state.put(state.keys().asSequence().single { state.opt(it) == "Вдох" }, "Выдох") }
+        val now = checkNotNull(ShownScreen.of(chosen)).line()
+        assertTrue(now, "{\"control\":\"Фаза\",\"value\":\"Выдох\"}" in now)
+        // lesson.plan: the number field of the angle and the mode choice. Its lesson and its question bind no input.
+        assertEquals("""[{"control":"Положение на орбите","value":40},{"control":"Вращение Луны","value":"С вращением"}]""",
+            data(ShownScreen.of(stored(plan("lesson")))).optJSONArray("values")?.toString())
+        val tea = stored("""
+            app("Чай", lang="ru")
+            need kind = input("choice", "Чай", "Чёрный", options=["Чёрный", "Зелёный"])
+            need brew = timer("Заварка", 300, alert=true, start="Старт", pause="Пауза", reset="Сброс", done="Готово")
+        """.trimIndent())
+        assertTrue(ToolSpec.parsePersisted(tea.spec).capabilities.isNotEmpty())
+        assertEquals(emptyList<ShownControl>(), ShownScreen.of(tea)?.controls)
+        assertEquals("""[{"control":"Чай","value":"Чёрный"}]""", data(ShownScreen.of(tea)).optJSONArray("values")?.toString())
+        // A keyed choice stores its key, and the person sees its label. A time stays the stored number of minutes.
+        val keyed = stored("""
+            app("Дорога", lang="ru")
+            need kind = input("choice", "Тип", "road", options={road: "Шоссе", trail: "Тропа"})
+            need at = input("time", "Время", "08:30")
+        """.trimIndent())
+        assertTrue(keyed.state, "\"kind\":\"road\"" in keyed.state)
+        assertEquals("""[{"control":"Тип","value":"Шоссе"},{"control":"Время","value":510}]""",
+            data(ShownScreen.of(keyed)).optJSONArray("values")?.toString())
+    }
+
+    /**
+     * Fix 1 of Task 4: the line of an app with private state (ToolSpec.privateResults, or the retained mark of the store) has no values,
+     * as a model request never gets them. Its controls do not change.
+     */
+    @Test fun aPrivateAppGivesNoValues() {
+        fun record(change: (JSONObject) -> Unit = {}): ToolRecord {
+            val spec = ToolSpec.parse(JSONObject("""
+                {"formatVersion":3,"title":"Пружина","description":"","capabilities":[],"stateSchema":{"force":"number"},"initialState":{"force":3},
+                "ui":{"type":"column","children":[{"type":"slider","text":"Сила","bind":"force","action":"set_force","min":1,"max":5,"step":1},
+                {"type":"button","text":"Сброс","action":"reset"}]},"source":"return {state:input.state};"}
+            """.trimIndent()).also(change).toString())
+            return ToolRecord("shown", 1, 1, spec.json, spec.initialState, spec.ui.toString(), null, true)
+        }
+        val open = record()
+        val controls = listOf(ShownControl("Сброс", "reset", null))
+        assertEquals(ShownScreen("shown", "Пружина", null, controls, listOf("Сила" to 3)), ShownScreen.of(open))
+        assertEquals("""[{"control":"Сила","value":3}]""", data(ShownScreen.of(open)).optJSONArray("values")?.toString())
+        // The store kept the mark of an earlier spec: the same app gives no values, and its controls stay.
+        assertEquals(ShownScreen("shown", "Пружина", null, controls), ShownScreen.of(open, privateResults = true))
+        assertFalse(data(ShownScreen.of(open, privateResults = true)).has("values"))
+        // The three parts of the rule: private durable records, typed device results, and owned calendar data.
+        val history = JSONObject().put("history", JSONObject().put("type", "object").put("fields", JSONObject().put("at", "number")))
+        val privateApps = listOf(record { it.put("collections", history) },
+            record { it.put("capabilities", org.json.JSONArray(listOf("audio.tone"))).put("capabilityResults", true) },
+            record { it.put("capabilities", org.json.JSONArray(com.alpha.assistant.capabilities.OwnedCalendarContract.ids.toList())) })
+        assertTrue(ToolSpec.parsePersisted(privateApps[0].spec).collections.length() > 0)
+        privateApps.forEach { tool -> assertFalse(tool.spec, data(ShownScreen.of(tool)).has("values")) }
+        // Records are no capability, so a press can run the button as before.
+        assertEquals(controls, ShownScreen.of(privateApps[0])?.controls)
+    }
+
+    /**
+     * Task 4 (decision 9): an app file of 9000 characters goes, and the values stay. Only when the line with no app file and no control is
+     * still longer than 8000 characters, the values go from the end.
+     */
+    @Test fun theStateStaysAtTheCap(): Unit = runBlocking {
+        val long = data(checkNotNull(ShownScreen.of(stored(slider))).copy(appFile = "x".repeat(9000)))
+        assertFalse(long.has("appFile"))
+        assertEquals("""[{"control":"Сила","value":3}]""", long.optJSONArray("values")?.toString())
+        // Four notes of 2048 characters, the longest text of a state value, do not fit together.
+        val notes = listOf("Первая", "Вторая", "Третья", "Четвёртая")
+        val text = "app(\"Заметки\", lang=\"ru\")\nneed force = input(\"slider\", \"Сила\", 3, min=1, max=5, step=1)\n" +
+            notes.indices.joinToString("\n") { "need n$it = input(\"text\", \"${notes[it]}\", \"\")" }
+        val full = data(ShownScreen.of(stored(text) { state -> notes.indices.forEach { state.put("n$it", "ы".repeat(2048)) } }))
+        assertFalse(full.has("appFile"))
+        val values = full.getJSONArray("values")
+        assertEquals(listOf("Сила", "Первая", "Вторая", "Третья"), List(values.length()) { values.getJSONObject(it).getString("control") })
+        assertEquals(3, values.getJSONObject(0).get("value"))
     }
 }

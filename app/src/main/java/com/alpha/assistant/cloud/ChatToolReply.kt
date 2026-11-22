@@ -120,6 +120,7 @@ The user turn before the latest request is SHOWN_SCREEN: the screen that the tal
 Choose kind press when the request names one control of SHOWN_SCREEN or means it. The brief is the exact label of that control from the list. Never write a label that is not in the list. For press, text is one or two short spoken sentences in the language of the request. They say what the screen shows after the press. Use search none.
 Choose refine when the request changes what that screen shows. The brief says the change.
 Choose screen for a new topic, which gets a new screen. Choose answer for a plain question.
+SHOWN_SCREEN also holds values (the present value of each control).
 """.trimIndent()
 
     /** The text of a spoken request with earlier turns (ruling FX-1). The routing call and the grounded decision get it. */

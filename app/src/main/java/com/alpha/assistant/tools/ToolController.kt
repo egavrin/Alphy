@@ -1206,6 +1206,8 @@ class ToolController internal constructor(private val app: Application, private 
             }
         }
     }
+    /** True when the store keeps the app [owner] private, also after a later change of its spec: a model request never gets its data. */
+    internal suspend fun privateResults(owner: String): Boolean = withContext(Dispatchers.IO) { store.privateResults(owner) }
     internal suspend fun remindersNeedReactivation(owner: String): Boolean = withContext(Dispatchers.IO) {
         MedicineStore(app,MedicineRuntime.database(store)).use { medicine ->
             medicine.reminders().any {

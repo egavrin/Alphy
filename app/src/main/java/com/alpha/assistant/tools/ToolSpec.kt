@@ -1,5 +1,7 @@
 package com.alpha.assistant.tools
 
+import com.alpha.assistant.capabilities.NavigationContract
+import com.alpha.assistant.capabilities.OwnedCalendarContract
 import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.images.ImageIntent
 import com.alpha.assistant.sandbox.SandboxContract
@@ -51,6 +53,9 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     internal val threeScene: Boolean, internal val sceneAssets: List<ThreeSceneAssetRef>,
     internal val generatedImages: List<GeneratedImage>, internal val lessonImageIntent: ImageIntent?, internal val appFile: String?) {
     internal val canQueueLocalButtons: Boolean get() = !threeScene && capabilities.isEmpty() && collections.length() == 0 && surfaces.isEmpty()
+    /** Typed device results, durable records, navigation, and owned calendar data stay local: the store marks such an app private for good. */
+    internal val privateResults: Boolean get() = capabilityResults || collections.length() > 0 ||
+        capabilities.any { it in NavigationContract.ids || it in OwnedCalendarContract.ids }
 
     fun validateState(value: String): JSONObject {
         require(value.toByteArray().size <= MAX_STATE_BYTES) { "Данные инструмента превышают 48 КиБ" }

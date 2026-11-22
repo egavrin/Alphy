@@ -196,7 +196,7 @@ class ToolStore private constructor(internal val context: Context, internal val 
 
     fun privateResults(owner: String) = readableDatabase.rawQuery("SELECT 1 FROM capability_private_owners WHERE owner=?",arrayOf(owner)).use { it.moveToFirst() }
     private fun retainResultPrivacy(tool: ToolRecord) {
-        if(ToolSpec.availablePersisted(tool.spec)?.let { it.capabilityResults || it.collections.length() > 0 || it.capabilities.any { id -> id in NavigationContract.ids || id in OwnedCalendarContract.ids } }==true) writableDatabase.insertWithOnConflict("capability_private_owners",null,
+        if(ToolSpec.availablePersisted(tool.spec)?.privateResults==true) writableDatabase.insertWithOnConflict("capability_private_owners",null,
             ContentValues().apply { put("owner",tool.id) },SQLiteDatabase.CONFLICT_IGNORE)
     }
     private fun android.database.Cursor.toolRecord() = ToolRecord(getString(0),getInt(1),getInt(2),getString(3),
