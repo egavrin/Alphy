@@ -3777,16 +3777,11 @@ function nextState(file, { app, definition, owners, objects }, previous, build) 
 
 return { BLOCKS, MISMATCH, isRecord, nextState };
 })();
-// template.js
-const { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, isTemplateFile, readTemplate, mergeTemplate, expandTemplate, buildTemplate } = (() => {
-// The template file of a voice screen (docs/superpowers/specs/2026-11-21-stage-templates-stream-design.md, sections 1 and 2): named lines
-// in a fixed order, which the kit checks, fixes, and expands into an app file of today's kinds. compile.js branches here for a template text,
-// plan, or stored app file.
-//
-//   scene("Почему корабль не тонет?", lang="ru", palette="blue")      the first line: the template, the title, the language, the palette
-//   control = choice("Предмет", ["Корабль", "Гвоздь"])                 the one control. A part reads its value as $/v
-//   s1 = rect(0, 110, 300, 110, "water", 0)                            the parts: s1 to s12 are shapes (scene), i1 to i6 items (items)
-//   card = card("Вытеснение воды", "Полый корабль ...")                 the card
+// form-base.js
+const { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, SHAPES, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, SENTENCE_END, cut, cutLong, headFault, textCardFault, colored, colorFault } = (() => {
+// What each template form uses (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): the first line, the budget, the drawing size,
+// the faults of a text, of the first line, and of a card with a text, the cut of a long text, and the colors of a shape. Each form has a
+// module of its own (forms.js), and template.js reads, merges, expands, and builds a template file with them.
 
 
 
@@ -3805,20 +3800,15 @@ const COLOR_NAMES = { red: "#dc2626", orange: "#ea580c", yellow: "#facc15", gree
 const PALETTES = ["teal", "green", "blue", "amber", "orange", "red", "pink", "purple", "indigo", "brown", "graphite"];
 /** The shapes of a scene, with the place of the color among their arguments (core.js SHAPES). */
 const SHAPES = { circle: 3, rect: 4, line: 4, text: 3, polygon: 1 };
-/** The names of the part lines of each template. A cells file has none: the control draws the cells. */
-const PART = { scene: /^s(?:[1-9]|1[0-2])$/, items: /^i[1-6]$/, cells: /(?!)/ };
-const LINES = { scene: "control, s1 to s12 (at most 12 shapes), and card", items: "control, i1 to i6 (at most 6 items), and card", cells: "control and card" };
 /** The drawing of each template, fixed from the first line: the picture has its final size before its first part. */
-const WIDTH = 300, HEIGHT = 220;
-
-const isTemplateFile = (text) => typeof text === "string" && TEMPLATE_HEAD.test(text.split("\n").find((line) => line.trim()) ?? "");
+const WIDTH = 300;
+const HEIGHT = 220;
 
 const isText = (node) => node?.k === "lit" && typeof node.v === "string";
 /** A number in the line, also a negative one, else undefined. */
 const numberOf = (node) => (node?.k === "lit" && typeof node.v === "number" ? node.v : node?.k === "un" && node.op === "-" && typeof node.arg?.v === "number" ? -node.arg.v : undefined);
 /** Each node of a tree for which test is true. */
 const nodesIn = (node, test) => (!node || typeof node !== "object" ? [] : [...(test(node) ? [node] : []), ...Object.values(node).flatMap((inner) => nodesIn(inner, test))]);
-const readsV = (node) => node.k === "path" && node.abs && node.segs.length === 1 && node.segs[0] === "v";
 
 /** The factor of the cap of a text inside the picture (BUDGET). */
 const INSIDE = 1.25;
@@ -3865,48 +3855,10 @@ function headFault(tree, word) {
   return textFault("the title", title, BUDGET.title);
 }
 
-const FORMS = { scene: "slider(LABEL, MIN, MAX, STEP, START) with numbers, or choice(LABEL, [OPTION, …], START)", items: "choice(LABEL): its options are the labels of the items", cells: "slider(LABEL, 0, COUNT, 1, START)" };
-/** The fault of a control line. The kit checks the bounds and the start of a slider and of a choice when it compiles the expansion. */
-function controlFault(tree, word) {
-  const args = tree.args ?? [], form = `the control of ${word} is ${FORMS[word]}`;
-  if (tree.k !== "call" || Object.keys(tree.named).length) return form;
-  if (tree.name === "slider" && word !== "items") {
-    if (args.length !== 5 || args.slice(1).some((arg) => numberOf(arg) === undefined)) return form;
-    if (word === "cells") {
-      const count = numberOf(args[2]);
-      if (numberOf(args[1]) !== 0 || numberOf(args[3]) !== 1) return form;
-      if (!(Number.isInteger(count) && count >= 2 && count <= BUDGET.cells)) return `COUNT is a whole number from 2 to ${BUDGET.cells}, and ${show(args[2])} is not one`;
-    }
-  } else if (tree.name === "choice" && word === "scene") {
-    const options = args[1]?.items;
-    if (args.length < 2 || args.length > 3 || !options || (args[2] && !isText(args[2]))) return form;
-    if (options.length > BUDGET.options) return `the choice has ${options.length} options, and its cap is ${BUDGET.options}. Keep the ones that matter most`;
-    if (options.length < 2) return "a choice needs at least 2 options";
-    const fault = options.map((option, index) => textFault(`option ${index + 1}`, option, BUDGET.option)).find(Boolean);
-    if (fault) return fault;
-  } else if (!(tree.name === "choice" && word === "items" && args.length === 1)) return form;
-  return textFault("the label", args[0], BUDGET.control);
-}
-
-function partFault(tree, word) {
-  if (word === "items") {
-    if (tree.k !== "call" || tree.name !== "item" || tree.args.length !== 3 || Object.keys(tree.named).length) return "an item is item(LABEL, SIGN, TEXT)";
-    return textFault("the label", tree.args[0], BUDGET.option) ?? textFault("the sign", tree.args[1], BUDGET.sign, false, INSIDE) ?? textFault("the text", tree.args[2], BUDGET.cardText);
-  }
-  if (tree.k !== "call" || !Object.hasOwn(SHAPES, tree.name)) return "a shape is circle, rect, line, text, or polygon";
-  const other = Object.keys(tree.named).find((key) => key !== "visible" && key !== "stroke");
-  if (other) return `a shape takes only visible= and stroke= by name, and ${other}= is not one`;
-  if (tree.name === "text") return textFault("the text", tree.args[2], BUDGET.text, true, INSIDE);
-  // The kit compiles a shorter or an odd list clean: it draws nothing for two points and drops the last number of an odd list.
-  const points = tree.name === "polygon" && tree.args[0]?.k === "list" ? tree.args[0].items.length : 6;
-  if (points < 6 || points % 2) return `the points of a polygon are a list of x and y numbers for at least 3 points (6 numbers), and this list has ${points} numbers`;
-  return null;
-}
-
-function cardFault(tree, word) {
-  const count = word === "items" ? 1 : 2;
-  if (tree.k !== "call" || tree.name !== "card" || tree.args.length !== count || Object.keys(tree.named).length) return `the card of ${word} is card(${count === 1 ? "TITLE): it shows the text of the chosen item" : "TITLE, TEXT)"}`;
-  return textFault("the card title", tree.args[0], BUDGET.cardTitle, true) ?? (count === 2 ? textFault("the card text", tree.args[1], BUDGET.cardText, true) : null);
+/** The fault of the card line card(TITLE, TEXT) of the template word: the card of scene and of cells. */
+function textCardFault(tree, word) {
+  if (tree.k !== "call" || tree.name !== "card" || tree.args.length !== 2 || Object.keys(tree.named).length) return `the card of ${word} is card(TITLE, TEXT)`;
+  return textFault("the card title", tree.args[0], BUDGET.cardTitle, true) ?? textFault("the card text", tree.args[1], BUDGET.cardText, true);
 }
 
 /** The values of a color: the color, or each value of a choice (test ? a : b, or if(test, a, b)), as choices in parts.js reads them. map gives each value again. */
@@ -3924,6 +3876,201 @@ const colorFault = (tree) => {
   return wrong ? `the color ${show(wrong)} is not a color of the kit. Use one of ${Object.keys(TONES).join(", ")}, one of ${Object.keys(COLOR_NAMES).join(", ")}, or a hex such as "#336699"` : null;
 };
 
+return { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, SHAPES, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, SENTENCE_END, cut, cutLong, headFault, textCardFault, colored, colorFault };
+})();
+// form-scene.js
+const { SCENE_FORM } = (() => {
+// The template scene (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): a picture of the shapes s1 to s12, one slider or choice,
+// and a card with a text. The kit draws the shapes as they are (template.js expandTemplate).
+
+
+
+const CONTROL = "slider(LABEL, MIN, MAX, STEP, START) with numbers, or choice(LABEL, [OPTION, …], START)";
+
+/** The form of scene (forms.js TemplateForm). */
+const SCENE_FORM = {
+  word: "scene",
+  part: /^s(?:[1-9]|1[0-2])$/,
+  lines: "control, s1 to s12 (at most 12 shapes), and card",
+  control: CONTROL,
+  /** The fault of a control line. The kit checks the bounds and the start of a slider and of a choice when it compiles the expansion. */
+  controlFault(tree) {
+    const args = tree.args ?? [], form = `the control of scene is ${CONTROL}`;
+    if (tree.k !== "call" || Object.keys(tree.named).length) return form;
+    if (tree.name === "slider") {
+      if (args.length !== 5 || args.slice(1).some((arg) => numberOf(arg) === undefined)) return form;
+    } else if (tree.name === "choice") {
+      const options = args[1]?.items;
+      if (args.length < 2 || args.length > 3 || !options || (args[2] && !isText(args[2]))) return form;
+      if (options.length > BUDGET.options) return `the choice has ${options.length} options, and its cap is ${BUDGET.options}. Keep the ones that matter most`;
+      if (options.length < 2) return "a choice needs at least 2 options";
+      const fault = options.map((option, index) => textFault(`option ${index + 1}`, option, BUDGET.option)).find(Boolean);
+      if (fault) return fault;
+    } else return form;
+    return textFault("the label", args[0], BUDGET.control);
+  },
+  partFault(tree) {
+    if (tree.k !== "call" || !Object.hasOwn(SHAPES, tree.name)) return "a shape is circle, rect, line, text, or polygon";
+    const other = Object.keys(tree.named).find((key) => key !== "visible" && key !== "stroke");
+    if (other) return `a shape takes only visible= and stroke= by name, and ${other}= is not one`;
+    if (tree.name === "text") return textFault("the text", tree.args[2], BUDGET.text, true, INSIDE);
+    // The kit compiles a shorter or an odd list clean: it draws nothing for two points and drops the last number of an odd list.
+    const points = tree.name === "polygon" && tree.args[0]?.k === "list" ? tree.args[0].items.length : 6;
+    if (points < 6 || points % 2) return `the points of a polygon are a list of x and y numbers for at least 3 points (6 numbers), and this list has ${points} numbers`;
+    return null;
+  },
+  cardFault: (tree) => textCardFault(tree, "scene"),
+  /** A scene whose first line and control alone have faults gives them to control (template.js ownersOf). */
+  owners(owners, alone, parts, add) {
+    if (!owners.has("control")) alone(parts).forEach((fault) => add("control", fault));
+  },
+};
+
+return { SCENE_FORM };
+})();
+// form-items.js
+const { ITEMS_FORM } = (() => {
+// The template items (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): the items i1 to i6, a choice of their labels, and a card
+// that shows the text of the chosen item. The drawing shows the sign and the label of the chosen item.
+
+
+
+
+const CONTROL = "choice(LABEL): its options are the labels of the items";
+
+/** The form of items (forms.js TemplateForm). */
+const ITEMS_FORM = {
+  word: "items",
+  part: /^i[1-6]$/,
+  lines: "control, i1 to i6 (at most 6 items), and card",
+  control: CONTROL,
+  controlFault(tree) {
+    const args = tree.args ?? [], form = `the control of items is ${CONTROL}`;
+    if (tree.k !== "call" || Object.keys(tree.named).length) return form;
+    if (!(tree.name === "choice" && args.length === 1)) return form;
+    return textFault("the label", args[0], BUDGET.control);
+  },
+  partFault(tree) {
+    if (tree.k !== "call" || tree.name !== "item" || tree.args.length !== 3 || Object.keys(tree.named).length) return "an item is item(LABEL, SIGN, TEXT)";
+    return textFault("the label", tree.args[0], BUDGET.option) ?? textFault("the sign", tree.args[1], BUDGET.sign, false, INSIDE) ?? textFault("the text", tree.args[2], BUDGET.cardText);
+  },
+  cardFault(tree) {
+    if (tree.k !== "call" || tree.name !== "card" || tree.args.length !== 1 || Object.keys(tree.named).length) return "the card of items is card(TITLE): it shows the text of the chosen item";
+    return textFault("the card title", tree.args[0], BUDGET.cardTitle, true);
+  },
+  /** The list of the items and the chosen item, the drawing of its sign and label, the labels as the options of the choice, and its text on the card. */
+  expand(parts) {
+    // The sign is large when it is one or two characters, and smaller for a word, so a sign at 1.25 times its cap fits the 300 px of the drawing.
+    // A preview with no item yet draws nothing, so the first item only adds to the picture.
+    return {
+      lines: [`$/items := [${parts.map(({ tree: { args: [label, sign, text] } }) => `{label: ${show(label)}, sign: ${show(sign)}, text: ${show(text)}}`).join(", ")}]`, "$/now := find($/items, $label == $/v)"],
+      shapes: parts.length ? ['text(150, 95, $/now/sign, "accent", len($/now/sign) <= 2 ? 72 : (len($/now/sign) <= 6 ? 44 : 24))', 'text(150, 190, $/v, "ink", 20)'] : [],
+      options: { k: "list", items: parts.map((part) => part.tree.args[0]) },
+      cardText: "$/now/text",
+    };
+  },
+  /** The value that $/v keeps when the control is left out: the label of the first item, or 0 with no item. */
+  start: (parts) => parts[0]?.tree.args[0] ?? { k: "lit", v: 0 },
+};
+
+return { ITEMS_FORM };
+})();
+// form-cells.js
+const { CELLS_FORM } = (() => {
+// The template cells (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): a slider of a count of cells and a card with a text.
+// The control draws the cells, so a cells file has no part line.
+
+
+
+
+const CONTROL = "slider(LABEL, 0, COUNT, 1, START)";
+
+/** The form of cells (forms.js TemplateForm). It has no partFault, because its part names match no line. */
+const CELLS_FORM = {
+  word: "cells",
+  part: /(?!)/,
+  lines: "control and card",
+  control: CONTROL,
+  controlFault(tree) {
+    const args = tree.args ?? [], form = `the control of cells is ${CONTROL}`;
+    if (tree.k !== "call" || Object.keys(tree.named).length) return form;
+    if (tree.name !== "slider") return form;
+    if (args.length !== 5 || args.slice(1).some((arg) => numberOf(arg) === undefined)) return form;
+    const count = numberOf(args[2]);
+    if (numberOf(args[1]) !== 0 || numberOf(args[3]) !== 1) return form;
+    if (!(Number.isInteger(count) && count >= 2 && count <= BUDGET.cells)) return `COUNT is a whole number from 2 to ${BUDGET.cells}, and ${show(args[2])} is not one`;
+    return textFault("the label", args[0], BUDGET.control);
+  },
+  cardFault: (tree) => textCardFault(tree, "cells"),
+  /** The drawing of the cells of a control line that the kit can read, else the parts as they are. */
+  expand(parts, control) {
+    if (control?.k !== "call") return {};
+    // Rows of at most ten cells, filled evenly, in the top 176 px, and the caption "K / N = P%" under them. One row of few cells gets taller cells.
+    const count = numberOf(control.args[2]), rows = Math.ceil(count / 10), cols = Math.ceil(count / rows);
+    const pitch = rows > 1 ? Math.min(Math.floor(280 / cols), Math.floor(176 / rows)) : Math.min(56, Math.floor(280 / cols)), side = pitch - 4, tall = rows > 1 ? side : Math.min(60, Math.round(side * 1.4));
+    const x0 = Math.round((WIDTH - (cols * pitch - 4)) / 2), y0 = 8 + Math.round((176 - ((rows - 1) * pitch + tall)) / 2);
+    return { shapes: [`each(${count}, rect(${x0} + ($index % ${cols}) * ${pitch}, ${y0} + floor($index / ${cols}) * ${pitch}, ${side}, ${tall}, $index < $/v ? "accent" : "muted", 3))`,
+      `text(150, 202, text($/v) + " / ${count} = " + text(round($/v / ${count} * 100)) + "%", "ink", 18)`] };
+  },
+};
+
+return { CELLS_FORM };
+})();
+// forms.js
+const { FORMS_BY_WORD } = (() => {
+// The template forms by their word (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1). A new form is a module of its own and its
+// entry here. template.js reads, merges, expands, and builds a template file with the form of its first line.
+
+
+
+
+
+/**
+ * @typedef {object} TemplateForm
+ * @property {"scene"|"items"|"cells"} word
+ * @property {RegExp} part   the names of its part lines
+ * @property {string} lines  its line text for a fault
+ * @property {string} control  its control forms for a fault
+ * @property {(tree: object) => string | null} controlFault  the fault of its control line
+ * @property {(tree: object) => string | null} [partFault]  the fault of a part line. A form whose part names match no line has none.
+ * @property {(tree: object) => string | null} cardFault  the fault of its card line
+ * @property {(parts: object[], control?: object) => {lines?: string[], shapes?: string[], options?: object, cardText?: string}} [expand]
+ *   what the expansion of template.js takes from the form: app lines before the drawing, the shapes of the drawing, the options of a
+ *   choice, and the card text. Each one that it leaves out keeps the default: no line, the parts as shapes, the options of the control,
+ *   and the text of the card line.
+ * @property {(parts: object[]) => object} [start]  the value that $/v keeps when the control is left out. Without it, the start of the control.
+ * @property {(owners: Map<string, string[]>, alone: (names: string[]) => string[], parts: string[], add: (name: string, fault: string) => void) => void} [owners]
+ *   the owners of the faults of the compile of an expansion that the form gives before the parts (template.js ownersOf).
+ */
+
+/** @type {Record<"scene"|"items"|"cells", TemplateForm>} */
+const FORMS_BY_WORD = { scene: SCENE_FORM, items: ITEMS_FORM, cells: CELLS_FORM };
+
+return { FORMS_BY_WORD };
+})();
+// template.js
+const { isTemplateFile, readTemplate, mergeTemplate, expandTemplate, buildTemplate } = (() => {
+// The template file of a voice screen (docs/superpowers/specs/2026-11-21-stage-templates-stream-design.md, sections 1 and 2): named lines
+// in a fixed order, which the kit checks, fixes, and expands into an app file of today's kinds. compile.js branches here for a template text,
+// plan, or stored app file.
+//
+//   scene("Почему корабль не тонет?", lang="ru", palette="blue")      the first line: the template, the title, the language, the palette
+//   control = choice("Предмет", ["Корабль", "Гвоздь"])                 the one control. A part reads its value as $/v
+//   s1 = rect(0, 110, 300, 110, "water", 0)                            the parts: s1 to s12 are shapes (scene), i1 to i6 items (items)
+//   card = card("Вытеснение воды", "Полый корабль ...")                 the card
+//
+// The code of each template form is in a module of its own (forms.js), and what each form uses is in form-base.js.
+
+
+
+
+
+
+
+const isTemplateFile = (text) => typeof text === "string" && TEMPLATE_HEAD.test(text.split("\n").find((line) => line.trim()) ?? "");
+
+const readsV = (node) => node.k === "path" && node.abs && node.segs.length === 1 && node.segs[0] === "v";
+
 /** A line of a template file or of a reply: {name, raw}, a first line with head, a delete as {gone}, or null for a line with no name. $/v is the line control. */
 function lineOf(raw) {
   const line = raw.trim(), word = TEMPLATE_HEAD.exec(line)?.[1], gone = /^delete\s+(\S+)$/.exec(line)?.[1], name = /^(\$\/v|[\p{L}_][\p{L}\p{N}_]*)\s*=(?!=)/u.exec(line)?.[1];
@@ -3939,7 +4086,7 @@ const rank = (name, word) => (name === word ? 0 : name === "control" ? 1 : name 
  * template does not have, and a line with no name are faults and not lines. The kit-written line $/v = VALUE is the line control.
  */
 function readTemplate(text) {
-  const [first = "", ...rest] = text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#")), word = TEMPLATE_HEAD.exec(first)?.[1];
+  const [first = "", ...rest] = text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#")), word = TEMPLATE_HEAD.exec(first)?.[1], form = FORMS_BY_WORD[word];
   const faults = [], lines = [], fault = (name, message) => { faults.push(`${name}: ${message}`); return message; };
   const read = (raw, parse) => { try { return parse(raw.trim()); } catch (failure) { if (failure instanceof DslError) return failure; throw failure; } };
   const head = read(first, parseExpression), headless = head instanceof DslError ? head.message : headFault(head, word);
@@ -3947,22 +4094,22 @@ function readTemplate(text) {
   lines.push({ name: word, raw: first.trim(), tree: headless ? null : head });
   for (const raw of rest) {
     const one = lineOf(raw), name = one?.name;
-    if (!one || one.head) { fault(word, `${JSON.stringify(raw.trim().slice(0, 40))} is not a line of the template. Its lines are the first line, ${LINES[word]}`); continue; }
+    if (!one || one.head) { fault(word, `${JSON.stringify(raw.trim().slice(0, 40))} is not a line of the template. Its lines are the first line, ${form.lines}`); continue; }
     if (one.gone) { fault(one.gone, "a template file has no delete line. Only a repair or a change reply deletes a line"); continue; }
-    if (name !== "control" && name !== "card" && !PART[word].test(name)) { fault(name, `the template ${word} has no line ${name}. Its lines are ${LINES[word]}`); continue; }
+    if (name !== "control" && name !== "card" && !form.part.test(name)) { fault(name, `the template ${word} has no line ${name}. Its lines are ${form.lines}`); continue; }
     if (lines.some((line) => line.name === name)) { fault(name, `this is a second line ${name}. Each line has its own name`); continue; }
     const entry = read(raw, parseLine);
     let tree = entry instanceof DslError ? null : entry.tree, message = entry instanceof DslError ? entry.message : null, source = raw.trim();
-    if (tree && name === "control") message = entry.kind === "state" ? (isText(tree) || numberOf(tree) !== undefined ? null : "$/v = VALUE takes a number or a text in quotes") : controlFault(tree, word);
+    if (tree && name === "control") message = entry.kind === "state" ? (isText(tree) || numberOf(tree) !== undefined ? null : "$/v = VALUE takes a number or a text in quotes") : form.controlFault(tree);
     else if (tree) {
       // The kept line has the cut text, so the stored file and a later change have it too.
       const short = cutLong(tree, name, word);
       if (short !== tree) { tree = short; source = `${name} = ${show(tree)}`; }
       const shape = name !== "card" && word === "scene", path = nodesIn(tree, (node) => node.k === "path" && !readsV(node))[0];
-      message = (name === "card" ? cardFault(tree, word) : partFault(tree, word)) ?? (path ? `a line reads only $/v, the value of the control, and this line reads ${show(path)}` : null);
+      message = (name === "card" ? form.cardFault(tree) : form.partFault(tree)) ?? (path ? `a line reads only $/v, the value of the control, and this line reads ${show(path)}` : null);
       if (shape && !message) message = colorFault(tree = colored(tree));
       // The choice of items shows their labels, so it cannot tell two items of one label apart.
-      const twin = !message && word === "items" && name !== "card" && lines.find((line) => line.tree && PART.items.test(line.name) && line.tree.args[0].v === tree.args[0].v);
+      const twin = !message && word === "items" && name !== "card" && lines.find((line) => line.tree && FORMS_BY_WORD.items.part.test(line.name) && line.tree.args[0].v === tree.args[0].v);
       if (twin) message = `the label ${show(tree.args[0])} is the label of ${twin.name} too. Each item needs a label of its own: the choice shows the labels`;
     }
     if (message) fault(name, message);
@@ -3991,13 +4138,14 @@ function mergeTemplate(stored, reply) {
 }
 
 /** The parts of a template that are drawn: each part line with no fault that is not left out. */
-const drawnParts = (read, leftOut) => read.lines.filter((line) => line.tree && !leftOut.has(line.name) && PART[read.word].test(line.name));
+const drawnParts = (read, leftOut) => read.lines.filter((line) => line.tree && !leftOut.has(line.name) && FORMS_BY_WORD[read.word].part.test(line.name));
 /**
  * The value that $/v keeps when the control is left out: the start of a slider or a choice, the first item of items, or 0 when the file has no
  * control line that the kit can read.
  */
 function startOf(read, leftOut) {
-  if (read.word === "items") return drawnParts(read, leftOut)[0]?.tree.args[0] ?? { k: "lit", v: 0 };
+  const form = FORMS_BY_WORD[read.word];
+  if (form.start) return form.start(drawnParts(read, leftOut));
   const line = read.lines.find((one) => one.name === "control");
   let tree = line?.tree;
   try { tree ??= line && parseLine(line.raw)?.tree; } catch { tree = null; }
@@ -4011,30 +4159,18 @@ function startOf(read, leftOut) {
  * rules as a mismatch (change.js).
  */
 function expandTemplate(read, leftOut) {
-  const { word } = read, [{ tree: head }] = read.lines, parts = drawnParts(read, leftOut), line = (name) => read.lines.find((one) => one.name === name && one.tree && !leftOut.has(name));
+  const [{ tree: head }] = read.lines, parts = drawnParts(read, leftOut), line = (name) => read.lines.find((one) => one.name === name && one.tree && !leftOut.has(name));
   if (!head) return null;
   const control = line("control")?.tree, card = line("card")?.tree, title = show(head.args[0]);
   const out = [`app(${title}, lang=${show(head.named.lang)}, preset="clean", palette=${show(head.named.palette ?? { k: "lit", v: "blue" })})`];
-  let shapes = parts.map((part) => show(part.tree));
-  if (word === "items") {
-    out.push(`$/items := [${parts.map(({ tree: { args: [label, sign, text] } }) => `{label: ${show(label)}, sign: ${show(sign)}, text: ${show(text)}}`).join(", ")}]`, "$/now := find($/items, $label == $/v)");
-    // The sign is large when it is one or two characters, and smaller for a word, so a sign at 1.25 times its cap fits the 300 px of the drawing.
-    // A preview with no item yet draws nothing, so the first item only adds to the picture.
-    shapes = parts.length ? ['text(150, 95, $/now/sign, "accent", len($/now/sign) <= 2 ? 72 : (len($/now/sign) <= 6 ? 44 : 24))', 'text(150, 190, $/v, "ink", 20)'] : [];
-  } else if (word === "cells" && control?.k === "call") {
-    // Rows of at most ten cells, filled evenly, in the top 176 px, and the caption "K / N = P%" under them. One row of few cells gets taller cells.
-    const count = numberOf(control.args[2]), rows = Math.ceil(count / 10), cols = Math.ceil(count / rows);
-    const pitch = rows > 1 ? Math.min(Math.floor(280 / cols), Math.floor(176 / rows)) : Math.min(56, Math.floor(280 / cols)), side = pitch - 4, tall = rows > 1 ? side : Math.min(60, Math.round(side * 1.4));
-    const x0 = Math.round((WIDTH - (cols * pitch - 4)) / 2), y0 = 8 + Math.round((176 - ((rows - 1) * pitch + tall)) / 2);
-    shapes = [`each(${count}, rect(${x0} + ($index % ${cols}) * ${pitch}, ${y0} + floor($index / ${cols}) * ${pitch}, ${side}, ${tall}, $index < $/v ? "accent" : "muted", 3))`,
-      `text(150, 202, text($/v) + " / ${count} = " + text(round($/v / ${count} * 100)) + "%", "ink", 18)`];
-  }
-  out.push(`need picture = drawing(${title}, ${WIDTH}, ${HEIGHT}, [${shapes.join(", ")}])`);
+  // What the form gives in place of the defaults (forms.js TemplateForm expand).
+  const own = FORMS_BY_WORD[read.word].expand?.(parts, control) ?? {}, shapes = own.shapes ?? parts.map((part) => show(part.tree));
+  out.push(...(own.lines ?? []), `need picture = drawing(${title}, ${WIDTH}, ${HEIGHT}, [${shapes.join(", ")}])`);
   const [label, ...args] = control?.args ?? [], start = show(startOf(read, leftOut));
   if (control?.k !== "call") out.push(`$/v = ${control ? show(control) : start}`);
   else if (control.name === "slider") out.push(`need v = input("slider", ${show(label)}, ${start}, min=${show(args[0])}, max=${show(args[1])}, step=${show(args[2])})`);
-  else out.push(`need v = input("choice", ${show(label)}, ${start}, options=${show(word === "items" ? { k: "list", items: parts.map((part) => part.tree.args[0]) } : args[0])})`);
-  if (card) out.push(`need card = card(${show(card.args[0])}, ${word === "items" ? "$/now/text" : show(card.args[1])})`);
+  else out.push(`need v = input("choice", ${show(label)}, ${start}, options=${show(own.options ?? args[0])})`);
+  if (card) out.push(`need card = card(${show(card.args[0])}, ${own.cardText ?? show(card.args[1])})`);
   return out.join("\n") + "\n";
 }
 
@@ -4052,7 +4188,7 @@ function ownersOf(read, leftOut, faults, build) {
   for (const fault of faults) /\bneed v\b/.test(fault) ? add("control", fault) : /\bneed card\b/.test(fault) ? add("card", fault) : rest.push(fault);
   if (!rest.length) return owners;
   const parts = drawnParts(read, leftOut).map((part) => part.name), alone = (names) => build(expandTemplate(read, new Set([...leftOut, ...owners.keys(), "card", ...names]))).faults;
-  if (read.word === "scene" && !owners.has("control")) alone(parts).forEach((fault) => add("control", fault));
+  FORMS_BY_WORD[read.word].owners?.(owners, alone, parts, add);
   for (const part of parts) alone(parts.filter((other) => other !== part)).forEach((fault) => add(part, fault));
   return owners;
 }
@@ -4109,7 +4245,7 @@ function buildTemplate(text, stored, build, preview = false) {
     word: read.word, kept, expanded: broken ? null : expanded, leftOut: [...leftOut], holds };
 }
 
-return { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, isTemplateFile, readTemplate, mergeTemplate, expandTemplate, buildTemplate };
+return { isTemplateFile, readTemplate, mergeTemplate, expandTemplate, buildTemplate };
 })();
 // compile.js
 const { compileAppFile, linesOf, readPlanReply, LINE, NEED_NAME, needsIn, patchAppFile, compileStep, previewStep } = (() => {

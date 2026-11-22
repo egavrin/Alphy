@@ -12,7 +12,7 @@ import { PROMPT, changeText, repairText, templateChangeText, templateRepairText,
 import { TEMPLATE_HEAD } from "./src/template.js";
 
 /** The modules of the bundle in dependency order: each one imports only modules before it. */
-const MODULES = ["icons", "dsl", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "change", "template", "compile"];
+const MODULES = ["icons", "dsl", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "change", "form-base", "form-scene", "form-items", "form-cells", "forms", "template", "compile"];
 const at = (path) => fileURLToPath(new URL(path, import.meta.url));
 /** The host's sources of its icon names (ToolUiCatalog.icons): the shell glyphs and the domain icons. */
 const HOST_SOURCES = ["ToolUiCatalog", "ToolIcons"].map((name) => at(`../app/src/main/java/com/alpha/assistant/tools/${name}.kt`));
@@ -39,23 +39,29 @@ const scanner = new Bun.Transpiler({ loader: "js" });
 /**
  * The modules [[name, text]] as one script. Each module keeps a scope of its own and shares only its exported names, so two
  * modules can use one name for their own helpers. An import names a module before it and names that it exports, and an
- * export line declares one function, class, or const. The build refuses each other form.
+ * export line declares one function, class, or const, or exports again names that a module before it exports
+ * (export { a, b } from "./x.js";). The build refuses each other form.
  */
 export function script(modules) {
   const exported = new Map();
   return modules.map(([name, text]) => {
-    const names = [];
+    const names = [], again = [], known = (list, from) => list.split(", ").every((one) => exported.get(from)?.has(one));
     const body = text.replace(/^import (.*);$/gm, (line, what) => {
       const [, list, from] = /^\{ ([\w$, ]+) \} from "\.\/([\w-]+)\.js"$/.exec(what) ?? [];
-      if (!list || !list.split(", ").every((one) => exported.get(from)?.has(one))) throw new Error(`kit/src/${name}.js: the build cannot keep this import: ${line}`);
+      if (!list || !known(list, from)) throw new Error(`kit/src/${name}.js: the build cannot keep this import: ${line}`);
+      return "";
+    }).replace(/^export \{ ([\w$, ]+) \} from "\.\/([\w-]+)\.js";$/gm, (line, list, from) => {
+      if (!known(list, from)) throw new Error(`kit/src/${name}.js: the build cannot keep this export: ${line}`);
+      // The script declares each exported name once, so a name that a module exports again gets no second declaration.
+      again.push(...list.split(", "));
       return "";
     }).replace(/^export ((?:async )?(?:function|class|const) ([\w$]+))/gm, (_, declaration, one) => { names.push(one); return declaration; });
     const left = /^(?:import|export)\b.*$/m.exec(body);
     if (left) throw new Error(`kit/src/${name}.js: the build cannot remove this line: ${left[0]}`);
     // export const a = 1, b = 2 would share only a.
-    const all = scanner.scan(text).exports;
-    if (all.length !== names.length) throw new Error(`kit/src/${name}.js: an export line declares one name: ${all.filter((one) => !names.includes(one)).join(", ")}`);
-    exported.set(name, new Set(names));
+    const all = scanner.scan(text).exports, shared = [...names, ...again];
+    if (all.length !== shared.length) throw new Error(`kit/src/${name}.js: an export line declares one name: ${all.filter((one) => !shared.includes(one)).join(", ")}`);
+    exported.set(name, new Set(shared));
     return `// ${name}.js\nconst { ${names.join(", ")} } = (() => {\n${body}\nreturn { ${names.join(", ")} };\n})();\n`;
   }).join("");
 }
