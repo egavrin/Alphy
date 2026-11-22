@@ -175,6 +175,24 @@ class FollowTurnRehearsalTest {
         assertEquals(pair.map { listOf(it.id, it.role, it.text, it.spoken) }, stored.filter { it.id in pair.map { m -> m.id } }.map { listOf(it.id, it.role, it.text, it.spoken) })
     }
 
+    /**
+     * A caption piece of the person can come after the voice began its reply (live check of Alpha 20): it joins the same turn, so the
+     * pair holds the whole words of the person, and the turn gets its one follow call.
+     */
+    @Test fun aLateCaptionJoinsTheSpokenPair() = live { model, talk, _ ->
+        said(model)
+        socket.emit(inputDelta("Что такое чёрная", 3_000, 3_800))
+        socket.emit(outputDelta("Это область", 4_000, 4_300))
+        socket.emit(inputDelta(" дыра", 3_800, 4_100))
+        socket.emit(outputDelta(" в космосе.", 4_300, 4_700))
+        robot.waitUntil(10_000) { talk.follows.size == 1 }
+        val whole = listOf("user" to "Что такое чёрная дыра", "assistant" to "Это область в космосе.")
+        assertEquals(whole, talk.follows.single().turns.map { it.role to it.text })
+        assertEquals(whole, shell.messages(model).takeLast(2).map { it.role to it.text })
+        assertTrue(shell.messages(model).takeLast(2).all { it.spoken })
+        during(1_000) { assertEquals(1, talk.follows.size) }
+    }
+
     /** Review focus 3: the voice speaks a few words and then hands off in the same turn. One user message stays, and the follow call stops. */
     @Test fun wordsThenAHandOffLeaveOneUserMessage() = live { model, talk, _ ->
         talk.followDelayMs = 3_000

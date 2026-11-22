@@ -8,9 +8,11 @@ private data class Delta(val text: String, val startMs: Long, val endMs: Long)
 /**
  * Input deltas at most this far apart are one speech run, and a run is current only when its last delta ends at most this far
  * before the hand-off (rulings R31 and R32). The same gap ends the run of a late last word. Gaps inside a turn were at most
- * 400 ms in the live checks.
+ * 400 ms in the live checks. The session uses the same gap for an input piece that comes after the voice began its reply: in
+ * the decisions probe of 2026-11-22 such a piece started 0 to 400 ms after the piece before it, the pieces of one phrase were
+ * at most 600 ms apart, and a new phrase started at least 4,200 ms later.
  */
-private const val SPEECH_RUN_GAP_MS = 1_000L
+internal const val SPEECH_RUN_GAP_MS = 1_000L
 
 /** The input and output stamps of GPT-Live sit on this grid. */
 private const val STAMP_STEP_MS = 200L

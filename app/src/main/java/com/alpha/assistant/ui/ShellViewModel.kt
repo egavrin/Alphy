@@ -341,6 +341,14 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         return SpokenPair(updated.id, user.id, assistant.id)
     }
 
+    /** The words of the person of [pair], when a caption piece came after the pair began. A chat that the pair made gets its title from them. */
+    internal fun spokenUserWords(pair: SpokenPair, words: String) {
+        val conversation = snapshot.conversations.find { it.id == pair.conversationId } ?: return
+        val text = words.trim()
+        replace(conversation.copy(title = if (pair.conversationId in unsavedPairChats) text.take(70) else conversation.title,
+            messages = conversation.messages.map { if (it.id == pair.userId) it.copy(text = text) else it }))
+    }
+
     internal fun appendSpokenWords(pair: SpokenPair, words: String) {
         val conversation = snapshot.conversations.find { it.id == pair.conversationId } ?: return
         replace(conversation.copy(messages = conversation.messages.map { if (it.id == pair.assistantId) it.copy(text = it.text + words) else it }))

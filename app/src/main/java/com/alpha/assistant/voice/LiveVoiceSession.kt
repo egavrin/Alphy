@@ -175,6 +175,9 @@ internal class LiveVoiceSession(
     private var touchOpenMs = 0L
     /** The user turn has an input transcript piece, so the next piece starts no turn ([LiveVoiceHost.inputStarted]). */
     private var inputOpen = false
+    /** The session time of the end of the last input transcript piece, and whether the output transcript ended the user turn of that piece. */
+    private var lastInputEndMs: Long? = null
+    private var endedByOutput = false
     /** A received voiced chunk: its arrival, its first frame in [queuedFrames], and a quiet run of [ONSET_QUIET_MS] before it. */
     private class Received(val arrivedNanos: Long, val frame: Long, val onset: Boolean)
     private val received = ArrayDeque<Received>()
@@ -234,7 +237,7 @@ internal class LiveVoiceSession(
         transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null; tolerated.clear()
         started = false; userMuted = false; awayMuted = false; captureMuted = false; dropping = false; interrupted = false
         playbackSeenMs = Long.MIN_VALUE; held.clear(); touchDownMs = null; touchOpenMs = 0L
-        inputOpen = false; received.clear(); queuedFrames = 0; skippedFrames.set(0); quietMs = 0; lastChunkNanos = 0; lastChunkMs = 0
+        inputOpen = false; lastInputEndMs = null; endedByOutput = false; received.clear(); queuedFrames = 0; skippedFrames.set(0); quietMs = 0; lastChunkNanos = 0; lastChunkMs = 0
         skipSentence = null; endSkip(); sinceSentence = ""
         active = true; status = ""; phase = LivePhase.CONNECTING
         scope.launch {
@@ -466,7 +469,11 @@ internal class LiveVoiceSession(
             }
             is LiveEvent.OutputAudio -> output(event.samples)
             is LiveEvent.InputTranscript -> {
-                if (!inputOpen && event.delta.isNotBlank()) { inputOpen = true; host?.inputStarted() }
+                // The voice can begin its reply, or go on with a narration, before the last caption piece of a phrase comes. A piece of
+                // the same speech run (SPEECH_RUN_GAP_MS) is no new turn of the host.
+                val joins = endedByOutput && lastInputEndMs?.let { event.startMs - it <= SPEECH_RUN_GAP_MS } == true
+                if (!inputOpen && event.delta.isNotBlank()) { inputOpen = true; endedByOutput = false; if (!joins) host?.inputStarted() }
+                if (event.delta.isNotBlank()) lastInputEndMs = event.endMs
                 host?.inputText(event.delta, event.eventId)
                 refresh()
                 // A delta arrives after its own end, so its phrase began at or before this time (ruling R11).
@@ -474,7 +481,7 @@ internal class LiveVoiceSession(
                 transcript.input(event.delta, event.startMs, event.endMs, playbackSeenMs >= began || interrupted)
                 interrupted = false
                 gapJob?.cancel()
-                gapJob = after(timing.turnGapMs) { inputOpen = false; turn(transcript.endTurn()) }
+                gapJob = after(timing.turnGapMs) { inputOpen = false; endedByOutput = false; turn(transcript.endTurn()) }
             }
             is LiveEvent.OutputTranscript -> {
                 host?.outputPiece(event.eventId)
@@ -501,7 +508,7 @@ internal class LiveVoiceSession(
                     replyEnded = false
                     if (skipText) skipPiece(event.delta, event.startMs, event.endMs, replyStart) else said(event.delta, event.startMs, event.endMs, replyStart)
                 }
-                turn(transcript.output(event.delta, event.startMs, event.endMs))
+                transcript.output(event.delta, event.startMs, event.endMs)?.let { endedByOutput = true; turn(it) }
             }
             is LiveEvent.Delegation -> delegation(event)
             is LiveEvent.Appended -> host?.appended(event.clientEventId)
@@ -659,7 +666,7 @@ internal class LiveVoiceSession(
     /** The turn of the request reaches the host before its hand-off. */
     private fun handOff(event: LiveEvent.Delegation, request: String) {
         waiting = null
-        inputOpen = false
+        inputOpen = false; endedByOutput = false
         turn(transcript.endTurn())
         host?.delegation(event.id, request)
     }

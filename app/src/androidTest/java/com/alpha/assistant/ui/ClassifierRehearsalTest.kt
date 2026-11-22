@@ -101,6 +101,27 @@ class ClassifierRehearsalTest {
         assertEquals(listOf("user" to NEXT_REQUEST, "assistant" to SAYS[1]), shell.messages(model).takeLast(2).map { it.role to it.text })
     }
 
+    /**
+     * K3 over the voice (live check of Alpha 20): the caption pieces of the person come between pieces of the voice. They are one turn:
+     * one command acts, and the chat keeps the whole phrase of the person.
+     */
+    @Test fun aCommandSpokenOverTheVoiceIsOneTurn() = live { model, talk ->
+        val scene = scene(model)
+        val routed = talk.routed.size
+        socket.emit(outputDelta("Смотри ", 2_000, 2_300, "o1"))
+        socket.emit(inputDelta("Давай ", 2_100, 2_400, "p1"))
+        socket.emit(liveDecision("p1", true, classified(USER_COMMAND, "none", 0.6)))
+        socket.emit(outputDelta("на ", 2_300, 2_600, "o2"))
+        socket.emit(inputDelta("дальше", 2_500, 2_900, "p2"))
+        socket.emit(liveDecision("p2", true, classified(USER_COMMAND, "next", 0.9)))
+        socket.emit(outputDelta("экран.", 2_600, 3_000, "o3"))
+        robot.waitUntil(5_000) { "" to MARK + SAYS[1] in socket.thinking() }
+        shows(model, scene, NAIL)
+        assertEquals(routed, talk.routed.size)
+        assertEquals(listOf("user" to "Давай дальше", "assistant" to SAYS[1]), shell.messages(model).takeLast(2).map { it.role to it.text })
+        assertTrue(shell.messages(model).none { it.spoken })
+    }
+
     /** K3: at a hand-off, the answer of the last piece may come up to 300 ms late. An answer after 400 ms leaves the turn to the routing call. */
     @Test fun theAnswerOfTheLastPieceMayComeLate() = live { model, talk ->
         val scene = scene(model)

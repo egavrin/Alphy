@@ -448,6 +448,8 @@ internal class LiveVoiceBridge(
         if (personTurn?.ended == true && delta.isNotBlank()) inputStarted()
         val turn = personTurn ?: return
         turn.words.append(delta)
+        // A caption piece can come after the voice began its reply, so the pair of the turn gets the whole words of the person.
+        turn.pair?.let { model.spokenUserWords(it, turn.words.toString()) }
         eventId?.let { turn.pieces += it }
         // K3: with no hand-off, the end of a phrase is 1000 ms with no new caption piece of the person.
         if (turn.handOff || turn.ended || classifiedScreen() == null) return

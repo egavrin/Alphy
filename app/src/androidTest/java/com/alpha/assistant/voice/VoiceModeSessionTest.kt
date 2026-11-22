@@ -240,6 +240,22 @@ class VoiceModeSessionTest {
         assertEquals(2, rig.host.inputStarts.get())
     }
 
+    /**
+     * A caption piece of the person can come after the voice began its reply (live check of Alpha 20). A piece that starts where the
+     * phrase ended goes on with the same turn. A phrase that starts later is a new turn.
+     */
+    @Test fun aLateInputPieceAfterTheReplyStartIsNoNewTurn() {
+        val rig = Rig().started()
+        rig.socket.emit(inputDelta("Что такое чёрная", 1_000, 1_800))
+        rig.socket.emit(outputDelta("Это область", 2_000, 2_300))
+        rig.socket.emit(inputDelta(" дыра", 1_800, 2_100))
+        rig.socket.emit(outputDelta(" в космосе.", 2_300, 2_700))
+        waitUntil("two pieces") { rig.host.pieces.size == 2 }
+        assertEquals(1, rig.host.inputStarts.get())
+        rig.socket.emit(inputDelta("Подожди", 4_000, 4_400))
+        waitUntil("the second turn") { rig.host.inputStarts.get() == 2 }
+    }
+
     /** The speaker plays 1 s behind the writes. The onset after the arm is the second voiced run, after 300 ms of silent audio. */
     @Test fun theChangeFiresWhenTheSpeakerPlaysTheOnset() {
         val rig = Rig(lagMs = 1_000).started()

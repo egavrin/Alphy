@@ -66,7 +66,8 @@ internal class Speech(val fixture: String, val words: String)
  * that the step holds (lane V). [touch]: the driver taps a control of the stage app [TOUCH_MS] after the end of the speech, as the
  * person who changes a value while the change runs. [tapWhileSpeaking]: the driver taps a control of the stage app while the voice
  * speaks the reply of the step and records the 8 s after the tap (the field `tap` of the step row). [untilStep]: the step ends as soon as
- * a steps scene on the stage shows that step, so the next step speaks while the voice narrates it (plan "one scene", L1).
+ * the walk of a steps scene moves the stage to that step, so the next step speaks while the voice narrates it (plan "one scene", L1). A
+ * new scene shows its answer step first, so the step that the stage shows is no sign of the walk.
  */
 internal class DialogueStep(val speech: Speech?, val handOff: Boolean, val screen: Boolean, val requestStarts: String? = null,
     val goal: String? = null, val touch: Boolean = false, val tapWhileSpeaking: Boolean = false, val untilStep: Int? = null)
@@ -553,9 +554,10 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         var since = SystemClock.elapsedRealtimeNanos()
         while (SystemClock.elapsedRealtimeNanos() < deadline && !capped) {
             noteStageError(scenario)
-            if (untilStep != null && main { stageStep(model) } >= untilStep) break
             val now = SystemClock.elapsedRealtimeNanos()
             val marks = recorder.marks()
+            if (untilStep != null && marks.any { it.name == DialogueRecorder.STAGE_STEP && it.atNanos > start &&
+                    it.detail?.let { step -> step.startsWith("$untilStep/") && step.endsWith(" narrator") } == true }) break
             val commentary = marks.lastOrNull { it.name == "commentary" && it.atNanos > start }?.atNanos
             val answered = commentary == null || marks.any { it.name == "voice_out" && it.atNanos > commentary } ||
                 now - commentary > VOICE_MS * 1_000_000
@@ -574,10 +576,6 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         robot.awaitFrames(5)
         return late
     }
-
-    /** The present step of a steps scene on the stage, or 0. */
-    private fun stageStep(model: ShellViewModel): Int =
-        model.stageToolId?.let { id -> model.tools.tools.firstOrNull { it.id == id } }?.let { ShownScreen.of(it)?.step?.index } ?: 0
 
     /** Notes the first session error that the stage shows in this step of an adaptive dialogue. It can show for a moment only. */
     private fun noteStageError(scenario: ActivityScenario<CloudTestActivity>) {
