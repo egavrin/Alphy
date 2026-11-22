@@ -185,6 +185,25 @@ class StageNarratorRehearsalTest {
         assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), rig.sent)
     }
 
+    /**
+     * Mark fix (live record live-2b-uxHeart, step 1): the voice says the mark word aloud before the opener and before sentence 1, in one
+     * reply and in word pieces. The second mark starts right after the end of the opener. Sentence 1 still arms, and its fire moves its step.
+     */
+    @Test fun aSpokenMarkBeforeASentenceStillMovesTheStage() {
+        val rig = Rig()
+        rig.start()
+        val pieces = listOf(" Дос", "ловно", ":", " Корабль", " держится", " на", " воде,", " потому", " что", " он", " полый. Дос", "ловно:") +
+            SAYS[0].split(" ").map { " $it" }
+        rig.say(pieces.first(), replyStart = true)
+        for (piece in pieces.drop(1)) rig.say(piece)
+        assertTrue(rig.armed)
+        // The opener starts with the first word of sentence 1, so it arms once and goes another way.
+        assertEquals(listOf(1, 2), listOf(rig.cancels, rig.arms))
+        rig.fire()
+        assertEquals(STEPS.take(1), rig.pressed)
+        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), rig.sent)
+    }
+
     @Test fun aNarratorPressDoesNotStopTheWalk() {
         val rig = Rig()
         rig.start()

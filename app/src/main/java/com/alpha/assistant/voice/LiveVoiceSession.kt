@@ -40,18 +40,24 @@ private const val SENTENCE_ENDS = ".!?…"
 /** [text] with no letter case, no punctuation, and single spaces, for the match of a spoken text with a sentence. */
 private fun plain(text: String) = text.lowercase().replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim()
 
+/** The mark word of [LiveProtocol.MARK] in [plain] form. */
+private val SPOKEN_MARK = plain(LiveProtocol.MARK)
+
+/** [heard] in [plain] form with no mark word at its start: the voice can say the mark aloud before a sentence (live record live-2b-uxHeart). */
+private fun plainHeard(heard: String) = plain(heard).let { if (it == SPOKEN_MARK) "" else it.removePrefix("$SPOKEN_MARK ") }
+
 /**
  * True when [heard], the transcript since the end of the last sentence, starts [sentence]: one is the start of the other, and [heard] has
- * a letter or a digit (plan "one scene", decision 14).
+ * a letter or a digit (plan "one scene", decision 14). A spoken mark word at the start of [heard] does not count.
  */
 internal fun startsSentence(heard: String, sentence: String): Boolean {
-    val said = plain(heard)
+    val said = plainHeard(heard)
     val whole = plain(sentence)
     return said.isNotEmpty() && whole.isNotEmpty() && (whole.startsWith(said) || said.startsWith(whole))
 }
 
-/** True when [heard] holds the whole of [sentence] from its start. */
-internal fun coversSentence(heard: String, sentence: String) = plain(sentence).let { it.isNotEmpty() && plain(heard).startsWith(it) }
+/** True when [heard] holds the whole of [sentence] from its start, after a spoken mark word. */
+internal fun coversSentence(heard: String, sentence: String) = plain(sentence).let { it.isNotEmpty() && plainHeard(heard).startsWith(it) }
 
 /** The text after the last sentence end of [text]. */
 internal fun afterSentenceEnd(text: String) = text.substring(text.indexOfLast { it in SENTENCE_ENDS } + 1)

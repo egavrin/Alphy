@@ -130,10 +130,11 @@ The voice must say each text of Alphy as Alphy wrote it, with no control, offer,
 - A refinement choice and a press that did not run get a host line in place of the reply. A plan card gets the lines of its plan phases.
 - `LiveProtocol.spoken` cuts the text at a sentence end, so that the mark and the text fit one append of at most 1,200 characters (`LiveVoiceBridge.MAX`).
 
-The instructions (`LiveProtocol.INSTRUCTIONS`) have three lines for these texts:
+The instructions (`LiveProtocol.INSTRUCTIONS`) have four lines for these texts:
 
 - The mark line, which starts with «Если в тексте есть метка «Дословно:»». GPT-Live says only the text after the mark, word for word and once. It adds no introduction, no words of its own, no repeat, no question, and no offer.
 - The stop line after it, which starts with «После этого текста замолчи и жди». After that text, GPT-Live stops and waits. It does not explain or go on, also when the answer seems incomplete.
+- The mark word line after the stop line, which starts with «Слово «Дословно» — служебная метка», tells GPT-Live never to say the mark word aloud or to start its own phrases with it.
 - The line for a text with no mark, which starts with «Текст без метки скажи коротко на языке разговора». GPT-Live says that text briefly, in the language of the talk. It adds no button, action, offer, or question that the text does not have.
 
 The instructions also set the language of the latest request and the form «ты». The routing call, the answer step, and the grounded decision of a spoken request also tell the chat model to address the person with «ты» (`ChatToolReply.SPOKEN_ADDRESS`), so the voice can say each text word for word. A typed request does not get this line. The wait phrase names no worker, no delegation, no request, and no mini-app.

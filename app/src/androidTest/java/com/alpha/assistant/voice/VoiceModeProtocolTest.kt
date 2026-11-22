@@ -55,6 +55,14 @@ class VoiceModeProtocolTest {
         assertEquals("После этого текста замолчи и жди: не объясняй и не продолжай сам, даже если ответ кажется неполным.", lines.getOrNull(mark + 1))
     }
 
+    /** Mark fix (live record live-2b-uxHeart): the voice said the mark word aloud and began own sentences with it, so the line after the stop line forbids both. */
+    @Test fun theInstructionsKeepTheMarkWordSilent() {
+        val lines = LiveProtocol.INSTRUCTIONS.lines()
+        val stop = lines.indexOfFirst { it.startsWith("После этого текста замолчи и жди:") }
+        assertTrue(LiveProtocol.INSTRUCTIONS, stop >= 0)
+        assertEquals("Слово «Дословно» — служебная метка. Никогда не произноси его вслух и не начинай с него свои фразы.", lines.getOrNull(stop + 1))
+    }
+
     /**
      * Plan D, Db3 (form J, ruling OD-D5): after the delegation line, the session start gives the choice between a hand-off for a
      * screen and an own short answer. The examples are not the topics of the live checks.

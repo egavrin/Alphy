@@ -423,6 +423,27 @@ class VoiceModeSessionTest {
         assertEquals(listOf("Первое.:0:300:true", "Хорошо.:1000:1500:true"), rig.host.pieces.toList())
     }
 
+    /**
+     * Mark fix (live record live-2b-uxHeart, step 1): the voice says the mark word aloud before the skipped sentence, in its own pieces and
+     * right after the end of the sentence before it. The skip still drops the sentence, and the new text after it plays.
+     */
+    @Test fun aSkipDropsASentenceAfterASpokenMark() {
+        val rig = Rig().started()
+        main { rig.session.skip(SECOND) }
+        rig.socket.emit(outputDelta("Первое. Дос", 0, 400))
+        rig.socket.emit(outputAudio(1, VOICED_600))
+        rig.socket.emit(outputDelta("ловно:", 400, 600))
+        rig.socket.emit(outputDelta(" $SECOND", 600, 1_200))
+        repeat(2) { rig.socket.emit(silentAudio()) }
+        rig.socket.emit(outputAudio(2, VOICED_600))
+        rig.socket.emit(outputDelta(" Новый ответ.", 1_200, 1_800))
+        repeat(2) { rig.socket.emit(silentAudio()) }
+        rig.socket.emit(outputAudio(3, VOICED_600))
+        waitUntil("the end of the reply") { rig.outputEnds() == 1 }
+        assertEquals(listOf(1_000, 3_000), rig.markers().filter { it != SILENT_SAMPLE.toInt() })
+        assertEquals(listOf("Первое. Дос:0:400:true", "ловно::400:600:false", " Новый ответ.:1200:1800:false"), rig.host.pieces.toList())
+    }
+
     /** Walk fix: words with no sentence end in an older reply block no skip that starts at the start of the next reply. */
     @Test fun aSkipStartsAfterStaleWordsOfAnOlderReply() {
         val rig = Rig().started()
