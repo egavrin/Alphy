@@ -88,7 +88,9 @@ internal fun showsOnTheStage(message: Message): Boolean = message.status !in unf
  * The fixed text of a failed request on the stage for the group of its error [code], with what the person can say next (plan "one scene",
  * decision 22). The groups of no answer and too big are those of a failed full generation (LiveVoiceBridge.fullFailed).
  */
-@StringRes private fun stageError(code: String): Int = when {
+@StringRes internal fun stageError(code: String): Int = when {
+    // First, because auth is also a code of no answer. The card of a key error has the settings button.
+    code in com.alpha.assistant.cloud.KEY_ERRORS -> R.string.stage_error_key
     code == "search_no_usable_results" || code == "source_attribution" -> R.string.stage_error_search
     code == "image_generation" -> R.string.stage_error_image
     code in LiveVoiceBridge.NO_ANSWER_CODES || code.startsWith("http_") -> R.string.stage_error_no_answer

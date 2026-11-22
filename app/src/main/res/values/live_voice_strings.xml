@@ -23,8 +23,9 @@
     <string name="live_voice_failed">OpenAI: ошибка голосового режима. Начните заново.</string>
     <!-- The fixed text of a failed request on the stage, by its error group, with what the person can say next (plan "one scene", decision 22). -->
     <string name="stage_error_search">Поиск не дал ответа. Скажи «попробуй ещё раз» или спроси по-другому.</string>
-    <string name="stage_error_image">Картинки выключены в настройках «Сервис ИИ». Спроси без картинки.</string>
+    <string name="stage_error_image">Картинка не получилась. Проверь картинки в настройках «Сервис ИИ» или спроси без картинки.</string>
     <string name="stage_error_no_answer">Сервис ИИ не ответил. Скажи «попробуй ещё раз».</string>
     <string name="stage_error_too_big">Это не помещается на один экран. Скажи короче, одной фразой.</string>
     <string name="stage_error_other">Не получилось. Скажи «попробуй ещё раз» или спроси по-другому.</string>
+    <string name="stage_error_key">Нужна настройка сервиса ИИ. Нажми «Открыть настройки».</string>
 </resources>

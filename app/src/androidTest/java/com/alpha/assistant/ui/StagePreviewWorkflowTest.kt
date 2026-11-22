@@ -270,8 +270,7 @@ class StagePreviewWorkflowTest {
         val notes = listOf(R.string.tool_live_input_pending, R.string.tool_live_input_unsaved, R.string.tool_live_input_unavailable,
             R.string.tool_live_input_finish_first).map { robot.text(it) } +
             listOf(R.string.tool_live_input_finish, R.string.tool_generated_apply).map { robot.text(it, SLIDER_LABEL) }
-        return readStage(robot) { nodes -> nodes.flatMap { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } } }
-            .filter { it.trimEnd() in notes }
+        return stageTexts(robot).filter { it.trimEnd() in notes }
     }
 
     private fun isShipCanvas(config: SemanticsConfiguration) =

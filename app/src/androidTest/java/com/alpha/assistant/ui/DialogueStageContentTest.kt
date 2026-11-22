@@ -81,23 +81,36 @@ class DialogueStageContentTest {
                 when (request.decisionContext?.originalUserTurn?.text) {
                     SEARCH_REQUEST -> throw CloudFailure("search_no_usable_results", SEARCH_FAILURE)
                     SOURCE_REQUEST -> throw CloudFailure("source_attribution", "Cite only the sources of the search.")
+                    KEY_REQUEST -> throw CloudFailure("key_missing", "The key is missing.")
                     else -> emit(CloudEvent.RoundComplete(chatDecision("answer", "Fixture response"), false))
                 }
         }, liveVoice = stage.fixture.liveVoice(stage.socket, stage.audio))
         stage.live { scenario, model ->
             val search = robot.text(R.string.stage_error_search)
             fun failed(code: String) = model.snapshot.selected?.messages?.any { it.id == model.liveVoiceCardId && it.errorCode == code } == true
-            fun texts() = readStage(robot) { nodes -> nodes.flatMap { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } } }
             stage.socket.say(SEARCH_REQUEST, "d1", 100)
-            robot.waitUntil(60_000) { failed("search_no_usable_results") && texts().isNotEmpty() }
-            assertEquals("English texts on the stage", emptyList<String>(), texts().filter { LATIN in it })
+            robot.waitUntil(60_000) { failed("search_no_usable_results") && stageTexts(robot).isNotEmpty() }
+            assertEquals("English texts on the stage", emptyList<String>(), stageTexts(robot).filter { LATIN in it })
             assertTrue("the text of the search group", robot.composedTextIn(scenario, STAGE, search))
             stage.socket.say(SOURCE_REQUEST, "d2", 2_000)
             // Only the card of a source check failure has its own retry button, so it shows when the stage has the second card.
             robot.waitUntil(60_000) { failed("source_attribution") && robot.composedTextIn(scenario, STAGE, robot.text(R.string.chat_message_retry)) }
             assertTrue("the text of the search group", robot.composedTextIn(scenario, STAGE, search))
             assertFalse("the chat text of a source check failure", robot.composedTextIn(scenario, STAGE, robot.text(R.string.chat_source_attribution)))
+            stage.socket.say(KEY_REQUEST, "d3", 4_000)
+            // Only the card of a key error has the settings button, so it shows when the stage has the third card.
+            robot.waitUntil(60_000) { failed("key_missing") && robot.composedTextIn(scenario, STAGE, robot.text(R.string.open_settings)) }
+            assertTrue("the text of the key group", robot.composedTextIn(scenario, STAGE, robot.text(R.string.stage_error_key)))
         }
+    }
+
+    /** Decision 22: one code of each error group gives the stage text of its group. A key error asks for the settings, also auth. */
+    @Test fun eachStageErrorGroupHasItsText() {
+        val groups = mapOf("search_no_usable_results" to R.string.stage_error_search, "source_attribution" to R.string.stage_error_search,
+            "image_generation" to R.string.stage_error_image, "network" to R.string.stage_error_no_answer,
+            "http_500" to R.string.stage_error_no_answer, "widget_size" to R.string.stage_error_too_big, "key_missing" to R.string.stage_error_key,
+            "auth" to R.string.stage_error_key, "unknown_code" to R.string.stage_error_other)
+        assertEquals(groups.mapValues { robot.text(it.value) }, groups.mapValues { robot.text(stageError(it.key)) })
     }
 
     /**
@@ -185,6 +198,7 @@ class DialogueStageContentTest {
         const val ALT = "Сердце человека в разрезе"
         const val SEARCH_REQUEST = "Найди счёт вчерашнего матча"
         const val SOURCE_REQUEST = "Найди, кто забил гол"
+        const val KEY_REQUEST = "Найди состав команды"
         /** The message of the failure of a search with no usable source (WebSearch). */
         const val SEARCH_FAILURE = "Search returned no usable sources. Retry the search or ask without web sources."
         val LATIN = Regex("[A-Za-z]")

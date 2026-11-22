@@ -382,6 +382,10 @@ internal fun <T> readStage(robot: ShellRobot, read: (List<SemanticsNode>) -> T):
     @Suppress("UNCHECKED_CAST") return result as T
 }
 
+/** Each text of a node in the stage, read as [readStage] reads. */
+internal fun stageTexts(robot: ShellRobot): List<String> =
+    readStage(robot) { nodes -> nodes.flatMap { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } } }
+
 /**
  * The texts that the canvas of a ship template on the stage draws, in their order, or null when the stage shows no such canvas. The canvas
  * label is the title and then each text with a period, as "title. A. B.".
