@@ -86,7 +86,8 @@ The spec is `docs/superpowers/specs/2026-11-18-live-voice-dialog-design.md`.
 - The course composers have no voice mode.
 - The start needs the microphone permission. The voice mode and the continuous voice session never run at the same time.
 - The voice screen is a stage above a low strip (`docs/superpowers/specs/2026-11-20-dialogue-stage-design.md`). The stage shows the app of the latest hand-off that made or changed an app, or a stage preview while Alphy makes a screen (section "Template screens and the stage preview"). Before the first app or preview, it shows the Alphy character.
-- The stage shows a chat card only when the card waits for a tap, or when a finished answer has a generated image. At a smallest width of 600 dp or more, the stage has two columns: the main visual with its controls at the left, and the other parts at the right. At that width, the stage keeps 276 dp for the padding, the kind label, the title, the first control, and the gaps around the canvas (`STAGE_TEXT_HEIGHT` in `ui/DialogueStage.kt`).
+- The stage shows a chat card only when the card waits for a tap, or when a finished answer has a generated image. On the card of a failed request, the stage shows the fixed text of its error group in place of the error text of the message (`stageError` in `ui/DialogueStage.kt`). Each text says what the person can say next. `docs/tool-integration.md` lists the groups.
+- At a smallest width of 600 dp or more, the stage has two columns: the main visual with its controls at the left, and the other parts at the right. At that width, the stage keeps 276 dp for the padding, the kind label, the title, the first control, and the gaps around the canvas (`STAGE_TEXT_HEIGHT` in `ui/DialogueStage.kt`).
 - The strip shows the status («Слушаю», «Alphy говорит», or «Alphy выполняет запрос»), the microphone state («Микрофон включён» or «Микрофон выключен»), and the current line of the speech of GPT-Live.
 - The microphone button mutes the capture and sends `session.input_audio.mute`. ✕ ends the voice mode.
 
@@ -97,23 +98,79 @@ The model is `gpt-live-1`, and the voice is `marin`. The audio is `audio/pcm` at
 The session omits `delegation`, so GPT-Live runs in client mode. GPT-Live sends `session.delegation.created`, and Alphy answers with `session.commentary.append`.
 
 - The request of a delegation is the last user turn of the input transcript. Words that the user says while GPT-Live speaks stay in the request, unless the user pauses for more than 1 s (spec 5.5.2). Alphy submits it as a normal chat message, with web search allowed.
-- When the reply is complete, Alphy sends «Ответ Alphy: » and the speakable reply, cut at a sentence end to at most 1,200 characters.
-- A mini-app request first sends «Alphy готовит мини-приложение, оно появится на экране.». The ready mini-app sends «Мини-приложение готово. Ответ Alphy: » and the reply.
-- A failed request sends «Alphy не смог выполнить запрос: » and the error text.
+- When the reply is complete, Alphy sends the reply after the mark (section "Exact speech and host lines").
+- A mini-app request first sends the host line `MINI_APP_STARTED` («Это появится на экране через несколько секунд.»). The ready mini-app sends its reply after the mark.
+- A failed request sends the host line `FAILED` («Не получилось: ») and the error text of the message.
 - A phone-action plan shows its plan card on the stage. Each end phase of the plan sends one more commentary: «Готово.», «Не получилось.», or «Действие отменено.».
-- A spoken request that a picture or a model makes clearer can get the routing kind `screen`. The voice says «Ответ Alphy: » and the answer at once, and the screen comes later on the stage. When the person asked in words to see a thing and the fast path gives no screen, the voice says «Быстро не получилось. Alphy собирает экран заново, это займёт около минуты.», and the full generation builds a new app. A screen that the person did not ask to see ends with no more call and no more line. The fast path of a new screen is the template call (section "Template screens and the stage preview") and the plan call. The plan call has the section "System" of `kit/prompt.md` as its instructions.
-- With an app on the stage, the routing call gets the shown screen (its title, its app file when the line fits 8,000 characters, and its controls) as untrusted data, and it can answer with the kind `press`. A press runs the named control as a tap, and then the voice says the answer. A label that names no control gives «На экране нет такой кнопки.». A tap that does not run in 2 s gives «Нажать не получилось.».
+- A spoken request that a picture or a model makes clearer can get the routing kind `screen`. The voice gets the answer after the mark at once (`LiveVoiceBridge.screenStarted`), and the screen comes later on the stage. When the person asked in words to see a thing and the fast path gives no screen, the voice gets the host line `FULL_WAIT` («Быстро не получилось. Экран соберётся заново, это займёт около минуты.»), and the full generation builds a new app. A screen that the person did not ask to see ends with no more call and no more line. The fast path of a new screen is the template call (section "Template screens and the stage preview") and the plan call. The plan call has the section "System" of `kit/prompt.md` as its instructions.
+- With an app on the stage, the routing call gets the shown screen (its title, its app file when the line fits 8,000 characters, its controls, and the present value of each control) as untrusted data (`docs/tool-integration.md`), and it can answer with the kind `press`. A press runs the named control as a tap, and then the voice says the answer. A label that names no control gives «На экране нет такой кнопки.». A tap that does not run in 2 s gives «Нажать не получилось.».
 - The routing call of a spoken request also gets the last turns of the chat as untrusted turns before the shown screen and the request: the newest three request and reply pairs, at most 2,000 characters, and a long text keeps its start and its end. A text goes only when its message has clean provenance and no web sources. Each other text is a host note with none of its text. A reply that ended with an error, or a change or screen that gave no app, carries a host note that no new screen and no change came.
 - A retry, a «да», or a short follow-up takes its meaning from these turns, and the decision brief states the whole request. A «да» to an offered phone action, automation, memory write, or app test is not a request for it. Earlier turns never authorize an operation that the latest request does not ask for. When a spoken request runs a web search, its grounded decision gets the same turns and the shown screen. The search query still comes from the latest request only.
 - The answer step of a spoken request knows that screens exist in the talk. It never says that it cannot show or change a screen, and it claims no action as done. After a «да» to an offered phone action, automation, memory write, or app test, it says that nothing started and asks the person to say that request in full.
 - A spoken change of the app on the stage runs the change by lines. The voice stays silent until the changed app is stored, and then it says the answer. A change that the kit cannot make becomes a new screen, which gets the plan of the old screen as untrusted data and sends only the plan call. The old app stays. When the new screen also fails, the voice says the waiting line, and the full generation builds a new app from the request, the brief, and the plan of the old screen.
-- The app on the stage keeps its frames and timers while a change of it runs, until a stage preview takes its place. The save of the change takes the newest state of the app: the kit computes the state of the changed plan again from that state, with no model call. A new revision from a different writer still stops the change.
+- While a change of the app on the stage runs, the stage dims that app to alpha 0.45 (`CHANGING_ALPHA` in `ui/DialogueStage.kt`) and turns its controls off. Its drawing takes no touch, and its playback buttons are off (the `input` parameter of `NativeToolSurface`). Its frames and timers go on. The dim lasts while `ToolController.drafts` holds a draft of the stage app and the message of that draft is `generating` (`changing` in `ui/DialogueStage.kt`). The saved receipt of a change is not in that list. It applies to each change of the stage app by a request of the chat, spoken or typed.
+- No frame of a change draws over the dimmed app, so the old scene and the parts of its change never mix. A frame of another operation, such as a new screen, still takes the place of the app.
+- After a change, each new part of the stage app scrolls into view and gets an accent mark for 1 s (`NEW_PART_MS` in `ui/DialogueStage.kt`). The mark has the state description «Новое» (`stage_new_part`). A new part is a topmost node of the new UI that holds no node of the revision before. So a changed text is new, and a new row around an old part is not. The first revision of an app on the stage, and a UI that is new as a whole, mark nothing. The stage adds the mark through `LocalNodeMark` of `tools/NativeToolUi.kt`.
+- The save of the change takes the newest state of the app: the kit computes the state of the changed plan again from that state, with no model call. A new revision from a different writer still stops the change.
 - A chat that the voice layer covers shows its mini-app cards without their live app, so the stage app gets the one drawing slot. The cards run their apps again when the voice mode ends. When the stage app waits for the slot, the stage shows «Запустится, когда другое мини-приложение остановится.» above the app, or below a drawing that is not part of the app.
-- When the full generation fails, the voice says the reason and a hint: «Экран не собран: сервис ИИ не ответил.», «Экран не собран: запрос не помещается на один экран.», or «Экран не собран: Alphy не смог его построить.», each followed by «Скажите запрос полностью, одной фразой.». The message keeps the failure code. When the voice mode ends during the full generation, the hand-off ends with no more line, and the request runs to its end.
+- When the full generation fails, the voice says the reason and a hint: «Экран не собран: сервис ИИ не ответил.», «Экран не собран: это не помещается на один экран.», or «Экран не собран: построить его не получилось.» (`FULL_NO_ANSWER`, `FULL_TOO_BIG`, `FULL_NOT_BUILT`), each followed by «Скажи всё одной фразой.» (`FULL_HINT`). The message keeps the failure code. When the voice mode ends during the full generation, the hand-off ends with no more line, and the request runs to its end.
 - A build that falls back or fails writes a release log line with the tag `AlphyGeneration`. A line of the chat request has the operation, the decision kind, the step, the outcome or the fallback reason, the failure code, and the exception class. Where a build goes on to the loop, or where a typed change step falls back, the route writes a line with `kind=none` and the id of the app or the operation. A build that falls back and then fails has two lines. No line holds text of the person.
 - A memory fact, an automation draft, or a course topic ends the voice mode with «Продолжите на экране».
 - A hand-off request runs to its end, also after the voice mode ends. Its result stays in the chat.
 - Text that the user types on the voice screen goes to Alphy. The reply goes to GPT-Live as quiet context (`session.thinking.append`).
+  The thinking text is «Пользователь написал: », the typed text (at most 400 characters, `TYPED_MAX`), the mark, and the reply. The typed words come before the mark, so the voice says only the reply.
+
+### Exact speech and host lines
+
+The voice must say each text of Alphy as Alphy wrote it, with no control, offer, or inner word of its own. So each text of Alphy goes to GPT-Live after a mark, and the instructions tell GPT-Live to say the text after the mark word for word.
+
+- The mark is `LiveProtocol.MARK` («Дословно: ») in `voice/LiveProtocol.kt`. Only the text of Alphy follows the mark.
+- These appends hold the mark: the answer of a screen at its start, the reply of each other complete hand-off (an answer, a press, or a mini-app), the reply of a complete change, and the reply of a typed turn.
+- A refinement choice and a press that did not run get a host line in place of the reply. A plan card gets the lines of its plan phases.
+- `LiveProtocol.spoken` cuts the text at a sentence end, so that the mark and the text fit one append of at most 1,200 characters (`LiveVoiceBridge.MAX`).
+
+The instructions (`LiveProtocol.INSTRUCTIONS`) have three lines for these texts:
+
+- The mark line, which starts with «Если в тексте есть метка «Дословно:»». GPT-Live says only the text after the mark, word for word and once. It adds no introduction, no words of its own, no repeat, no question, and no offer.
+- The stop line after it, which starts with «После этого текста замолчи и жди». After that text, GPT-Live stops and waits. It does not explain or go on, also when the answer seems incomplete.
+- The line for a text with no mark, which starts with «Текст без метки скажи коротко на языке разговора». GPT-Live says that text briefly, in the language of the talk. It adds no button, action, offer, or question that the text does not have.
+
+The instructions also set the language of the latest request and the form «ты». The wait phrase names no worker, no delegation, no request, and no mini-app.
+
+A host line is a fixed line of the bridge that holds no text of Alphy. A host line goes with no mark, so GPT-Live can say it in the language of the talk. The host lines exist only in Russian.
+
+- The constants of the companion object of `LiveVoiceBridge` (`ui/LiveVoiceBridge.kt`): `NOT_HEARD`, `BUSY`, `MINI_APP_STARTED`, `PRESS_MISSING`, `PRESS_FAILED`, `FULL_WAIT`, and `FULL_NO_ANSWER`, `FULL_TOO_BIG`, or `FULL_NOT_BUILT` with `FULL_HINT`.
+- The approval lines: `PROPOSE`, `ASK`, `STARTED`, `CANCELLED`, `DONE`, and `NOT_DONE`.
+- `FAILED` and the error text of the message.
+- The line of a card that waits for a tap, from `LiveVoiceBridge.onScreenLine(context, phase, refinement)`. It takes the label of the button from the resources:
+
+| Case | Line |
+| --- | --- |
+| A refinement choice | «Выбери на экране, что изменить.» |
+| `NEEDS_PERMISSION` | «Нажми «%s» на экране.» with `agent_permission_allow` («Запросить доступ») |
+| `WAITING_FOR_CAMERA` | «Нажми «%s» на экране.» with `agent_continue_camera` («Продолжить к камере») |
+| `NEEDS_SELECTION` | «Выбери вариант на экране.» |
+| `REVIEW` | «Подтверди на экране: нажми «%s».» with `agent_execute` («Выполнить») |
+| Each other phase, or no plan | «Подробности на экране.» |
+
+When a turn of the approval window cannot decide the plan, the bridge gives `onScreenLine` the plan phase only while the agent is not busy. So a busy plan in `REVIEW` gets «Подробности на экране.», because the card turns its execute button off while the agent is busy.
+
+### A touch on the stage
+
+The sound of a tap in the microphone must not stop the voice of Alphy as speech. So a touch on the stage closes the touch gate of the session for a short time. While the gate is closed, no microphone sound leaves the phone.
+
+- The stage reports each touch (`reportTouches` in `ui/DialogueStage.kt`). The report goes through `LiveVoiceBridge.stageTouch` to `LiveVoiceSession.touch(down)`.
+- A touch is down while any pointer is down. A cancel ends it, and so does the end of the stage. The report watches the first pass of each event and takes no event, so each control, scroll, and drawing keeps its input.
+- While the gate is closed, GPT-Live and the barge-in detector get zero samples in place of each microphone block. The stream keeps its cadence. The mute state stays, and no mute event goes out.
+- The gate closes at the down. While the touch stays down, the gate opens 1,000 ms after the down (`TOUCH_HOLD_MS` in `voice/LiveVoiceSession.kt`). So the person can speak while a finger moves a slider, and a lost end opens the gate too.
+- The end of the touch closes the gate for 300 ms (`TOUCH_TAIL_MS`), because a tap also makes a sound at its end.
+- The zero blocks do not teach the barge-in detector the echo level. So the echo of Alphy after a touch does not count as speech.
+- Only a touch on the stage counts. A touch on the strip closes nothing, and a press by voice is no touch.
+
+The gate has these limits:
+
+- Each down closes the gate again and starts a new limit of 1,000 ms. So fast taps, each less than 300 ms after the end of the tap before, keep the gate closed for the whole series. GPT-Live hears no speech in that time.
+- The stage reports one touch while any pointer is down. A tap of a second finger during a touch that stays down longer than 1,000 ms does not close the gate, so its sound reaches GPT-Live.
 
 ### Template screens and the stage preview
 
@@ -148,17 +205,18 @@ The stage preview:
   Then the control, each part, and the card draw, each when its line is complete. An unfinished last line does not draw.
 - A line with a fault does not draw before its repair, and each other line stays.
 - A preview has the layout of the live stage app, with its control off. It takes the place of the shown app, so a later new screen replaces the shown app at its first line.
+- A live input of a preview, such as a slider, shows no input note (`tool_live_input_*`) and no «Применить» button, also after a drag (`NativeLiveActions` in `tools/NativeToolUi.kt`). The live app on the stage before its first snapshot does the same. So the screen does not move when the live app comes. Outside the stage, the note and the button stay.
 - The kit preview step makes each preview (`kit/README.md`, section "The preview step"). `docs/tool-integration.md` gives the rules of each update.
 - While `ToolController.previewBeforeRouting` is true (the default), the early template call shows its previews before the routing call ends. When it is false, the newest preview waits until the routing call gives the kind `screen`.
 - When Alphy cancels the early template call, or the request ends, its preview goes away with no error and no spoken line. So a turn that gets no screen ends with no preview.
-- While the host check runs, the stage shows the compiled app as a preview. This applies to a new screen (a template or a free app file) and to a template change.
+- While the host check of a new screen (a template or a free app file) runs, the stage shows the compiled app as a preview. A template change makes this preview too, and the stage shows it as the change rule below says.
 - A fallback, a cancel, or a failure of a screen removes its preview, and a later preview of that screen does not show.
 - When the app is stored, the canvas keeps the drawing of the last preview until the live app draws. The control turns on when the operation is no longer busy.
-- A spoken change of a template app draws each changed line over the shown screen, in place of the live app. The preview uses the stored state, so a value that the person moved stays.
+- A spoken change of a template app makes a preview of each changed line, but the stage does not draw it over the shown app (`StagePreview.covers` in `ui/DialogueStage.kt`). The shown app stays dimmed until the dim ends (section "Session and hand-offs"). Then the last preview of the change, the compiled changed app, holds the canvas until the live app draws. The stored app stays in view while the change runs, so a value that the person moved stays in view and reaches the changed app.
 - An `outside` reply to a template change call, a change of a free app file, and a typed request show no preview.
 - `ToolController.previewStream` is true by default. When it is false, no screen gets a preview.
 - The generation trace marks `template_call_start` and `template_outcome` (`clean0`, `clean1`, `partial1`, `outside`, `whole`, or `failed`) for the template call of a new screen.
-  It marks `stage_preview` with the `holds` value of each preview that shows, and `stage_preview_gone` when a shown preview goes away with no app.
+  It marks `stage_preview` with the `holds` value of each preview that becomes the current preview of `ToolController.stagePreviews`, and `stage_preview_gone` when a current preview goes away with no app. A preview of a change is current also while the stage does not draw it over the dimmed app.
   It marks `controls_on` when the operation is no longer busy after a screen stored its app.
 
 ### Data sent to OpenAI
@@ -166,9 +224,13 @@ The stage preview:
 - The microphone audio, continuously while the microphone is not muted.
 - Fixed Russian instructions (`LiveProtocol.INSTRUCTIONS` in `voice/LiveProtocol.kt`).
 - A history preload: the latest text messages of the selected conversation, at most 128 messages and 8,192 tokens. Attachments, images, and mini-app content are not sent.
-- The commentary and thinking texts: the replies of Alphy and short status lines.
+- The commentary and thinking texts: the replies of Alphy after the mark, the host lines, and the typed words of a typed turn.
 
 Each hand-off request also goes to the chat model of the account, as a typed request does.
+With an app on the stage, the routing call and the grounded decision of a spoken request also get the shown screen (`ShownScreen.line()` in `tools/ShownScreen.kt`).
+It holds the title, the app file when the line fits, the labels of the controls, and `values`: the present value of each control by its label.
+`values` also comes from an app that takes no press. An app with private results gives no `values` (`docs/tool-integration.md`).
+The voice mode needs an OpenAI account, so this data goes to OpenAI too.
 The voice mode adds no consent line. The OpenAI consent already names voice recordings for speech recognition, and chat text already goes to OpenAI.
 Alphy does not store the audio. The transcripts stay in memory for the session. Only the hand-off messages are saved in the chat.
 
@@ -196,6 +258,10 @@ The chat shows the status in the composer status line.
 | An HTTP refusal of the upgrade | The provider error text. A key error opens «Сервис ИИ». |
 | An `error` event that is not for a sent commentary, thinking text, mute, or unmute | «OpenAI: ошибка голосового режима. Начните заново.» |
 
+A hand-off or a typed turn runs until the bridge has read the end of its message (`LiveVoiceBridge.handOffRunning()`). So a silence check between the end of a build and that read cannot close the talk.
+When a complete hand-off puts its app on the stage, the bridge starts the 60 s count again (`LiveVoiceSession.countSilence()`, called from `report()`). The person needs that time to see a screen, which can come with no spoken text.
+The hold of a running hand-off stays limited by `LiveTiming.handOffHoldMs` (180 s).
+
 A permission dialog, a picker of «+», or an app that Alphy opens mutes the microphone and keeps the session. The microphone unmutes when Alphy is in front again.
 In the compact assistant, the voice mode also ends when the sheet closes, at `onHide`, at `onLockscreenShown`, and when the sheet opens the full app.
 
@@ -212,7 +278,7 @@ A tap on the plan card works at all times.
 
 Voice approval is on only for the phone models in `VOICE_APPROVAL_MODELS` (`voice/LiveAudio.kt`).
 The list is empty, so voice approval is off on every device until a phone model passes the echo check.
-While voice approval is off, the plan card needs a tap, and GPT-Live says «Нужно подтверждение на экране.».
+While voice approval is off, the plan card needs a tap, and GPT-Live gets the line of `onScreenLine` for the plan phase, such as «Подтверди на экране: нажми «Выполнить».» (section "Exact speech and host lines").
 
 ### Echo check
 
@@ -285,12 +351,12 @@ These results of run 1 differ from the spec:
 - The output transcript times lead the output audio. The received audio of a reply ends 1.7 to 2.4 s after its last `end_ms` on the input clock, before the playback delay of the phone.
 - GPT-Live did not stop a commentary when the user spoke over it. It opened no delegation for the request that interrupted it.
 - GPT-Live spoke the thinking text aloud.
-- GPT-Live changed «Нужно подтверждение на экране.» into a request to say «да» or «нет».
+- GPT-Live changed the line for a confirmation on the screen into a request to say «да» or «нет».
 
 After run 1, the session finds replies by the sample level (rulings R24 to R30).
 A chunk is voiced when its RMS level is above 0.01 (`LIVE_VOICED_RMS`).
 A reply ends after 800 ms of silent stream audio after its last voiced chunk (`replyGapMs`), or after 800 ms without any chunk.
-An instruction line tells GPT-Live to send the user to the button on the card for «Нужно подтверждение на экране.».
+An instruction line of that build told GPT-Live to send the user to the button on the card for the line of a confirmation on the screen. Section "Exact speech and host lines" gives the present lines.
 
 Run 2 (`live-2a3dd7bb5762`) tested that build with a real-time playback fake:
 
