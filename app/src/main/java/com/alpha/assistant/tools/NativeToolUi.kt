@@ -959,7 +959,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
             NativeNode(checkNotNull(children).getJSONObject(page),state,enabled,imageVersion,imageLoader,imageAvailable,calendarHost,false,heading,event=event)
         }
         "theme" -> NativePreset(node.getString("preset"), node.optInt("cornerRadius", -1).takeIf { it >= 0 }, node.optDouble("typeScale",1.0),
-            node.optString("palette").ifEmpty { null }, node.optBoolean("dark")) {
+            node.optString("palette").ifEmpty { null }, node.optBoolean("dark"), stage = dialogueTitle != null) {
             Column(modifier,verticalArrangement=verticalArrangement(style,gap),horizontalAlignment=alignment(style)) {
                 // A split of the dialogue stage is the split of the single column of the theme.
                 if (dialogueSplit == null) content()
@@ -2017,10 +2017,15 @@ internal fun rootThemeColors(ui: String, shellDark: Boolean): ColorScheme? =
     }
 
 @Composable private fun NativePreset(preset: String, cornerRadius: Int? = null, typeScale: Double = 1.0, palette: String? = null,
-    dark: Boolean = false, content: @Composable () -> Unit) {
+    dark: Boolean = false, stage: Boolean = false, content: @Composable () -> Unit) {
     val radius=(cornerRadius ?: when(preset) {"clean" -> 12; "soft" -> 24; "expressive" -> 28; "editorial" -> 4; "technical" -> 0; else -> 32}).dp
     val typography=MaterialTheme.typography
-    val colors = themeColors(preset, palette, dark, MaterialTheme.colorScheme.background.luminance() < 0.5f)
+    val shell = MaterialTheme.colorScheme
+    val shellDark = shell.background.luminance() < 0.5f
+    // On the dialogue stage the app, its canvas, and each part in the surface color take the shell surface, so they and the stage are one
+    // surface (plan "one scene", decision 22). Cards keep the palette containers. A dark app in a light shell keeps its dark surface for its light text.
+    val colors = themeColors(preset, palette, dark, shellDark)
+        .let { if (stage && (shellDark || !dark)) it.copy(background = shell.surface, surface = shell.surface) else it }
     val scale=typeScale.toFloat()
     fun scaled(style: androidx.compose.ui.text.TextStyle) = style.copy(fontSize=style.fontSize*scale,lineHeight=style.lineHeight*scale)
     fun heading(style: androidx.compose.ui.text.TextStyle) =

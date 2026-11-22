@@ -1,8 +1,14 @@
 package com.alpha.assistant.ui
 
+import android.content.res.Configuration
+import android.content.res.Resources
 import android.graphics.Bitmap
+import android.util.Log
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.test.core.app.ActivityScenario
+import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
@@ -12,6 +18,10 @@ import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.images.ImageProvider
 import com.alpha.assistant.images.ProviderImage
+import com.alpha.assistant.tools.AgentScriptProvider
+import com.alpha.assistant.tools.Scripted
+import com.alpha.assistant.tools.agentFixtureFinish
+import com.alpha.assistant.tools.agentWrite
 import com.alpha.assistant.tools.appfile.plan as appFilePlan
 import org.json.JSONObject
 import org.junit.After
@@ -19,6 +29,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
+import java.io.File
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** Plan D, Da2, rulings 2 and 3 of the controller: what the stage and the strip show, each thing once. */
 class DialogueStageContentTest {
@@ -55,6 +68,69 @@ class DialogueStageContentTest {
         }
     }
 
+    /**
+     * Plan "one scene", Task 8: in dark theme the stage, the app, and the canvas of a full mini-app are one surface, and a card keeps its
+     * palette tint. A template draws its picture in a hero card, which is a card, so its canvas takes the tint of that card.
+     */
+    @Test fun theStageHasOneSurfaceInDarkTheme() {
+        val night = checkNotNull(Regex("""Night mode: (\S+)""").find(robot.shell("cmd uimode night"))).groupValues[1]
+        try {
+            robot.shell("cmd uimode night yes")
+            robot.waitUntil { (Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES }
+            val full = AgentScriptProvider(listOf(Scripted.Text("outside(\"game\")"), Scripted.Text(agentWrite(ORBIT_APP)), Scripted.Text(agentFixtureFinish)))
+            val shell = TemplateShell(stage.fixture, robot, stage.socket)
+            shell.live(TemplateTalk(AgentScriptProvider(shipTemplate()), full)) { scenario, model, _ ->
+                scenario.onActivity { assertTrue("dark theme", (it.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES) }
+                val ship = shell.screen(model)
+                assertOneSurface(scenario, "template", SHIP_CARD, canvas = null)
+                val before = shell.messages(model).size
+                stage.socket.say(TemplateTalk.APP_REQUEST, "d2", 2_000)
+                shell.waitForTheAnswer(model, before)
+                robot.waitUntil(60_000) { model.stageToolId != null && model.stageToolId != ship.id && !model.tools.busy }
+                assertOneSurface(scenario, "full", ORBIT_CARD, canvas = ORBIT)
+            }
+        } finally { robot.shell("cmd uimode night $night") }
+    }
+
+    /**
+     * The page in the stage gutter, the app background in the padding of its column, and [canvas] by its left edge equal the shell surface
+     * within 2 for each channel. The card with the title [card] differs. All pixels are at the height of that title, away from the corners.
+     */
+    private fun assertOneSurface(scenario: ActivityScenario<CloudTestActivity>, name: String, card: String, canvas: String?) {
+        robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, card) &&
+            (canvas == null || robot.composedIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.ContentDescription)?.any { d -> d.startsWith("$canvas.") } == true }) }
+        robot.awaitFrames(5)
+        val origin = IntArray(2)
+        scenario.onActivity { it.window.decorView.getLocationOnScreen(origin) }
+        val density = stage.fixture.context.resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).roundToInt()
+        val page = robot.composedBounds(scenario, STAGE).first
+        // The gutter of the stage (DialogueStage), and the column padding «medium» of the app.
+        val gutter = dp(if (page.width() / density >= 600) 28 else 20)
+        val title = checkNotNull(robot.composedBoundsIn(scenario, STAGE, robot.hasText(card)))
+        val drawing = canvas?.let { label ->
+            checkNotNull(robot.composedBoundsIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.ContentDescription)?.any { d -> d.startsWith("$label.") } == true })
+        }
+        val shot = checkNotNull(robot.automation.takeScreenshot())
+        try {
+            File(checkNotNull(stage.fixture.context.getExternalFilesDir("one-surface")), "$name.png").outputStream().use {
+                check(shot.compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+            fun at(x: Int, y: Int) = shot.getPixel(origin[0] + x, origin[1] + y)
+            val y = title.centerY()
+            val surface = AlphaDarkColors.surface.toArgb()
+            val pixels = listOfNotNull("page" to at(page.left + gutter / 2, y), "app" to at(page.left + gutter + dp(6), y),
+                drawing?.let { "canvas" to at(it.left + dp(8), it.centerY()) })
+            val cardPixel = at(title.left - dp(6), y)
+            val found = (pixels + ("card" to cardPixel)).joinToString { "${it.first} #${Integer.toHexString(it.second)}" }
+            Log.i("OneSurface", "$name: $found")
+            pixels.forEach { (part, pixel) -> assertTrue("$name: $part is the shell surface #${Integer.toHexString(surface)}: $found", near(pixel, surface)) }
+            assertFalse("$name: the card keeps its tint: $found", near(cardPixel, surface))
+        } finally { shot.recycle() }
+    }
+
+    private fun near(a: Int, b: Int) = listOf(16, 8, 0).all { shift -> abs((a shr shift and 0xFF) - (b shr shift and 0xFF)) <= 2 }
+
     /** The shell with an image provider of OpenAI that returns a 16 px picture with no network. */
     private fun installWithPictures(chat: ChatProvider) {
         val pictures = ImageProvider { _, _, _ ->
@@ -78,5 +154,18 @@ class DialogueStageContentTest {
         val PICTURE_ANSWER: String = JSONObject(chatDecision("answer", "Вот сердце в разрезе.")).put("image", JSONObject()
             .put("slot", "heart").put("prompt", "A human heart in section").put("alt", ALT).put("aspect", "1:1").put("required", true)
             .toString()).toString()
+        /** The title of the text card of the ship template. */
+        const val SHIP_CARD = "Вытеснение воды"
+        const val ORBIT = "Земля на орбите"
+        const val ORBIT_CARD = "Один оборот"
+        /** A full mini-app in the blue palette with its canvas straight in the column of its theme, as the full generation writes one. */
+        val ORBIT_APP: String = JSONObject("""
+            {"title":"Орбита","description":"Земля на орбите","capabilities":[],"stateSchema":{"n":"number"},"initialState":{"n":0},
+            "surfaces":[{"id":"main","width":300,"height":200}],
+            "ui":{"type":"theme","preset":"clean","palette":"blue","cornerRadius":20,"children":[{"type":"column","style":{"gap":"medium","padding":"medium"},
+              "children":[{"type":"canvas","text":"$ORBIT","surfaces":["main"]},
+              {"type":"card","text":"$ORBIT_CARD","children":[{"type":"text","text":"Земля проходит круг за год."}]}]}]}}
+        """.trimIndent()).put("source", "return {state:input.state,surfaces:{main:{commands:[{type:'circle',x:150,y:100,radius:20,color:'accent'}]}}};")
+            .toString()
     }
 }
