@@ -39,6 +39,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -214,7 +217,7 @@ private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId !=
     // A committed preview whose app never reached the stage, such as at the end of the mode, seeds no later stage.
     DisposableEffect(previews) { onDispose { previews.current?.toolId?.let(previews::drawn) } }
     val fold = LocalConfiguration.current.smallestScreenWidthDp >= DIALOGUE_WIDE_DP
-    BoxWithConstraints(modifier.fillMaxWidth().testTag("dialogue_stage")) {
+    BoxWithConstraints(modifier.fillMaxWidth().testTag("dialogue_stage").pointerInput(model) { reportTouches(model::liveStageTouch) }) {
         // The gutter of an open mini-app (FocusedToolPane).
         val gutter = if (maxWidth >= 600.dp) 28.dp else 20.dp
         // In a short space, such as landscape with the keyboard, the decorative character goes.
@@ -252,6 +255,22 @@ private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId !=
     }
     shareText?.let { ShareTextToNotes(it) { shareText = null } }
     if (linkError) ChatLinkErrorDialog { linkError = false }
+}
+
+/**
+ * Reports each touch of the stage (plan "one scene", Task 6). A touch is down while any pointer is down. A cancel ends it, and so does
+ * the end of the stage. It only watches, in the first pass, and takes no event, so each control, scroll, and drawing keeps its input.
+ */
+private suspend fun PointerInputScope.reportTouches(report: (Boolean) -> Unit) {
+    awaitPointerEventScope {
+        var down = false
+        try {
+            while (true) {
+                val pressed = awaitPointerEvent(PointerEventPass.Initial).changes.any { it.pressed }
+                if (pressed != down) { down = pressed; report(pressed) }
+            }
+        } finally { if (down) report(false) }
+    }
 }
 
 /**

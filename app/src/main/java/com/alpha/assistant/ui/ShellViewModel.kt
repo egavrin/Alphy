@@ -181,6 +181,8 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     internal val liveVoiceWorking: Boolean get() = liveBridge?.working == true
     /** Each spoken press of a control of the stage app, with the app id (plan D, Dc1). */
     internal val livePresses: Flow<VoicePress>? get() = liveBridge?.presses
+    /** A touch on the stage of the voice mode starts or ends (plan "one scene", Task 6). */
+    internal fun liveStageTouch(down: Boolean) { liveBridge?.stageTouch(down) }
     /** The uptime until which a screen or an app that Alphy opens is expected in front (spec 5.8.1, [expectAlphyScreen]). */
     internal var alphyScreenUntil = 0L
     /** The activity class that started the voice mode. The shell and the assistant sheet share this model ([ownsLiveVoice]). */

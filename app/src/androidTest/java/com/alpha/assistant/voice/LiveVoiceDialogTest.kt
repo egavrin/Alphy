@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -28,6 +29,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import kotlin.random.Random
 
 /**
  * The live check of spec 6.3: one GPT-Live session with the real key runs a Russian request with a 25 s late commentary, a second
@@ -36,7 +38,8 @@ import kotlin.math.abs
  * a script fault does not spend a paid run.
  */
 class LiveVoiceDialogTest {
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val context = instrumentation.targetContext
 
     @Test fun dialogScriptPassesOnAScriptedServer() {
         val log = File(context.cacheDir, "live-dialog-rehearsal.log")
@@ -58,6 +61,140 @@ class LiveVoiceDialogTest {
         assertFalse("The event log holds the key.", account.key in log.readText())
         assertTrue(outcome.summary, outcome.failures.isEmpty())
         outcome.summary
+    }
+
+    /**
+     * Plan "one scene", Task 6: a touch on the stage sends zero samples from its down until 300 ms after its end, so the sound of a tap
+     * stops no reply. A loud voice file plays over a reply of Alphy from the down. After the gate, the file goes out and flushes the reply.
+     */
+    @Test fun aStageTouchSendsNoMicrophoneSound() {
+        val dialog = LiveDialog(ScriptedLiveServer(), LOOPBACK, ACCOUNT, 0)
+        var down = 0L
+        var up = 0L
+        var playing = false
+        val outcome = dialog.run(File(context.cacheDir, "live-touch-rehearsal.log")) {
+            check(dialog.start())
+            dialog.listen()
+            // Words with no pause, so Alphy's voice plays with no gap for about 8 s.
+            val reply = dialog.comment("d1", LiveProtocol.MARK + List(40) { "слово" }.joinToString(" "))
+            check(dialog.waitFor("the voice of the reply", 10_000) { dialog.voiced.any { it > reply.first } })
+            SystemClock.sleep(500)
+            down = dialog.touch(true)
+            dialog.feeder.say(voice("live-reply"))
+            SystemClock.sleep(maxOf(0, down + 200 - dialog.now()))
+            up = dialog.touch(false)
+            SystemClock.sleep(maxOf(0, up + 2_000 - dialog.now()))
+            playing = !dialog.feeder.idle
+        }
+        assertTrue(outcome.summary, outcome.failures.isEmpty())
+        assertTrue("the voice file still plays", playing)
+        val closed = dialog.appends(down + MARGIN_MS, up + TAIL_MS - MARGIN_MS)
+        assertTrue("zero samples from the down until 300 ms after the end: $closed", closed.size >= 12 && closed.none { it.second })
+        val open = dialog.appends(up + TAIL_MS + MARGIN_MS, up + 2_000)
+        assertTrue("sound after the gate: $open", open.size >= 50 && open.all { it.second })
+        assertTrue("Alphy's voice streamed during the gate", dialog.voiced.any { it in down..up + TAIL_MS })
+        assertTrue("no flush until the gate opens: ${dialog.flushes}", dialog.flushes.none { it <= up + TAIL_MS })
+        assertTrue("the voice file flushes the reply after the gate: ${dialog.flushes}", dialog.flushes.any { it > up + TAIL_MS })
+    }
+
+    /** Plan "one scene", Task 6: a touch that stays down opens the microphone 1000 ms after its down. Its end closes it for 300 ms. */
+    @Test fun aHeldTouchOpensTheMicrophoneAgain() {
+        val dialog = LiveDialog(ScriptedLiveServer(), LOOPBACK, ACCOUNT, 0)
+        var down = 0L
+        var up = 0L
+        var playing = false
+        val outcome = dialog.run(File(context.cacheDir, "live-held-touch-rehearsal.log")) {
+            check(dialog.start())
+            dialog.listen()
+            SystemClock.sleep(500)
+            down = dialog.touch(true)
+            dialog.feeder.say(voice("live-reply"))
+            SystemClock.sleep(maxOf(0, down + 1_500 - dialog.now()))
+            up = dialog.touch(false)
+            SystemClock.sleep(maxOf(0, up + 1_000 - dialog.now()))
+            playing = !dialog.feeder.idle
+        }
+        assertTrue(outcome.summary, outcome.failures.isEmpty())
+        assertTrue("the voice file still plays", playing)
+        val held = dialog.appends(down + MARGIN_MS, down + HOLD_MS - MARGIN_MS)
+        assertTrue("zero samples for 1000 ms after the down: $held", held.size >= 30 && held.none { it.second })
+        val reopened = dialog.appends(down + HOLD_MS + MARGIN_MS, up - MARGIN_MS)
+        assertTrue("sound while the touch stays down after 1000 ms: $reopened", reopened.size >= 12 && reopened.all { it.second })
+        val tail = dialog.appends(up + MARGIN_MS, up + TAIL_MS - MARGIN_MS)
+        assertTrue("zero samples for 300 ms after the end: $tail", tail.size >= 6 && tail.none { it.second })
+        val after = dialog.appends(up + TAIL_MS + MARGIN_MS, up + 1_000)
+        assertTrue("sound after the tail: $after", after.size >= 20 && after.all { it.second })
+    }
+
+    /**
+     * Plan "one scene", Task 6: the zero samples of a touch do not teach the barge-in detector the echo level, as only blocks while the
+     * device plays teach it (ruling R35). So Alphy's echo after a touch does not count as speech and does not flush the reply.
+     */
+    @Test fun echoAfterAStageTouchIsNoBargeIn() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val socket = FakeLiveTransport()
+        val audio = FakeLiveAudio()
+        val session = LiveVoiceSession(context, scope, socket, { audio }, { ACCOUNT }, LOOPBACK)
+        val random = Random(5)
+        // Gives the session [count] blocks at [rms] and returns, for each append, whether a sample is not zero.
+        fun feed(count: Int, rms: Double): List<Boolean> {
+            val before = socket.inputSounds().size
+            repeat(count) { audio.capture(random.pcmBlock(rms)) }
+            until("$count appends") { socket.inputSounds().size >= before + count }
+            return socket.inputSounds().drop(before)
+        }
+        try {
+            instrumentation.runOnMainSync { session.start(SilentHost) }
+            until("the connection") { socket.connected }
+            socket.emit(LIVE_STARTED)
+            until("session.started") { session.phase == LivePhase.LISTENING }
+            // The room before the reply, then the echo of the reply: the grace of 240 ms and a steady level, half the speech threshold.
+            feed(25, 0.001)
+            audio.playbackActive = true
+            feed(30, 0.009)
+            instrumentation.runOnMainSync { session.touch(true) }
+            // The main thread takes the blocks far within the 1000 ms of a held touch.
+            val touched = feed(60, 0.009)
+            instrumentation.runOnMainSync { session.touch(false) }
+            SystemClock.sleep(TAIL_MS + 100)
+            val after = feed(20, 0.009)
+            assertTrue("the touch sent zero samples: $touched", touched.none { it })
+            assertTrue("the echo after the touch went out: $after", after.all { it })
+            assertEquals("flushes by the echo after the touch", 0, audio.flushes.get())
+        } finally {
+            instrumentation.runOnMainSync { session.stop() }
+            scope.cancel()
+        }
+    }
+
+    private fun voice(name: String) = wavSamples(instrumentation.context.assets.open("voice/$name.wav").use { it.readBytes() })
+
+    private fun until(what: String, condition: () -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + 5_000
+        while (!condition()) {
+            check(SystemClock.uptimeMillis() < deadline) { "No $what within 5 s" }
+            SystemClock.sleep(10)
+        }
+    }
+
+    private object SilentHost : LiveVoiceHost {
+        override fun history() = emptyList<Message>()
+        override fun delegation(id: String, request: String) = Unit
+        override fun turn(turn: UserTurn) = Unit
+        override fun handOffRunning() = false
+        override fun appended(eventId: String) = Unit
+        override fun outputEnded(endMs: Long) = Unit
+        override fun ended(status: String, settingsRequired: Boolean) = Unit
+    }
+
+    private companion object {
+        val LOOPBACK = Endpoints { "http://127.0.0.1:4000" }
+        val ACCOUNT = AiAccount(AiProvider.OPENAI, "alpha-test-only")
+        /** The gate of a touch (LiveVoiceSession.touch): the tail after its end and the limit of a held touch. */
+        const val TAIL_MS = 300L
+        const val HOLD_MS = 1_000L
+        /** The sender worker stamps an append after the main thread made it, so a window keeps this margin at each edge. */
+        const val MARGIN_MS = 40L
     }
 }
 
@@ -116,7 +253,9 @@ internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, accoun
     @Volatile private var interruptAt = -1L
     /** (dialog ms, voiced) of each chunk that the session wrote to the speaker. */
     private val plays = CopyOnWriteArrayList<Pair<Long, Boolean>>()
-    private val flushes = CopyOnWriteArrayList<Long>()
+    val flushes = CopyOnWriteArrayList<Long>()
+    /** (dialog ms of the send, a sample is not zero) of each input audio append. The sender worker sends it after the main thread made it. */
+    val appends = CopyOnWriteArrayList<Pair<Long, Boolean>>()
     /** The changes of `playbackActive` and of the phase, as the feeder sees them every 20 ms. */
     private val activeChanges = CopyOnWriteArrayList<Pair<Long, Boolean>>()
     private val phaseChanges = CopyOnWriteArrayList<Pair<Long, LivePhase>>()
@@ -430,6 +569,9 @@ internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, accoun
         return at to main { session.commentary(delegation, text) }
     }
 
+    /** A touch on the stage starts or ends. Returns the dialog ms right after the session took it. */
+    fun touch(down: Boolean): Long = main { session.touch(down); now() }
+
     /** Waits for output transcript text after [since], then for [QUIET_MS] without output. Returns whether text came. */
     private fun spoken(since: Long, what: String): Boolean {
         val spoke = waitFor("$what output transcript", 20_000) { outputs(since).isNotEmpty() }
@@ -437,7 +579,7 @@ internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, accoun
         return spoke
     }
 
-    private fun waitFor(what: String, timeoutMs: Long, whileActive: Boolean = true, condition: () -> Boolean): Boolean {
+    fun waitFor(what: String, timeoutMs: Long, whileActive: Boolean = true, condition: () -> Boolean): Boolean {
         val deadline = now() + timeoutMs
         while (!condition()) {
             if (now() > deadline || (whileActive && host.ended != null)) { note("no $what within $timeoutMs ms"); return false }
@@ -475,8 +617,11 @@ internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, accoun
     }
 
     private fun sent(text: String) {
-        // The audio blocks are 50 a second. The fixture queue lines stand for them.
-        if ("session.input_audio.append" in text.take(60)) return
+        // The audio blocks are 50 a second. The fixture queue lines stand for them in the log.
+        if ("session.input_audio.append" in text.take(60)) {
+            appends += now() to Base64.decode(JSONObject(text).getString("audio"), Base64.DEFAULT).any { it != 0.toByte() }
+            return
+        }
         val at = now()
         val e = JSONObject(text)
         val type = e.getString("type")
@@ -528,6 +673,8 @@ internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, accoun
 
     private fun info(name: String, detail: String) { checks += "INFO $name: $detail" }
 
+    /** The appends sent in [from, to). */
+    fun appends(from: Long, to: Long) = appends.filter { it.first in from until to }
     // The send time is taken before the send, so a part that arrives in the same millisecond answers it.
     fun outputs(from: Long, to: Long = Long.MAX_VALUE) = events.filter { it.type == OUTPUT && it.at >= from && it.at <= to }
     private fun inputs(from: Long) = events.filter { it.type == INPUT && it.at > from }

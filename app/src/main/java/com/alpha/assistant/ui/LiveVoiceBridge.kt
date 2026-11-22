@@ -106,6 +106,9 @@ internal class LiveVoiceBridge(
         return press.ran.await()
     }
 
+    /** A touch on the stage starts ([down]) or ends. A press by voice is no touch. The session hears no microphone sound for its time. */
+    fun stageTouch(down: Boolean) = session.touch(down)
+
     fun start(firstSpeech: Boolean) {
         session.start(this, firstSpeech)
         watch = model.viewModelScope.launch {

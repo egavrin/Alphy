@@ -1,5 +1,6 @@
 package com.alpha.assistant.voice
 
+import android.util.Base64
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.providerFailure
 import org.json.JSONObject
@@ -38,6 +39,9 @@ internal class FakeLiveTransport : LiveTransport {
     /** The sent commentary appends as (delegation id, text), in order. */
     fun commentary() = sent.map(::JSONObject).filter { it.getString("type") == "session.commentary.append" }
         .map { it.getString("delegation_id") to it.getString("content") }
+    /** For each sent input audio append, in order: whether it holds a sample that is not zero. */
+    fun inputSounds() = sent.map(::JSONObject).filter { it.getString("type") == "session.input_audio.append" }
+        .map { append -> Base64.decode(append.getString("audio"), Base64.DEFAULT).any { it != 0.toByte() } }
 
     override fun connect(url: String, key: String, listener: LiveListener): LiveConnection {
         this.url = url; this.key = key; this.listener = listener

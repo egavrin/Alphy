@@ -23,6 +23,11 @@ import kotlinx.coroutines.withContext
 
 internal enum class LivePhase { IDLE, CONNECTING, LISTENING, SPEAKING, MUTED }
 
+/** The gate of a touch on the stage ([LiveVoiceSession.touch]): it stays closed this long after the end of the touch. */
+private const val TOUCH_TAIL_MS = 300L
+/** The gate opens this long after the down of a touch that stays down, because the sound comes at the down and at the end. */
+private const val TOUCH_HOLD_MS = 1_000L
+
 /**
  * The timers of spec 5.8 and 5.4.5. A user turn also ends after [turnGapMs] without input transcript deltas. A reply of Alphy ends
  * after [replyGapMs] of silent stream audio after its last voiced chunk, counted in samples, or after [replyGapMs] without any chunk
@@ -99,6 +104,9 @@ internal class LiveVoiceSession(
     /** The uptime of the last capture block or output chunk that saw audio in the device. The overlap rule (R11) uses the device flag. */
     private var playbackSeenMs = Long.MIN_VALUE
     private var waiting: LiveEvent.Delegation? = null
+    /** The uptime of the down of a touch on the stage while it is down, and the uptime at which the gate after its end opens ([touch]). */
+    private var touchDownMs: Long? = null
+    private var touchOpenMs = 0L
     /** The client event ids of the appends, mutes, and unmutes of this session. An error for one keeps the mode (rulings R10, R37). */
     private val tolerated = HashSet<String>()
     /** The uptime of the session start, the last change of the user's speech, or the last output end (ruling R38). */
@@ -120,7 +128,7 @@ internal class LiveVoiceSession(
         this.firstSpeech = firstSpeech
         transcript = LiveTranscript(); detector = BargeInDetector(); waiting = null; tolerated.clear()
         started = false; userMuted = false; awayMuted = false; captureMuted = false; dropping = false; interrupted = false
-        playbackSeenMs = Long.MIN_VALUE; held.clear()
+        playbackSeenMs = Long.MIN_VALUE; held.clear(); touchDownMs = null; touchOpenMs = 0L
         active = true; status = ""; phase = LivePhase.CONNECTING
         scope.launch {
             try {
@@ -154,6 +162,16 @@ internal class LiveVoiceSession(
         if (away && active) flush()
         awayMuted = away
         applyMute()
+    }
+
+    /**
+     * A touch on the stage starts ([down]) or ends (plan "one scene", Task 6). On a phone the sound of a tap in the microphone stopped
+     * Alphy's voice as speech. So from the down until [TOUCH_TAIL_MS] after the end, but not longer than [TOUCH_HOLD_MS] after the down,
+     * GPT-Live and the barge-in check get zero samples. A person can speak while a finger moves a slider, and a lost end opens again.
+     */
+    fun touch(down: Boolean) {
+        val now = SystemClock.uptimeMillis()
+        if (down) touchDownMs = now else { touchDownMs = null; touchOpenMs = now + TOUCH_TAIL_MS }
     }
 
     /** Sends a hand-off result and returns its client event id. After the end it sends nothing, as hand-offs outlive it (spec 5.5.9). */
@@ -246,10 +264,15 @@ internal class LiveVoiceSession(
         val device = live ?: return
         // Blocks that were on the way at a mute.
         if (captureMuted) return
+        val now = SystemClock.uptimeMillis()
+        // A touch on the stage: zero samples at the usual cadence. The mute state and the server stay as they are.
+        val touched = touchDownMs?.let { now - it < TOUCH_HOLD_MS } == true || now < touchOpenMs
+        val heard = if (touched) ShortArray(block.size) else block
         val playing = speaking()
         val plays = device.playbackActive
-        // Barge-in: the user's voice over the playback stops it at once (spec 5.4.5). Only the device flag teaches the echo (R35).
-        if (detector.accept(block, playing, plays) && playing) {
+        // Barge-in: the user's voice over the playback stops it at once (spec 5.4.5). Only the device flag teaches the echo (R35), and
+        // the zero samples of a touch hold no echo, so they teach nothing: Alphy's echo after the touch stays under the threshold.
+        if (detector.accept(heard, playing, plays && !touched) && playing) {
             // A barge-in in a dry pause did not start over Alphy's voice, so only the device flag marks the next turn (R11).
             if (plays) interrupted = true
             flush()
@@ -262,7 +285,7 @@ internal class LiveVoiceSession(
         }
         level = device.level
         // GPT-Live hears the user also during a barge-in. Nothing goes out before session.started (spec 5.3.2).
-        if (started) connection?.let { socket -> sender.launch { socket.send(LiveProtocol.audio(block)) } }
+        if (started) connection?.let { socket -> sender.launch { socket.send(LiveProtocol.audio(heard)) } }
         refresh()
     }
 

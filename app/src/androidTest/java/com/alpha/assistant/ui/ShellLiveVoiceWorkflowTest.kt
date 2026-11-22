@@ -5,9 +5,12 @@ import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.AlarmClock
+import android.view.InputDevice
+import android.view.MotionEvent
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -63,6 +66,7 @@ import com.alpha.assistant.voice.inputDelta
 import com.alpha.assistant.voice.liveDelegation
 import com.alpha.assistant.voice.outputAudio
 import com.alpha.assistant.voice.outputDelta
+import com.alpha.assistant.voice.pcmBlock
 import com.alpha.assistant.voice.VoiceSession
 import com.alpha.assistant.voice.VoiceSettings
 import kotlinx.coroutines.CompletableDeferred
@@ -82,6 +86,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.random.Random
 
 /** The hand-off bridge of spec 5.5 to 5.8: a scripted GPT-Live socket and scripted audio drive the real shell model. */
 class ShellLiveVoiceWorkflowTest {
@@ -602,6 +607,56 @@ class ShellLiveVoiceWorkflowTest {
             assertEquals(listOf("complete", PRESS_TEXT, null), messages(model).last().let { listOf(it.status, it.text, it.toolId) })
             robot.waitUntil { JSONObject(stored(model, app).state).getString("cay") == "Yeşil çay" }
         }
+    }
+
+    /**
+     * Plan "one scene", Task 6: a pointer down and up on the stage reach the session as `stageTouch(true)` and `stageTouch(false)`. The down
+     * closes the microphone to GPT-Live, a touch that stays down opens it after 1000 ms, and only the end closes it again for 300 ms. The
+     * report takes no event, so a tap on a control of the stage app still runs it. A touch on the strip closes nothing.
+     */
+    @Test fun aStageTouchReachesTheSession() =
+        onStage(provider = StageProvider(script = AgentScriptProvider(listOf(Scripted.Text(CHOICE))))) { scenario, model, app ->
+            robot.waitUntil { inStage(scenario, CHOICE_BUTTON) }
+            val stage = robot.composedBounds(scenario, STAGE).first
+            // The empty space at the bottom of the stage, under the short app.
+            val space = Rect(stage.centerX(), stage.bottom - 40, stage.centerX(), stage.bottom - 40)
+            val button = checkNotNull(robot.composedBoundsIn(scenario, STAGE, robot.hasText(CHOICE_BUTTON)))
+            val status = checkNotNull(robot.composedBoundsIn(scenario, STRIP, robot.hasText(robot.text(R.string.live_voice_listening))))
+            assertTrue("the microphone sound goes out before a touch", heard())
+            hold(scenario, space) { down ->
+                assertFalse("a touch that is down sends no sound", heard())
+                SystemClock.sleep(maxOf(0, down + 1_300 - SystemClock.uptimeMillis()))
+                assertTrue("a touch that stays down opens the microphone after 1000 ms", heard())
+            }
+            assertFalse("the end of the touch closes the microphone for 300 ms", heard())
+            SystemClock.sleep(500)
+            assertTrue("the microphone opens 300 ms after the end", heard())
+            hold(scenario, status) { assertTrue("a touch on the strip closes nothing", heard()) }
+            assertTrue("the end of a touch on the strip closes nothing", heard())
+            hold(scenario, button) {}
+            robot.waitUntil { JSONObject(stored(model, app).state).getString("cay") == "Yeşil çay" }
+        }
+
+    /** Gives the session one loud capture block and returns whether its append holds a sample that is not zero. */
+    private fun heard(): Boolean {
+        val before = socket.inputSounds().size
+        audio.capture(Random.pcmBlock(0.15))
+        robot.waitUntil { socket.inputSounds().size > before }
+        return socket.inputSounds()[before]
+    }
+
+    /** Holds one finger on the center of the window rectangle [at] during [during], which gets the uptime after the down. */
+    private fun hold(scenario: ActivityScenario<CloudTestActivity>, at: Rect, during: (Long) -> Unit) {
+        val origin = IntArray(2)
+        scenario.onActivity { it.window.decorView.getLocationOnScreen(origin) }
+        val downTime = SystemClock.uptimeMillis()
+        fun send(action: Int) {
+            val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, origin[0] + at.exactCenterX(), origin[1] + at.exactCenterY(), 0)
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            try { assertTrue("touch event $action", robot.automation.injectInputEvent(event, true)) } finally { event.recycle() }
+        }
+        send(MotionEvent.ACTION_DOWN)
+        try { during(SystemClock.uptimeMillis()) } finally { send(MotionEvent.ACTION_UP) }
     }
 
     /** A press of a button that the app refuses, because an operation of the apps starts as the press comes, changes nothing. */
@@ -1879,6 +1934,7 @@ class ShellLiveVoiceWorkflowTest {
 
     private companion object {
         const val STAGE = "dialogue_stage"
+        const val STRIP = "dialogue_strip"
         const val CHARACTER = "live_voice_character"
         const val APP_REQUEST = "Сделай калькулятор чаевых"
         const val SCREEN_REQUEST = "Объясни, как работает сердце"
@@ -1939,6 +1995,8 @@ class ShellLiveVoiceWorkflowTest {
         """.trimIndent()
         /** [TEA] without its alerting timer: it declares no capability, so its choice and its local button are controls of the shown screen. */
         val CHOICE = TEA.lineSequence().filterNot { "timer(" in it }.joinToString("\n")
+        /** The local button of [TEA] and [CHOICE]. */
+        const val CHOICE_BUTTON = "Yeşil çay seç"
         /** The grounded answer of a screen that needs fresh facts, and its source. */
         const val FRESH_TEXT = "Сегодня сердце бьётся 70 раз в минуту."
         val FRESH_SOURCE = Source("Пульс", "https://example.com/pulse", "Пульс в покое: 70 ударов в минуту")
