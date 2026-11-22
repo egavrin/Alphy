@@ -7,9 +7,11 @@ import com.alpha.assistant.cloud.AiAccount
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.cloud.OPENAI_LIVE_MODEL
+import com.alpha.assistant.data.Message
 import com.alpha.assistant.tools.liveCheck
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,11 +36,36 @@ class LiveStepSyncProbeTest {
         val results = ArrayList<String>()
         for (experiment in ProbeExperiment.entries) {
             val log = File(directory, "${experiment.name}.jsonl")
-            results += experiment.name + ": " + StepProbe(ScriptedLiveServer(listOf(HEART_TEXT, TAP_TEXT)), local, account, experiment).run(log)
+            val result = StepProbe(ScriptedLiveServer(listOf(HEART_TEXT, TAP_TEXT)), local, account, experiment).run(log)
+            results += experiment.name + ": " + result
             val text = log.readText()
             assertFalse("${log.name} holds the key.", "alpha-test-only" in text)
             assertTrue(text.takeLast(2000), "\"-> session.close\"" in text && "\"session.closed\"" in text)
+            // Task 15: the five texts in order with their kinds, and the instructions and the two earlier turns in session.start.
+            experiment.subject?.let { subject ->
+                assertTrue(result, result.startsWith("done"))
+                assertEquals(experiment.name, subject.sends, sends(log))
+                assertTrue("${experiment.name}: the first text went out before the waiting line.", waitedForTheVoice(log))
+                val start = log.readLines().map(::JSONObject).first { it.getString("type") == "-> session.start" }
+                assertEquals(EXACT_INSTRUCTIONS, start.getString("instructions"))
+                assertEquals(4, start.getJSONArray("input").length())
+            }
         }
+        val exactAlone = File(directory, "exact-no-delegation.jsonl")
+        results += "exact, no delegation: " + StepProbe(ScriptedLiveServer(listOf(HEART_TEXT), undelegated = setOf(0)), local, account,
+            ProbeExperiment.EXACT_SEASONS).run(exactAlone)
+        assertEquals(SEASONS.sends.map { Send.THINKING to it.second }, sends(exactAlone))
+        assertTrue("The first text went out before the voice answered itself.", waitedForTheVoice(exactAlone))
+        // The subject choice of the paid method: a fault leaves a subject open, and each other stop finishes it.
+        val done = File(directory, "exact-done")
+        assertEquals(ProbeExperiment.EXACT_RAINBOW, nextExact(done))
+        finish(done, ProbeExperiment.EXACT_RAINBOW, "stopped: IllegalStateException")
+        assertEquals(ProbeExperiment.EXACT_RAINBOW, nextExact(done))
+        finish(done, ProbeExperiment.EXACT_RAINBOW, "done")
+        assertEquals(ProbeExperiment.EXACT_PLANE, nextExact(done))
+        finish(done, ProbeExperiment.EXACT_PLANE, "cap reached")
+        finish(done, ProbeExperiment.EXACT_SEASONS, "done")
+        assertEquals(null, nextExact(done))
         val noDelegation = File(directory, "no-delegation.jsonl")
         results += "no delegation: " + StepProbe(ScriptedLiveServer(listOf(HEART_TEXT), undelegated = setOf(0)), local, account,
             ProbeExperiment.M2_PRODUCT).run(noDelegation)
@@ -49,24 +76,57 @@ class LiveStepSyncProbeTest {
         File(directory, "results.txt").writeText(results.joinToString("\n"))
     }
 
-    @Test fun m1Commentary() = paid("m1Commentary", ProbeExperiment.M1_COMMENTARY)
-    @Test fun m1Thinking() = paid("m1Thinking", ProbeExperiment.M1_THINKING)
-    @Test fun m1Early() = paid("m1Early", ProbeExperiment.M1_EARLY)
-    @Test fun m2Product() = paid("m2Product", ProbeExperiment.M2_PRODUCT)
-    @Test fun m2Exact() = paid("m2Exact", ProbeExperiment.M2_EXACT)
-    @Test fun m1CommentaryExact() = paid("m1CommentaryExact", ProbeExperiment.M1_COMMENTARY_EXACT)
-    @Test fun tapAndSilentFact() = paid("tapAndSilentFact", ProbeExperiment.TAP_AND_FACT)
+    @Test fun m1Commentary() = paid("m1Commentary") { ProbeExperiment.M1_COMMENTARY }
+    @Test fun m1Thinking() = paid("m1Thinking") { ProbeExperiment.M1_THINKING }
+    @Test fun m1Early() = paid("m1Early") { ProbeExperiment.M1_EARLY }
+    @Test fun m2Product() = paid("m2Product") { ProbeExperiment.M2_PRODUCT }
+    @Test fun m2Exact() = paid("m2Exact") { ProbeExperiment.M2_EXACT }
+    @Test fun m1CommentaryExact() = paid("m1CommentaryExact") { ProbeExperiment.M1_COMMENTARY_EXACT }
+    @Test fun tapAndSilentFact() = paid("tapAndSilentFact") { ProbeExperiment.TAP_AND_FACT }
 
-    private fun paid(method: String, experiment: ProbeExperiment) = liveCheck("LiveStepSyncProbeTest#$method",
+    /**
+     * Task 15: one session on the first subject with no finished session on this device, so three runs give the three subjects.
+     * `run.py` passes no subject. Delete the directory `exact-speech-done` to start again.
+     */
+    @Test fun exactSpeechOnNewSubjects() = paid("exactSpeechOnNewSubjects") {
+        checkNotNull(nextExact(exactDone)) { "Each subject has a finished session." }
+    }
+
+    private val exactDone get() = File(checkNotNull(context.getExternalFilesDir(null)), "exact-speech-done")
+
+    /** [pick] runs only in a paid run, so a suite run skips before it. */
+    private fun paid(method: String, pick: () -> ProbeExperiment) = liveCheck("LiveStepSyncProbeTest#$method",
         missing = { account -> "Only OpenAI has GPT-Live.".takeIf { account.provider != AiProvider.OPENAI } },
         model = { OPENAI_LIVE_MODEL }) { account, _ ->
+        val experiment = pick()
         val runId = checkNotNull(InstrumentationRegistry.getArguments().getString("liveRunId"))
         val log = File(checkNotNull(context.getExternalFilesDir(null)), "live-check/$runId/events.jsonl")
         val result = StepProbe(OkHttpLiveTransport(), Endpoints.PRODUCTION, account, experiment).run(log)
         // assertFalse keeps the key out of the failure text.
         assertFalse("The log holds the key.", account.key in log.readText())
-        result
+        if (experiment.subject != null) finish(exactDone, experiment, result)
+        "${experiment.name}: $result"
     }
+}
+
+/** The first experiment of Task 15 with no finished session in [done], in the run order, or null. */
+private fun nextExact(done: File) = ProbeExperiment.entries.firstOrNull { it.subject != null && !File(done, it.name).exists() }
+
+/** Marks [experiment] finished in [done], unless a fault stopped its session (`stopped: …`): then a run again repeats the subject. */
+private fun finish(done: File, experiment: ProbeExperiment, result: String) {
+    if (!result.startsWith("stopped")) File(done.apply { mkdirs() }, experiment.name).createNewFile()
+}
+
+/** The voice spoke after the request and before the first append of [log] (the waiting line, or its own answer). */
+private fun waitedForTheVoice(log: File): Boolean {
+    val lines = log.readLines().map(::JSONObject)
+    val first = lines.first { line -> Send.entries.any { line.getString("type") == "-> session.${it.name.lowercase()}.append" } }.getLong("t")
+    return lines.any { it.getString("type") == OUTPUT && it.getLong("t") < first }
+}
+
+/** The kind and the text of each append in [log], in order. */
+private fun sends(log: File) = log.readLines().map(::JSONObject).mapNotNull { line ->
+    Send.entries.firstOrNull { line.getString("type") == "-> session.${it.name.lowercase()}.append" }?.let { it to line.getString("content") }
 }
 
 private const val HEART_TEXT = "Покажи, как кровь течёт по сердцу."
@@ -99,8 +159,66 @@ private fun probeInstructions(exact: Boolean): String {
 
 private enum class Send { COMMENTARY, THINKING }
 
-/** One paid session each. [capMs] is the hard limit of session time from `session.start`. */
-private enum class ProbeExperiment(val exact: Boolean, val capMs: Long, val script: StepProbe.() -> Unit) {
+/** Task 15: the instructions of plan Task 3 (exact copy). Task 3 lands later and puts them into `LiveProtocol.INSTRUCTIONS`. */
+private const val EXACT_INSTRUCTIONS = """Ты голосовой режим помощника. Говори коротко и естественно, на языке последней просьбы человека. Обращайся к человеку на «ты».
+Ты сам не выполняешь действия и не знаешь свежих фактов. Любую просьбу о действии на телефоне, поиске, свежих фактах, погоде, мини-приложении, памяти, файлах или о том, что на экране, сразу передавай через делегирование.
+Если ответ станет понятнее с картинкой, схемой или моделью, которую человек может менять (как что-то устроено, как что-то движется, урок с проверкой), передай просьбу через делегирование. Примеры: «объясни, как образуется радуга», «как устроен атом», «научи меня таблице умножения на семь».
+Простой вопрос с коротким ответом (факт, определение, совет, разговор) отвечай сам сразу и ничего не передавай. Примеры: «сколько планет в Солнечной системе», «кто написал „Войну и мир“», «как дела».
+Просьбу изменить экран, продолжить урок или проверить себя передавай через делегирование.
+Ответ человека на вопрос проверки, который ты только что произнёс, тоже передавай через делегирование.
+Не задавай уточняющих вопросов о задаче сам.
+Пока ответ готовится, скажи одну короткую фразу ожидания. Не говори, кто работает. Не называй делегирование, запрос или мини-приложение.
+Если в тексте есть метка «Дословно:», произнеси только текст после метки, слово в слово: без вступления, без своих слов, без вопросов и без предложений.
+Текст без метки скажи коротко на языке разговора. Не добавляй кнопок, действий, предложений и вопросов, которых в нём нет.
+Никогда не говори, что действие выполнено, пока это не подтверждено.
+Когда тебе предлагают действие, прочитай предложение и попроси сказать «да» или «нет». Никогда не говори, что действие одобрено или запущено.
+Если нужно подтверждение на экране, назови кнопку, как в тексте, и никогда не проси сказать «да» или «нет».
+Ты не видишь экран. Любой вопрос об экране передавай через делегирование."""
+/** Two host lines of plan Task 3 with no text of Alphy, so with no mark: `FULL_WAIT` and the screen line of `NEEDS_PERMISSION`. */
+private const val FULL_WAIT_LINE = "Быстро не получилось. Экран соберётся заново, это займёт около минуты."
+private const val PERMISSION_LINE = "Нажми «Запросить доступ» на экране."
+
+/**
+ * A subject of Task 15: its request fixture, two earlier turns on other subjects, and the texts of Alphy, with no digits in them.
+ * The typed words hold a word that the reply does not have, so a spoken typed word shows in the transcript.
+ */
+private class ExactSubject(val fixture: String, turns: List<Pair<String, String>>, screen: String, answer: String, typed: String, reply: String) {
+    /** The talk history in the chat form that `LiveProtocol.history` takes. */
+    val messages = turns.flatMapIndexed { i, (asked, said) ->
+        listOf(Message("history-$i-user", "user", asked, 2L * i, "complete"), Message("history-$i-assistant", "assistant", said, 2L * i + 1, "complete"))
+    }
+    /** In the order of value: a marked screen start, the typed turn as the bridge sends it, `FULL_WAIT`, the marked answer, the screen line. */
+    val sends = listOf(Send.COMMENTARY to EXACT_MARK + screen, Send.THINKING to "Пользователь написал: $typed $EXACT_MARK$reply",
+        Send.COMMENTARY to FULL_WAIT_LINE, Send.COMMENTARY to EXACT_MARK + answer, Send.COMMENTARY to PERMISSION_LINE)
+}
+
+private val RAINBOW = ExactSubject("ux-why-5",
+    listOf("Почему море солёное?" to "Реки приносят в море соли из камней и почвы. Вода испаряется, а соль остаётся.",
+        "Сколько живут черепахи?" to "Многие черепахи живут больше пятидесяти лет, а некоторые доживают до ста пятидесяти."),
+    screen = "Радугу создают капли дождя. Каждая капля делит белый свет на цвета.",
+    answer = "В капле свет преломляется и отражается. Каждый цвет выходит под своим углом.",
+    typed = "А почему радуга круглая?", reply = "Цветные капли лежат на круге вокруг тени твоей головы.")
+
+private val SEASONS = ExactSubject("ux-why-4",
+    listOf("Какая кошка самая большая?" to "Самая большая кошка — тигр. Амурский тигр весит до трёхсот килограммов.",
+        "Из чего делают бумагу?" to "Бумагу делают из древесины. Её измельчают, варят в воде и прессуют в тонкие листы."),
+    screen = "Времена года меняются, потому что ось Земли наклонена.",
+    answer = "Летом наше полушарие наклонено к Солнцу. Зимой лучи падают косо и греют слабее.",
+    typed = "А на экваторе бывает зима?", reply = "На экваторе Солнце всегда высоко, поэтому там тепло весь год.")
+
+/** The English talk: the host lines stay Russian, so the log shows the language that the voice gives them. */
+private val PLANE = ExactSubject("tpl-e-explain",
+    listOf("What is the tallest animal?" to "The giraffe is the tallest animal. An adult can be taller than five meters.",
+        "Why do cats purr?" to "Cats purr when they are calm, and sometimes when they are hurt. The sound comes from the muscles of the voice box."),
+    screen = "Wings push air down. The air pushes the plane up. This is lift.",
+    answer = "Air flows faster over the wing. Lower pressure above it lifts the plane.",
+    typed = "What if the engines stop?", reply = "The plane can still glide and land safely.")
+
+/**
+ * One paid session each. [capMs] is the hard limit of session time from `session.start`. A [subject] gives the session the
+ * instructions of Task 3 and the subject's two earlier turns.
+ */
+private enum class ProbeExperiment(val exact: Boolean, val capMs: Long, val script: StepProbe.() -> Unit, val subject: ExactSubject? = null) {
     /** Q1 (a), Q2: each step is a commentary on the request's delegation, sent at the end of the last reply. */
     M1_COMMENTARY(false, 50_000, { sequential(Send.COMMENTARY) }),
     // After S1 the product text made step 1 a 19 s retell of the whole path, so the other M1 runs use the exact line.
@@ -116,6 +234,11 @@ private enum class ProbeExperiment(val exact: Boolean, val capMs: Long, val scri
     M1_COMMENTARY_EXACT(true, 45_000, { sequential(Send.COMMENTARY) }),
     /** Q4, Q6: no request; a tap sentence as thinking, then a silent fact and a spoken question about the screen. */
     TAP_AND_FACT(false, 30_000, { tapAndFact() }),
+    // Task 15, in the run order: the rainbow is the delegation example of the instructions, and the seasons may get no delegation.
+    // The cap keeps a session with its close under 50 s (cap 50 s gave 50.8 s in PR §1).
+    EXACT_RAINBOW(true, 48_000, { exactSpeech() }, RAINBOW),
+    EXACT_PLANE(true, 48_000, { exactSpeech() }, PLANE),
+    EXACT_SEASONS(true, 48_000, { exactSpeech() }, SEASONS),
 }
 
 private class CapReached : RuntimeException()
@@ -135,7 +258,7 @@ private class StepProbe(private val transport: LiveTransport, private val endpoi
     private val lines = CopyOnWriteArrayList<JSONObject>()
     private val audio = FakeLiveAudio()
     private val feeder = WavFeeder(audio)
-    private val instructions = probeInstructions(experiment.exact)
+    private val instructions = if (experiment.subject != null) EXACT_INSTRUCTIONS else probeInstructions(experiment.exact)
     @Volatile private var connection: LiveConnection? = null
     @Volatile private var started = false
     @Volatile private var closed = false
@@ -156,11 +279,12 @@ private class StepProbe(private val transport: LiveTransport, private val endpoi
         var stop = "done"
         try {
             check(audio.open({ block -> if (started && !closed) connection?.send(LiveProtocol.audio(block)) }, {}))
-            val start = JSONObject(LiveProtocol.start(emptyList())).apply { getJSONObject("session").put("instructions", instructions) }
+            val start = JSONObject(LiveProtocol.start(experiment.subject?.messages.orEmpty()))
+                .apply { getJSONObject("session").put("instructions", instructions) }
             val socket = transport.connect(liveUrl(endpoints), account.key, listener())
             connection = socket
             startAt = now()
-            record("-> session.start") { put("instructions", instructions) }
+            record("-> session.start") { put("instructions", instructions); put("input", start.getJSONObject("session").getJSONArray("input")) }
             socket.send(start.toString())
             check(waitFor("session.started", 12_000) { started }) { "no session.started" }
             feeder.start()
@@ -352,6 +476,35 @@ private class StepProbe(private val transport: LiveTransport, private val endpoi
         val delegation = request() ?: return
         val sent = commentary(delegation, (if (experiment.exact) EXACT_MARK else PRODUCT_MARK) + STEPS.joinToString(" "))
         replyStart(sent)
+        quiet(2_500, 40_000)
+    }
+
+    /**
+     * The request [fixture] and its delegation, once the voice is quiet. Null when a reply ended with no delegation: the voice
+     * answered itself. The early exit keeps that case inside the cap.
+     */
+    fun handOff(fixture: String): String? {
+        val end = say(fixture)
+        val delegation = { delegations.firstOrNull { it.first >= end - 2_000 }?.second }
+        waitFor("delegation or an ended reply", maxOf(0, end + 10_000 - now())) {
+            delegation() != null || replyAfter(end)?.let { it.end >= 0 } == true
+        }
+        // The waiting line starts after the delegation, and quiet() holds before the first voiced chunk, so wait for its start first.
+        replyStart(end, 3_000)
+        quiet(1_200, 20_000)
+        return delegation().also { note(if (it == null) "no delegation" else "delegation $it") }
+    }
+
+    /** Task 15: each text of the subject once the voice is quiet. With no delegation, each text goes as a thinking text. */
+    fun exactSpeech() {
+        val subject = checkNotNull(experiment.subject)
+        val delegation = handOff(subject.fixture)
+        for ((how, text) in subject.sends) {
+            val sent = if (delegation == null) thinking(text) else send(how, delegation, text)
+            if (replyStart(sent) == null) note("no reply after $sent")
+            // A reply end can fall between two sentences of one text (PR §3, S5), so the next text waits for a longer quiet.
+            quiet(1_200, 25_000)
+        }
         quiet(2_500, 40_000)
     }
 
