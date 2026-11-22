@@ -416,6 +416,14 @@ internal class ShellRobot(fixture: String) {
         return top
     }
     /**
+     * Hides the keyboard through the insets controller and waits until it is hidden. A back is not safe for this step: when the app
+     * hides the keyboard by itself, as after an enter action that finishes a field, the back can arrive after that hide and close the activity.
+     */
+    fun hideKeyboard(scenario: ActivityScenario<*>) {
+        scenario.onActivity { WindowCompat.getInsetsController(it.window, it.window.decorView).hide(WindowInsetsCompat.Type.ime()) }
+        waitUntil { keyboardTop(scenario) == null }
+    }
+    /**
      * In landscape, [focus] raises the keyboard. Then each of [labels] must be a full target that ends at or above the keyboard top.
      * The keyboard and the portrait orientation are restored after the check.
      */

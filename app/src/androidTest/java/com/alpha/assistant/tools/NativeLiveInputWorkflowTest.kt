@@ -67,7 +67,7 @@ class NativeLiveInputWorkflowTest {
                 assertTrue(robot.field(text).performAction(ime.id))
             } else robot.shell("input keyevent KEYCODE_ENTER")
             robot.waitUntil { channel.finishAttempts.get() == 1 }
-            if (robot.keyboardTop(scenario) != null) robot.back()
+            robot.hideKeyboard(scenario)
             robot.click("Продолжить")
             assertTrue("A final value can still be waiting for admission", channel.calls.none { it.finished })
             assertTrue(discrete.isEmpty())

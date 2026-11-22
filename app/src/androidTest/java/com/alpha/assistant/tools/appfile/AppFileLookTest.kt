@@ -350,7 +350,7 @@ class AppFileLookTest {
         robot.waitFor(finish)
         assertTrue(robot.field("Prodotto").performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id))
         robot.waitGone(finish)
-        if(robot.keyboardTop(scenario) != null) robot.back()
+        robot.hideKeyboard(scenario)
         step("4-keyboard-action")
         published(robot,model,store,id)
         robot.click("Aggiungi")
