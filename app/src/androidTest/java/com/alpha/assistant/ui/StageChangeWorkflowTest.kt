@@ -1,6 +1,7 @@
 package com.alpha.assistant.ui
 
 import android.os.SystemClock
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -142,7 +143,7 @@ class StageChangeWorkflowTest {
                 assertTrue("the change ended before the checks", stageDimmed(robot) && !provider.gate.isCompleted)
                 // A drag writes only the paddle, which the drawing shows. The game stores only its score and lives, which the ticks write.
                 assertEquals("a drag moved the paddle of the dimmed game", dimmed.paddle, later.paddle, 0.0)
-                assertFalse("a control of the dimmed game was on", stageControlOn(robot))
+                assertEquals("the controls of the dimmed game that were on", emptyList<String>(), stageControlsOn())
                 assertTrue("the frames of the dimmed game stopped: ${dimmed.tick} then ${later.tick}", later.tick > dimmed.tick)
                 provider.gate.complete(Unit)
                 robot.waitUntil(60_000) { messages(model).size == count + 2 && messages(model).last().status !in unfinishedStatuses }
@@ -166,6 +167,15 @@ class StageChangeWorkflowTest {
             val at = node.positionOnScreen
             Game(match.groupValues[1].toInt(), match.groupValues[2].toDouble(), android.graphics.Rect(at.x.toInt(), at.y.toInt(),
                 (at.x + node.size.width).toInt(), (at.y + node.size.height).toInt()))
+        }
+    }
+
+    /** The texts in each stage control that a tap can press, as [stageControlOn] finds them, so a failure names the control. */
+    private fun stageControlsOn(): List<String> = readStage(robot) { nodes ->
+        fun all(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::all)
+        nodes.filter { SemanticsActions.OnClick in it.config && SemanticsProperties.Disabled !in it.config }.map { control ->
+            all(control).flatMap { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } +
+                node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() }.joinToString(" ")
         }
     }
 
@@ -362,25 +372,36 @@ class StageChangeWorkflowTest {
     private data class ChangeSample(val texts: List<String>?, val preview: Boolean, val drawing: List<String>?, val controlOn: Boolean, val spoken: Boolean,
         val dimmed: Boolean)
 
-    /** The stage every 30 ms until the change of [before] is stored as revision 2. */
+    /** The stage every 30 ms until the change of [before] is stored as revision 2, by the tool list or by a committed preview. */
     private fun watchChange(model: ShellViewModel, before: ToolRecord): List<ChangeSample> {
         val samples = mutableListOf<ChangeSample>()
         val end = SystemClock.uptimeMillis() + 60_000
+        fun changed() = stored(model, before.id).revision != before.revision || committedPreview(model, before)
         while (true) {
             // The voice is read before the revision, so a sample with a spoken answer and no stored change is a true early answer.
             val spoken = socket.commentary().any { it.first == "d2" }
-            if (stored(model, before.id).revision != before.revision) break
+            if (changed()) break
             check(SystemClock.uptimeMillis() < end) { "the change was not stored within 60 s" }
             val preview = changePreview(model, before)
-            // Each read is one main-thread pass. A sample whose reads straddle the start or the end of the dim shows no one screen, so it is dropped.
+            // Each read is one main-thread pass. A sample whose reads straddle the start or the end of the dim, or the store of the change,
+            // shows no one screen, so it is dropped: the model read of the preview comes before the reads of the screen.
+            // A spoken sample is never dropped, because the voice spoke before the change was stored.
             val dimmed = stageDimmed(robot)
             val sample = ChangeSample(shipCanvasTexts(robot), preview != null, preview?.frame?.drawing?.let(::drawingTypes),
                 stageControlOn(robot), spoken, dimmed)
-            if (stageDimmed(robot) == dimmed) samples += sample
+            if (spoken || (stageDimmed(robot) == dimmed && !changed())) samples += sample
             SystemClock.sleep(30)
         }
         return samples
     }
+
+    /**
+     * True when the stage previews hold the preview of a change of [before] stored as a later revision. ToolController.generateAutomatic marks
+     * it in the main-thread pass that stores the change and completes its message, so before the voice line. The tool list refreshes after a
+     * later suspension, so it can still have the old revision when the voice speaks. The mark stays until the stage draws the new revision.
+     */
+    private fun committedPreview(model: ShellViewModel, before: ToolRecord) =
+        model.tools.stagePreviews.current?.let { it.toolId == before.id && (it.revision ?: 0) > before.revision } == true
 
     /** The uncommitted preview of a change of [before] that the stage shows, or null. */
     private fun changePreview(model: ShellViewModel, before: ToolRecord) =
