@@ -17,6 +17,8 @@
     <string name="live_voice_content">OpenAI прервал голосовой режим по правилам содержания</string>
     <string name="live_voice_connection">Связь с OpenAI прервалась</string>
     <string name="live_voice_on_screen">Продолжите на экране</string>
+    <!-- The state description of a part that a change added to the app on the stage, for 1 s. -->
+    <string name="stage_new_part">Новое</string>
     <!-- A fixed text: the server message of an error event can echo part of the key (spec 5.3.6). -->
     <string name="live_voice_failed">OpenAI: ошибка голосового режима. Начните заново.</string>
 </resources>

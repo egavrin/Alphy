@@ -12,30 +12,44 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.alpha.assistant.R
 import com.alpha.assistant.agent.AgentPlanCard
@@ -45,6 +59,7 @@ import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.tools.ArtifactSnapshot
 import com.alpha.assistant.tools.CoveredToolSurface
 import com.alpha.assistant.tools.DIALOGUE_WIDE_DP
+import com.alpha.assistant.tools.LocalNodeMark
 import com.alpha.assistant.tools.MiniAppActions
 import com.alpha.assistant.tools.MiniAppContent
 import com.alpha.assistant.tools.StagePreview
@@ -56,6 +71,7 @@ import com.alpha.assistant.tools.ToolSpec
 import com.alpha.assistant.tools.three.ThreeScenePane
 import com.alpha.assistant.voice.LivePhase
 import com.alpha.assistant.voice.LiveVoiceSession
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import org.json.JSONObject
@@ -81,9 +97,78 @@ internal fun stageCanvasHeight(maxHeight: Dp, fold: Boolean): Dp = (if (fold) ma
 
 /**
  * The preview that the stage draws in place of [tool] (Task 16): an uncommitted one, or a committed one until the stage holds its stored
- * revision, because the stage tool and the tool list change after the commit.
+ * revision, because the stage tool and the tool list change after the commit. While [changing], an uncommitted frame of [tool] does not
+ * draw, so the old scene and the frames of its change never mix (plan "one scene", decision 22).
  */
-private fun StagePreview.covers(tool: ToolRecord?): Boolean = revision == null || tool == null || tool.id != toolId || tool.revision < revision
+private fun StagePreview.covers(tool: ToolRecord?, changing: Boolean): Boolean =
+    if (revision == null) !changing || tool?.id != toolId else tool == null || tool.id != toolId || tool.revision < revision
+
+/** True while an operation of [chat] changes [tool]: the draft of that tool is stored, and the message of the operation still waits for it. */
+private fun changing(model: ShellViewModel, chat: Conversation?, tool: ToolRecord?): Boolean = tool != null && chat != null &&
+    model.tools.drafts.any { draft -> draft.toolId == tool.id && chat.messages.any { it.toolOperationId == draft.id && it.status == "generating" } }
+
+/** The alpha of the old scene while its change runs (plan "one scene", decision 22). */
+private const val CHANGING_ALPHA = 0.45f
+
+/** How long a new part keeps its mark. */
+private const val NEW_PART_MS = 1_000L
+
+/**
+ * The JSON text of each topmost node of [ui] with no node of [old] in it: a node whose text [old] does not have, or whose children are all
+ * such nodes. So a changed text is new, and a new row around an old part is not. A [ui] that is new as a whole marks nothing.
+ */
+private fun newNodes(old: String, ui: String): Set<String> {
+    fun children(node: JSONObject) = node.optJSONArray("children")?.let { list -> List(list.length()) { list.getJSONObject(it) } }.orEmpty()
+    val known = HashSet<String>()
+    fun index(node: JSONObject) { known += node.toString(); children(node).forEach(::index) }
+    index(JSONObject(old))
+    val found = HashSet<String>()
+    fun new(node: JSONObject): Boolean {
+        val inner = children(node)
+        val fresh = inner.map(::new)
+        val whole = if (inner.isEmpty()) node.toString() !in known else fresh.all { it }
+        if (!whole) inner.filterIndexed { index, _ -> fresh[index] }.forEach { found += it.toString() }
+        return whole
+    }
+    new(JSONObject(ui))
+    return found
+}
+
+/**
+ * The new parts of [tool] (decision 22): the nodes of its UI that its revision before did not have, for [NEW_PART_MS] after the stage shows
+ * the new revision. The first revision of an app on the stage marks nothing.
+ */
+@Composable private fun newParts(tool: ToolRecord?): Set<String> {
+    // The record of the last composition, so a new revision compares with the newest UI of the revision before it.
+    val last = remember(tool?.id) { arrayOf(tool) }
+    val parts = remember(tool?.id, tool?.revision) {
+        last[0]?.takeIf { tool != null && it.revision != tool.revision }?.let { newNodes(it.ui, checkNotNull(tool).ui) }.orEmpty()
+    }
+    SideEffect { last[0] = tool }
+    var marked by remember(parts) { mutableStateOf(parts) }
+    if (parts.isNotEmpty()) LaunchedEffect(parts) { delay(NEW_PART_MS); marked = emptySet() }
+    return marked
+}
+
+/** The mark of a new part: an accent fill behind it with its state description, and a scroll of the stage that brings the part into view. */
+@Composable private fun newPartMark(): Modifier {
+    val inView = remember { BringIntoViewRequester() }
+    var measured by remember { mutableStateOf(IntSize.Zero) }
+    // The gap of the stage around the part comes into view too, so the part and its mark do not touch the strip.
+    val gap = with(LocalDensity.current) { 12.dp.toPx() }
+    // One frame first, so the part has its place and its size on the stage (the date fields of NativeToolUi.kt do the same).
+    LaunchedEffect(inView) { withFrameNanos {}; inView.bringIntoView(Rect(-gap, -gap, measured.width + gap, measured.height + gap)) }
+    val label = stringResource(R.string.stage_new_part)
+    val tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
+    val shape = MaterialTheme.shapes.medium
+    // Draw-only and behind the part, so the mark moves nothing and covers no text. An outline on a text line crossed its first letter.
+    return Modifier.bringIntoViewRequester(inView).onSizeChanged { measured = it }.semantics { stateDescription = label }.drawBehind {
+        val outset = 4.dp.toPx()
+        translate(-outset, -outset) {
+            drawOutline(shape.createOutline(Size(size.width + 2 * outset, size.height + 2 * outset), layoutDirection, this), tint)
+        }
+    }
+}
 
 /** True when the stage shows an app or a preview, and not the large character. */
 private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId != null || model.tools.stagePreviews.current != null
@@ -107,7 +192,9 @@ private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId !=
     var linkError by remember { mutableStateOf(false) }
     val tool = model.stageToolId?.let { id -> model.tools.tools.find { it.id == id } }
     val previews = model.tools.stagePreviews
-    val preview = previews.current?.takeIf { it.covers(tool) }
+    val changing = changing(model, chat, tool)
+    val preview = previews.current?.takeIf { it.covers(tool, changing) }
+    val parts = newParts(tool)
     // A committed preview seeds the drawing of its stored revision, which the stage now holds.
     val seed = previews.current?.takeIf { tool != null && it.toolId == tool.id && it.revision == tool.revision }
     // A committed preview whose app never reached the stage, such as at the end of the mode, seeds no later stage.
@@ -134,7 +221,17 @@ private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId !=
             }
             when {
                 preview != null -> StagePreviewContent(preview.frame, canvasHeight)
-                tool != null -> StageApp(model.tools, tool, cardActions, canvasHeight, model.livePresses, seed)
+                // One layer that stays while the change runs, so the app keeps its frames and timers (ToolEngine.acceptDraft).
+                tool != null -> Column(Modifier.graphicsLayer { alpha = if (changing) CHANGING_ALPHA else 1f }
+                    .then(if (changing) Modifier.testTag("stage_dimmed") else Modifier),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(15.dp)) {
+                    val mark: (@Composable (JSONObject) -> Modifier)? = remember(parts) {
+                        if (parts.isEmpty()) null else { node -> if (node.toString() in parts) newPartMark() else Modifier }
+                    }
+                    CompositionLocalProvider(LocalNodeMark provides mark) {
+                        StageApp(model.tools, tool, cardActions, canvasHeight, model.livePresses, seed, changing)
+                    }
+                }
                 else -> character?.let { AlphyCharacter(model.liveVoice, it, Modifier.testTag("live_voice_character")) }
             }
         }
@@ -145,16 +242,17 @@ private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId !=
 
 /**
  * The app of the stage, drawn as an open mini-app draws it (FocusedToolPane): a 3D scene, a drawing with its host, or the app. The app draws
- * its title after its kind label. A 3D scene and a closed app draw no app, so the stage gives them the title.
+ * its title after its kind label. A 3D scene and a closed app draw no app, so the stage gives them the title. While [changing], its controls
+ * are off.
  */
 @Composable private fun StageApp(controller: ToolController, tool: ToolRecord, actions: MiniAppActions, canvasHeight: Dp,
-    presses: Flow<VoicePress>?, seed: StagePreview?) {
+    presses: Flow<VoicePress>?, seed: StagePreview?, changing: Boolean) {
     val spec = remember(tool.spec, tool.ui, tool.state) { ToolSpec.availablePersisted(tool) }
     val voicePresses = remember(presses, tool.id) { presses?.filter { it.toolId == tool.id } }
     if (spec == null || spec.threeScene) Text(spec?.title ?: ToolSpec.storedTitle(tool.spec), Modifier.fillMaxWidth().semantics { heading() },
         style = MaterialTheme.typography.headlineSmall)
     if (spec == null) { Text(stringResource(R.string.tool_closed_format)); return }
-    val enabled = !controller.busy && !actions.covers(tool.id)
+    val enabled = !changing && !controller.busy && !actions.covers(tool.id)
     val host = if (!spec.threeScene && spec.surfaces.isNotEmpty()) remember(controller, tool.id, tool.revision) { controller.artifactHost(tool) }
         else null
     // An app with no drawing of its own takes no seed, so its committed preview ends at once.

@@ -120,7 +120,10 @@ class StagePreviewWorkflowTest {
         }
     }
 
-    /** A stage tool with the live drawing A, a change preview with the drawing B, then the commit: the canvas shows B until the new live drawing, never A. */
+    /**
+     * A stage tool with the live drawing A, a change preview with the drawing B, then the commit: the stored drawing A stays while the change
+     * call waits (plan "one scene", decision 22), and from the store the canvas shows B until the new live drawing, never A.
+     */
     @Test fun aChangeOfTheSameToolSeedsTheLastPreviewDrawing() {
         val changed = frame(SHIP_CHANGED)
         val provider = Screens(SHIP)
@@ -133,17 +136,21 @@ class StagePreviewWorkflowTest {
             stage.socket.say(CHANGE_REQUEST, "d2", 2_000)
             robot.waitUntil(30_000) { provider.changeCalled.isCompleted }
             show(model, changed, before.id)
-            robot.waitUntil { canvasLabels() == CHANGED_LABELS }
+            during(1_000) { assertEquals("the canvas while the change call waits", SHIP_LABELS, canvasLabels()) }
             val seen = linkedSetOf<String?>()
             provider.changeGo.complete(Unit)
-            // The uncommitted change preview keeps the stage while the change is stored.
-            robot.waitUntil(60_000) { seen += canvasLabels(); stored(model, before.id).revision == before.revision + 1 && !model.tools.busy }
+            // The revision is read before the canvas, so each kept read comes after the store.
+            robot.waitUntil(60_000) {
+                val stored = stored(model, before.id).revision == before.revision + 1
+                canvasLabels().let { if (stored) seen += it }
+                stored && !model.tools.busy
+            }
             seen += commitAndWatch(model, stored(model, before.id))
-            assertEquals("the canvas from the change preview to the new live drawing", setOf(CHANGED_LABELS), seen)
+            assertEquals("the canvas from the store to the new live drawing", setOf(CHANGED_LABELS), seen)
         }
     }
 
-    /** A change preview takes the place of the live app while the change runs: the value that the person moved still reaches the changed app. */
+    /** The stored app stays on the stage while the change runs, so the value that the person moved stays in view and reaches the changed app. */
     @Test fun aChangePreviewKeepsTheValueThatThePersonMoved() {
         val changed = frame(SHIP_CHANGED)
         val provider = Screens(SHIP)
@@ -157,7 +164,7 @@ class StagePreviewWorkflowTest {
             stage.socket.say(CHANGE_REQUEST, "d2", 2_000)
             robot.waitUntil(30_000) { provider.changeCalled.isCompleted }
             show(model, changed, before.id)
-            robot.waitUntil { canvasLabels() == CHANGED_LABELS }
+            during(500) { assertEquals("the canvas while the change call waits", "", canvasLabels()) }
             provider.changeGo.complete(Unit)
             robot.waitUntil(60_000) { stored(model, before.id).revision == before.revision + 1 && !model.tools.busy }
             // The state of the ship holds the value of its control only, under a generated key.

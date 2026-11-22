@@ -146,6 +146,8 @@ private val LocalLiveRow = staticCompositionLocalOf<String?> { null }
 private val LocalTimerClock = staticCompositionLocalOf<NativeTimerClock?> { null }
 private val LocalForegroundTimer = staticCompositionLocalOf<com.alpha.assistant.timer.ForegroundTimerUiHost?> { null }
 private val LocalVideoUi = staticCompositionLocalOf<NativeVideoUi?> { null }
+/** The modifier that the host adds to a node, such as the mark of a new part on the dialogue stage. Null adds none. */
+internal val LocalNodeMark = staticCompositionLocalOf<(@Composable (JSONObject) -> Modifier)?> { null }
 
 private class NativeVideoUi(val host: NativeVideoUiHost, val root: JSONObject, val allowAction: () -> Boolean)
 
@@ -903,6 +905,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
     // A card draws a background, so its padding is inside it. For other nodes, padding is outside.
     val outerPadding=if(type == "card") 0.dp else space(style?.optString("padding"))
     val modifier=nativeInteractions(node,enabled,event,nativeLayout(node,placement,compact || type in setOf("spacer","icon","emoji")).padding(outerPadding))
+        .then(LocalNodeMark.current?.let { mark -> mark(node) } ?: Modifier)
     val gap=space(style?.optString("gap"),12)
     val action=node.optString("action")
     val children=node.optJSONArray("children")
