@@ -867,11 +867,14 @@ class ShellLiveVoiceWorkflowTest {
     @Test fun aStopDuringTheFullGenerationEndsTheHandOff() {
         val full = CompletableDeferred<Unit>()
         val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))) + List(3) { Scripted.Text(OUTSIDE) } + LOOP)
-        onStage(provider = StageProvider(script = script, hold = 3 to full)) { scenario, model, app ->
+        val provider = StageProvider(script = script, hold = 3 to full)
+        onStage(provider = provider) { _, model, app ->
             val before = messages(model).size
             socket.say(T2_REQUEST, "d2", 2_000)
             robot.waitUntil(60_000) { "d2" to FULL_WAIT in commentary() }
-            scenario.onActivity { model.cancelRequest() }
+            robot.waitUntil { provider.holding.isCompleted }
+            // No idle wait: frames run without a pause during the generation, so on a slow emulator an idle wait can pass the 20 s first-text limit.
+            robot.instrumentation.runOnMainSync { model.cancelRequest() }
             waitForTheAnswer(model, before)
             assertEquals(listOf("cancelled", null), messages(model).last().let { listOf(it.status, it.toolId) })
             robot.waitUntil { commentary().count { it.first == "d2" } == 2 }
@@ -1854,6 +1857,8 @@ class ShellLiveVoiceWorkflowTest {
         private val hold: Pair<Int, CompletableDeferred<Unit>>? = null, private val fault: Exception? = null) : ChatProvider {
         val calls = CopyOnWriteArrayList<Pair<CloudRequest, CloudSession>>()
         val planCalls get() = calls.filter { it.first.generationStage != null }
+        /** Complete when the plan call of [hold] waits. */
+        val holding = CompletableDeferred<Unit>()
         override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
             if (answerNoTemplate(request, emit)) return
             calls += request to session
@@ -1862,7 +1867,7 @@ class ShellLiveVoiceWorkflowTest {
                 if (EARLY_BRIEF in input && SCREEN_REQUEST !in input) awaitCancellation()
                 plans.await()
                 if (request.generationStage == CloudGenerationStage.APP_FILE_CHANGE) { fault?.let { throw it }; changes.await() }
-                if (hold?.first == script.calls.size) hold.second.await()
+                if (hold?.first == script.calls.size) { holding.complete(Unit); hold.second.await() }
                 return script.respond(key, request, session, emit)
             }
             routing.await()
