@@ -232,7 +232,7 @@ internal val InlineToolViewportCornerRadius = 16.dp
     actions: MiniAppActions, immersive: Boolean = false, covered: Boolean = false,
     onCoverReady: (Boolean) -> Unit = {}, topControls: @Composable () -> Unit = {},
     stageAvailableHeight: Dp? = null, drawingSeed: ArtifactSnapshot? = null, content: @Composable () -> Unit = {},
-    onSnapshot: (ArtifactSnapshot) -> Unit = {},
+    input: Boolean = true, onSnapshot: (ArtifactSnapshot) -> Unit = {},
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val handle = remember(tool.id, tool.revision, host) { Any() }
@@ -270,6 +270,7 @@ internal val InlineToolViewportCornerRadius = 16.dp
             topControls = topControls,
             stageAvailableHeight = stageAvailableHeight,
             content = content,
+            input = input,
             onSnapshot = {
                 latestSnapshot = it
                 lastDrawing.value = it

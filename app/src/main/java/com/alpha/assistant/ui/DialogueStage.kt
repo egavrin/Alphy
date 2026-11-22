@@ -280,7 +280,8 @@ private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId !=
     when {
         spec.threeScene -> ThreeScenePane(controller, tool, spec, canvasHeight, null, enabled)
         // The drawing keeps its frames and timers while a change of its app runs: the save of the change takes the newest state (ToolEngine.acceptDraft).
-        host != null -> CoveredToolSurface(tool, spec, true, canvasHeight, host, actions, drawingSeed = drawingSeed, content = content) {
+        host != null -> CoveredToolSurface(tool, spec, true, canvasHeight, host, actions, drawingSeed = drawingSeed, content = content,
+            input = !changing) {
             snapshot = it
             // Only a live snapshot of the committed revision ends the seed: a late one of the old revision would leave an empty frame.
             if (seed != null && it.tool.revision == seed.revision) controller.stagePreviews.drawn(tool.id)

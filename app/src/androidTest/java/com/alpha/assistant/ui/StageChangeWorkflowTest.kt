@@ -15,7 +15,9 @@ import com.alpha.assistant.cloud.CloudGenerationStage.APP_FILE_TEMPLATE
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.tools.AgentScriptProvider
+import com.alpha.assistant.tools.ArkanoidFixture
 import com.alpha.assistant.tools.SLOW_LAP
+import com.alpha.assistant.tools.agentReply
 import com.alpha.assistant.tools.Scripted
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.appfile.AppFilePrompt
@@ -104,6 +106,74 @@ class StageChangeWorkflowTest {
                 check(saved)
             }
         }
+    }
+
+    /**
+     * Plan "one scene", decision 22: the controls are off while a change runs. The stage game is [ArkanoidFixture] from the app agent: a drag
+     * moves its paddle, each frame counts a tick, and the host draws its play, pause, and restart buttons. While the change call waits and the
+     * scene is dimmed, a drag moves nothing and no button is on, but the ticks go on. After the change is stored, a drag works again.
+     */
+    @Test fun aDimmedDrawingTakesNoTouch() {
+        val provider = GameChange()
+        withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+            fixture.install(chat = provider, liveVoice = fixture.liveVoice(socket, FakeLiveAudio()))
+            fixture.launch().use { scenario ->
+                val model = checkNotNull(fixture.model)
+                robot.waitUntil { !model.loading }
+                scenario.onActivity { model.startLiveVoice(voiceApproval = false) }
+                robot.waitUntil { socket.connected }
+                socket.emit(LIVE_STARTED)
+                robot.waitUntil { model.liveVoice.phase == LivePhase.LISTENING }
+                socket.say(APP_REQUEST, "d1", 100)
+                robot.waitUntil(60_000) { model.stageToolId != null && !model.tools.busy && game() != null }
+                val before = stored(model, checkNotNull(model.stageToolId))
+                // The game plays on the stage with no press, and a drag moves its paddle: the proof that the drag of this test reaches the canvas.
+                robot.waitUntil { checkNotNull(game()).tick > 0 }
+                val rest = checkNotNull(game()).paddle
+                drag(0.8f, 0.2f)
+                robot.waitUntil { checkNotNull(game()).paddle != rest }
+                val count = messages(model).size
+                socket.say(CHANGE_REQUEST, "d2", 2_000)
+                robot.waitUntil(60_000) { provider.changeCalled.isCompleted && stageDimmed(robot) }
+                val dimmed = checkNotNull(game())
+                drag(0.2f, 0.8f)
+                SystemClock.sleep(1_500)
+                val later = checkNotNull(game())
+                assertTrue("the change ended before the checks", stageDimmed(robot) && !provider.gate.isCompleted)
+                // A drag writes only the paddle, which the drawing shows. The game stores only its score and lives, which the ticks write.
+                assertEquals("a drag moved the paddle of the dimmed game", dimmed.paddle, later.paddle, 0.0)
+                assertFalse("a control of the dimmed game was on", stageControlOn(robot))
+                assertTrue("the frames of the dimmed game stopped: ${dimmed.tick} then ${later.tick}", later.tick > dimmed.tick)
+                provider.gate.complete(Unit)
+                robot.waitUntil(60_000) { messages(model).size == count + 2 && messages(model).last().status !in unfinishedStatuses }
+                assertEquals(listOf("complete", before.revision + 1), messages(model).last().let { listOf(it.status, it.toolRevision) })
+                robot.waitUntil { !stageDimmed(robot) && stageControlOn(robot) && game() != null }
+                val changed = checkNotNull(game()).paddle
+                drag(0.8f, 0.2f)
+                robot.waitUntil { checkNotNull(game()).paddle != changed }
+            }
+        }
+    }
+
+    /** The tick and the paddle that the drawing of the stage game shows, and its bounds on the screen. */
+    private data class Game(val tick: Int, val paddle: Double, val bounds: android.graphics.Rect)
+
+    /** The stage game, or null when the stage shows no drawing of it. The stage reads with no wait for an idle main thread. */
+    private fun game(): Game? = readStage(robot) { nodes ->
+        nodes.firstNotNullOfOrNull { node ->
+            val label = node.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull { it.startsWith("$GAME_TITLE.") }
+            val match = label?.let(GAME_LABEL::find) ?: return@firstNotNullOfOrNull null
+            val at = node.positionOnScreen
+            Game(match.groupValues[1].toInt(), match.groupValues[2].toDouble(), android.graphics.Rect(at.x.toInt(), at.y.toInt(),
+                (at.x + node.size.width).toInt(), (at.y + node.size.height).toInt()))
+        }
+    }
+
+    /** A drag across the middle of the canvas of the stage game, from [from] to [to] of its width. */
+    private fun drag(from: Float, to: Float) {
+        val canvas = checkNotNull(game()).bounds
+        fun x(part: Float) = (canvas.left + canvas.width() * part).toInt()
+        robot.shell("input swipe ${x(from)} ${canvas.centerY()} ${x(to)} ${canvas.centerY()} 300")
     }
 
     // Plan of stage templates, Task 5: a spoken change of a template screen sends the template file, and the kit merges the changed lines.
@@ -380,7 +450,36 @@ class StageChangeWorkflowTest {
         }
     }
 
+    /**
+     * The routing call of [APP_REQUEST] creates an app, and the routing call of [CHANGE_REQUEST] changes it. Each plan call and change call
+     * answers outside, so the app agent writes [ArkanoidFixture] and then its change. The first agent call of the change completes
+     * [changeCalled] and waits for [gate]. A template call gets [NO_TEMPLATE]. The plan call beside a routing call waits for its cancel.
+     */
+    private class GameChange : ChatProvider {
+        val changeCalled = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        private val loops = java.util.concurrent.atomic.AtomicInteger()
+        override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) {
+            if (answerNoTemplate(request, emit)) return
+            val stage = request.generationStage
+            if (stage != null) {
+                if (EARLY_BRIEF in request.turns.last().text) awaitCancellation()
+                if (stage != AGENT) return emit(CloudEvent.Text(OUTSIDE))
+                val change = request.turns.size == 1 && loops.incrementAndGet() > 1
+                if (change) { changeCalled.complete(Unit); gate.await() }
+                return emit(CloudEvent.Text(request.agentReply(if (loops.get() > 1) CHANGED_GAME else ArkanoidFixture.spec())))
+            }
+            emit(CloudEvent.RoundComplete(if (request.decisionContext?.originalUserTurn?.text == CHANGE_REQUEST)
+                chatDecision("refine", "Готово.", "Change the shown app") else chatDecision("create", "Готово.", "Make the app"), false))
+        }
+    }
+
     private companion object {
+        const val GAME_TITLE = "Arkanoid"
+        /** The tick and the paddle in the status text that [ArkanoidFixture] draws. */
+        val GAME_LABEL = Regex("Tick (\\d+) Paddle ([\\d.]+)")
+        /** [ArkanoidFixture] with another description, as the app agent writes the change. */
+        val CHANGED_GAME: String get() = JSONObject(ArkanoidFixture.spec()).put("description", "Move the paddle. Break all the bricks.").toString()
         const val APP_REQUEST = "Сделай приложение"
         const val CHANGE_REQUEST = "Измени его"
         /** The plan call beside the routing call starts before a brief exists, so its prompt has an empty brief line. */

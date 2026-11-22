@@ -100,6 +100,8 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable internal fun NativeToolSurface(tool: ToolRecord,spec: ToolSpec,enabled: Boolean,maxCanvasHeight: Dp,host: ArtifactUiHost,immersive: Boolean=false,covered: Boolean=false,onCoverReady: (Boolean)->Unit = {},topControls: @Composable () -> Unit = {},stageAvailableHeight: Dp? = null,
+    // False turns off only the touch of the drawing and its playback buttons: the frames and timers go on, as on the stage during a change.
+    input: Boolean = true,
     content: @Composable () -> Unit = {},drawingBefore: () -> ArtifactSnapshot? = {null},onSnapshot: (ArtifactSnapshot) -> Unit = {}) {
     val context=LocalContext.current
     val view=LocalView.current
@@ -339,8 +341,8 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
                 }.then(if (immersive) Modifier.onGloballyPositioned {stageBounds=it.boundsInRoot()} else Modifier.clip(MaterialTheme.shapes.medium))
                     .background(canvasBackground)
                     .semantics {contentDescription="$description. $labels"}
-                    .pointerInput(ids,measuredSize,interactive,enabled,snapshot?.playback in setOf("ready","playing"),error==null,attempt,acceptedViewport,requestedViewport,covered) {
-                        if(!interactive || !enabled || covered || snapshot?.playback !in setOf("ready","playing") || error!=null || viewportSurface!=null && acceptedViewport!=requestedViewport)return@pointerInput
+                    .pointerInput(ids,measuredSize,interactive,enabled,input,snapshot?.playback in setOf("ready","playing"),error==null,attempt,acceptedViewport,requestedViewport,covered) {
+                        if(!interactive || !enabled || !input || covered || snapshot?.playback !in setOf("ready","playing") || error!=null || viewportSurface!=null && acceptedViewport!=requestedViewport)return@pointerInput
                         try {awaitPointerEventScope {
                             while(true) {
                                 val event=awaitPointerEvent()
@@ -378,7 +380,7 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
         }
     }
     val playbackControls: @Composable () -> Unit = {
-        ToolPlaybackControls(ArtifactPlayback.primaryControl(snapshot?.playback), enabled && !covered,
+        ToolPlaybackControls(ArtifactPlayback.primaryControl(snapshot?.playback), enabled && input && !covered,
             restartEnabled = snapshot != null, appLanguage = spec.appLanguage) { event ->
             for (id in spec.surfaces.keys) enqueue(GraphicsContract.event(event, surfaceId = id))
         }
