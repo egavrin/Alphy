@@ -205,7 +205,9 @@ internal class LiveVoiceBridge(
         }
     }
 
-    override fun handOffRunning() = working
+    // Until report() reads the end of each message, so a silence check between the commit and report() cannot close the talk. Only the
+    // ids that report() reads: a repeated delegation id replaces its entry, and its first message would never reach done.
+    override fun handOffRunning() = working || handOffs.values.any { it !in done } || typed.keys.any { it !in done }
     override fun appended(eventId: String) { approval?.takeIf { it.proposal == eventId }?.acknowledged = true }
 
     // shortcut: the window opens at the first output end after the acknowledgment (rule 3), which can be the tail of an earlier

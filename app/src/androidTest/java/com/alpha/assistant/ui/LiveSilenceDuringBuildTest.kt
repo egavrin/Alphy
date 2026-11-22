@@ -4,6 +4,8 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.test.core.app.ActivityScenario
+import com.alpha.assistant.CloudTestActivity
 import com.alpha.assistant.R
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
@@ -12,6 +14,7 @@ import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.Endpoints
+import com.alpha.assistant.data.Draft
 import com.alpha.assistant.tools.Scripted
 import com.alpha.assistant.tools.ToolGenerationTraceEvent
 import com.alpha.assistant.tools.agentFixtureFinish
@@ -20,6 +23,7 @@ import com.alpha.assistant.tools.send
 import com.alpha.assistant.tools.withPlanStep
 import com.alpha.assistant.voice.LIVE_STARTED
 import com.alpha.assistant.voice.LiveConnection
+import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.LivePhase
 import com.alpha.assistant.voice.LiveTiming
 import com.alpha.assistant.voice.LiveTransport
@@ -59,23 +63,55 @@ class LiveSilenceDuringBuildTest {
 
     /** The rule of the silence close stays for a talk with nothing in progress: the close comes at the first check. */
     @Test fun theTalkClosesAfterSilenceWithNoBuild() {
+        var start = 0L
+        val status = silentTalk(before = { start = SystemClock.uptimeMillis() })
+        closesOneSilenceTimeAfter("session.started", start, status)
+    }
+
+    /** A spoken request gets an answer with no app: the hand-off ends, and the close comes one silence time after the answer line. */
+    @Test fun theTalkClosesOneSilenceTimeAfterAnAnswer() {
+        val status = silentTalk { _, _ -> socket.say(REQUEST, "d1", 100) }
+        val answer = sent.first { (_, event) ->
+            event.optString("type") == COMMENTARY && event.optString("content").startsWith(LiveProtocol.MARK)
+        }.first
+        closesOneSilenceTimeAfter("the answer line", answer, status)
+    }
+
+    /** A typed turn ends, and the close comes one silence time after its thinking line. */
+    @Test fun theTalkClosesOneSilenceTimeAfterATypedTurn() {
+        val status = silentTalk { scenario, model -> scenario.onActivity { model.editDraft(Draft("Привет")); model.sendLiveTyped() } }
+        closesOneSilenceTimeAfter("the thinking line", sent.first { it.second.optString("type") == THINKING }.first, status)
+    }
+
+    /**
+     * Starts the voice mode with the silent scripted voice and the fixture chat, runs [before] just before `session.started` and [act]
+     * after it, waits for the close, and gives the end status.
+     */
+    private fun silentTalk(before: () -> Unit = {}, act: (ActivityScenario<CloudTestActivity>, ShellViewModel) -> Unit = { _, _ -> }): String {
         stage.fixture.install(liveVoice = stage.fixture.liveVoice(stamped, stage.audio, LOOPBACK, LiveTiming(silenceMs = SILENCE_MS)))
-        stage.fixture.launch().use { scenario ->
+        return stage.fixture.launch().use { scenario ->
             val model = checkNotNull(stage.fixture.model)
             robot.waitUntil { !model.loading }
             scenario.onActivity { model.startLiveVoice() }
             robot.waitUntil { socket.connected }
-            // The count starts when the session handles session.started, so not before this time.
-            val start = SystemClock.uptimeMillis()
+            before()
             socket.emit(LIVE_STARTED)
-            robot.waitUntil(SILENCE_MS * 3) { closeAt() != null && model.liveVoice.phase == LivePhase.IDLE }
+            robot.waitUntil { model.liveVoice.phase != LivePhase.CONNECTING }
+            act(scenario, model)
+            // Long enough to see a close at a later check, so the bound below names it.
+            robot.waitUntil(SILENCE_MS * 4) { closeAt() != null && model.liveVoice.phase == LivePhase.IDLE }
             lateinit var status: String
             robot.instrumentation.runOnMainSync { status = model.liveVoice.status }
-            val after = checkNotNull(closeAt()) - start
-            assertTrue("Close $after ms after session.started, expected from $SILENCE_MS to ${SILENCE_MS * 3 / 2} ms",
-                after >= SILENCE_MS && after < SILENCE_MS * 3 / 2)
-            assertEquals(robot.text(R.string.live_voice_no_speech), status)
+            status
         }
+    }
+
+    /** The silence close comes at the first check after [origin] (named [what]): at least one silence time later, and not a later check. */
+    private fun closesOneSilenceTimeAfter(what: String, origin: Long, status: String) {
+        val after = checkNotNull(closeAt()) - origin
+        assertTrue("Close $after ms after $what, expected from $SILENCE_MS to ${SILENCE_MS * 3 / 2} ms",
+            after >= SILENCE_MS && after < SILENCE_MS * 3 / 2)
+        assertEquals(robot.text(R.string.live_voice_no_speech), status)
     }
 
     @Test fun theTalkStaysOpenDuringALongBuild() {
@@ -129,18 +165,19 @@ class LiveSilenceDuringBuildTest {
                 }
                 lateinit var status: String
                 robot.instrumentation.runOnMainSync { status = model.liveVoice.status }
+                // Before the end of the mode by the test, which sends its own close.
+                val close = closeAt()
                 scenario.onActivity { model.endLiveVoice() }
-                judge(rows, changes, status)
+                judge(rows, changes, status, close)
             }
         }
     }
 
     /** Logs the run and checks the two points of the brief together, so the failure message names each one. */
-    private fun judge(rows: List<Row>, changes: List<Row>, status: String) {
+    private fun judge(rows: List<Row>, changes: List<Row>, status: String, close: Long?) {
         val t0 = fullWaitAt()
         val origin = t0 ?: rows.first().at
         val screen = changes.firstOrNull { it.app }?.at
-        val close = closeAt()
         val events = sent.filter { it.second.optString("type") in setOf(COMMENTARY, CLOSE) }.map { (at, event) ->
             "%+6d ms sent %s %s".format(at - origin, event.optString("type"), event.optString("content"))
         }
@@ -206,6 +243,7 @@ class LiveSilenceDuringBuildTest {
         const val ROW_MS = 100L
         const val LIMIT_MS = 60_000L
         const val COMMENTARY = "session.commentary.append"
+        const val THINKING = "session.thinking.append"
         const val CLOSE = "session.close"
         const val REQUEST = "Покажи, как выглядит снежный барс"
         const val ANSWER = "Снежный барс — крупная кошка с густым пятнистым мехом."
