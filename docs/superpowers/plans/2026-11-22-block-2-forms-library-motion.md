@@ -22,7 +22,7 @@ Requirement: the delivery rules of 2026-11-22 (`~/.claude/CLAUDE.md`, "Delivery 
 1. One build job for the stage (Opus, effort xhigh), in the session worktree, under `.superpowers/sdd/2026-11-22-one-scene/job-rules.md`. The job writes the tests of a requirement before its code, builds, runs its tests one time at the end, and hands back one tested result with a report of at most 40 lines.
 2. The controller reads the whole product diff and sends one fix list to the same job.
 3. The controller runs the commit gate (Slopo, then the architecture scan, then the disposition file) for each commit.
-4. One set of paid checks for the release, with its budget stated before the first call and its spend after the last one.
+4. One set of paid checks for the release, with its budget stated before the first call and its spend after the last one. Each model check has a tuning set and a final held-out set, and no tuning runs on the final set.
 5. The version commit, the release candidate (a Sonnet job: release build type, signed with the debug keystore, `aapt dump badging` exit 0, no `application-debuggable`, the update check over the release before), the untangle review, the push, and the prerelease.
 6. The full device suite one time for the release, beside other work, with the error-level device log saved.
 
@@ -60,14 +60,15 @@ Each is an Implementation choice inside the spec, unless it names a Requirement.
 
 1. **Families (spec 7.4, Requirement).** The routing decision of a `screen` names a family: `explain` or `data`. The early template call of a first screen stays the explain family. For `data`, the host stops the early call and starts the data template call with the brief of the routing call, and with the source excerpts when a search ran. The practice family comes with stage 9.
 2. **The mark of a data form is state.** A marked row, cell, or point is a value of the app, as the option of a choice is. A tap on a row or a point moves the mark. A spoken request moves it by the press path that exists (a routing press, or a follow `mark`). So the rows and the points are options in the line of the shown screen.
-3. **No invented data, checked by the host.** For a searched data form, the host compares each number of the form with the source excerpts. A number that no excerpt holds turns the form into `nodata` with its reason. A searched form holds no computed value. The spec gives the rule; the host check is the method.
+3. **No invented data, checked by the host.** For a searched data form, the host compares each number of a data cell or of a point with the source excerpts. The host already holds them: each source has its title and its summary (`Source.summary`), and the generation prompt carries them as excerpts (`ChatToolReply.generationPrompt`). A number that no excerpt holds turns the form into `nodata` with its reason. A searched form holds no computed value. The spec gives the rule; the host check is the method.
+   - The comparison is by digits: a decimal comma equals a decimal point, a space or a comma inside a number is dropped, and a score such as «2:1» is its two numbers. A number that only counts the rows (a rank column that the model adds) is not a data value and is not checked.
+   - The check can reject true data. The model check counts each false reject: a form that became `nodata` although the excerpts hold its values, by the controller's reading.
 4. **A data form has one narration line `say`**: the point of the data. It has no steps, so it gets no scene item of the classifier.
 5. **The scene text of the classifier** holds only the title, the step labels, and the step sentences of a stepped scene, as in Alpha 20. No fetched data goes to the Decisions model in block 2.
 6. **The first areas of the library** are Human body (11 objects), Space (9), and Math figures (7): 27 objects. The spec says "about 30 objects of two areas", and no two areas of its list hold 30. Basis of the choice: the paid dialogues use these subjects (the heart, the Moon, the orbit, the theorem of Pythagoras), so the paired check has requests.
 7. **The search accuracy gate runs against the whole name list of spec 12.5** (about 150 names). Names with no drawing are entries of the test only. With 27 real entries and 24 candidates the gate would pass by count alone.
 8. **The review sheet of new objects** is accepted by the controller before the release, and the sheet goes to the owner with the release. He can reject an entry after it.
-9. **Speed is judged from the live check**, not from one more paid run: the first line and the controls of the first screen of `uxHeart` and `uxSteps`, against the same steps of the Alpha 20 record (`evidence/one-scene/live-3/`: first line 4.8 s, controls 8.7 s for `uxHeart`).
-10. **The spoken commands of a `play` scene** («быстрее», «медленнее», «стоп», «дальше») go by the routing press, as spec 9.4 says. The classifier keeps its commands for stepped scenes.
+9. **The spoken commands of a `play` scene** («быстрее», «медленнее», «стоп», «дальше») go by the routing press, as spec 9.4 says. The classifier keeps its commands for stepped scenes.
 
 ## Decisions for the owner
 
@@ -76,6 +77,7 @@ None blocks the code of stage 5.
 - **U1. The cap of the template model check.** `kit/modelcheck.js` holds the caps that he approved: `LIMIT = 689` calls in all and `TEMPLATE_LIMIT = 150` template calls. The record `evidence/modelcheck/spend.json` holds 651 calls, 126 of them template calls, so 38 calls are left. Block 2 needs at most 100 template calls for stage 5, 120 for stage 6, and 80 for stage 7: 300 in all. Unresolved decision: it blocks the paid model check of each stage, which is a gate of the release.
 - **U2. A limit for the classifier cost in a long talk.** One answer costs more as the talk grows (about $0.3 for 10 minutes and about $2 for 30 minutes by estimate). Options: no limit, as in Alpha 20; or the classifier goes off for the talk when one answer passes 4,000 input tokens (about 8 minutes), and the talk goes on as in Alpha 19. Until his word: no limit.
 - **U3. The search time on a phone (stage 6).** The spec measures the search on a phone. The controller may not install a test build on his phone. Proposal: the gate runs on the emulator, and the release build writes the measured search time and the load time of the embedding model to its release log line. It blocks only the wording of the gate of stage 6.
+- **U4. The speed gate G9.** The spec asks for a paired run against Alpha 17 on one emulator (12 runs of one step, at most 360 s of voice and 36 chat calls). Alpha 20 ran no paired run: its speed evidence is the free stream gates and the times of the live check. Proposal: judge G9 from the live check of each stage, against the same steps of the Alpha 20 record (`evidence/one-scene/live-3/`, `uxHeart`: first line 4.8 s, controls 8.7 s), with a bar of 0.5 s. Until his word, the paired run of the spec stays the gate, inside the one paid set of the stage.
 
 ---
 
@@ -100,12 +102,12 @@ Data family (spec 7.4, 11):
 
 Voice riders (the open list of Alpha 20):
 
-- **V1. «Продолжай» as a command.** The input question gets the choice `continue`. At a confidence of at least 0.75 the host walks the rest of the steps as the routing press does. A paid wording check comes first: text calls of the Decisions API on «Дальше», «Продолжай», «Давай дальше», «Продолжи», «Верни назад», «Повтори», «Покажи второй шаг», and two questions, each two times (at most 40 calls, about $0.01). The choice ships only when «Дальше» stays `next` and «Продолжай» gives `continue` in each call.
-- **V2. The start of the follow call.** It starts at the first sentence end of the voice, or 2,500 ms after the voice began its reply, the earlier of the two. In Alpha 20 one long sentence delayed a scene to 19 s after the speech.
-- **V3. The command bar.** The live check records the confidence of each command. No change of the 0.75 bar in this stage: two «Дальше» of three were below it in the Alpha 20 check, and three samples are too few.
+- **V1. «Продолжай» as a command.** The input question gets the choice `continue`. At a confidence of at least 0.75 the host walks the rest of the steps as the routing press does. A paid wording check comes first: text calls of the Decisions API on «Дальше», «Продолжай», «Давай дальше», «Продолжи», «Верни назад», «Повтори», «Покажи второй шаг», and two questions, each two times (at most 40 calls, about $0.01). The text calls only screen the wording: they are not the native trigger. The deciding check is the live `uxSteps` run: «Дальше» gives `next` and «Продолжай» gives `continue`. If not, the choice leaves the build before the release.
+- **V2. The start of the follow call.** It starts at the first sentence end of the voice, or 2,500 ms after the voice began its reply, the earlier of the two. In Alpha 20 one long sentence delayed a scene to 19 s after the speech. At 2,500 ms the call can see a cut sentence. Words that begin an answer count as an answer (`answered` true), so the new scene does not narrate over the voice: the follow instructions get one sentence for it, and `LiveFollowCheckTest` gets a case with a cut answer (expected `screen`, `answered` true).
+- **V3. The command bar.** The live check records the confidence of each command. No change of the 0.75 bar in this stage: two «Дальше» of three were below it in the Alpha 20 check, and three samples are too few. The new choice of V1 changes the question, so the samples start again with this stage.
 - **V4.** One test fails when `LiveProtocol.MAX_STEPS` and the option cap of the kit differ.
-- **V5. The locked tool database.** Read `os3/suite-20/errors-*.txt` of the Alpha 20 suite and the log of the `replay` failure (`os3/job/end-fa/`). Find the cause. Correct a fault of the test setup. Report a product fault with its evidence, and correct it only when the change is small and has a test.
-- **V6.** The rig helpers of `ClassifierRehearsalTest`, `FollowTurnRehearsalTest`, and `StageTapRehearsalTest` move to one shared place.
+- **V5. The locked tool database (last, time box 30 minutes).** Read `os3/suite-20/errors-*.txt` of the Alpha 20 suite and the log of the `replay` failure (`os3/job/end-fa/`). Find the cause. Correct a fault of the test setup. Report a product fault with its evidence, and correct it only when the change is small and has a test. At the end of the time box, report what the logs show.
+- **V6 (last, time box 30 minutes).** The rig helpers of `ClassifierRehearsalTest`, `FollowTurnRehearsalTest`, and `StageTapRehearsalTest` move to one shared place.
 
 ## Tests, one behavior each
 
@@ -125,14 +127,15 @@ Voice riders (the open list of Alpha 20):
 | Kit run and `--check` | 0 failures |
 | Fit gate (`StageTemplateFitTest`) for each new form at its caps, phone and fold | OK |
 | Stream gates 1a and 1b with a data form | 1b median at most 0.3 s |
-| Model check of the data family (needs U1): 20 held-out requests, known facts and searched | clean files at the first try at least 16 of 20; no invented value in a searched form; the call time reported |
-| G7 for this stage: a comparison, a table, and a chart each show in their own form in the live check | 3 of 3 |
-| G9 (decision 9) | no later than Alpha 20 by more than 0.5 s |
+| Model check of the data family (needs U1). A tuning set of 10 requests and a final set of 20 held-out requests, known facts and searched. A searched request uses recorded source excerpts as a fixture. No tuning on the final set. | final set: clean files at the first try at least 16 of 20; no invented value in a searched form; at most 1 false reject of the host check; the call time reported |
+| G7 for this stage: a comparison, a table, and a chart each show in their own form in the live check, on known facts (the new dialogue `uxData`) | 3 of 3 |
+| G9 (U4) | the bar of the spec by a paired run, or the bar of U4 when the owner takes the proposal |
 
 ## Paid budget
 
-- Model check: at most 100 template calls (U1), and 40 Decisions text calls for V1.
-- Live check: at most 600 s of voice, 60 chat calls, and $0.10 of Decisions calls. Dialogues: `uxCompare`, `uxFootball`, `uxKinds`, `uxHeart`, and `uxSteps`.
+- Model check: at most 100 template calls (U1), 4 chat calls for the new case of `LiveFollowCheckTest`, and 40 Decisions text calls for V1.
+- Live check: at most 600 s of voice, 60 chat calls, and $0.10 of Decisions calls. Dialogues: the new `uxData` (known facts: «Сравни Землю и Марс», «Покажи планеты таблицей», «Покажи это графиком», «А у какой самый длинный год?», a mark by voice), `uxCompare`, `uxFootball` (a searched table, which can end in `nodata`), `uxHeart`, and `uxSteps`.
+- The paired run of G9, when U4 has no answer: at most 360 s of voice and 36 chat calls more.
 
 ---
 
@@ -205,7 +208,7 @@ Motion (spec 9.3, 9.4):
 - **M1. The `play` control of `scene`:** a value that runs from its start to its end in a named count of seconds, again and again, with pause and play, and three speeds: slow, normal, and fast.
 - **M2.** The kit `animate` gets a loop and a pause. The host playback control that exists is reused.
 - **M3.** The template prompt no longer sends "a thing that moves by itself" to the full generation.
-- **M4.** A spoken «быстрее», «медленнее», «стоп», or «дальше» is a press of that control: one routing call, no template call (decision 10). The line of the shown screen holds the state of the control. A tap on the control is heard, as each tap is.
+- **M4.** A spoken «быстрее», «медленнее», «стоп», or «дальше» is a press of that control: one routing call, no template call (decision 9). The line of the shown screen holds the state of the control. A tap on the control is heard, as each tap is.
 - **M5. The smooth change (spec 9.3).** When a control changes, the numbers of the shapes glide to their new values in about 250 ms when both states have the same shapes. In each other case the two states cross-fade. The host does this between two frames, with no extra call into the app.
 - **M6.** A second change during a glide starts from the picture that shows at that moment. The last frame of a glide equals the new state.
 - **M7.** A walk and a `play` control in one scene: the narrator moves the steps, and the motion runs inside each step.
