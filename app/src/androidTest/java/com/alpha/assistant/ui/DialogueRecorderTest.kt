@@ -15,6 +15,7 @@ import com.alpha.assistant.tools.send
 import com.alpha.assistant.tools.withPlanStep
 import com.alpha.assistant.voice.FakeLiveAudio
 import com.alpha.assistant.voice.LivePhase
+import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.ScriptedLiveServer
 import com.alpha.assistant.voice.WavFeeder
 import com.alpha.assistant.voice.wavSamples
@@ -119,8 +120,8 @@ class DialogueRecorderTest {
 
     /** Lane V: the pass bar judges a step by its structure, the stage, the kind, an error, and the classes of the lines of Alphy. */
     @Test fun eachStepIsJudgedByItsStructure() {
-        assertEquals("answer", DialogueRecorder.lineOf(LiveVoiceBridge.ANSWER + "Готово."))
-        assertEquals("question", DialogueRecorder.lineOf(LiveVoiceBridge.ANSWER + "Показать извержение?"))
+        assertEquals("answer", DialogueRecorder.lineOf(LiveProtocol.MARK + "Готово."))
+        assertEquals("question", DialogueRecorder.lineOf(LiveProtocol.MARK + "Показать извержение?"))
         assertEquals("progress", DialogueRecorder.lineOf(LiveVoiceBridge.MINI_APP_STARTED))
         // Each line of the app that is no reply is a host line: a failed press, the waiting line, and each reason of a failed full generation.
         for (line in listOf(LiveVoiceBridge.PRESS_MISSING, LiveVoiceBridge.FULL_WAIT, LiveVoiceBridge.FULL_NO_ANSWER + LiveVoiceBridge.FULL_HINT,

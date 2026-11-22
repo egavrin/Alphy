@@ -13,6 +13,7 @@ import com.alpha.assistant.voice.LIVE_VOICED_RMS
 import com.alpha.assistant.voice.LiveConnection
 import com.alpha.assistant.voice.LiveListener
 import com.alpha.assistant.voice.LivePhase
+import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.LiveTransport
 import com.alpha.assistant.voice.rms
 import org.json.JSONArray
@@ -204,12 +205,13 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
         val SPEAKING = LivePhase.SPEAKING.name
 
         /**
-         * The class of a commentary of the app, from the prefixes that the bridge puts before a reply: `answer` (a reply), `question`
-         * (a reply that asks back), `progress` (an app is made), or `host` (any other line of the app, such as a failure or a wait).
+         * The class of a commentary of the app, from the mark that the bridge puts before a text of Alphy: `answer` (a reply), `question`
+         * (a reply that asks back), `progress` (an app is made), or `host` (any other line of the app with no mark, such as a failure or a
+         * wait).
          */
         fun lineOf(content: String) = when {
             content.startsWith(LiveVoiceBridge.MINI_APP_STARTED) -> "progress"
-            !content.startsWith(LiveVoiceBridge.ANSWER) && !content.startsWith(LiveVoiceBridge.MINI_APP_READY) -> "host"
+            !content.startsWith(LiveProtocol.MARK) -> "host"
             content.trimEnd().endsWith("?") -> "question"
             else -> "answer"
         }

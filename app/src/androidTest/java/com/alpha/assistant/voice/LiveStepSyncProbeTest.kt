@@ -47,7 +47,7 @@ class LiveStepSyncProbeTest {
                 assertEquals(experiment.name, subject.sends, sends(log))
                 assertTrue("${experiment.name}: the first text went out before the waiting line.", waitedForTheVoice(log))
                 val start = log.readLines().map(::JSONObject).first { it.getString("type") == "-> session.start" }
-                assertEquals(EXACT_INSTRUCTIONS, start.getString("instructions"))
+                assertEquals(LiveProtocol.INSTRUCTIONS, start.getString("instructions"))
                 assertEquals(4, start.getJSONArray("input").length())
             }
         }
@@ -148,32 +148,35 @@ private const val EXACT_LINE = "Если текст Alphy начинается �
 private const val TAP_STEP = "Теперь кровь идёт в правый желудочек."
 private const val SILENT_FACT = "Не произноси это. Запомни: на экране выбрана кнопка «Груз»."
 
-/** The product instructions, with [EXACT_LINE] after the retell line when [exact]. */
+/**
+ * The product instructions that the older experiments probed, before Task 3 of the plan of 2026-11-22 changed
+ * `LiveProtocol.INSTRUCTIONS`. The older experiments keep them, so a run again sends what they sent.
+ */
+private const val PROBED_INSTRUCTIONS = """Ты голосовой режим помощника Alphy. Говори по-русски, коротко и естественно. Пользователь говорит по-русски или по-английски.
+Ты сам не выполняешь действия и не знаешь свежих фактов. Любую просьбу о действии на телефоне, поиске, свежих фактах, погоде, мини-приложении, памяти, файлах или о том, что на экране, сразу передавай Alphy через делегирование.
+Если ответ станет понятнее с картинкой, схемой или моделью, которую человек может менять (как что-то устроено, как что-то движется, урок с проверкой), передай просьбу Alphy: Alphy покажет экран с материалами и пришлёт ответ, который ты перескажешь. Примеры: «объясни, как образуется радуга», «как устроен атом», «научи меня таблице умножения на семь».
+Простой вопрос с коротким ответом (факт, определение, совет, разговор) отвечай сам сразу и ничего не передавай. Примеры: «сколько планет в Солнечной системе», «кто написал „Войну и мир“», «как дела».
+Просьбу изменить экран, продолжить урок или проверить себя передавай Alphy.
+Не задавай уточняющих вопросов о задаче сам. Alphy спросит, если нужно, а ты озвучишь его вопрос.
+Пока Alphy работает, скажи одну короткую фразу ожидания.
+Никогда не говори, что действие выполнено, пока Alphy этого не подтвердил.
+Когда Alphy предлагает действие, прочитай предложение и попроси сказать «да» или «нет». Никогда не говори, что действие одобрено или запущено. Это подтверждает Alphy.
+Если Alphy сообщает, что нужно подтверждение на экране, попроси нажать кнопку на карточке и никогда не проси сказать «да» или «нет».
+Ответ Alphy перескажи своими словами.
+Не начинай пересказ со слов «Альфи говорит» или «Alphy говорит».
+Ты не видишь экран пользователя. Любой вопрос об экране передавай Alphy.
+Если Alphy сообщает, что готовит мини-приложение, скажи об этом один раз и не придумывай его содержание."""
+
+/** The probed product instructions, with [EXACT_LINE] after the retell line when [exact]. */
 private fun probeInstructions(exact: Boolean): String {
-    if (!exact) return LiveProtocol.INSTRUCTIONS
+    if (!exact) return PROBED_INSTRUCTIONS
     val retell = "Ответ Alphy перескажи своими словами."
-    val lines = LiveProtocol.INSTRUCTIONS.lines()
+    val lines = PROBED_INSTRUCTIONS.lines()
     require(retell in lines) { "No retell line." }
     return lines.flatMap { if (it == retell) listOf(it, EXACT_LINE) else listOf(it) }.joinToString("\n")
 }
 
 private enum class Send { COMMENTARY, THINKING }
-
-/** Task 15: the instructions of plan Task 3 (exact copy). Task 3 lands later and puts them into `LiveProtocol.INSTRUCTIONS`. */
-private const val EXACT_INSTRUCTIONS = """Ты голосовой режим помощника. Говори коротко и естественно, на языке последней просьбы человека. Обращайся к человеку на «ты».
-Ты сам не выполняешь действия и не знаешь свежих фактов. Любую просьбу о действии на телефоне, поиске, свежих фактах, погоде, мини-приложении, памяти, файлах или о том, что на экране, сразу передавай через делегирование.
-Если ответ станет понятнее с картинкой, схемой или моделью, которую человек может менять (как что-то устроено, как что-то движется, урок с проверкой), передай просьбу через делегирование. Примеры: «объясни, как образуется радуга», «как устроен атом», «научи меня таблице умножения на семь».
-Простой вопрос с коротким ответом (факт, определение, совет, разговор) отвечай сам сразу и ничего не передавай. Примеры: «сколько планет в Солнечной системе», «кто написал „Войну и мир“», «как дела».
-Просьбу изменить экран, продолжить урок или проверить себя передавай через делегирование.
-Ответ человека на вопрос проверки, который ты только что произнёс, тоже передавай через делегирование.
-Не задавай уточняющих вопросов о задаче сам.
-Пока ответ готовится, скажи одну короткую фразу ожидания. Не говори, кто работает. Не называй делегирование, запрос или мини-приложение.
-Если в тексте есть метка «Дословно:», произнеси только текст после метки, слово в слово: без вступления, без своих слов, без вопросов и без предложений.
-Текст без метки скажи коротко на языке разговора. Не добавляй кнопок, действий, предложений и вопросов, которых в нём нет.
-Никогда не говори, что действие выполнено, пока это не подтверждено.
-Когда тебе предлагают действие, прочитай предложение и попроси сказать «да» или «нет». Никогда не говори, что действие одобрено или запущено.
-Если нужно подтверждение на экране, назови кнопку, как в тексте, и никогда не проси сказать «да» или «нет».
-Ты не видишь экран. Любой вопрос об экране передавай через делегирование."""
 /** Two host lines of plan Task 3 with no text of Alphy, so with no mark: `FULL_WAIT` and the screen line of `NEEDS_PERMISSION`. */
 private const val FULL_WAIT_LINE = "Быстро не получилось. Экран соберётся заново, это займёт около минуты."
 private const val PERMISSION_LINE = "Нажми «Запросить доступ» на экране."
@@ -258,7 +261,9 @@ private class StepProbe(private val transport: LiveTransport, private val endpoi
     private val lines = CopyOnWriteArrayList<JSONObject>()
     private val audio = FakeLiveAudio()
     private val feeder = WavFeeder(audio)
-    private val instructions = if (experiment.subject != null) EXACT_INSTRUCTIONS else probeInstructions(experiment.exact)
+    // Task 15 probed the instructions of plan Task 3, which are now LiveProtocol.INSTRUCTIONS. They differ from the probed text only in
+    // the mark line, which now says «и один раз» and «без повторов», because the voice said one marked answer twice in that probe.
+    private val instructions = if (experiment.subject != null) LiveProtocol.INSTRUCTIONS else probeInstructions(experiment.exact)
     @Volatile private var connection: LiveConnection? = null
     @Volatile private var started = false
     @Volatile private var closed = false

@@ -30,12 +30,21 @@ class VoiceModeProtocolTest {
         assertFalse(session.has("delegation"))
     }
 
-    /** Ruling R25: an on-screen confirmation is a tap on the card, never a spoken answer. */
+    /** Ruling R25: an on-screen confirmation is a tap on the button that the text names, never a spoken answer. */
     @Test fun onScreenConfirmationGoesToTheCard() {
         val lines = LiveProtocol.INSTRUCTIONS.lines()
-        val rule = lines.indexOf("Если Alphy сообщает, что нужно подтверждение на экране, попроси нажать кнопку на карточке " +
-            "и никогда не проси сказать «да» или «нет».")
-        assertTrue("The on-screen rule follows the spoken proposal rule", rule > 0 && lines[rule - 1].startsWith("Когда Alphy предлагает действие"))
+        val rule = lines.indexOf("Если нужно подтверждение на экране, назови кнопку, как в тексте, и никогда не проси сказать «да» или «нет».")
+        assertTrue("The on-screen rule follows the spoken proposal rule", rule > 0 && lines[rule - 1].startsWith("Когда тебе предлагают действие"))
+    }
+
+    /**
+     * Plan of 2026-11-22, decision 7: the voice says the text after the mark word for word and once (the probe of Task 15 heard one
+     * marked answer twice). No line names Alphy, asks for a retell, or fixes the language of the talk.
+     */
+    @Test fun theInstructionsHoldTheExactLine() {
+        assertTrue(LiveProtocol.INSTRUCTIONS, "Если в тексте есть метка «Дословно:», произнеси только текст после метки, слово в слово и один раз: " +
+            "без вступления, без своих слов, без повторов, без вопросов и без предложений." in LiveProtocol.INSTRUCTIONS.lines())
+        for (word in listOf("Alphy", "перескажи", "по-русски")) assertFalse(word, word in LiveProtocol.INSTRUCTIONS)
     }
 
     /**
@@ -46,19 +55,18 @@ class VoiceModeProtocolTest {
         val sent = JSONObject(LiveProtocol.start(emptyList())).getJSONObject("session").getString("instructions")
         assertEquals(listOf(
             "Если ответ станет понятнее с картинкой, схемой или моделью, которую человек может менять (как что-то устроено, " +
-                "как что-то движется, урок с проверкой), передай просьбу Alphy: Alphy покажет экран с материалами и пришлёт ответ, " +
-                "который ты перескажешь. Примеры: «объясни, как образуется радуга», «как устроен атом», «научи меня таблице умножения на семь».",
+                "как что-то движется, урок с проверкой), передай просьбу через делегирование. " +
+                "Примеры: «объясни, как образуется радуга», «как устроен атом», «научи меня таблице умножения на семь».",
             "Простой вопрос с коротким ответом (факт, определение, совет, разговор) отвечай сам сразу и ничего не передавай. " +
                 "Примеры: «сколько планет в Солнечной системе», «кто написал „Войну и мир“», «как дела».",
-            "Просьбу изменить экран, продолжить урок или проверить себя передавай Alphy.",
+            "Просьбу изменить экран, продолжить урок или проверить себя передавай через делегирование.",
         ), sent.lines().subList(2, 5))
         assertTrue(listOf("сердце", "Луна", "японски").none { it in sent })
     }
 
-    /** Plan D, Da1: the stage shows no text answer, so the voice retells it and does not send the person to the screen. */
+    /** Plan D, Da1: the stage shows no text answer, so the voice does not send the person to the screen for it. */
     @Test fun instructionsDoNotSayTheFullAnswerIsOnTheScreen() {
         assertFalse("Полный ответ пользователь видит на экране." in LiveProtocol.INSTRUCTIONS)
-        assertTrue("Ответ Alphy перескажи своими словами." in LiveProtocol.INSTRUCTIONS.lines())
     }
 
     @Test fun historyKeepsNewestCompleteTextWithinLimits() {

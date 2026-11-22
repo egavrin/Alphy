@@ -58,6 +58,7 @@ import com.alpha.assistant.voice.FakeLiveTransport
 import com.alpha.assistant.voice.FakeSpeechInput
 import com.alpha.assistant.voice.LIVE_STARTED
 import com.alpha.assistant.voice.LivePhase
+import com.alpha.assistant.voice.LiveProtocol.MARK
 import com.alpha.assistant.voice.inputDelta
 import com.alpha.assistant.voice.liveDelegation
 import com.alpha.assistant.voice.outputAudio
@@ -119,7 +120,7 @@ class ShellLiveVoiceWorkflowTest {
             assertEquals(messages(model).single { it.role == "assistant" }.id, model.liveVoiceCardId)
             assertTrue(routed.single().search)
             // spoken() ends a reply without a sentence end with a period.
-            assertEquals(listOf("d1" to "Ответ Alphy: Fixture response."), commentary())
+            assertEquals(listOf("d1" to "${MARK}Fixture response."), commentary())
             // The text that the user typed on the voice screen stays in the composer.
             assertEquals("Черновик", model.snapshot.draft.text)
         }
@@ -130,7 +131,7 @@ class ShellLiveVoiceWorkflowTest {
         live { _, model ->
             socket.emit(liveDelegation("d1", 700))
             robot.waitUntil { commentary().isNotEmpty() }
-            assertEquals(listOf("d1" to "Alphy не расслышал запрос."), commentary())
+            assertEquals(listOf("d1" to LiveVoiceBridge.NOT_HEARD), commentary())
             assertTrue(model.snapshot.conversations.isEmpty())
             assertEquals(0, fixture.provider.calls)
         }
@@ -143,8 +144,7 @@ class ShellLiveVoiceWorkflowTest {
         live { _, model ->
             socket.say("Сделай счётчик", "d1", 100)
             robot.waitUntil(60_000) { commentary().size == 2 }
-            assertEquals(listOf("d1" to "Alphy готовит мини-приложение, оно появится на экране.",
-                "d1" to "Мини-приложение готово. Ответ Alphy: Fixture response."), commentary())
+            assertEquals(listOf("d1" to LiveVoiceBridge.MINI_APP_STARTED, "d1" to "${MARK}Fixture response."), commentary())
             assertNotNull(messages(model).last().toolId)
         }
     }
@@ -157,8 +157,7 @@ class ShellLiveVoiceWorkflowTest {
             live { _, model ->
                 socket.say(APP_REQUEST, "d1", 100)
                 robot.waitUntil(60_000) { commentary().size == 2 }
-                assertEquals(listOf("d1" to "Alphy готовит мини-приложение, оно появится на экране.",
-                    "d1" to "Мини-приложение готово. Ответ Alphy: Готово."), commentary())
+                assertEquals(listOf("d1" to LiveVoiceBridge.MINI_APP_STARTED, "d1" to "${MARK}Готово."), commentary())
                 assertEquals(listOf(CloudGenerationStage.APP_FILE), script.calls.map { it.generationStage })
                 val card = checkNotNull(messages(model).last().toolId)
                 // The library list of the controller refreshes after the card.
@@ -219,7 +218,7 @@ class ShellLiveVoiceWorkflowTest {
             assertTrue(routed.single().voiceScreen)
             assertEquals(AgentPhase.REVIEW, plan.phase)
             assertNull(messages(model).last().toolId)
-            assertEquals(listOf("d1" to ON_SCREEN), commentary())
+            assertEquals(listOf("d1" to onScreen(AgentPhase.REVIEW)), commentary())
         }
     }
 
@@ -322,7 +321,7 @@ class ShellLiveVoiceWorkflowTest {
         assertTrue(runCatching { provider.planCalls.single().second.check() }.isFailure)
         assertEquals(listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_CANCELED), phases)
         assertNull(messages(model).last().toolId)
-        assertEquals(listOf("d1" to "Ответ Alphy: Fixture response."), commentary())
+        assertEquals(listOf("d1" to "${MARK}Fixture response."), commentary())
     }
 
     /** Plan D, Db4: a stop while the routing call and the plan call wait stops both, and no app comes when they could answer. */
@@ -391,7 +390,7 @@ class ShellLiveVoiceWorkflowTest {
             assertEquals(1, script.calls.size)
             assertEquals(listOf(AppFileNames.EARLY_PLAN_START, AppFileNames.EARLY_PLAN_CANCELED), phases)
             assertNull(messages(model).last().toolId)
-            assertEquals(listOf("d1" to "Ответ Alphy: Fixture response."), commentary())
+            assertEquals(listOf("d1" to "${MARK}Fixture response."), commentary())
         }
     }
 
@@ -470,7 +469,7 @@ class ShellLiveVoiceWorkflowTest {
             assertTrue("\nReply excerpt: $FRESH_TEXT" in input)
             assertTrue("\nSource [1] excerpt: ${FRESH_SOURCE.title}\n${FRESH_SOURCE.summary}" in input)
             robot.awaitFrames(5)
-            assertEquals(listOf("d1" to "Ответ Alphy: $FRESH_TEXT"), commentary())
+            assertEquals(listOf("d1" to "$MARK$FRESH_TEXT"), commentary())
         }
     }
 
@@ -543,7 +542,7 @@ class ShellLiveVoiceWorkflowTest {
         val message = messages(model).last()
         assertEquals("cancelled", message.status)
         assertNull(message.toolId)
-        assertEquals(listOf("d1" to SCREEN_ANSWER, "d1" to "Alphy не смог выполнить запрос: Запрос остановлен."), commentary())
+        assertEquals(listOf("d1" to SCREEN_ANSWER, "d1" to STOPPED), commentary())
         assertTrue(model.liveVoice.active)
         gate.complete(Unit)
         robot.awaitFrames(5)
@@ -569,7 +568,7 @@ class ShellLiveVoiceWorkflowTest {
     @Test fun aLaterAnswerKeepsTheScreen() = onStage { scenario, model, app ->
         robot.waitUntil { inStage(scenario, CALC_LABEL) }
         socket.say("Какая погода", "d2", 2_000)
-        robot.waitUntil { "d2" to "Ответ Alphy: Fixture response." in commentary() }
+        robot.waitUntil { "d2" to "${MARK}Fixture response." in commentary() }
         assertEquals(app, model.stageToolId)
         assertTrue(inStage(scenario, CALC_LABEL))
         assertFalse(inStage(scenario, "Fixture response"))
@@ -584,7 +583,7 @@ class ShellLiveVoiceWorkflowTest {
             socket.say(PRESS_REQUEST, "d2", 2_000)
             waitForTheAnswer(model, before)
             robot.waitUntil { JSONObject(stored(model, app).state).getInt("lesson") == 2 }
-            robot.waitUntil { "d2" to "Ответ Alphy: $PRESS_TEXT" in commentary() }
+            robot.waitUntil { "d2" to "$MARK$PRESS_TEXT" in commentary() }
             assertTrue(routingOf(provider, PRESS_REQUEST).shownScreen.orEmpty().startsWith(ShownScreen.PREFIX))
             assertEquals(listOf(CloudGenerationStage.APP_FILE), provider.script.calls.map { it.generationStage })
             assertEquals(listOf("complete", PRESS_TEXT, null), messages(model).last().let { listOf(it.status, it.text, it.toolId) })
@@ -875,7 +874,7 @@ class ShellLiveVoiceWorkflowTest {
             socket.say(CHANGE_REQUEST, "d2", 2_000)
             waitForTheAnswer(model, before)
             assertEquals(listOf("error", "internal", APP_INTERNAL), messages(model).last().let { listOf(it.status, it.errorCode, it.error) })
-            robot.waitUntil { "d2" to "Alphy не смог выполнить запрос: $APP_INTERNAL" in commentary() }
+            robot.waitUntil { "d2" to LiveVoiceBridge.FAILED + APP_INTERNAL in commentary() }
             assertEquals(app, model.stageToolId)
             assertBuilds(model, "kind=refine step=change outcome=failed code=none error=${IllegalStateException::class.java.name}")
         }
@@ -1050,7 +1049,7 @@ class ShellLiveVoiceWorkflowTest {
         live { _, model ->
             socket.say("Какая погода", "d1", 100)
             robot.waitUntil { commentary().isNotEmpty() }
-            assertEquals(listOf("d1" to "Alphy не смог выполнить запрос: Сбой"), commentary())
+            assertEquals(listOf("d1" to LiveVoiceBridge.FAILED + "Сбой"), commentary())
             assertEquals("error", messages(model).last().status)
         }
     }
@@ -1111,7 +1110,7 @@ class ShellLiveVoiceWorkflowTest {
             assertTrue(model.liveVoiceWorking)
             gate.complete(Unit)
             robot.waitUntil { commentary().size == 2 }
-            assertEquals(setOf("d1" to "Ответ Alphy: Ответ на: Первый.", "d2" to "Ответ Alphy: Ответ на: Второй."), commentary().toSet())
+            assertEquals(setOf("d1" to "${MARK}Ответ на: Первый.", "d2" to "${MARK}Ответ на: Второй."), commentary().toSet())
             assertEquals(listOf(first.id, second.id), messages(model).filter { it.role == "assistant" && it.status == "complete" }.map { it.id })
             assertFalse(model.liveVoiceWorking)
         }
@@ -1140,17 +1139,83 @@ class ShellLiveVoiceWorkflowTest {
             assertEquals("Привет", messages(model).first().text)
             assertEquals("complete", messages(model).last().status)
             assertEquals(messages(model).last().id, model.liveVoiceCardId)
-            assertEquals("Пользователь написал: Привет. Ответ Alphy: Fixture response.", thinking)
+            assertEquals("Пользователь написал: Привет. ${MARK}Fixture response.", thinking)
             assertTrue(commentary().isEmpty())
         }
     }
 
-    /** A typed message that made an app gets the same retell text as a hand-off with an app. */
-    @Test fun typedAppTurnSaysTheAppIsReady() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+    /** A typed message that made an app gets its reply under the mark, as a hand-off with an app. */
+    @Test fun typedAppTurnGoesUnderTheMark() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
         install(chat = StageProvider())
         live { scenario, model ->
-            assertEquals("Пользователь написал: $APP_REQUEST. Мини-приложение готово. Ответ Alphy: Готово.",
-                typedThinking(scenario, model, APP_REQUEST))
+            assertEquals("Пользователь написал: $APP_REQUEST. ${MARK}Готово.", typedThinking(scenario, model, APP_REQUEST))
+        }
+    }
+
+    /**
+     * Plan of 2026-11-22, decision 7: each text of Alphy goes to the voice after the mark: the start of a screen, an answer, and the
+     * reply of a typed turn.
+     */
+    @Test fun eachTextOfAlphyGoesUnderTheMark() = gatedRequest { scenario, model, gate ->
+        assertEquals(listOf("d1" to "$MARK$SCREEN_TEXT"), commentary())
+        gate.complete(Unit)
+        robot.waitUntil(60_000) { model.stageToolId != null }
+        socket.say("Какая погода", "d2", 3_000)
+        robot.waitUntil { commentary().any { it.first == "d2" } }
+        assertEquals(listOf("d2" to "${MARK}Fixture response."), commentary().filter { it.first == "d2" })
+        val thinking = typedThinking(scenario, model, "Привет")
+        assertTrue(thinking, thinking.endsWith("${MARK}Fixture response."))
+    }
+
+    /**
+     * Review Focus 4: a talk in English. The text after each mark is the English reply alone, with no host word, and the waiting line of
+     * the full generation and the screen line of a plan go with no mark.
+     */
+    @Test fun noHostWordIsUnderTheMark() = withPlanStep(fixture.context, AiProvider.OPENAI, true) {
+        val script = AgentScriptProvider(listOf(Scripted.Text(appFilePlan("calc"))) + List(2) { Scripted.Text(BROKEN_PLAN) } +
+            Scripted.Text(OUTSIDE) + LOOP)
+        val stage = StageProvider(show = true, script = script, done = "Done.", screen = "The heart is a pump.")
+        // The timer request and its plan call go to the fixture provider, which makes the phone plan.
+        fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence(TIMER_REQUEST, "таймер"))
+        fixture.provider.agentProposal = """{"steps":[{"function":"clock.setTimer","args":{"seconds":600}}]}"""
+        install(chat = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
+                if (request.agentPlan || request.decisionContext?.originalUserTurn?.text == TIMER_REQUEST) fixture.provider.respond(key, request, session, emit)
+                else stage.respond(key, request, session, emit)
+        })
+        live { scenario, model ->
+            socket.say(APP_REQUEST, "d1", 100)
+            robot.waitUntil(60_000) { model.stageToolId != null }
+            val app = model.stageToolId
+            val before = messages(model).size
+            socket.say(SCREEN_REQUEST, "d2", 2_000)
+            waitForTheAnswer(model, before)
+            robot.waitUntil(60_000) { model.stageToolId != app }
+            typedThinking(scenario, model, "Hello")
+            assertEquals(AgentPhase.REVIEW, proposed(model, TIMER_REQUEST, "d3", 4_000).phase)
+            robot.awaitFrames(5)
+            assertEquals(listOf("d1" to LiveVoiceBridge.MINI_APP_STARTED, "d1" to "${MARK}Done.", "d2" to "${MARK}The heart is a pump.",
+                "d2" to FULL_WAIT, "d3" to onScreen(AgentPhase.REVIEW)), commentary())
+            val texts = socket.sent.map(::JSONObject).filter { it.getString("type") in setOf("session.commentary.append", "session.thinking.append") }
+                .map { it.getString("content") }
+            val replies = setOf("Done.", "The heart is a pump.", "Fixture response.")
+            for (text in texts.filter { MARK in it }) assertTrue(text, text.substringAfter(MARK) in replies)
+            // Two hand-off texts and the typed reply.
+            assertEquals(texts.toString(), 3, texts.count { MARK in it })
+        }
+    }
+
+    /** Plan of 2026-11-22, decision 8: a card that waits for a permission names its button by the label on the screen. */
+    @Test fun theScreenLineNamesItsButton() {
+        assertNotEquals("The camera permission must be denied on the test emulator", PackageManager.PERMISSION_GRANTED,
+            fixture.context.checkSelfPermission(Manifest.permission.CAMERA))
+        fixture.provider.devicePlanSteps = listOf(PhoneActionEvidence("Take a selfie.", "selfie"))
+        fixture.provider.agentProposal = """{"steps":[{"function":"camera.capture","args":{"lens":"front"}}]}"""
+        install()
+        live(voiceApproval = true) { _, model ->
+            assertEquals(AgentPhase.NEEDS_PERMISSION, proposed(model, "Take a selfie.", "d1", 100).phase)
+            SystemClock.sleep(500)
+            assertEquals(listOf("d1" to "Нажми «Запросить доступ» на экране."), commentary())
         }
     }
 
@@ -1162,7 +1227,7 @@ class ShellLiveVoiceWorkflowTest {
     }
 
     @Test fun refinementAsksForTheScreen() = refinement { _, model ->
-        assertEquals(listOf("d1" to "Нужно подтверждение на экране."), commentary())
+        assertEquals(listOf("d1" to onScreen(null, refinement = true)), commentary())
         assertEquals(2, messages(model).last().refinementChoices.size)
     }
 
@@ -1170,8 +1235,8 @@ class ShellLiveVoiceWorkflowTest {
     @Test fun refinementChoiceSpeaksTheNewResult() = refinement { scenario, model ->
         scenario.onActivity { model.chooseRefinementTarget(messages(model).last().id, "a") }
         robot.waitUntil(60_000) { commentary().size == 3 }
-        assertEquals(listOf("d1" to "Нужно подтверждение на экране.", "d1" to "Alphy готовит мини-приложение, оно появится на экране.",
-            "d1" to "Мини-приложение готово. Ответ Alphy: Готово."), commentary())
+        assertEquals(listOf("d1" to onScreen(null, refinement = true), "d1" to LiveVoiceBridge.MINI_APP_STARTED, "d1" to "${MARK}Готово."),
+            commentary())
         assertEquals("a", messages(model).last().toolId)
     }
 
@@ -1281,7 +1346,7 @@ class ShellLiveVoiceWorkflowTest {
         fixture.provider.devicePlanSteps = null
         socket.say("да, но на десять минут", "d2", 6_000)
         robot.waitUntil { commentary().size == 2 }
-        assertEquals(listOf("d1" to PROPOSAL_ADD, "d2" to "Ответ Alphy: Fixture response."), commentary())
+        assertEquals(listOf("d1" to PROPOSAL_ADD, "d2" to "${MARK}Fixture response."), commentary())
         assertEquals(listOf(PLAN_REQUEST, "да, но на десять минут"), messages(model).filter { it.role == "user" }.map { it.text })
         assertEquals(review, model.agent.plan)
     }
@@ -1343,7 +1408,7 @@ class ShellLiveVoiceWorkflowTest {
         val facts = listOf("A", "B").map { it.repeat(500) }
         reviewed(prepare = { writes(facts) }) { _, _, _ ->
             val proposal = commentary().single().second
-            assertEquals("Alphy предлагает: ${added(facts[0])}; ${added(facts[1])}.$ASK", proposal)
+            assertEquals("${LiveVoiceBridge.PROPOSE}${added(facts[0])}; ${added(facts[1])}.$ASK", proposal)
             assertTrue(proposal.length <= 1_200)
         }
     }
@@ -1355,18 +1420,18 @@ class ShellLiveVoiceWorkflowTest {
         assertFalse(model.agent.busy)
         assertEquals(review, model.agent.plan)
         SystemClock.sleep(500)
-        assertEquals(listOf("d1" to ON_SCREEN), commentary())
+        assertEquals(listOf("d1" to onScreen(AgentPhase.REVIEW)), commentary())
     }
 
     /** Spec 5.5.10 rule 10. */
     @Test fun withoutEchoCheckOnlyTapRuns() = reviewed(voiceApproval = false) { scenario, model, review ->
-        assertEquals(listOf("d1" to ON_SCREEN), commentary())
+        assertEquals(listOf("d1" to onScreen(AgentPhase.REVIEW)), commentary())
         answer("да", 6_000)
         assertFalse(model.agent.busy)
         assertEquals(review, model.agent.plan)
         scenario.onActivity { model.agent.execute(review) }
         robot.waitUntil { commentary().size == 2 }
-        assertEquals(listOf("d1" to ON_SCREEN, "d1" to DONE), commentary())
+        assertEquals(listOf("d1" to onScreen(AgentPhase.REVIEW), "d1" to DONE), commentary())
     }
 
     /** Spec 5.5.8: the end of each run goes to the hand-off of its plan once. A tap runs each plan. */
@@ -1402,8 +1467,8 @@ class ShellLiveVoiceWorkflowTest {
             } finally { robot.instrumentation.removeMonitor(clock) }
             robot.waitUntil { commentary().size == 6 }
             SystemClock.sleep(500)
-            assertEquals(listOf("d1" to ON_SCREEN, "d1" to failed, "d2" to ON_SCREEN, "d2" to DONE, "d3" to ON_SCREEN, "d3" to CANCELLED),
-                commentary())
+            val review = onScreen(AgentPhase.REVIEW)
+            assertEquals(listOf("d1" to review, "d1" to failed, "d2" to review, "d2" to DONE, "d3" to review, "d3" to CANCELLED), commentary())
         }
     }
 
@@ -1427,7 +1492,7 @@ class ShellLiveVoiceWorkflowTest {
             assertEquals(AgentPhase.NEEDS_PERMISSION, permission.phase)
             assertEquals(selection.id to selection.revision + 1, permission.id to permission.revision)
             SystemClock.sleep(500)
-            assertEquals(listOf("d1" to ON_SCREEN, "d2" to ON_SCREEN), commentary())
+            assertEquals(listOf("d1" to onScreen(AgentPhase.NEEDS_SELECTION), "d2" to onScreen(AgentPhase.NEEDS_PERMISSION)), commentary())
         }
     }
 
@@ -1693,10 +1758,12 @@ class ShellLiveVoiceWorkflowTest {
      * a change call for [changes], and both answer from [script] (the app file [plan]). A change call throws [fault] when it is set, and
      * the call of [script] with the index of [hold] waits for its gate. The early plan call of a request that gets no screen waits for its
      * cancel, so it takes no reply of [script] and no test depends on when the cancel comes. A template call gets [NO_TEMPLATE] and goes
-     * to no list, so [calls] and [planCalls] hold no template call.
+     * to no list, so [calls] and [planCalls] hold no template call. [done] is the routing text of a made or changed app, and [screen]
+     * the routing text of a screen.
      */
     private class StageProvider(plan: String = "calc", val plans: CompletableDeferred<Unit> = CompletableDeferred(Unit),
-        private val show: Boolean = false, private val brief: String = SCREEN_BRIEF,
+        private val show: Boolean = false, private val brief: String = SCREEN_BRIEF, private val done: String = "Готово.",
+        private val screen: String = SCREEN_TEXT,
         val script: AgentScriptProvider = AgentScriptProvider(listOf(Scripted.Text(appFilePlan(plan)))),
         val routing: CompletableDeferred<Unit> = CompletableDeferred(Unit), private val press: String = NEXT,
         private val changes: CompletableDeferred<Unit> = CompletableDeferred(Unit),
@@ -1718,10 +1785,10 @@ class ShellLiveVoiceWorkflowTest {
             val text = request.decisionContext?.originalUserTurn?.text
             if (text == T10_REQUEST) emit(CloudEvent.Search("found", listOf(FRESH_SOURCE)))
             emit(CloudEvent.RoundComplete(when (text) {
-                APP_REQUEST -> chatDecision("create", "Готово.", "Make the app")
-                CHANGE_REQUEST, T2_REQUEST, T8_REQUEST -> chatDecision("refine", "Готово.", HALF_BRIEF)
-                T10_REQUEST -> JSONObject(chatDecision("refine", "Готово.", HALF_BRIEF)).put("search", "required").toString()
-                SCREEN_REQUEST -> JSONObject(chatDecision("screen", SCREEN_TEXT, brief)).put("show", show).toString()
+                APP_REQUEST -> chatDecision("create", done, "Make the app")
+                CHANGE_REQUEST, T2_REQUEST, T8_REQUEST -> chatDecision("refine", done, HALF_BRIEF)
+                T10_REQUEST -> JSONObject(chatDecision("refine", done, HALF_BRIEF)).put("search", "required").toString()
+                SCREEN_REQUEST -> JSONObject(chatDecision("screen", screen, brief)).put("show", show).toString()
                 PRESS_REQUEST -> chatDecision("press", PRESS_TEXT, press)
                 else -> chatDecision("answer", "Fixture response")
             }, false))
@@ -1776,6 +1843,9 @@ class ShellLiveVoiceWorkflowTest {
 
     private fun commentary() = socket.commentary()
 
+    /** The screen line of a plan card in [phase], or of a refinement choice. */
+    private fun onScreen(phase: AgentPhase?, refinement: Boolean = false) = LiveVoiceBridge.onScreenLine(fixture.context, phase, refinement)
+
     private fun messages(model: ShellViewModel) = model.snapshot.selected?.messages.orEmpty()
 
     private companion object {
@@ -1788,7 +1858,7 @@ class ShellLiveVoiceWorkflowTest {
         /** The titles of the drawings of the fixture plans `lesson` and `shapes`, the start of the labels of their canvases. */
         const val LESSON_DRAWING = "Земля в центре, Луна на орбите и метка её стороны"
         const val SHAPES_DRAWING = "Each shape and color"
-        const val SCREEN_ANSWER = "Ответ Alphy: $SCREEN_TEXT"
+        const val SCREEN_ANSWER = "$MARK$SCREEN_TEXT"
         const val TIMER_REQUEST = "Поставь таймер на 10 минут"
         const val CHANGE_REQUEST = "Покажи ещё половину счёта"
         const val HALF_BRIEF = "Add half of the bill"
@@ -1797,13 +1867,13 @@ class ShellLiveVoiceWorkflowTest {
         const val T8_REQUEST = "Не, не надо добавлять, целиком замени картинку с рассказом про Энцелад"
         const val T10_REQUEST = "Замени картинку и помести всю доступную информацию про Энцелад на экран"
         /** The spoken line of a changed or new screen of a change request. */
-        const val CHANGED = "Ответ Alphy: Готово."
+        const val CHANGED = "${MARK}Готово."
         /** The spoken lines of the full generation: the waiting line, and a provider that did not answer with the hint (rulings FX-4, FX-5). */
-        const val FULL_WAIT = "Быстро не получилось. Alphy собирает экран заново, это займёт около минуты."
-        const val FULL_NO_ANSWER = "Экран не собран: сервис ИИ не ответил. Скажите запрос полностью, одной фразой."
+        const val FULL_WAIT = LiveVoiceBridge.FULL_WAIT
+        const val FULL_NO_ANSWER = LiveVoiceBridge.FULL_NO_ANSWER + LiveVoiceBridge.FULL_HINT
         /** The chat text of an exception that is not a CloudFailure in an operation of the apps (ruling FX-10). */
         const val APP_INTERNAL = "Внутренняя ошибка Alphy: мини-приложение не готово. Сохранённые мини-приложения и данные не изменились. Повторите запрос."
-        const val STOPPED = "Alphy не смог выполнить запрос: Запрос остановлен."
+        const val STOPPED = LiveVoiceBridge.FAILED + "Запрос остановлен."
         /** A plan reply for a thing that the kit cannot give. */
         const val OUTSIDE = "outside(\"game\")"
         /** The calc plan with a fault in the line of perPerson. */
@@ -1858,9 +1928,8 @@ class ShellLiveVoiceWorkflowTest {
         const val PLAN_REQUEST = "Change my memory of my favorite color to green"
         const val ADD = """{"steps":[{"function":"memory.write","args":{"text":"Favorite color is green"}}]}"""
         const val EDIT = """{"steps":[{"function":"memory.write","args":{"match":"Favorite color","text":"Favorite color is green"}}]}"""
-        const val ASK = " Скажите «да», чтобы выполнить, или «нет», чтобы отменить."
-        val PROPOSAL_ADD = "Alphy предлагает: ${added("Favorite color is green")}.$ASK"
-        const val ON_SCREEN = "Нужно подтверждение на экране."
+        const val ASK = LiveVoiceBridge.ASK
+        val PROPOSAL_ADD = "${LiveVoiceBridge.PROPOSE}${added("Favorite color is green")}.$ASK"
         const val STARTED = "Запускаю."
         const val CANCELLED = "Действие отменено."
         const val DONE = "Готово. План завершён."

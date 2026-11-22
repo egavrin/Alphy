@@ -3,12 +3,14 @@ package com.alpha.assistant.voice
 import android.os.SystemClock
 import android.util.Base64
 import androidx.test.platform.app.InstrumentationRegistry
+import com.alpha.assistant.agent.AgentPhase
 import com.alpha.assistant.cloud.AiAccount
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.cloud.OPENAI_LIVE_MODEL
 import com.alpha.assistant.data.Message
 import com.alpha.assistant.tools.liveCheck
+import com.alpha.assistant.ui.LiveVoiceBridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -104,6 +106,8 @@ internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, accoun
     val host = Host()
     private val session = LiveVoiceSession(instrumentation.targetContext, scope, Recorder(transport), { speaker }, { account }, endpoints, timing)
     val feeder = WavFeeder(audio, afterBlock = ::sample)
+    /** The screen line of the chat bridge for a timer plan with voice approval off. */
+    private val onScreen = LiveVoiceBridge.onScreenLine(instrumentation.targetContext, AgentPhase.REVIEW)
     @Volatile private var feedStart = 0L
     /** The last `playbackActive` and phase that [sample] saw. Only the feeder thread uses them. */
     private var sampledActive: Boolean? = null
@@ -212,7 +216,7 @@ internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, accoun
             "deltas after it: ${events.count { it.type == INPUT && it.at > created && it.at < created + 3_000 }}; host request «$request»")
         expect("request text complete at the hand-off (spec 5.5.2)", "таймер" in request.lowercase(), "«$request»")
         SystemClock.sleep(maxOf(0, created + commentaryDelayMs - now()))
-        val c1 = comment(d1, ON_SCREEN)
+        val c1 = comment(d1, onScreen)
         val claims = text(outputs(asked, c1.first)).lowercase()
         expect("no claim before the commentary (anti-goal 1)", CLAIMS.none { it in claims }, "output before it «$claims»")
         expect("a commentary ${commentaryDelayMs / 1000} s after its delegation is spoken (spec 5.5.6)", spoken(c1.first, "commentary 1"),
@@ -544,13 +548,12 @@ internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, accoun
     private companion object {
         val HISTORY = listOf(Message("live-h1", "user", "Привет, Alphy", 1, "sent"), Message("live-h2", "assistant", "Здравствуйте! Чем помочь?", 2, "complete"))
         // The texts that the chat bridge sends for a timer plan with voice approval off, then on (LiveVoiceBridge).
-        const val ON_SCREEN = "Нужно подтверждение на экране."
         const val DONE = "Готово. План завершён."
-        const val THINKING = "Пользователь написал: Сколько будет два плюс два? Ответ Alphy: Четыре."
-        const val LONG_ANSWER = "Ответ Alphy: Луна — единственный естественный спутник Земли. Она находится примерно в трёхстах восьмидесяти " +
+        const val THINKING = "Пользователь написал: Сколько будет два плюс два? ${LiveProtocol.MARK}Четыре."
+        const val LONG_ANSWER = "${LiveProtocol.MARK}Луна — единственный естественный спутник Земли. Она находится примерно в трёхстах восьмидесяти " +
             "четырёх тысячах километров от нас и всегда повёрнута к Земле одной стороной. Приливы и отливы в океанах возникают в основном " +
             "из-за притяжения Луны, а полный цикл её фаз длится около двадцати девяти с половиной суток."
-        const val PROPOSAL = "Alphy предлагает: Таймер, 5 минут. Скажите «да», чтобы выполнить, или «нет», чтобы отменить."
+        const val PROPOSAL = LiveVoiceBridge.PROPOSE + "Таймер, 5 минут." + LiveVoiceBridge.ASK
         const val STARTED = "Запускаю."
         val MUTES = setOf("session.input_audio.mute", "session.input_audio.unmute")
         val CLAIMS = listOf("поставил", "поставлен", "запустил", "запускаю", "готово")
@@ -567,7 +570,7 @@ internal class LiveDialog(transport: LiveTransport, endpoints: Endpoints, accoun
  * silence. A reply that the user talked over stops at the end of that user turn, as in the second live run: the audio of the words
  * already in the transcript still streams, and the next reply starts after at least 1.1 s of silent stream audio. Each turn opens a
  * delegation and gets a filler line, except a turn of [undelegated]: it gets a short answer and no delegation. [script] gives the
- * transcript of each turn.
+ * transcript of each turn. Of an append with the mark it speaks the text after the mark, and any other append as it is.
  */
 internal class ScriptedLiveServer(private val script: List<String> = TURNS, private val undelegated: Set<Int> = emptySet()) : LiveTransport {
     // A daemon worker that is never shut down, so a late audio send after the close cannot throw.
@@ -602,11 +605,11 @@ internal class ScriptedLiveServer(private val script: List<String> = TURNS, priv
             "session.input_audio.append" -> heard(Base64.decode(e.getString("audio"), Base64.DEFAULT))
             "session.commentary.append" -> {
                 emit(JSONObject().put("type", APPENDED).put("client_event_id", e.getString("event_id")))
-                speak(e.getString("content"))
+                speak(e.getString("content").substringAfter(LiveProtocol.MARK))
             }
             "session.thinking.append" -> {
                 emit(JSONObject().put("type", "session.thinking.appended").put("client_event_id", e.getString("event_id")))
-                speak("Четыре.")
+                speak(e.getString("content").substringAfter(LiveProtocol.MARK))
             }
             "session.close" -> { stream?.cancel(false); emit(JSONObject().put("type", "session.closed").put("reason", "close_requested")) }
         }

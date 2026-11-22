@@ -1,6 +1,7 @@
 package com.alpha.assistant.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -134,7 +135,7 @@ internal class LiveVoiceBridge(
     fun screenStarted(messageId: String, answer: String) {
         val delegation = handOffs.entries.firstOrNull { it.value == messageId }?.key ?: return
         screens += messageId
-        session.commentary(delegation, spoken(ANSWER, answer))
+        session.commentary(delegation, spoken(LiveProtocol.MARK, answer))
     }
 
     /**
@@ -188,9 +189,9 @@ internal class LiveVoiceBridge(
             it.id == window.planId && it.revision == window.revision && it.phase == AgentPhase.REVIEW && !agent.busy
         }
         val text = when {
-            plan == null -> ON_SCREEN
-            answer == SpokenAnswer.APPROVE -> { agent.execute(plan); if (agent.busy) STARTED else ON_SCREEN }
-            else -> { agent.dismiss(plan); if (agent.plan == null) CANCELLED else ON_SCREEN }
+            plan == null -> onScreen(agent.plan?.phase)
+            answer == SpokenAnswer.APPROVE -> { agent.execute(plan); if (agent.busy) STARTED else onScreen(agent.plan?.phase) }
+            else -> { agent.dismiss(plan); if (agent.plan == null) CANCELLED else onScreen(agent.plan?.phase) }
         }
         val decided = answer to text
         answered = decided
@@ -229,7 +230,7 @@ internal class LiveVoiceBridge(
                 if (message.status == "generating") continue
                 changes -= id
                 if (message.status == "complete") {
-                    session.commentary(delegation, spoken(ANSWER, message.text))
+                    session.commentary(delegation, spoken(LiveProtocol.MARK, message.text))
                     continue
                 }
             }
@@ -242,10 +243,9 @@ internal class LiveVoiceBridge(
                 message.status == "generating" -> MINI_APP_STARTED
                 full && message.status == "error" -> fullFailed(message.errorCode)
                 message.status != "complete" -> FAILED + message.error.take(MAX - FAILED.length)
-                message.refinementChoices.isNotEmpty() -> ON_SCREEN
-                message.toolId != null -> spoken(MINI_APP_READY, message.text)
+                message.refinementChoices.isNotEmpty() -> onScreen(null, refinement = true)
                 message.text == PRESS_MISSING || message.text == PRESS_FAILED -> message.text
-                else -> spoken(ANSWER, message.text)
+                else -> spoken(LiveProtocol.MARK, message.text)
             })
         }
         for ((id, text) in typed) {
@@ -253,8 +253,8 @@ internal class LiveVoiceBridge(
             message.toolId?.let { stageToolId = it }
             // A typed plan has no hand-off, so GPT-Live neither reads nor approves it.
             if (message.text == planReady) planHandOff = null
-            session.thinking(spoken("Пользователь написал: ${LiveProtocol.spoken(text, TYPED_MAX)} " +
-                (if (message.toolId != null) MINI_APP_READY else ANSWER), message.text))
+            // The typed words go before the mark, so the voice says only the reply (Task 15 probed this form).
+            session.thinking(spoken("Пользователь написал: ${LiveProtocol.spoken(text, TYPED_MAX)} ${LiveProtocol.MARK}", message.text))
         }
         reportPlan()
     }
@@ -268,8 +268,8 @@ internal class LiveVoiceBridge(
         if (plan == null || !planStates.add(Triple(plan.id, plan.revision, plan.phase))) return
         val voiceProposal = plan.takeIf { it.phase == AgentPhase.REVIEW && voiceApproval }?.let(::proposal)
         val text = when (plan.phase) {
-            AgentPhase.REVIEW -> voiceProposal ?: ON_SCREEN
-            in SCREEN_PHASES -> ON_SCREEN
+            AgentPhase.REVIEW -> voiceProposal ?: onScreen(plan.phase)
+            in SCREEN_PHASES -> onScreen(plan.phase)
             AgentPhase.COMPLETED -> spoken(DONE, string(if (plan.alarmSequence()) R.string.agent_alarms_sent else R.string.agent_completed))
             AgentPhase.FAILED -> spoken(NOT_DONE, plan.results.lastOrNull().orEmpty())
             AgentPhase.STOPPED -> CANCELLED
@@ -318,6 +318,8 @@ internal class LiveVoiceBridge(
     /** [prefix] and the speakable [reply] within the limit of one append (spec 5.5.5). */
     private fun spoken(prefix: String, reply: String) = prefix + LiveProtocol.spoken(reply, MAX - prefix.length)
 
+    private fun onScreen(phase: AgentPhase?, refinement: Boolean = false) = onScreenLine(model.getApplication(), phase, refinement)
+
     private fun string(id: Int, vararg args: Any): String =
         model.getApplication<Application>().let { if (args.isEmpty()) it.getString(id) else it.getString(id, *args) }
 
@@ -325,11 +327,10 @@ internal class LiveVoiceBridge(
         const val MAX = 1200
         /** The typed text of a thinking append. The rest of the limit is for the reply. */
         const val TYPED_MAX = 400
-        const val NOT_HEARD = "Alphy не расслышал запрос."
-        const val BUSY = "Alphy ещё занят предыдущими запросами."
-        const val ANSWER = "Ответ Alphy: "
-        const val MINI_APP_STARTED = "Alphy готовит мини-приложение, оно появится на экране."
-        const val MINI_APP_READY = "Мини-приложение готово. Ответ Alphy: "
+        // Each host line holds no text of Alphy, so it goes with no mark (plan of 2026-11-22, decisions 7 and 8).
+        const val NOT_HEARD = "Не удалось расслышать. Повтори, пожалуйста."
+        const val BUSY = "Подожди немного: предыдущий ответ ещё готовится."
+        const val MINI_APP_STARTED = "Это появится на экране через несколько секунд."
         /** A spoken press named no single control of the shown screen, so nothing ran. */
         const val PRESS_MISSING = "На экране нет такой кнопки."
         /** A spoken press named a control, but no stage ran its tap, so nothing changed. */
@@ -337,21 +338,20 @@ internal class LiveVoiceBridge(
         /** The time for the stage to run or refuse a press. A loaded phone can need some frames, and the voice waits only on a failure. */
         const val PRESS_WAIT_MS = 2_000L
         /** The full generation of a screen that the fast path did not give starts (ruling FX-4). */
-        const val FULL_WAIT = "Быстро не получилось. Alphy собирает экран заново, это займёт около минуты."
+        const val FULL_WAIT = "Быстро не получилось. Экран соберётся заново, это займёт около минуты."
         /** The reason groups of a failed full generation, each with [FULL_HINT] after it (ruling FX-5). */
         const val FULL_NO_ANSWER = "Экран не собран: сервис ИИ не ответил."
-        const val FULL_TOO_BIG = "Экран не собран: запрос не помещается на один экран."
-        const val FULL_NOT_BUILT = "Экран не собран: Alphy не смог его построить."
-        const val FULL_HINT = " Скажите запрос полностью, одной фразой."
+        const val FULL_TOO_BIG = "Экран не собран: это не помещается на один экран."
+        const val FULL_NOT_BUILT = "Экран не собран: построить его не получилось."
+        const val FULL_HINT = " Скажи всё одной фразой."
         /** The failure codes of a provider that did not answer. An http_<status> code is a provider that refused the call. */
         val NO_ANSWER_CODES = setOf("provider", "auth", "quota", "rate_limit", "unavailable", "network", "empty_response", "incomplete",
             "pre_headers_io", "pre_headers_timeout", "stream_io", "stream_timeout", "stream_invalid", "widget_generation")
         /** The failure codes of a request or a reply that does not fit a limit. */
         val TOO_BIG_CODES = setOf("widget_size", "widget_response_size", "response_size", "response_length", "tool_limit")
-        const val FAILED = "Alphy не смог выполнить запрос: "
-        const val ON_SCREEN = "Нужно подтверждение на экране."
-        const val PROPOSE = "Alphy предлагает: "
-        const val ASK = " Скажите «да», чтобы выполнить, или «нет», чтобы отменить."
+        const val FAILED = "Не получилось: "
+        const val PROPOSE = "Предлагаю: "
+        const val ASK = " Скажи «да», чтобы выполнить, или «нет», чтобы отменить."
         const val STARTED = "Запускаю."
         const val CANCELLED = "Действие отменено."
         const val DONE = "Готово. "
@@ -359,5 +359,21 @@ internal class LiveVoiceBridge(
         /** The plan card needs a tap or a system dialog in these phases (rule 9). */
         val SCREEN_PHASES =
             setOf(AgentPhase.NEEDS_PERMISSION, AgentPhase.NEEDS_SELECTION, AgentPhase.UNAVAILABLE, AgentPhase.WAITING_FOR_CAMERA)
+
+        /**
+         * The line of a card that waits for a tap, with the label of its button (plan of 2026-11-22, decision 8): a refinement choice,
+         * or the plan card in [phase]. Each other phase, and no plan, asks for the execute button.
+         */
+        fun onScreenLine(context: Context, phase: AgentPhase?, refinement: Boolean = false): String {
+            fun press(label: Int) = "Нажми «${context.getString(label)}» на экране."
+            return when {
+                refinement -> "Выбери на экране, что изменить."
+                phase == AgentPhase.NEEDS_PERMISSION -> press(R.string.agent_permission_allow)
+                phase == AgentPhase.WAITING_FOR_CAMERA -> press(R.string.agent_continue_camera)
+                phase == AgentPhase.NEEDS_SELECTION -> "Выбери вариант на экране."
+                phase == AgentPhase.UNAVAILABLE -> "Подробности на экране."
+                else -> "Подтверди на экране: нажми «${context.getString(R.string.agent_execute)}»."
+            }
+        }
     }
 }
