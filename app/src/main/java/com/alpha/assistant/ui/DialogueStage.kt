@@ -85,6 +85,18 @@ internal fun showsOnTheStage(message: Message): Boolean = message.status !in unf
     (message.status != "complete" || message.refinementChoices.isNotEmpty() || message.attachments.any { it.mime == GeneratedImage.ATTACHMENT })
 
 /**
+ * The fixed text of a failed request on the stage for the group of its error [code], with what the person can say next (plan "one scene",
+ * decision 22). The groups of no answer and too big are those of a failed full generation (LiveVoiceBridge.fullFailed).
+ */
+@StringRes private fun stageError(code: String): Int = when {
+    code == "search_no_usable_results" || code == "source_attribution" -> R.string.stage_error_search
+    code == "image_generation" -> R.string.stage_error_image
+    code in LiveVoiceBridge.NO_ANSWER_CODES || code.startsWith("http_") -> R.string.stage_error_no_answer
+    code in LiveVoiceBridge.TOO_BIG_CODES -> R.string.stage_error_too_big
+    else -> R.string.stage_error_other
+}
+
+/**
  * The stage height around the drawing of an app: the padding, the kind label, the title, the first control, and the gaps (Da2 ruling 1).
  * The label and the title take about 120 dp, and a slider with its label, the tallest first control, about 105 dp.
  * Gate 3 (2026-11-21): at the fold size a template at its caps scrolled 5.8 dp, with a 266 dp drawing that its width limits on a 534 dp
@@ -214,7 +226,7 @@ private fun stageShowsApp(model: ShellViewModel): Boolean = model.stageToolId !=
                 chat.messages.find { it.id == model.liveVoiceCardId }?.takeIf(::showsOnTheStage)?.let { message ->
                     ChatMessageItem(model, chat, message, cardActions, openTool, openAutomation, showLivePreviews = true,
                         pairedToolId = null, pairedDraftId = null, share = { shareText = it }, settings = settings,
-                        linkError = { linkError = true })
+                        linkError = { linkError = true }, errorText = stringResource(stageError(message.errorCode)))
                 }
                 // The plan of the chat, as the chat list shows it. A later hand-off keeps it while it waits for a tap.
                 model.agent.plan?.takeIf { it.conversationId == chat.id }?.let { AgentPlanCard(model.agent, it) }

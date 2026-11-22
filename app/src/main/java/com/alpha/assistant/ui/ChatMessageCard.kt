@@ -44,6 +44,8 @@ import com.alpha.assistant.data.Source
     share: () -> Unit,
     settings: () -> Unit,
     linkError: () -> Unit,
+    // The text of the error box in place of the text of the message, such as a stage error (plan "one scene", decision 22).
+    errorText: String? = null,
 ) {
     val user = message.role == "user"
     val body = publicUpdate ?: fragment ?: message.text
@@ -134,6 +136,7 @@ import com.alpha.assistant.data.Source
                     Surface(shape = RoundedCornerShape(12.dp), color = if (canRecover) colors.secondaryContainer else colors.errorContainer,
                         contentColor = if (canRecover) colors.onSecondaryContainer else colors.onErrorContainer) {
                         val error = when {
+                            errorText != null -> errorText
                             sourceProblem -> stringResource(R.string.chat_source_attribution)
                             emptyReply -> stringResource(R.string.chat_empty_answer)
                             else -> message.error

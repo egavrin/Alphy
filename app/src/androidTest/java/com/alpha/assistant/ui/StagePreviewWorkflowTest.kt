@@ -69,6 +69,24 @@ class StagePreviewWorkflowTest {
         }
     }
 
+    /**
+     * Plan "one scene", decision 22: a slider of a preview on the stage shows no input note of the host and no «Применить», also after a
+     * drag. In the study they showed for about 3 s, and the screen jumped when the live app came (lane C, other findings, item 1).
+     */
+    @Test fun aSliderPreviewOnTheStageHasNoWarning() {
+        val frame = frame(SLIDER)
+        live(Screens(SLIDER)) { scenario, model ->
+            show(model, frame)
+            robot.waitUntil { robot.composedTextIn(scenario, STAGE, SLIDER_TITLE) && robot.composedIn(scenario, STAGE, ::isSlider) }
+            val slider = checkNotNull(robot.composedBoundsIn(scenario, STAGE, ::isSlider))
+            val origin = IntArray(2)
+            scenario.onActivity { it.window.decorView.getLocationOnScreen(origin) }
+            val y = origin[1] + slider.centerY()
+            robot.shell("input swipe ${origin[0] + slider.left + slider.width() / 4} $y ${origin[0] + slider.left + slider.width() * 3 / 4} $y 350")
+            during(1_000) { assertEquals("live input texts on the stage", emptyList<String>(), liveInputTexts()) }
+        }
+    }
+
     /** A frame of another operation takes the place of the stored app on the stage. */
     @Test fun aLaterNewScreenReplacesTheShownApp() {
         val frame = frame(SHIP)
@@ -245,6 +263,17 @@ class StagePreviewWorkflowTest {
 
     private fun isCharacter(config: SemanticsConfiguration) = config.getOrNull(SemanticsProperties.TestTag) == CHARACTER
 
+    private fun isSlider(config: SemanticsConfiguration) = SemanticsProperties.ProgressBarRangeInfo in config
+
+    /** Each text on the stage that is an input note of the host (tool_live_input_*) or the «Применить» button of the slider. */
+    private fun liveInputTexts(): List<String> {
+        val notes = listOf(R.string.tool_live_input_pending, R.string.tool_live_input_unsaved, R.string.tool_live_input_unavailable,
+            R.string.tool_live_input_finish_first).map { robot.text(it) } +
+            listOf(R.string.tool_live_input_finish, R.string.tool_generated_apply).map { robot.text(it, SLIDER_LABEL) }
+        return readStage(robot) { nodes -> nodes.flatMap { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } } }
+            .filter { it.trimEnd() in notes }
+    }
+
     private fun isShipCanvas(config: SemanticsConfiguration) =
         config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.startsWith(SHIP_TITLE) } == true
 
@@ -314,5 +343,11 @@ class StagePreviewWorkflowTest {
         /** A change of s3 only. */
         const val CHANGE_LINE = "s3 = text(150, 50, \"Пустота внутри\", \"ink\", 14, visible=\$/v == \"Корабль\")"
         val SHIP_CHANGED: String by lazy { SHIP.lines().joinToString("\n") { if (it.startsWith("s3 =")) CHANGE_LINE else it } }
+        const val SLIDER_TITLE = "Что такое большинство?"
+        const val SLIDER_LABEL = "Голоса за"
+        /** The cells template of `template/majority` in Russian: a live slider, as the template of the study had. */
+        const val SLIDER = "cells(\"$SLIDER_TITLE\", lang=\"ru\", palette=\"teal\")\n" +
+            "control = slider(\"$SLIDER_LABEL\", 0, 20, 1, 11)\n" +
+            "card = card(\"Больше половины\", \"Большинство — больше половины голосов: 11 из 20 — большинство, а 10 из 20 — только половина.\")"
     }
 }

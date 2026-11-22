@@ -728,7 +728,7 @@ private data class MiniAppOrigin(
 /** One message of [chat] with its mini-app card or preview. The chat list and the voice mode card show it (spec 5.2.3). */
 @Composable internal fun ChatMessageItem(model: ShellViewModel, chat: Conversation, message: Message, cardActions: MiniAppActions,
     openTool: (String) -> Unit, openAutomation: (String) -> Unit, showLivePreviews: Boolean, pairedToolId: String?,
-    pairedDraftId: String?, share: (String) -> Unit, settings: () -> Unit, linkError: () -> Unit) {
+    pairedDraftId: String?, share: (String) -> Unit, settings: () -> Unit, linkError: () -> Unit, errorText: String? = null) {
     Column(Modifier.fillMaxWidth().padding(start = if (message.role == "user") 25.dp else 0.dp)) {
         val assistant = message.role == "assistant"
         val canRetry = assistant && message.status in setOf("error", "cancelled", "interrupted")
@@ -745,6 +745,7 @@ private data class MiniAppOrigin(
             share = { share(message.text) },
             settings = settings,
             linkError = linkError,
+            errorText = errorText,
         )
         if (message.toolId != null && message.toolRevision != null) {
             Spacer(Modifier.height(8.dp))

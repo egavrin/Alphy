@@ -13,6 +13,7 @@ import com.alpha.assistant.R
 import com.alpha.assistant.cloud.AiProvider
 import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
+import com.alpha.assistant.cloud.CloudFailure
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.images.GeneratedImage
@@ -25,6 +26,7 @@ import com.alpha.assistant.tools.agentWrite
 import com.alpha.assistant.tools.appfile.plan as appFilePlan
 import org.json.JSONObject
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,6 +67,36 @@ class DialogueStageContentTest {
             stage.socket.say("Какая погода", "d2", 2_000)
             robot.waitUntil(60_000) { stage.socket.commentary().any { it.first == "d2" } }
             robot.waitUntil { !robot.composedIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.ContentDescription)?.contains(ALT) == true } }
+        }
+    }
+
+    /**
+     * Plan "one scene", decision 22: a hand-off that fails in its search shows on the stage the fixed text of its error group, which says
+     * what to say next, and no English (lane B of the study, O2). A source check failure has a chat text of its own: the stage shows the
+     * text of its group in its place, and the card keeps its retry button.
+     */
+    @Test fun aStageErrorSaysWhatToSayNext() {
+        stage.fixture.install(chat = object : ChatProvider {
+            override suspend fun respond(key: String, request: CloudRequest, session: CloudSession, emit: suspend (CloudEvent) -> Unit) =
+                when (request.decisionContext?.originalUserTurn?.text) {
+                    SEARCH_REQUEST -> throw CloudFailure("search_no_usable_results", SEARCH_FAILURE)
+                    SOURCE_REQUEST -> throw CloudFailure("source_attribution", "Cite only the sources of the search.")
+                    else -> emit(CloudEvent.RoundComplete(chatDecision("answer", "Fixture response"), false))
+                }
+        }, liveVoice = stage.fixture.liveVoice(stage.socket, stage.audio))
+        stage.live { scenario, model ->
+            val search = robot.text(R.string.stage_error_search)
+            fun failed(code: String) = model.snapshot.selected?.messages?.any { it.id == model.liveVoiceCardId && it.errorCode == code } == true
+            fun texts() = readStage(robot) { nodes -> nodes.flatMap { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } } }
+            stage.socket.say(SEARCH_REQUEST, "d1", 100)
+            robot.waitUntil(60_000) { failed("search_no_usable_results") && texts().isNotEmpty() }
+            assertEquals("English texts on the stage", emptyList<String>(), texts().filter { LATIN in it })
+            assertTrue("the text of the search group", robot.composedTextIn(scenario, STAGE, search))
+            stage.socket.say(SOURCE_REQUEST, "d2", 2_000)
+            // Only the card of a source check failure has its own retry button, so it shows when the stage has the second card.
+            robot.waitUntil(60_000) { failed("source_attribution") && robot.composedTextIn(scenario, STAGE, robot.text(R.string.chat_message_retry)) }
+            assertTrue("the text of the search group", robot.composedTextIn(scenario, STAGE, search))
+            assertFalse("the chat text of a source check failure", robot.composedTextIn(scenario, STAGE, robot.text(R.string.chat_source_attribution)))
         }
     }
 
@@ -151,6 +183,11 @@ class DialogueStageContentTest {
         const val CALC_LABEL = "Per person"
         const val PICTURE_REQUEST = "Покажи, как выглядит сердце"
         const val ALT = "Сердце человека в разрезе"
+        const val SEARCH_REQUEST = "Найди счёт вчерашнего матча"
+        const val SOURCE_REQUEST = "Найди, кто забил гол"
+        /** The message of the failure of a search with no usable source (WebSearch). */
+        const val SEARCH_FAILURE = "Search returned no usable sources. Retry the search or ask without web sources."
+        val LATIN = Regex("[A-Za-z]")
         val PICTURE_ANSWER: String = JSONObject(chatDecision("answer", "Вот сердце в разрезе.")).put("image", JSONObject()
             .put("slot", "heart").put("prompt", "A human heart in section").put("alt", ALT).put("aspect", "1:1").put("required", true)
             .toString()).toString()

@@ -220,6 +220,10 @@ class NativeLiveInputWorkflowTest {
             assertTrue(generateSequence(field) { it.parent }.any { !it.isEnabled })
             val apply = robot.waitFor(robot.text(R.string.tool_generated_apply, text))
             assertTrue(generateSequence(apply) { it.parent }.any { !it.isEnabled })
+            // Off the dialogue stage the slider keeps its note and its Apply too (plan "one scene", decision 22): one note for each control.
+            val sliderApply = robot.waitFor(robot.text(R.string.tool_generated_apply, slider))
+            assertTrue(generateSequence(sliderApply) { it.parent }.any { !it.isEnabled })
+            assertEquals(3, robot.texts().count { it == robot.text(R.string.tool_live_input_unavailable) })
             assertTrue(discrete.isEmpty())
         }
     }

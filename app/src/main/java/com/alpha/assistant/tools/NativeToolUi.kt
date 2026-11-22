@@ -235,7 +235,7 @@ private class NativeLiveEdits(noticeState: MutableState<Int?>,
 }
 
 private class NativeLiveUi(val adapter: NativeLiveInput?, val access: NativeLiveAccess, val edits: NativeLiveEdits,
-    private val root: JSONObject, private val state: JSONObject) {
+    private val root: JSONObject, private val state: JSONObject, val stage: Boolean) {
     fun allows(action: String, payload: Any?): Boolean =
         runCatching { ToolUiCatalog.validateLiveInput(root, action, payload, state) }.isSuccess
 }
@@ -558,7 +558,7 @@ private val miniAppOtherLanguage = mapOf(
     Surface(Modifier.fillMaxWidth(), color = background) {
         CompositionLocalProvider(LocalEmbeddedTool provides embedded, LocalToolBackground provides background,
             LocalRouteSystemBack provides (routeSystemBackEnabled && !embedded),
-            LocalLiveUi provides NativeLiveUi(liveInput, access, edits, root, values), LocalTimerClock provides timerClock,
+            LocalLiveUi provides NativeLiveUi(liveInput, access, edits, root, values, stage = dialogueTitle != null), LocalTimerClock provides timerClock,
             LocalVideoUi provides videoUi, LocalForegroundTimer provides timerHost,
             LocalMiniAppControlsLanguage provides appLanguage) {
             Column(Modifier.fillMaxWidth()) {
@@ -1651,6 +1651,8 @@ private class NativeLiveEditor(private val ui: NativeLiveUi, val draft: NativeLi
     val canEdit get() = enabled && ui.access.available && !draft.finishing
     val automatic get() = ui.adapter?.channel != null
     val unavailable get() = ui.adapter == null || !ui.adapter.active
+    /** A control on the dialogue stage with no live host and no edit: a stream preview, or the live app before its first snapshot. */
+    val stagePreview get() = ui.stage && unavailable && draft.status == null
     fun shown(original: Any) = draft.shown(original, ui.adapter?.record?.stateVersion)
     fun change(value: Any) {
         if (canEdit) draft.edit(value, action, row, ui, finish = false)
@@ -1681,6 +1683,8 @@ private class NativeLiveEditor(private val ui: NativeLiveUi, val draft: NativeLi
 }
 
 @Composable private fun NativeLiveActions(editor: NativeLiveEditor, label: String, finishButton: Boolean) {
+    // The stage shows no input note and no Apply for a preview, so the screen does not jump when the live app comes (plan "one scene", decision 22).
+    if (editor.stagePreview) return
     when (editor.draft.status) {
         NativeLiveStatus.Pending -> NativeLiveMessage(R.string.tool_live_input_pending)
         NativeLiveStatus.Unsaved -> NativeLiveMessage(R.string.tool_live_input_unsaved)
