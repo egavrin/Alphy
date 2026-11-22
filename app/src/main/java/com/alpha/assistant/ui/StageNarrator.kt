@@ -47,8 +47,10 @@ internal class StageNarrator(
     /** The transcript started the waiting sentence, so its sync fire is pending, and [confirmed] once the whole sentence came. */
     private var armed = false
     private var confirmed = false
-    /** The transcript of the voice since the end of its last sentence. */
+    /** The transcript of the voice since the end of its last sentence, or since the last reply boundary when no sentence is armed. */
     private var heard = ""
+    /** A reply boundary came inside the armed sentence since the last piece ([boundary]). */
+    private var crossed = false
     /** The step with no sentence that the narrator presses at the next reply end, and then says its card text (decision 14). */
     private var cardStep: Int? = null
     /** The press of the walk that runs now. A stop cancels it, so a press that the stage has not run yet never runs (fix list item 1). */
@@ -75,7 +77,7 @@ internal class StageNarrator(
     private fun walk(toolId: String, steps: List<String>, narration: SceneNarration, from: Int) {
         stop(WalkStop.ANSWER)
         scene = toolId; this.steps = steps; this.narration = narration
-        walking = true; heard = ""; cardStep = null; step = from - 1
+        walking = true; heard = ""; crossed = false; cardStep = null; step = from - 1
     }
 
     /** Sends the sentence of [k]. A step with no sentence is pressed at once when nothing is said before it, else at the next reply end. */
@@ -109,8 +111,10 @@ internal class StageNarrator(
     /** Each output transcript piece of the voice (decision 14). A reply start is not necessary: a sentence can come inside the reply before it. */
     fun output(text: String, replyStart: Boolean, arrivedNanos: Long) {
         if (!walking) return
-        if (replyStart) heard = ""
-        val said = heard + text
+        if (replyStart) boundary()
+        val across = crossed
+        crossed = false
+        var said = heard + text
         heard = afterSentenceEnd(said)
         val sentence = waitingText ?: return
         val k = checkNotNull(waiting)
@@ -120,6 +124,8 @@ internal class StageNarrator(
             // The voice said other words before the end of the sentence: no step moves on them.
             armed = false
             cancelOnset()
+            // After a reply boundary, this piece starts anew, so the words before the boundary block no later arm.
+            if (across) { said = text; heard = afterSentenceEnd(text) }
         }
         // The start of a sentence after an end inside this piece, or the whole sentence when this piece ends it.
         val start = heard.ifBlank { said }
@@ -146,12 +152,18 @@ internal class StageNarrator(
 
     /** The end of a reply: a step with no sentence is pressed now, and its card text goes to the voice (decision 14). */
     fun replyEnded() {
-        heard = ""
+        boundary()
         if (!walking) return
         val k = cardStep ?: return
         cardStep = null
         pressCard(k)
     }
+
+    /**
+     * A reply end or a reply start. The transcript runs ahead of the audio, and a reply ends by its audio, so a boundary can fall inside a
+     * sentence (live record live-2-uxHeart): an armed sentence keeps its words, and other words before the boundary go.
+     */
+    private fun boundary() { if (armed && !confirmed) crossed = true else heard = "" }
 
     /**
      * Stops the walk (decision 15). The sentence that plays ends. The waiting sentence gets [skip], for speech only with [skipAfterSpeech].

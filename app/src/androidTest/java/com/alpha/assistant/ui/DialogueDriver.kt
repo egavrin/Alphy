@@ -403,7 +403,10 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
             .associate { robot.text(it) to fixture.context.resources.getResourceEntryName(it) }
     }
 
-    /** A transcript of the person ([HEARD]) or of the voice ([SPOKE]), or a commentary of Alphy to the voice ([ALPHY]). */
+    /**
+     * A transcript of the person ([HEARD]) or of the voice ([SPOKE]), a commentary of Alphy to the voice ([ALPHY]), or a thinking text to the
+     * voice ([THINKING]), such as a sentence of a walk.
+     */
     private class Heard(val atNanos: Long, val who: String, val text: String)
 
     /** Runs the steps on [transport] and [chat]. Returns the report. A failed hard assertion throws after the files are written. */
@@ -483,6 +486,8 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
                     // The UX study of 2026-11-21: the head of the app file on the stage, the frames in time order, and the tap.
                     .put("appHead", appFiles[step]?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(APP_HEAD_CHARS) ?: JSONObject.NULL)
                     .put("frames", JSONArray(frames?.names.orEmpty())).put("framesError", frames?.error).put("tap", tap)
+                    // The walk fix: the thinking texts of the step. `thinkingMs` and `stepMoves` give the times from the end of speech.
+                    .put("thinking", JSONArray(heard.filter { it.who == THINKING && it.atNanos >= began }.map { it.text }))
                 var next: DialogueStep? = null
                 if (dialogue.adaptive) {
                     val reply = request?.let { asked -> main { messages(model).dropWhile { it.id != asked.id }.firstOrNull { it.role == "assistant" } } }
@@ -791,8 +796,10 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         object : LiveConnection by connection {
             override fun send(text: String): Boolean {
                 socketLog?.add("sent" to type(text))
-                if ("\"session.commentary.append\"" in text.take(60)) runCatching { JSONObject(text).optString("content") }.getOrNull()
-                    ?.let { heard += Heard(SystemClock.elapsedRealtimeNanos(), ALPHY, it) }
+                // A commentary of Alphy, or a thinking text such as a sentence of the narrator of a walk (the walk fix).
+                val who = text.take(60).let { if ("\"session.commentary.append\"" in it) ALPHY else if ("\"session.thinking.append\"" in it) THINKING else null }
+                if (who != null) runCatching { JSONObject(text).optString("content") }.getOrNull()
+                    ?.let { heard += Heard(SystemClock.elapsedRealtimeNanos(), who, it) }
                 return connection.send(text)
             }
         }
@@ -884,6 +891,7 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
         const val HEARD = "heard"
         const val SPOKE = "spoke"
         const val ALPHY = "alphy"
+        const val THINKING = "thinking"
     }
 }
 

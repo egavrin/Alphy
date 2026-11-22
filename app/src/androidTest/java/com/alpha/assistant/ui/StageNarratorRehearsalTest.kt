@@ -138,6 +138,53 @@ class StageNarratorRehearsalTest {
         assertEquals(STEPS.take(1), rig.pressed)
     }
 
+    /**
+     * Walk fix (live record live-2-uxHeart, step 1): the transcript runs ahead of the audio, and a reply ends by its audio, so the first piece
+     * of sentence 1 comes in the reply of the opener, and the rest after the reply end. The sentence stays armed, and its fire moves its step.
+     */
+    @Test fun aReplyEndInsideASentenceKeepsItArmed() {
+        val rig = Rig()
+        rig.start()
+        rig.say("Сейчас покажу, почему так.", replyStart = true)
+        rig.say(" " + SAYS[0].take(4))
+        assertTrue(rig.armed)
+        rig.replyEnded()
+        rig.say(SAYS[0].drop(4).take(6), replyStart = true)
+        rig.say(SAYS[0].drop(10))
+        assertTrue(rig.armed)
+        assertEquals(0, rig.cancels)
+        rig.fire()
+        assertEquals(STEPS.take(1), rig.pressed)
+        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), rig.sent)
+    }
+
+    /**
+     * Walk fix: words before a reply boundary block no later arm. Own words with no sentence end, an armed start that the next reply does
+     * not go on with, and a sentence that the next reply says again from its start.
+     */
+    @Test fun wordsBeforeAReplyBoundaryBlockNoLaterArm() {
+        val rig = Rig()
+        rig.start()
+        rig.say("Смотри", replyStart = true)
+        rig.replyEnded()
+        rig.say(SAYS[0].take(7), replyStart = true)
+        assertTrue(rig.armed)
+        rig.replyEnded()
+        rig.say("Хорошо, дальше", replyStart = true)
+        assertFalse(rig.armed)
+        assertEquals(1, rig.cancels)
+        rig.replyEnded()
+        rig.say(SAYS[0].take(7), replyStart = true)
+        assertTrue(rig.armed)
+        rig.replyEnded()
+        rig.say(SAYS[0], replyStart = true)
+        assertTrue(rig.armed)
+        assertEquals(listOf(2, 3), listOf(rig.cancels, rig.arms))
+        rig.fire()
+        assertEquals(STEPS.take(1), rig.pressed)
+        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), rig.sent)
+    }
+
     @Test fun aNarratorPressDoesNotStopTheWalk() {
         val rig = Rig()
         rig.start()

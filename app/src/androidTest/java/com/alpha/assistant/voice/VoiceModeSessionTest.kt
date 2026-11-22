@@ -320,7 +320,8 @@ class VoiceModeSessionTest {
             if (!samePiece) rig.socket.emit(outputDelta(" Новый ответ.", 900, 1_500))
             repeat(3) { rig.socket.emit(silentAudio()) }
             rig.socket.emit(outputAudio(3, VOICED_600))
-            waitUntil("the end of the reply") { rig.outputEnds() == 1 }
+            // The 300 ms of silent audio end the reply of the sentence, and chunk 3 opens the next one: its end follows the write of chunk 3.
+            waitUntil("the end of the reply of the new text") { rig.outputEnds() == 2 }
             val case = if (samePiece) "in the same piece" else "in a later piece"
             assertEquals(case, listOf(3_000), rig.markers().filter { it != SILENT_SAMPLE.toInt() })
             // The skipped sentence opened the reply, so the first text that the host gets starts the reply in both cases.
@@ -351,6 +352,90 @@ class VoiceModeSessionTest {
             assertEquals(case, "$SECOND:2000:2600:true", rig.host.pieces.last())
             main { rig.session.stop() }
         }
+    }
+
+    /**
+     * Walk fix (live record live-2-uxHeart, step 1): the transcript runs ahead of the audio, and a reply ends by its audio. The first piece
+     * of the skipped sentence comes in the open reply, that reply ends, and the rest comes with a reply start, before its audio. The skip
+     * goes on: no text and no audio of the sentence reach the host or the speaker, and the new text after it plays.
+     */
+    @Test fun aSkipGoesOnAcrossAReplyEndInsideItsSentence() {
+        val rig = Rig().started()
+        rig.socket.emit(outputDelta("Первое.", 0, 300))
+        rig.socket.emit(outputAudio(1, VOICED_600))
+        main { rig.session.skip(SECOND) }
+        rig.socket.emit(outputDelta("Второе ", 300, 500))
+        repeat(3) { rig.socket.emit(silentAudio()) }
+        waitUntil("the reply end inside the sentence") { rig.outputEnds() == 1 }
+        rig.socket.emit(outputDelta("предложение.", 500, 900))
+        rig.socket.emit(outputAudio(2, VOICED_600))
+        rig.socket.emit(outputDelta(" Новый ответ.", 900, 1_500))
+        repeat(2) { rig.socket.emit(silentAudio()) }
+        rig.socket.emit(outputAudio(3, VOICED_600))
+        waitUntil("the end of the reply") { rig.outputEnds() == 2 }
+        assertEquals(listOf(1_000, 3_000), rig.markers().filter { it != SILENT_SAMPLE.toInt() })
+        assertEquals(listOf("Первое.:0:300:true", " Новый ответ.:900:1500:false"), rig.host.pieces.toList())
+    }
+
+    /**
+     * Walk fix: a reply end inside a sentence is no reply end of the bound of a pending skip (fix list item 2c). The open reply ends inside
+     * its sentence, the rest of that sentence is the next reply, and the skipped sentence comes after it: the skip still drops it.
+     */
+    @Test fun aReplyEndInsideASentenceKeepsAPendingSkip() {
+        val rig = Rig().started()
+        rig.socket.emit(outputDelta("Первое ", 0, 300))
+        rig.socket.emit(outputAudio(1, VOICED_600))
+        main { rig.session.skip(SECOND) }
+        repeat(3) { rig.socket.emit(silentAudio()) }
+        waitUntil("the reply end inside the first sentence") { rig.outputEnds() == 1 }
+        rig.socket.emit(outputDelta("предложение.", 300, 900))
+        rig.socket.emit(outputAudio(2, VOICED_600))
+        waitUntil("the end of the first sentence") { rig.outputEnds() == 2 }
+        rig.socket.emit(outputDelta(SECOND, 1_000, 1_600))
+        repeat(2) { rig.socket.emit(silentAudio()) }
+        rig.socket.emit(outputAudio(3, VOICED_600))
+        waitUntil("the end of the skipped reply") { rig.outputEnds() == 3 }
+        assertEquals(listOf(1_000, 2_000), rig.markers().filter { it != SILENT_SAMPLE.toInt() })
+        assertEquals(listOf("Первое :0:300:true", "предложение.:300:900:true"), rig.host.pieces.toList())
+    }
+
+    /**
+     * Walk fix: a barge-in cuts a reply inside the skipped sentence. That reply end ends the skip, so the answer after it reaches the host as
+     * a new reply, with no word of the cut sentence.
+     */
+    @Test fun aBargeInEndsAStartedSkip() {
+        val rig = Rig(TIMING.copy(replyGapMs = 1_500)).started()
+        rig.audio.playbackActive = true
+        rig.socket.emit(outputDelta("Первое.", 0, 300))
+        rig.socket.emit(outputAudio(1))
+        main { rig.session.skip(SECOND) }
+        rig.socket.emit(outputDelta("Второе ", 300, 500))
+        waitUntil("first reply") { rig.audio.played.size == 1 }
+        repeat(15) { rig.audio.capture(quiet()) }
+        repeat(10) { rig.audio.capture(loud()) }
+        waitUntil("flush") { rig.audio.flushes.get() == 1 }
+        rig.audio.playbackActive = false
+        rig.audio.capture(quiet())
+        waitUntil("user stopped") { !rig.session.userSpeaking }
+        waitUntil("the end of the cut reply") { rig.outputEnds() == 1 }
+        rig.socket.emit(outputDelta("Хорошо.", 1_000, 1_500))
+        waitUntil("the answer") { rig.host.pieces.size == 2 }
+        assertEquals(listOf("Первое.:0:300:true", "Хорошо.:1000:1500:true"), rig.host.pieces.toList())
+    }
+
+    /** Walk fix: words with no sentence end in an older reply block no skip that starts at the start of the next reply. */
+    @Test fun aSkipStartsAfterStaleWordsOfAnOlderReply() {
+        val rig = Rig().started()
+        rig.socket.emit(outputDelta("Смотри", 0, 300))
+        rig.socket.emit(outputAudio(1, VOICED_600))
+        main { rig.session.skip(SECOND) }
+        waitUntil("the end of the reply with no sentence end") { rig.outputEnds() == 1 }
+        rig.socket.emit(outputDelta(SECOND, 1_000, 1_600))
+        repeat(2) { rig.socket.emit(silentAudio()) }
+        rig.socket.emit(outputAudio(2, VOICED_600))
+        waitUntil("the end of the skipped reply") { rig.outputEnds() == 2 }
+        assertEquals(listOf(1_000), rig.markers().filter { it != SILENT_SAMPLE.toInt() })
+        assertEquals(listOf("Смотри:0:300:true"), rig.host.pieces.toList())
     }
 
     /** The time of a fire after the arm and the frames that the speaker had played at it. */

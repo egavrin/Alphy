@@ -8,12 +8,16 @@ import com.alpha.assistant.cloud.CloudSession
 import com.alpha.assistant.cloud.CloudGenerationStage
 import com.alpha.assistant.cloud.Endpoints
 import com.alpha.assistant.tools.AgentScriptProvider
+import com.alpha.assistant.tools.SceneAction
+import com.alpha.assistant.tools.SceneStep
 import com.alpha.assistant.tools.Scripted
 import com.alpha.assistant.tools.ToolGenerationTraceEvent
 import com.alpha.assistant.tools.appfile.plan as appFilePlan
 import com.alpha.assistant.tools.send
 import com.alpha.assistant.tools.withPlanStep
 import com.alpha.assistant.voice.FakeLiveAudio
+import com.alpha.assistant.voice.FakeLiveTransport
+import com.alpha.assistant.voice.LiveListener
 import com.alpha.assistant.voice.LivePhase
 import com.alpha.assistant.voice.LiveProtocol
 import com.alpha.assistant.voice.ScriptedLiveServer
@@ -115,6 +119,44 @@ class DialogueRecorderTest {
         fun values(request: JSONObject) = names.map { if (request.has(it)) request.getLong(it) else null }
         assertEquals(requests.toString(), listOf(listOf(3_100L, 3_500L, 5_000L, 7_000L, 5L, 0L), listOf(3_000L, null, null, null, 1L, 1L),
             listOf(null, null, 6_400L, 6_400L, 0L, 0L)), requests.map(::values))
+        recorder.close()
+    }
+
+    /**
+     * Walk fix: the clock of a walk. Each thinking append is a mark, and each change of the step of the same stage app is a mark at its time
+     * with the who of the action of the bridge that set it, also when the bridge records that action a poll later. A new app is no move.
+     */
+    @Test fun theClockOfAWalkHasItsSentencesAndItsSteps() {
+        var now = 0L
+        fun at(ms: Long) { now = ms * 1_000_000 }
+        val recorder = DialogueRecorder { now }
+        val socket = FakeLiveTransport()
+        val connection = recorder.transport(socket).connect("ws://127.0.0.1:4000", "", object : LiveListener {
+            override fun onText(text: String) = Unit
+            override fun onFailure(status: Int?, message: String) = Unit
+            override fun onClosed() = Unit
+        })
+        fun step(index: Int, label: String) = SceneStep(index, 3, label)
+        fun action(who: String, label: String) = SceneAction(who, CONTROL, label)
+        at(1_000); recorder.speechEnd(now)
+        at(1_500); connection.send(LiveProtocol.thinking("t1", LiveProtocol.MARK + SAY))
+        at(2_000); recorder.stage(SCENE, step(1, "Корабль"), CONTROL, emptyList())
+        at(3_000); recorder.stage(SCENE, step(2, "Гвоздь"), CONTROL, emptyList())
+        at(3_100); recorder.stage(SCENE, step(2, "Гвоздь"), CONTROL, listOf(action("narrator", "Гвоздь")))
+        at(4_000); recorder.stage(SCENE, step(3, "Лодка"), CONTROL, listOf(action("narrator", "Гвоздь"), action("tap", "Лодка")))
+        at(5_000); recorder.stage("other", step(1, "Корабль"), CONTROL, emptyList())
+        assertEquals(1, socket.sent.size)
+        val marks = recorder.marks().filter { it.name in setOf(DialogueRecorder.THINKING, DialogueRecorder.STAGE_STEP) }
+        assertEquals(listOf("thinking:null:1500", "stage_step:2/3 narrator:3000", "stage_step:3/3 tap:4000"),
+            marks.map { "${it.name}:${it.detail}:${it.atNanos / 1_000_000}" })
+        val request = recorder.report().getJSONArray("requests").getJSONObject(0)
+        assertEquals("[500]", request.getJSONArray("thinkingMs").toString())
+        val moves = request.getJSONArray("stepMoves")
+        assertEquals(listOf("2000 2/3 narrator", "3000 3/3 tap"),
+            List(moves.length()) { moves.getJSONObject(it).let { move -> "${move.getLong("ms")} ${move.getString("step")} ${move.getString("who")}" } })
+        // The clock holds names only: no word of a sentence or of a step.
+        val recorded = recorder.marks().toString() + recorder.report()
+        assertFalse(recorded, listOf("Корабль", "Гвоздь", "Лодка", SAY).any { it in recorded })
         recorder.close()
     }
 
@@ -272,5 +314,8 @@ class DialogueRecorderTest {
         const val LABEL = "Подпиши на картинке каждый этап."
         const val LONGER = "Сделай нить маятника вдвое длиннее."
         const val MOTION = "Пусть маятник качается сам, без остановки."
+        const val SCENE = "scene"
+        const val CONTROL = "Предмет"
+        const val SAY = "Корабль полый, и вода держит его."
     }
 }

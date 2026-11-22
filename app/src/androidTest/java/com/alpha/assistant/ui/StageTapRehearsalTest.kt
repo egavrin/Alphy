@@ -34,7 +34,9 @@ class StageTapRehearsalTest {
     private val socket = FakeLiveTransport()
     private val audio = FakeLiveAudio()
     private val shell = TemplateShell(fixture, robot, socket)
-    @After fun remove() = shell.remove()
+    /** The clock of a dialogue that a test watches with, closed after the test. */
+    private var clock: DialogueRecorder? = null
+    @After fun remove() { clock?.close(); shell.remove() }
 
     @Test fun aTapOnAStepWhileSilentSaysItsSentence() = live { model, talk ->
         val scene = scene(model)
@@ -165,6 +167,8 @@ class StageTapRehearsalTest {
      */
     @Test fun theWalkGoesFromTheFirstStepToTheLast() = live { model, talk ->
         val scene = scene(model)
+        // Walk fix: the clock of a live dialogue records each move of the step with its who.
+        val recorder = DialogueRecorder().also { clock = it; it.watch(model) }
         assertEquals(STEPS[0], shipSubject(scene))
         speak("Сейчас покажу, почему корабль плавает.", marker = 1, atMs = 2_000)
         during(1_500) { assertEquals(STEPS[0], shipSubject(shell.stored(model, scene.id))); assertEquals(1, thinkings().size) }
@@ -189,6 +193,44 @@ class StageTapRehearsalTest {
         // Review focus 1: the presses of the walk are the narrator's, so they do not stop it, and no action is a tap.
         ask(talk, ANSWER_REQUEST, "d2", 11_000)
         assertEquals(listOf("narrator:$STEP_CONTROL:$NAIL", "narrator:$STEP_CONTROL:${STEPS[2]}"), actionsOf(talk, ANSWER_REQUEST))
+        robot.waitUntil { recorder.marks().count { it.name == DialogueRecorder.STAGE_STEP } == 2 }
+        assertEquals(listOf("2/3 narrator", "3/3 narrator"), recorder.marks().filter { it.name == DialogueRecorder.STAGE_STEP }.map { it.detail })
+    }
+
+    /**
+     * Walk fix (live record live-2-uxHeart, step 1): the first piece of say1 comes while the reply of the opener is open, the reply ends by
+     * its silent audio, and the rest of say1 comes with a reply start, before its audio. The walk goes on: say2 goes out, and its step moves.
+     */
+    @Test fun aReplyEndInsideASentenceStillMovesTheStage() = live { model, _ ->
+        val scene = scene(model)
+        speak("Сейчас покажу, почему корабль плавает.", marker = 1, atMs = 2_000)
+        socket.emit(outputDelta(" " + SAYS[0].take(4), 2_600, 2_700))
+        robot.waitUntil { model.liveVoice.phase == LivePhase.SPEAKING }
+        robot.waitUntil { model.liveVoice.phase == LivePhase.LISTENING }
+        socket.emit(outputDelta(SAYS[0].drop(4), 2_700, 3_300))
+        socket.emit(outputAudio(2, VOICED_600))
+        robot.waitUntil { thinkings().size == 2 }
+        assertEquals(listOf(MARK + SAYS[0], MARK + SAYS[1]), thinkings())
+        assertTrue(model.liveWalking)
+        speak(SAYS[1], marker = 3, atMs = 4_000)
+        robot.waitUntil { thinkings().size == 3 }
+        stays(model, scene, NAIL)
+    }
+
+    /**
+     * Walk fix, the order of the first red run: all of say1 comes in the open reply of the opener, and its audio follows the opener audio
+     * with no quiet run, so its fire comes from the fallback frame. say2 goes out, and the next sentence moves its step.
+     */
+    @Test fun aSentenceInTheReplyOfTheOpenerMovesTheStage() = live { model, _ ->
+        val scene = scene(model)
+        speak("Сейчас покажу, почему корабль плавает.", marker = 1, atMs = 2_000)
+        socket.emit(outputDelta(" " + SAYS[0].take(4), 2_600, 2_700))
+        socket.emit(outputDelta(SAYS[0].drop(4), 2_700, 3_300))
+        socket.emit(outputAudio(2, VOICED_600))
+        robot.waitUntil { thinkings().size == 2 }
+        speak(SAYS[1], marker = 3, atMs = 4_000)
+        robot.waitUntil { thinkings().size == 3 }
+        stays(model, scene, NAIL)
     }
 
     /** A new hand-off stops the walk. «Продолжай» presses the continue control of the line and walks from the present step to the last. */

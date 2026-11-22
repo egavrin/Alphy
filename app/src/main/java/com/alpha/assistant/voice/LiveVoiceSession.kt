@@ -298,6 +298,7 @@ internal class LiveVoiceSession(
      * from the next voiced start. When the transcript goes another way before the end of the sentence, the skip ends: the dropped text goes
      * to the host and the held audio plays. It sends nothing. A pending skip ends at a thinking or commentary text that holds [sentence], and
      * at the end of the first reply after the one that is open now, because the voice says a waiting sentence in the open reply or the next.
+     * A reply end inside a sentence ends neither a started skip nor a reply of this count, unless a barge-in cut that reply.
      */
     fun skip(sentence: String) { skipSentence = sentence; skipSpans = replyJob?.isActive == true || !replyEnded }
 
@@ -407,12 +408,19 @@ internal class LiveVoiceSession(
             }
             is LiveEvent.OutputTranscript -> {
                 val replyStart = replyEnded
-                if (replyStart) sinceSentence = ""
-                // A pending skip starts at the first piece that starts its sentence, also inside the reply before it (decision 15).
+                // A pending skip starts at the first piece that starts its sentence, also inside the reply before it (decision 15). The
+                // transcript runs ahead of the audio, and a reply ends by its audio, so a reply start can fall inside a sentence: the words
+                // since the last sentence end stay, and a piece at a reply start is also tried alone, so older words block no skip.
                 val before = afterSentenceEnd(sinceSentence)
                 skipSentence?.let { sentence ->
-                    if (skipping == null && startsSentence(before + event.delta, sentence)) {
-                        skipSentence = null; skipping = sentence; skipHeard = before; skipDropped = ""; skipCovered = false
+                    val heard = when {
+                        skipping != null -> null
+                        startsSentence(before + event.delta, sentence) -> before
+                        replyStart && startsSentence(event.delta, sentence) -> ""
+                        else -> null
+                    }
+                    if (heard != null) {
+                        skipSentence = null; skipping = sentence; skipHeard = heard; skipDropped = ""; skipCovered = false
                         skipStartMs = event.startMs; skipReplyStart = replyStart; skipText = true; skipAudio = true
                     }
                 }
@@ -543,9 +551,12 @@ internal class LiveVoiceSession(
         replyJob?.cancel(); replyJob = null
         held.clear()
         replyEnded = true
-        endSkip()
+        // A reply ends by its audio while the transcript runs ahead, so a reply end can fall inside a sentence. A started skip ends here only
+        // when its whole sentence came or a barge-in cut the reply. Only a cut reply or a reply end at a sentence end counts for a pending skip.
+        val counts = dropping || plain(sinceSentence).isEmpty()
+        if (skipCovered || dropping) endSkip()
         // A pending skip waits through the reply that was open at the skip, then through one more reply (fix list item 2c).
-        if (skipSentence != null) { if (skipSpans) skipSpans = false else skipSentence = null }
+        if (skipSentence != null && counts) { if (skipSpans) skipSpans = false else skipSentence = null }
         host?.outputEnded(transcript.outputEndMs)
         heardMs = SystemClock.uptimeMillis()
         countSilence()

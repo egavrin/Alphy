@@ -7,6 +7,9 @@ import com.alpha.assistant.cloud.ChatProvider
 import com.alpha.assistant.cloud.CloudEvent
 import com.alpha.assistant.cloud.CloudRequest
 import com.alpha.assistant.cloud.CloudSession
+import com.alpha.assistant.tools.SceneAction
+import com.alpha.assistant.tools.SceneStep
+import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.ToolGenerationTraceEvent
 import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.voice.LIVE_VOICED_RMS
@@ -39,6 +42,8 @@ internal data class DialogueMark(val name: String, val detail: String?, val atNa
  * - each trace phase of a generation, and `screen_visible`: the stage shows a new app (`new`) or a new revision (`revision`).
  * - `state_commit`: the first state commit of the stage app, with no new revision, after a hand-off.
  * - `voice_phase`: the phase of the voice mode changed, with the new phase, such as `SPEAKING`.
+ * - `thinking`: the app sends a thinking text to the voice, such as a sentence of the narrator of a walk.
+ * - `stage_step`: the step of the stage app changed, with the step and the count, and who set it ([stage]).
  */
 internal class DialogueRecorder(private val clock: () -> Long = SystemClock::elapsedRealtimeNanos) : Closeable {
     private val marks = CopyOnWriteArrayList<DialogueMark>()
@@ -63,6 +68,7 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
                     mark("commentary", lineOf(content))
                     if (content == LiveVoiceBridge.FULL_WAIT) mark("full_wait")
                 }
+                if ("\"session.thinking.append\"" in text.take(60)) mark(THINKING)
                 return connection.send(text)
             }
             override fun close() = connection.close()
@@ -104,21 +110,32 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
     fun watch(model: ShellViewModel) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.runOnMainSync {
+            // An observer of the test shell keeps its events.
+            val earlier = model.tools.generationTraceObserver
             model.tools.generationTraceObserver = { event ->
+                earlier?.invoke(event)
                 if (event is ToolGenerationTraceEvent.Phase) phase(event)
             }
         }
         var shown: Triple<String, Int, Int>? = null
         var phase: String? = null
+        // The shown screen of the stage app, read again only when the app, its revision, or its state changed.
+        var read: Triple<String, Int, Int>? = null
+        var screen: ShownScreen? = null
         poll = Executors.newSingleThreadScheduledExecutor { Thread(it, "dialogue-clock").apply { isDaemon = true } }.apply {
             scheduleWithFixedDelay({
                 var now: Triple<String, Int, Int>? = null
                 var voice: String? = null
+                var actions: List<SceneAction> = emptyList()
                 instrumentation.runOnMainSync {
-                    now = model.stageToolId?.let { id -> model.tools.tools.firstOrNull { it.id == id }?.let { Triple(id, it.revision, it.stateVersion) } }
+                    val record = model.stageToolId?.let { id -> model.tools.tools.firstOrNull { it.id == id } }
+                    now = record?.let { Triple(it.id, it.revision, it.stateVersion) }
+                    if (now != read) { read = now; screen = record?.let { ShownScreen.of(it) } }
                     voice = model.liveVoice.phase.name
+                    actions = model.liveActions
                 }
                 if (voice != phase) { phase = voice; mark(VOICE_PHASE, voice) }
+                screen.let { stage(it?.toolId, it?.step, it?.stepControl, actions) }
                 val stage = now
                 if (stage != null && (stage.first != shown?.first || stage.second != shown?.second))
                     mark("screen_visible", if (stage.first == shown?.first) "revision" else "new")
@@ -127,6 +144,29 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
                 shown = stage
             }, 0, 100, TimeUnit.MILLISECONDS)
         }
+    }
+
+    /** The step of the stage app at the last poll, and a change of it whose who the bridge has not recorded yet, with its time and polls. */
+    private var stepOf: Pair<String, SceneStep>? = null
+    private var moved: Triple<SceneStep, Long, Int>? = null
+
+    /**
+     * One poll of the step of the stage app [toolId]. A change of the step of the same app is a `stage_step` mark at its time, with the who
+     * of the last action of the bridge ([SceneAction.who]: narrator, voice, or tap). The bridge records that action after the change, so the
+     * mark waits for it for at most [WHO_POLLS] polls, and then names `unknown`. [watch] calls it each poll, and a test can call it.
+     */
+    fun stage(toolId: String?, step: SceneStep?, stepControl: String?, actions: List<SceneAction>) {
+        val before = stepOf
+        stepOf = if (toolId != null && step != null) toolId to step else null
+        if (toolId != null && step != null && before?.first == toolId && before.second.index != step.index) {
+            moved?.let { (earlier, at, _) -> mark(STAGE_STEP, "${earlier.index}/${earlier.count} unknown", at) }
+            moved = Triple(step, clock(), 0)
+        }
+        val (pending, at, polls) = moved ?: return
+        val who = actions.lastOrNull()?.takeIf { it.control == stepControl && it.value == pending.label }?.who
+        if (who == null && polls < WHO_POLLS) { moved = Triple(pending, at, polls + 1); return }
+        mark(STAGE_STEP, "${pending.index}/${pending.count} ${who ?: "unknown"}", at)
+        moved = null
     }
 
     /** Marks a trace phase of a generation at its time on the trace clock. [watch] passes each phase, and a test can pass its own. */
@@ -185,6 +225,12 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
                 .put("speechEndToCommentaryMs", ms(lines.firstOrNull())).put("commentaryMs", JSONArray(lines.map { (it.atNanos - end) / 1_000_000 }))
                 .put("speechEndToVoiceEndMs", ms(window.filter { it.name == VOICE_PHASE }.zipWithNext()
                     .lastOrNull { (from, to) -> from.detail == SPEAKING && to.detail != SPEAKING }?.second))
+                // The walk fix: each thinking text to the voice, and each move of the step of the stage app with who set it.
+                .put("thinkingMs", JSONArray(window.filter { it.name == THINKING }.map { ms(it) }))
+                .put("stepMoves", JSONArray(window.filter { it.name == STAGE_STEP }.map { move ->
+                    val (step, who) = checkNotNull(move.detail).split(" ")
+                    JSONObject().put("ms", ms(move)).put("step", step).put("who", who)
+                }))
         }
         return JSONObject().put("requests", JSONArray(requests)).put("calls", calls(all))
             .put("chatCalls", all.count { it.name == "call_start" })
@@ -202,6 +248,10 @@ internal class DialogueRecorder(private val clock: () -> Long = SystemClock::ela
         const val STAGE_PREVIEW_GONE = "stage_preview_gone"
         const val CONTROLS_ON = "controls_on"
         const val VOICE_PHASE = "voice_phase"
+        const val THINKING = "thinking"
+        const val STAGE_STEP = "stage_step"
+        /** The polls (100 ms each) that a step move waits for the action of the bridge that names its who. */
+        const val WHO_POLLS = 10
         val SPEAKING = LivePhase.SPEAKING.name
 
         /**
