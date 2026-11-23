@@ -12,15 +12,17 @@
   "ru": [
    "мускулы",
    "сокращение мышцы",
-   "бицепс"
+   "бицепс",
+   "трицепс"
   ],
   "en": [
    "muscles",
    "contraction",
-   "biceps"
+   "biceps",
+   "triceps"
   ]
  },
- "line": "a muscle",
+ "line": "the muscles of a bent arm, the biceps and the triceps, over the bones",
  "image": "muscle.webp",
  "box": [
   98.8,
@@ -38,6 +40,18 @@
     9.4
    ],
    "ring": 11.1
+  },
+  {
+   "id": "triceps",
+   "names": {
+    "ru": "трицепс",
+    "en": "triceps"
+   },
+   "label": [
+    10.4,
+    22.3
+   ],
+   "ring": 9.0
   },
   {
    "id": "forearm_bones",
