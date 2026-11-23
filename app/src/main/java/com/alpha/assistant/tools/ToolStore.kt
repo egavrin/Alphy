@@ -66,18 +66,23 @@ class ToolStore private constructor(internal val context: Context, internal val 
             var retries = 0
             while (true) {
                 try {
-                    return ToolLibraryStorage.open(context, library) {
-                        val opened = context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null, ToolLibraryStorage.preserveOnCorruption)
-                        try {
-                            initialize(opened)
-                        } catch (failure: Exception) {
-                            opened.close()
-                            if (failure is SQLiteDatabaseLockedException) throw failure
-                            throw ToolLibraryUnavailable(failure)
-                        }
-                        database = opened
-                        opened
+                    // No thread waits for the database while it holds the library gate (a transaction can wait for the gate in
+                    // requireCurrent). Only the creation of a missing file runs under the gate: no other connection can make it wait.
+                    val opened = ToolLibraryStorage.open(context, library) {
+                        if (context.getDatabasePath(databaseName).exists()) null else openFile()
+                    } ?: openFile().also { existing ->
+                        // The selection can change while the open waits. Check it again before the first use.
+                        try { ToolLibraryStorage.requireCurrent(context, library) } catch (failure: Exception) { existing.close(); throw failure }
                     }
+                    try {
+                        initialize(opened)
+                    } catch (failure: Exception) {
+                        opened.close()
+                        if (failure is SQLiteDatabaseLockedException) throw failure
+                        throw ToolLibraryUnavailable(failure)
+                    }
+                    database = opened
+                    return opened
                 } catch (failure: SQLiteDatabaseLockedException) {
                     if (retries == 4) throw ToolLibraryUnavailable(failure)
                     // Opening can collide with a write from another store. Let it finish outside the library gate.
@@ -88,6 +93,8 @@ class ToolStore private constructor(internal val context: Context, internal val 
                 }
             }
         }
+
+    private fun openFile() = context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null, ToolLibraryStorage.preserveOnCorruption)
 
     @Synchronized override fun close() {
         database?.close()

@@ -147,7 +147,7 @@ class StageMotionWorkflowTest {
     /**
      * F1 (stage 7, fix lists 1 and 2, H3): 20 taps on the running orbit (each speed, the pause, and the play, four times). The robot taps a
      * control only when it is enabled, as a person can. Each tap takes effect, and the median time from the tap to the new state is at most
-     * 300 ms. The log gives each time and the time that the controls look disabled.
+     * 300 ms. No tap waits more than 1 s (stage 7b). The log gives each time and the time that the controls look disabled.
      */
     @Test fun twentyTapsOnARunningSceneTakeEffectInAMedianOf300Ms() {
         shell.live(MotionTalk(AgentScriptProvider(orbit))) { scenario, model, _ ->
@@ -188,6 +188,8 @@ class StageMotionWorkflowTest {
                 (gray?.let { (from, to) -> " disabled ${from.roundToInt()} to ${to?.roundToInt()} ms" } ?: "") }
             println(JSONObject().put("gate", "F1").put("presses", text))
             assertTrue("each tap takes effect: $text", results.all { (_, shown, _) -> shown != null })
+            // Stage 7b (R1): with no lock cycle of the store, no tap waits more than 1 s.
+            assertTrue("no tap waits more than 1 s: $text", results.all { (_, shown, _) -> shown!! <= 1_000 })
             val median = results.mapNotNull { it.second }.sorted().let { (it[9] + it[10]) / 2 }
             assertTrue("the median time from a tap to its state is $median ms, above 300 ms: $text", median <= 300)
         }
