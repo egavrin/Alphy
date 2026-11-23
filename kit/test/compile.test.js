@@ -302,7 +302,9 @@ test("build (K1 fix 1): a copy of the sources at a different path gives the same
     }
     const ours = new Map((await outputs()).map(([path, text]) => [relative(root, path), text]));
     const theirs = (await (await import(join(copy, "kit", "build.js"))).outputs()).map(([path, text]) => [relative(copy, path), text]);
-    expect([theirs.length, theirs.filter(([path, text]) => ours.get(path) !== text).map(([path]) => path)]).toEqual([ours.size, []]);
+    // An image of the library is bytes, so it compares by its bytes.
+    const same = (path, text) => (Buffer.isBuffer(text) ? text.equals(ours.get(path)) : ours.get(path) === text);
+    expect([theirs.length, theirs.filter(([path, text]) => !same(path, text)).map(([path]) => path)]).toEqual([ours.size, []]);
   } finally { rmSync(dirname(dirname(dirname(copy))), { recursive: true }); }
 });
 

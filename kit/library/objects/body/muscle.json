@@ -1,0 +1,91 @@
+{
+ "id": "body.muscle",
+ "names": {
+  "ru": [
+   "мышца"
+  ],
+  "en": [
+   "muscle"
+  ]
+ },
+ "words": {
+  "ru": [
+   "мускулы",
+   "сокращение мышцы",
+   "бицепс"
+  ],
+  "en": [
+   "muscles",
+   "contraction",
+   "biceps"
+  ]
+ },
+ "line": "a muscle",
+ "image": "muscle.webp",
+ "box": [
+  98.8,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "biceps",
+   "names": {
+    "ru": "бицепс",
+    "en": "biceps"
+   },
+   "label": [
+    -3.1,
+    9.4
+   ],
+   "ring": 11.1
+  },
+  {
+   "id": "forearm_bones",
+   "names": {
+    "ru": "кости предплечья",
+    "en": "forearm bones"
+   },
+   "label": [
+    -38.9,
+    -5.1
+   ],
+   "ring": 7.8
+  },
+  {
+   "id": "elbow",
+   "names": {
+    "ru": "локоть",
+    "en": "elbow"
+   },
+   "label": [
+    -32.2,
+    39.7
+   ],
+   "ring": 7.8
+  },
+  {
+   "id": "humerus",
+   "names": {
+    "ru": "плечевая кость",
+    "en": "humerus"
+   },
+   "label": [
+    19.3,
+    -14.1
+   ],
+   "ring": 7.8
+  },
+  {
+   "id": "shoulder_blade",
+   "names": {
+    "ru": "лопатка",
+    "en": "shoulder blade"
+   },
+   "label": [
+    41.7,
+    -8.5
+   ],
+   "ring": 7.6
+  }
+ ]
+}

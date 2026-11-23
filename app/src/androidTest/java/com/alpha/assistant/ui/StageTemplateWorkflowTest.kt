@@ -145,8 +145,10 @@ class StageTemplateWorkflowTest {
             val call = talk.calls.single()
             assertEquals(APP_FILE_TEMPLATE, call.generationStage)
             assertEquals(prompt.template, call.systemInstructions)
-            // The call starts beside the routing call: no brief yet, and no dialogue line.
-            assertEquals(listOf(ChatToolReply.generationPrompt(SCREEN_REQUEST, "", "", emptyList(), host = "")), call.turns.map { it.text })
+            // The call starts beside the routing call: no brief yet, and no dialogue line. Its ready objects are the count of its trace mark.
+            val (task, count) = TemplateTalk.withoutLibrary(call.turns.single().text)
+            assertEquals(ChatToolReply.generationPrompt(SCREEN_REQUEST, "", "", emptyList(), host = ""), task)
+            assertEquals(phases.toString(), listOf(count), TemplateTalk.libraryMarks(phases))
             assertFalse(prompt.dialogue in call.turns.single().text)
             assertEquals(listOf("early_plan_start", "early_plan_used"), phases.filter { it.startsWith("early_plan") })
             assertEquals(1, phases.count { it == "template_call_start" })
@@ -164,7 +166,8 @@ class StageTemplateWorkflowTest {
             robot.waitUntil(60_000) { model.stageToolId != null && model.stageToolId != calc.id }
             assertEquals(listOf(APP_FILE, APP_FILE_TEMPLATE), talk.stages)
             val input = talk.calls[1].turns.single().text
-            assertTrue(input, input.startsWith("User request: $FRESH_REQUEST\nWidget brief: $SCREEN_BRIEF\n"))
+            // Stage 6, S3: the candidates of the library search may stand between the request and the brief (a host line, docs/voice-integration.md).
+            assertTrue(input, input.startsWith("User request: $FRESH_REQUEST\n") && "\nWidget brief: $SCREEN_BRIEF\n" in input)
             assertTrue(input, "\nReply excerpt: $FRESH_TEXT" in input)
             assertTrue(input, "\nSource [1] excerpt: ${FRESH_SOURCE.title}\n${FRESH_SOURCE.summary}" in input)
             assertFalse(input, prompt.dialogue in input)
@@ -302,7 +305,7 @@ internal class TemplateTalk(private val templates: AgentScriptProvider = AgentSc
             APP_REQUEST -> chatDecision("create", "Готово.", "Make the app")
             SCREEN_REQUEST -> JSONObject(chatDecision("screen", SCREEN_TEXT, SCREEN_BRIEF)).put("show", show).toString()
             FRESH_REQUEST -> JSONObject(chatDecision("screen", FRESH_TEXT, SCREEN_BRIEF)).put("search", "required").toString()
-            CHANGE_REQUEST -> chatDecision("refine", "Готово.", CHANGE_BRIEF)
+            CHANGE_REQUEST, HEART_CHANGE -> chatDecision("refine", "Готово.", CHANGE_BRIEF)
             else -> chatDecision("answer", "Fixture response")
         }, false))
     }
@@ -312,6 +315,19 @@ internal class TemplateTalk(private val templates: AgentScriptProvider = AgentSc
         const val SCREEN_REQUEST = "Объясни, почему корабль не тонет"
         const val FRESH_REQUEST = "Найди свежие данные о плавучести кораблей"
         const val CHANGE_REQUEST = "Покажи ещё гвоздь"
+        /** A change that names a ready object, the third step of the live heart talk (fix list 4, K3). */
+        const val HEART_CHANGE = "Покажи, как кровь течёт по сердцу"
+        private val LIBRARY_BLOCK = Regex("\nReady objects that may fit this request[^\n]*(\n- [^\n]*)*")
+        /**
+         * The task [text] with no block of ready objects, and the number of its candidates. The search of the app gives the vectors or the word
+         * match by the time its model needs (fix list 4, K1), so a test compares the rest and the count of the trace mark library_candidates.
+         */
+        fun withoutLibrary(text: String): Pair<String, Int> {
+            val block = LIBRARY_BLOCK.find(text) ?: return text to 0
+            return text.removeRange(block.range) to block.value.lines().count { it.startsWith("- ") }
+        }
+        /** The count of the trace mark library_candidates in [phases], such as 24 of "library_candidates:24 vectors". */
+        fun libraryMarks(phases: List<String>) = phases.filter { it.startsWith("library_candidates:") }.map { it.removePrefix("library_candidates:").substringBefore(' ').toInt() }
         const val SCREEN_BRIEF = "Why a ship floats and a nail sinks"
         const val CHANGE_BRIEF = "Add a part that shows with the nail"
         const val SCREEN_TEXT = "Полый корабль вытесняет много воды."

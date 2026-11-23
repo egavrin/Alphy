@@ -1,0 +1,12 @@
+[
+  {"id": "l-heart", "expect": "template", "request": "Покажи, как устроено сердце человека."},
+  {"id": "l-aorta", "expect": "template", "request": "Куда кровь идёт из левого желудочка? Покажи на сердце."},
+  {"id": "l-saturn", "expect": "template", "request": "Расскажи про кольца Сатурна. Из чего они?"},
+  {"id": "l-pythagoras", "expect": "template", "request": "Explain the Pythagorean theorem with a triangle."},
+  {"id": "l-water", "expect": "template", "request": "Из каких атомов состоит молекула воды?"},
+  {"id": "l-thermometer", "expect": "template", "request": "How does a thermometer show that water is boiling?"},
+  {"id": "l-gears", "expect": "template", "request": "Покажи, как одна шестерёнка крутит другую."},
+  {"id": "l-fraction", "expect": "template", "request": "Что значит три четверти? Покажи дробь."},
+  {"id": "l-pendulum", "expect": "template", "request": "Why does a pendulum swing slower when its string is longer?"},
+  {"id": "l-sound", "expect": "template", "request": "Почему звук — это волна? Покажи, как она бежит."}
+]

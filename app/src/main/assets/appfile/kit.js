@@ -303,10 +303,155 @@ function show(node) {
 
 return { DslError, parseExpression, parseLine, HEADS, AppFile, show };
 })();
+// kinds.js
+const { fixed, inside, segmentsOf, KINDS, PROPERTIES, boxOf } = (() => {
+// The registry of the shape kinds and the shape properties (stage 6, L1 and L2). The evaluator (core.js), the drawing (draw.js), the faults
+// of a template line (form-scene.js), and the prompt text (prompt.js) come from it: a new kind is one entry here, with its arguments, its
+// prompt text, and its draw rule. A draw rule gives Alphy's drawing commands with no color: draw.js adds the paint.
+
+/** False in the run-time text of an app (dsl.js). */
+const MESSAGES = true;
+
+/** A sum such as x - r keeps 2 decimals, as the kit's numbers do, with no float noise. */
+const fixed = (value) => Math.round(value * 100) / 100;
+/** True when each value is a coordinate that Alphy takes: a finite number from -8192 to 8192. */
+const inside = (values) => values.every((value) => Number.isFinite(value) && Math.abs(value) <= 8192);
+const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+const closed = (points) => ({ type: "polyline", points: [...points, points[0]], stroke: 2 });
+const pairs = (points) => { const out = []; for (let index = 0; index + 1 < points.length; index += 2) out.push([points[index], points[index + 1]]); return out; };
+const at = (point) => ({ x: fixed(point[0]), y: fixed(point[1]) });
+
+/**
+ * The segments of a path through [x, y] points: straight lines, or a smooth curve (a Catmull-Rom spline as cubic segments) that passes
+ * through each point. A closed path ends with a close segment.
+ */
+function segmentsOf(points, smooth, shut) {
+  const count = points.length, out = [{ type: "move", ...at(points[0]) }], point = (index) => points[shut ? (index + count) % count : clamp(index, 0, count - 1)];
+  for (let index = 1; index < count + (shut ? 1 : 0); index++) {
+    const [a, b, c, d] = [point(index - 2), point(index - 1), point(index), point(index + 1)];
+    if (!smooth) { out.push({ type: "line", ...at(c) }); continue; }
+    out.push({ type: "cubic", cx1: fixed(b[0] + (c[0] - a[0]) / 6), cy1: fixed(b[1] + (c[1] - a[1]) / 6), cx2: fixed(c[0] - (d[0] - b[0]) / 6), cy2: fixed(c[1] - (d[1] - b[1]) / 6), ...at(c) });
+  }
+  if (shut) out.push({ type: "close" });
+  return out;
+}
+
+/** The segments of a closed polygon with each corner rounded by a curve of size r: a solid body with no sharp point, as the look target asks. */
+function rounded(points, r) {
+  const count = points.length, toward = (from, to, size) => {
+    const length = Math.hypot(to[0] - from[0], to[1] - from[1]), share = Math.min(0.5, size / (length || 1));
+    return [from[0] + (to[0] - from[0]) * share, from[1] + (to[1] - from[1]) * share];
+  };
+  const out = [];
+  points.forEach((point, index) => {
+    const [a, b] = [toward(point, points[(index + count - 1) % count], r), toward(point, points[(index + 1) % count], r)];
+    out.push({ type: index ? "line" : "move", ...at(a) }, { type: "quad", cx: fixed(point[0]), cy: fixed(point[1]), ...at(b) });
+  });
+  return [...out, { type: "close" }];
+}
+
+/**
+ * The shape kinds: args are the positional arguments before the color, last is the one extra value after the color with no name, prompt is
+ * the text of the template prompt (null for a kind that only a library line writes), and draw gives the commands of one shape, or null for a
+ * shape that Alphy cannot draw. A shape with stroke draws its outline only. points is the least count of points of a list of points, and named
+ * names the properties of this kind alone, which its prompt text explains.
+ */
+const KINDS = {
+  circle: { args: ["x", "y", "r"], prompt: MESSAGES ? "circle(x, y, r, color)" : "", draw({ x, y, r, stroke }) {
+    if (!(r >= 0 && r <= 2048) || !inside([x - r, y - r, x + r, y + r])) return null;
+    const side = fixed(2 * r);
+    return stroke ? { type: "arc", x: fixed(x - r), y: fixed(y - r), width: side, height: side, start: 0, sweep: 360, stroke: 2 } : { type: "circle", x, y, radius: r };
+  } },
+  rect: { args: ["x", "y", "w", "h"], last: "radius", prompt: MESSAGES ? "rect(x, y, w, h, color, radius)" : "", draw({ x, y, w, h, radius, stroke }) {
+    // A size below 0 is the same box from its other corner.
+    const box = { x: Math.min(x, fixed(x + w)), y: Math.min(y, fixed(y + h)), width: Math.abs(w), height: Math.abs(h) };
+    const right = fixed(box.x + box.width), bottom = fixed(box.y + box.height);
+    if (!inside([box.x, box.y, right, bottom]) || box.width > 8192 || box.height > 8192) return null;
+    if (stroke) return closed([[box.x, box.y], [right, box.y], [right, bottom], [box.x, bottom]]);
+    return radius ? { type: "roundRect", ...box, radius: clamp(radius, 0, 1024) } : { type: "rect", ...box };
+  } },
+  line: { args: ["x1", "y1", "x2", "y2"], last: "width", prompt: MESSAGES ? "line(x1, y1, x2, y2, color, width)" : "",
+    draw: ({ x1, y1, x2, y2, width }) => (inside([x1, y1, x2, y2]) ? { type: "line", x: x1, y: y1, x2, y2, stroke: clamp(width ?? 2, 0.1, 128) } : null) },
+  text: { args: ["x", "y", "text"], last: "size", prompt: MESSAGES ? "text(x, y, value, color, size)" : "",
+    draw: ({ x, y, text, size, align }) => (inside([x, y]) ? { type: "text", x, y, size: clamp(size ?? 14, 1, 128), text: text.slice(0, 2048), align: align ?? "center", baseline: "middle" } : null) },
+  polygon: { args: ["points"], points: 3, prompt: MESSAGES ? "polygon([x1, y1, x2, y2, ...], color)" : "", draw({ points, stroke }) {
+    // [x1, y1, x2, y2, ...] as [x, y] points. A polygon has 3 to 2048 points, and its outline 2 or more and its first point again.
+    const list = pairs(points);
+    if (!inside(list.flat()) || list.length < (stroke ? 2 : 3) || list.length > (stroke ? 2047 : 2048)) return null;
+    return stroke ? closed(list) : { type: "polygon", points: list };
+  } },
+  path: { args: ["points"], last: "width", points: 2, named: ["smooth", "closed"], prompt: MESSAGES ? "path([x1, y1, x2, y2, ...], color, width): a line through the points, straight, or a curve with smooth=true. With closed=true it is a filled shape" : "",
+    draw({ points, width, smooth, closed: shut, stroke }) {
+      const list = pairs(points);
+      if (!inside(list.flat()) || list.length < 2 || list.length > 200) return null;
+      const segments = segmentsOf(list, Boolean(smooth), Boolean(shut));
+      return shut && !stroke ? { type: "path", segments } : { type: "path", segments, stroke: clamp(width ?? 2, 0.1, 128) };
+    } },
+  arrow: { args: ["x1", "y1", "x2", "y2"], last: "width", prompt: MESSAGES ? "arrow(x1, y1, x2, y2, color, width): a solid arrow from the first point to the head at the second point" : "",
+    draw({ x1, y1, x2, y2, width }) {
+      const length = Math.hypot(x2 - x1, y2 - y1), w = clamp(width ?? 4, 1, 24);
+      if (!inside([x1, y1, x2, y2]) || length < 1) return null;
+      // A body of the width and a head of 3 widths, so the body is a third of the head (F4): a solid shape with a rounded head, as the force
+      // arrow of the look target.
+      const [ux, uy] = [(x2 - x1) / length, (y2 - y1) / length], head = Math.min(length * 0.5, 2.8 * w + 4), half = 1.5 * w, a = w / 2;
+      const base = [x2 - ux * head, y2 - uy * head], side = (point, off) => [point[0] - uy * off, point[1] + ux * off];
+      const points = [side([x1, y1], a), side(base, a), side(base, half), [x2, y2], side(base, -half), side(base, -a), side([x1, y1], -a)];
+      return { type: "path", segments: rounded(points, Math.max(1, w * 0.4)) };
+    } },
+  arc: { args: ["x", "y", "r", "from", "sweep"], last: "width", prompt: MESSAGES ? "arc(x, y, r, from, sweep, color, width): a part of a circle from the angle from, sweep degrees counterclockwise" : "",
+    draw({ x, y, r, from, sweep, width }) {
+      if (!(r > 0 && r <= 2048) || !inside([x - r, y - r, x + r, y + r])) return null;
+      // Alphy measures an angle clockwise from the x axis, and the kit counterclockwise, as sin and cos of the prompt.
+      return { type: "arc", x: fixed(x - r), y: fixed(y - r), width: fixed(2 * r), height: fixed(2 * r), start: fixed(clamp(-from, -360, 360)), sweep: fixed(clamp(-sweep, -360, 360)), stroke: clamp(width ?? 3, 0.1, 128) };
+    } },
+  // A group places its shapes at x, y, scaled and turned: a ready object of the library is one group (library.js). No prompt: only a library line writes it.
+  group: { args: ["x", "y", "scale", "shapes"], prompt: null, draw: () => null },
+  // The picture of an image entry of the library (stage 6, I4) in the box x, y, w, h: the host draws it from its assets with its own colors, so
+  // it takes no color. No prompt: only a library line writes it.
+  image: { args: ["x", "y", "w", "h", "image"], color: false, prompt: null,
+    draw: ({ x, y, w, h, image }) => (w > 0 && h > 0 && inside([x, y, x + w, y + h]) ? { type: "image", id: image, x, y, width: w, height: h } : null) },
+};
+
+/**
+ * The properties of a shape by name: kind is how core.js reads the value (a test, a boolean, a number, a color, or a text), and prompt is
+ * the text of the template prompt (null for a property that only a library line writes).
+ */
+const PROPERTIES = {
+  visible: { kind: "test", prompt: MESSAGES ? "visible=test" : "" },
+  stroke: { kind: "boolean", prompt: MESSAGES ? "stroke=true for the outline only" : "" },
+  smooth: { kind: "boolean", prompt: null },
+  closed: { kind: "boolean", prompt: null },
+  gradient: { kind: "color", prompt: MESSAGES ? "gradient=color for a fill that fades from the color of the shape at its top to this color at its bottom" : "" },
+  radial: { kind: "number", prompt: MESSAGES ? "radial=1 with gradient= for a ball: the light comes from the upper left" : "" },
+  glow: { kind: "boolean", prompt: MESSAGES ? "glow=true for a soft light around it" : "" },
+  opacity: { kind: "number", prompt: MESSAGES ? "opacity=0.5 for a shape you can see through (0 to 1)" : "" },
+  turn: { kind: "number", prompt: MESSAGES ? "turn=degrees to turn it counterclockwise around its center" : "" },
+  align: { kind: "text", prompt: null },
+  radius: { kind: "number", prompt: null },
+  width: { kind: "number", prompt: null },
+  size: { kind: "number", prompt: null },
+};
+
+/** The box of a command: {x, y, w, h}, for a gradient, a glow, and a turn. */
+function boxOf(command) {
+  const { type, x, y, radius, width, height, x2, y2, points, segments } = command;
+  if (type === "circle") return { x: x - radius, y: y - radius, w: 2 * radius, h: 2 * radius };
+  if (type === "line") return { x: Math.min(x, x2), y: Math.min(y, y2), w: Math.abs(x2 - x), h: Math.abs(y2 - y) };
+  const list = points ?? (segments ? segments.flatMap((one) => [[one.x, one.y], [one.cx1, one.cy1], [one.cx2, one.cy2]]).filter(([px]) => px !== undefined) : null);
+  if (list) {
+    const xs = list.map(([px]) => px), ys = list.map(([, py]) => py), left = Math.min(...xs), top = Math.min(...ys);
+    return { x: left, y: top, w: Math.max(...xs) - left, h: Math.max(...ys) - top };
+  }
+  return { x, y, w: width ?? 0, h: height ?? 0 };
+}
+
+return { fixed, inside, segmentsOf, KINDS, PROPERTIES, boxOf };
+})();
 // core.js
-const { CATALOG, ICON_NAMES, ACTIONS, TONES, HEX, STEPS, explode, dayNumber, minutes, phased, foreground, shownFormulas, own, MAX_DOTS, given, App, settings } = (() => {
+const { CATALOG, ICON_NAMES, ACTIONS, TONES, HEX, TONE, isColor, STEPS, explode, dayNumber, minutes, phased, foreground, shownFormulas, own, MAX_DOTS, given, App, settings } = (() => {
 // Runs an app file without any platform: state, formulas, actions, and the component tree.
 // A renderer draws the tree. The checks of the host are in check.js.
+
 
 
 
@@ -341,19 +486,24 @@ const CATALOG = {
 const ICON_NAMES = { ArrowUp: "Arrow", ArrowDown: "Sort", ArrowLeft: "Back", ArrowRight: "Chevron", Edit: "Pencil" };
 const NAMED = new Set(["visible", "enabled", "variant", "tone", "emphasis", "weight", "min", "max", "step", "empty", "placeholder", "gap", "selected", "kind", "size", "align", "columns", "icon", "fit"]);
 const ACTIONS = new Set(["set", "toggle", "inc", "dec", "append", "remove", "clear", "when", "move", "flip", "animate"]);
-/** The data calls of a Drawing and of a Model3d, with the arguments of each one in order. A color follows them. */
-const SHAPES = { circle: ["x", "y", "r"], rect: ["x", "y", "w", "h"], line: ["x1", "y1", "x2", "y2"], text: ["x", "y", "text"], polygon: ["points"] };
-const BODIES = { box: ["part", "x", "y", "z", "w", "h", "d"], cylinder: ["part", "x", "y", "z", "radius", "length", "axis"] };
-const TEXTS = new Set(["text", "part", "axis"]), EXTRAS = ["radius", "width", "size", "stroke"];
-// A shape also takes its own extra value after the color with no name. The dev run of the dialogue check: 5 of 16 plans
+/**
+ * The data calls of a Model3d, with the arguments of each one in order, as the shape kinds of a Drawing (kinds.js KINDS) have them. A color
+ * follows them. The evaluator reads the registry when it draws, so a new kind needs no other edit.
+ */
+const BODIES = { box: { args: ["part", "x", "y", "z", "w", "h", "d"] }, cylinder: { args: ["part", "x", "y", "z", "radius", "length", "axis"] } };
+const TEXTS = new Set(["text", "part", "axis", "image"]);
+// A shape also takes its own extra value after the color with no name (kinds.js last). The dev run of the dialogue check: 5 of 16 plans
 // that think wrote text(x, y, "Земля", "muted", 12) or line(x1, y1, x2, y2, "muted", 2), and no repair step found the cause.
-const LAST = { text: "size", line: "width", rect: "radius" };
 /**
  * The colors of a shape or a body by role. "accent" is the palette of the app. A different color is "#RRGGBB" (HEX). Each other color of a line is a
  * fault of the line, and a renderer draws a computed color that it does not know as ink.
  */
-const TONES = { ink: "#0f172a", muted: "#94a3b8", accent: null, surface: "#ffffff", water: "#38bdf8", land: "#65a30d", sun: "#facc15", sand: "#e7d3a8", wood: "#a16207", success: "#16a34a", warning: "#ea580c" };
+const TONES = { ink: "#0f172a", muted: "#94a3b8", accent: null, surface: "#ffffff", water: "#38bdf8", land: "#65a30d", sun: "#facc15", sand: "#e7d3a8", wood: "#a16207", success: "#16a34a", warning: "#ea580c", error: "#dc2626" };
 const HEX = /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+/** A tone of a color of the kit (stage 6, L2): the color, a step of +1 to +3 (lighter) or -1 to -3 (darker), and an alpha in percent, such as "accent+1@40". */
+const TONE = new RegExp(`^(${Object.keys(TONES).join("|")})([+-][123])?(?:@(\\d{1,2}|100))?$`);
+/** True for a color of a shape: a color of the kit, a tone of one, or a hex. */
+const isColor = (color) => typeof color === "string" && (TONE.test(color) || HEX.test(color));
 
 /**
  * The work of one event of the run-time, or of one look of the compile step, in steps: each value, shape, and node, and each item and
@@ -649,28 +799,30 @@ class App {
       if (!rows) throw new DslError(MESSAGES ? "each needs a list or a count: each($/rows, shape) or each(5, shape)" : "");
       return rows.flatMap((row, index) => this.drawn(kinds, tag, args[1], { ...ctx, it: row, each: index }));
     }
-    const keys = Object.hasOwn(kinds, name) ? kinds[name] : null;
-    if (!keys) throw new DslError(MESSAGES ? `${show(tree).slice(0, 30)} is not one of ${Object.keys(kinds).join(", ")}, each` : "");
-    const last = LAST[name], takes = MESSAGES ? `${name} takes ${keys.join(", ")}, color${last ? `, ${last}` : ""}` : "";
-    if (args.length < keys.length || args.length > keys.length + (last ? 2 : 1)) throw new DslError(MESSAGES ? `${show(tree).slice(0, 60)} has ${args.length} values: ${takes}` : "");
+    const keys = Object.hasOwn(kinds, name) ? kinds[name].args : null;
+    if (!keys) throw new DslError(MESSAGES ? `${show(tree).slice(0, 30)} is not one of ${Object.keys(kinds).filter((kind) => kinds[kind].prompt !== null).join(", ")}, each` : "");
+    // A group has no color: its shapes have their own (kinds.js). A picture of the library has its own colors.
+    const last = kinds[name].last, colored = keys.at(-1) !== "shapes" && kinds[name].color !== false, takes = MESSAGES ? `${name} takes ${keys.join(", ")}${colored ? ", color" : ""}${last ? `, ${last}` : ""}` : "";
+    if (args.length < keys.length || args.length > keys.length + (last ? 2 : colored ? 1 : 0)) throw new DslError(MESSAGES ? `${show(tree).slice(0, 60)} has ${args.length} values: ${takes}` : "");
     if (named.visible && !this.value(named.visible, ctx)) return [];
     const number = (value, key) => { if (value === null || value === "" || typeof value === "boolean" || !Number.isFinite(Number(value))) throw new DslError(MESSAGES ? `${key} of ${name} is not a number: ${takes}` : ""); return round(Number(value), 2); };
+    const color = (value, key) => { const text = String(value ?? "ink"); if (MESSAGES && !isColor(text)) throw new DslError(`the color ${JSON.stringify(text)} of ${key === "color" ? name : `${key}= of ${name}`} is not a color of the kit. Use one of ${Object.keys(TONES).join(", ")}, or a hex such as "#336699"`); return text; };
     const out = { [tag]: name };
     keys.forEach((key, index) => {
+      if (key === "shapes") { out.shapes = this.drawn(kinds, tag, args[index], ctx); return; }
       const value = this.value(args[index], ctx);
       out[key] = TEXTS.has(key) ? String(value ?? "") : key === "points" ? [value].flat().map((item) => number(item, key)) : number(value, key);
     });
     if (out.axis !== undefined && !["x", "y", "z"].includes(out.axis)) throw new DslError(MESSAGES ? `axis of ${name} is "x", "y", or "z"` : "");
-    out.color = String((args[keys.length] ? this.value(args[keys.length], ctx) : null) ?? "ink");
-    if (MESSAGES && !Object.hasOwn(TONES, out.color) && !HEX.test(out.color)) {
-      throw new DslError(`the color ${JSON.stringify(out.color)} of ${name} is not a color of the kit. Use one of ${Object.keys(TONES).join(", ")}, or a hex such as "#336699"`);
-    }
+    if (colored) out.color = color(args[keys.length] ? this.value(args[keys.length], ctx) : null, "color");
     if (args.length === keys.length + 2) out[last] = number(this.value(args[keys.length + 1], ctx), last);
     for (const [key, arg] of Object.entries(named)) {
+      const property = tag === "shape" || ["radius", "width", "size", "stroke"].includes(key) ? PROPERTIES[key] : undefined;
       if (key === "visible") continue;
-      if (!EXTRAS.includes(key)) throw new DslError(MESSAGES ? `${name} has no argument ${key}` : "");
+      if (!property) throw new DslError(MESSAGES ? `${name} has no argument ${key}` : "");
       const value = this.value(arg, ctx);
-      if (key !== "stroke") out[key] = number(value, key); else if (value) out.stroke = true;
+      if (property.kind === "boolean") { if (value) out[key] = true; }
+      else out[key] = property.kind === "color" ? color(value, key) : property.kind === "text" ? String(value ?? "") : number(value, key);
     }
     if (++this.shapes > MAX_SHAPES) this.stop(MESSAGES ? `the drawing has more than ${MAX_SHAPES} shapes, and Alphy stops it. Alphy draws at most 512 commands` : "");
     return [out];
@@ -810,7 +962,7 @@ class App {
         this.shapes = 0;
         // An item that fails, such as a shape whose x is not a number at run time, is a fault and is left out: the other items still draw.
         node.props[key] = (list.k === "list" ? list.items : [list]).flatMap((item) => {
-          try { return this.drawn(key === "shapes" ? SHAPES : BODIES, key === "shapes" ? "shape" : "body", item, ctx); }
+          try { return this.drawn(key === "shapes" ? KINDS : BODIES, key === "shapes" ? "shape" : "body", item, ctx); }
           catch (failure) { this.fault(name ?? tree.name, MESSAGES ? `${key}: ${failure.message}` : ""); return []; }
         });
         if (key === "bodies" && node.props.exploded) node.props.bodies = explode(node.props.bodies);
@@ -971,7 +1123,7 @@ class App {
 // The kit uses the smoke gate: an app file of this design has no check lines.
 const settings = { gate: "smoke", now: () => Date.now() };
 
-return { CATALOG, ICON_NAMES, ACTIONS, TONES, HEX, STEPS, explode, dayNumber, minutes, phased, foreground, shownFormulas, own, MAX_DOTS, given, App, settings };
+return { CATALOG, ICON_NAMES, ACTIONS, TONES, HEX, TONE, isColor, STEPS, explode, dayNumber, minutes, phased, foreground, shownFormulas, own, MAX_DOTS, given, App, settings };
 })();
 // words.js
 const { WORDS, hasWords, wordOf } = (() => {
@@ -2467,8 +2619,9 @@ function rows(screen, node, key, line, expr, at, title) {
 return { MAX_ROW_FIELDS, MAX_ROWS, ALPHY, stable, namer, wished, clockOf, MAX_TEXT, cast, castRow, relative, rows };
 })();
 // draw.js
-const { BAR_SURFACE, sideOf, LIMITS, PALETTE, utf8, hostBytes, fixed, commandsOf, barOf, MODEL, STAGE, ACCENTS, accentOf, polygonsOf, budgetOf, fit } = (() => {
+const { BAR_SURFACE, sideOf, LIMITS, PALETTE, colorOf, utf8, hostBytes, commandsOf, barOf, MODEL, STAGE, ACCENTS, accentOf, polygonsOf, budgetOf, fit } = (() => {
 // The drawing of a surface: the kit's shapes as Alphy's drawing commands (GraphicsContract.frame), and the limits of one reply.
+
 
 
 
@@ -2476,16 +2629,28 @@ const { BAR_SURFACE, sideOf, LIMITS, PALETTE, utf8, hostBytes, fixed, commandsOf
 const BAR_SURFACE = { width: 1024, height: 64 };
 /** A side of a surface: Alphy takes 64 to 2048 pixels each way. */
 const sideOf = (value) => Math.min(2048, Math.max(64, Math.round(Number(value)) || 0));
-/** What Alphy draws in one reply, for all surfaces together (GraphicsContract.frame, ArtifactProtocol.validateSurfaces). */
-const LIMITS = { commands: 512, pairs: 2048, chars: 2048, bytes: 32768 };
+/** What Alphy draws in one reply, for all surfaces together (GraphicsContract.frame, ArtifactProtocol.validateSurfaces): also the path segments and the gradient stops. */
+const LIMITS = { commands: 512, pairs: 2048, chars: 2048, bytes: 32768, segments: 512, stops: 128 };
 /**
  * The kit's color names as Alphy's colors: a tone of the theme for a role, else the hex of the kit. The role surface is the lowest container of the
  * theme (NativeToolUi.drawingRoles): white on a light theme and near black on a dark one (L1 item 6).
  */
-const ROLES = { ink: "default", muted: "muted", accent: "accent", success: "success", warning: "warning", surface: "surface" };
+const ROLES = { ink: "default", muted: "muted", accent: "accent", success: "success", warning: "warning", error: "error", surface: "surface" };
 const PALETTE = Object.fromEntries(Object.keys(TONES).map((name) => [name, ROLES[name] ?? TONES[name]]));
-/** A color name of the palette, a hex that passes as it is, or the default ink for each other text. */
-const colorOf = (color, palette) => (Object.hasOwn(palette, color) ? palette[color] : HEX.test(color) ? color : "default");
+const clampOf = (value, low, high) => Math.min(high, Math.max(low, value));
+/**
+ * A color name of the palette, a hex that passes as it is, or the default ink for each other text. A tone (core.js TONE) of a role of the theme
+ * stays a tone, which Alphy mixes from the color of the role in the theme (GraphicsContract.toneOf). A tone of a hex color is mixed here the
+ * same way: 30 % toward white for each step up, 25 % toward black for each step down. opacity multiplies the alpha.
+ */
+function colorOf(color, palette = PALETTE, opacity = 1) {
+  const [, name, step = "", alpha = "100"] = TONE.exec(color) ?? [], share = Math.round(clampOf(Number(alpha) * opacity, 0, 100));
+  const base = name ? palette[name] : HEX.test(color) ? color : "default";
+  if (!HEX.test(base) || (!step && share === 100)) return step || share < 100 ? `${base}${step}${share < 100 ? `@${share}` : ""}` : base;
+  const [a, ...rgb] = argbOf(base), up = Number(step) > 0, mix = up ? 0.3 * Number(step) : -0.25 * Number(step);
+  const channels = rgb.map((value) => hex2(value + ((up ? 255 : 0) - value) * mix)).join("");
+  return a === 255 && share === 100 ? `#${channels}` : `#${hex2((a * share) / 100)}${channels}`;
+}
 
 /** The UTF-8 bytes of a text. The sandbox has no TextEncoder that the kit can count on. */
 const utf8 = (text) => {
@@ -2495,12 +2660,7 @@ const utf8 = (text) => {
 };
 /** The bytes of a value in JSON as the host writes it: org.json writes "/" as "\/". */
 const hostBytes = (value) => utf8(JSON.stringify(value).replace(/\//g, "\\/"));
-/** A sum such as x - r keeps 2 decimals, as the kit's numbers do, with no float noise. */
-const fixed = (value) => Math.round(value * 100) / 100;
-const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
-/** True when each value is a coordinate that Alphy takes: a finite number from -8192 to 8192. */
-const inside = (values) => values.every((value) => Number.isFinite(value) && Math.abs(value) <= 8192);
-const closed = (points) => ({ type: "polyline", points: [...points, points[0]], stroke: 2 });
+
 /**
  * True when the point X, Y is inside the [x, y] points by the non-zero rule, the fill rule of an Android Path (SurfaceDrawing.kt): each edge that
  * crosses the ray from the point toward a larger x adds 1 when it goes toward a larger y and -1 when it goes toward a smaller y, and the sum is not 0.
@@ -2510,31 +2670,47 @@ const wound = (points, X, Y) => points.reduce((turns, [x, y], index) => {
   return turns + (b <= Y ? +(y > Y && side > 0) : -(y <= Y && side < 0));
 }, 0) !== 0;
 
-/** One shape of the kit (App.drawn) as one command of Alphy, or null for a shape that Alphy cannot draw. */
-function commandOf({ shape, x, y, r, w, h, x1, y1, x2, y2, text, points, radius, width, size, stroke }) {
-  if (shape === "circle") {
-    if (!(r >= 0 && r <= 2048) || !inside([x - r, y - r, x + r, y + r])) return null;
-    const side = fixed(2 * r);
-    return stroke ? { type: "arc", x: fixed(x - r), y: fixed(y - r), width: side, height: side, start: 0, sweep: 360, stroke: 2 } : { type: "circle", x, y, radius: r };
+/**
+ * The paint of a command: its color with the opacity of the shape, or a gradient over its box. gradient= fades from the color at the top of the
+ * box to its color at the bottom. With radial=SHARE it fades from a point to the edge: radial=0 from the center, which gives a soft spot, and
+ * radial=1 from a point up and left of the center, which gives a body its volume.
+ */
+function painted(command, shape, palette) {
+  const opacity = clampOf(shape.opacity ?? 1, 0, 1), color = colorOf(shape.color, palette, opacity);
+  if (!shape.gradient || command.type === "text" || command.type === "line" || command.type === "arc" || command.stroke) return { ...command, color };
+  const { x, y, w, h } = boxOf(command), stops = [{ offset: 0, color }, { offset: 1, color: colorOf(shape.gradient, palette, opacity) }];
+  const share = clampOf(shape.radial ?? 0, 0, 1);
+  const gradient = shape.radial !== undefined ? { type: "radial", x: fixed(x + w * (0.5 - 0.12 * share)), y: fixed(y + h * (0.5 - 0.16 * share)), radius: fixed(Math.max(0.1, Math.max(w, h) * (0.5 + 0.3 * share))), stops }
+    : { type: "linear", x: fixed(x + w / 2), y: fixed(y), x2: fixed(x + w / 2), y2: fixed(y + Math.max(h, 0.1)), stops };
+  return { ...command, gradient };
+}
+/** The transform of a turn by degrees counterclockwise and a scale, with the origin moved to x, y (GraphicsContract.frame). */
+const transformOf = (degrees, scale, x, y) => {
+  const angle = (degrees * Math.PI) / 180, cos = Math.cos(angle) * scale, sin = Math.sin(angle) * scale, four = (value) => Math.round(value * 10000) / 10000;
+  return [four(cos), four(-sin), four(sin), four(cos), fixed(x), fixed(y)];
+};
+/** One shape of the kit (App.drawn) as its commands of Alphy: a glow under it, the shape, and a group for a turn or a group shape. None for a shape that Alphy cannot draw. */
+function commandsOfShape(shape, palette) {
+  if (shape.shape === "group") {
+    const scale = Number.isFinite(shape.scale) && shape.scale > 0 ? Math.min(shape.scale, 64) : 1;
+    return inside([shape.x, shape.y]) ? [{ type: "group", transform: transformOf(shape.turn ?? 0, scale, shape.x, shape.y), children: commandsOf(shape.shapes ?? [], palette) }] : [];
   }
-  if (shape === "rect") {
-    // A size below 0 is the same box from its other corner.
-    const box = { x: Math.min(x, fixed(x + w)), y: Math.min(y, fixed(y + h)), width: Math.abs(w), height: Math.abs(h) };
-    const right = fixed(box.x + box.width), bottom = fixed(box.y + box.height);
-    if (!inside([box.x, box.y, right, bottom]) || box.width > 8192 || box.height > 8192) return null;
-    if (stroke) return closed([[box.x, box.y], [right, box.y], [right, bottom], [box.x, bottom]]);
-    return radius ? { type: "roundRect", ...box, radius: clamp(radius, 0, 1024) } : { type: "rect", ...box };
+  const command = KINDS[shape.shape]?.draw(shape);
+  if (!command) return [];
+  // A picture of the library keeps its own colors: no paint, no glow.
+  if (command.type === "image") return [command];
+  const box = boxOf(command), [cx, cy] = [box.x + box.w / 2, box.y + box.h / 2], out = [];
+  if (shape.glow) {
+    // A soft light around the shape: a disk of 1.4 times its size in its color that fades to nothing.
+    const radius = fixed(Math.max(4, Math.max(box.w, box.h) * 0.7)), fade = (share) => colorOf(shape.color, palette, share * clampOf(shape.opacity ?? 1, 0, 1));
+    if (inside([cx - radius, cy - radius, cx + radius, cy + radius]))
+      out.push({ type: "circle", x: fixed(cx), y: fixed(cy), radius, gradient: { type: "radial", x: fixed(cx), y: fixed(cy), radius, stops: [{ offset: 0, color: fade(0.55) }, { offset: 1, color: fade(0) }] } });
   }
-  if (shape === "line") return inside([x1, y1, x2, y2]) ? { type: "line", x: x1, y: y1, x2, y2, stroke: clamp(width ?? 2, 0.1, 128) } : null;
-  if (shape === "text") return inside([x, y]) ? { type: "text", x, y, size: clamp(size ?? 14, 1, 128), text: text.slice(0, LIMITS.chars), align: "center", baseline: "middle" } : null;
-  if (shape === "polygon") {
-    // [x1, y1, x2, y2, ...] as [x, y] points. A polygon has 3 to 2048 points, and its outline 2 or more and its first point again.
-    const pairs = [];
-    for (let index = 0; index + 1 < points.length; index += 2) pairs.push([points[index], points[index + 1]]);
-    if (!inside(pairs.flat()) || pairs.length < (stroke ? 2 : 3) || pairs.length > (stroke ? 2047 : 2048)) return null;
-    return stroke ? closed(pairs) : { type: "polygon", points: pairs };
-  }
-  return null;
+  out.push(painted(command, shape, palette));
+  if (!shape.turn) return out;
+  // A turn around the center of the box: the group moves the center to the origin, turns, and moves it back.
+  const [a, b, c, d] = transformOf(shape.turn, 1, 0, 0);
+  return [{ type: "group", transform: [a, b, c, d, fixed(cx - a * cx - c * cy), fixed(cy - b * cx - d * cy)], children: out }];
 }
 
 /**
@@ -2542,14 +2718,15 @@ function commandOf({ shape, x, y, r, w, h, x1, y1, x2, y2, text, points, radius,
  * draw is left out, and a size past Alphy's bounds is clamped. A text takes a color that reads on the last filled disk, box, or polygon under its anchor (L1 item 6):
  * - on a shape in a hex color, black or white by the luminance of the shape. With a gamma of 2.2 and a limit of 0.18, the contrast is 4.5 or more.
  * - on a shape in an ink role, the surface role. The host keeps each ink and the surface role at 4.5 or more (NativeToolUi.drawingRoles).
- * - on a shape in muted, the default ink. A muted shape is a light tint of the muted ink, and only the default ink keeps 4.5 on that tint.
+ * - on a shape in muted, or in a tone at 50 % alpha or less, the default ink. Such a shape is a light tint, and only the default ink keeps 4.5 on that tint.
  * - on a shape in surface, or on no shape, its own color, and the default ink for the surface role.
  * A line and an outline cover no text.
  */
 const commandsOf = (shapes, palette = PALETTE) => shapes.reduce((drawn, shape) => {
-  const command = commandOf(shape);
-  let color = colorOf(shape.color, palette), under;
-  if (command?.type === "text") {
+  const made = commandsOfShape(shape, palette), command = made.length === 1 ? made[0] : null;
+  if (command?.type !== "text") { drawn.push(...made); return drawn; }
+  let color = command.color, under;
+  {
     const { x: X, y: Y } = command;
     // A box is a rect or a roundRect, the only types that start with r. An arc is the outline of a disk.
     for (const { type, x, y, radius, width, height, points, color: fill } of drawn) {
@@ -2558,9 +2735,9 @@ const commandsOf = (shapes, palette = PALETTE) => shapes.reduce((drawn, shape) =
     }
     // The relative luminance of the shape, with weights times 10000.
     color = HEX.test(under) ? (argbOf(under).reduce((sum, channel, index) => sum + [0, 2126, 7152, 722][index] * (channel / 255) ** 2.2, 0) > 1800 ? "#000000" : "#ffffff")
-      : under === "muted" ? "default" : under && under !== "surface" ? "surface" : color === "surface" ? "default" : color;
+      : under === "muted" || Number(TONE.exec(under ?? "")?.[3] ?? 100) <= 50 ? "default" : under && under !== "surface" ? "surface" : color === "surface" ? "default" : color;
   }
-  if (command) drawn.push({ ...command, color });
+  drawn.push({ ...command, color });
   return drawn;
 }, []);
 
@@ -2660,17 +2837,28 @@ function polygonsOf(bodies, turnDegrees, exploded, selected, width, height, acce
   });
 }
 
-/** What one command costs: a box, a circle, and a text 1 pair, a line 2, a polygon or a polyline 1 for each point (GraphicsContract.frame). */
-const pairsOf = (command) => command.points?.length ?? (command.type === "line" ? 2 : 1);
-const charsOf = (command) => command.text?.length ?? 0;
+/**
+ * What one command costs (GraphicsContract.frame): a box, a circle, and a text 1 pair, a line 2, a polygon or a polyline 1 for each point, a
+ * path 1 for each point of its segments, a gradient 1 for its point and 1 more for a linear one, and a group what its commands cost and 1 more.
+ */
+const SEGMENT_PAIRS = { move: 1, line: 1, quad: 2, cubic: 3, close: 0 };
+const pairsOf = (command) => (command.type === "group" ? 1 + command.children.reduce((sum, child) => sum + pairsOf(child), 0)
+  : (command.points?.length ?? (command.segments ? command.segments.reduce((sum, one) => sum + SEGMENT_PAIRS[one.type], 0) : command.type === "line" ? 2 : 1))
+    + (command.gradient ? (command.gradient.type === "linear" ? 2 : 1) : 0));
+const each = (cost) => (command) => (command.type === "group" ? command.children.reduce((sum, child) => sum + each(cost)(child), 0) : cost(command));
+const charsOf = each((command) => command.text?.length ?? 0);
+const countOf = (command) => (command.type === "group" ? 1 + command.children.reduce((sum, child) => sum + countOf(child), 0) : 1);
+const segmentsOf = each((command) => command.segments?.length ?? 0);
+const stopsOf = each((command) => command.gradient?.stops.length ?? 0);
 /**
  * What the surfaces of one reply cost, from [id, commands] in order: the commands, pairs, and text characters of all of them, and
  * the bytes of {id: {commands}, ...} as the host writes it. The emitter checks the first reply with it, and fit starts from the reply with no commands.
  */
 const budgetOf = (surfaces) => {
   const commands = surfaces.flatMap(([, list]) => list);
-  return { commands: commands.length, pairs: commands.reduce((sum, command) => sum + pairsOf(command), 0),
-    chars: commands.reduce((sum, command) => sum + charsOf(command), 0), bytes: hostBytes(Object.fromEntries(surfaces.map(([id, list]) => [id, { commands: list }]))) };
+  const sum = (cost) => commands.reduce((total, command) => total + cost(command), 0);
+  return { commands: sum(countOf), pairs: sum(pairsOf), chars: sum(charsOf), bytes: hostBytes(Object.fromEntries(surfaces.map(([id, list]) => [id, { commands: list }]))),
+    segments: sum(segmentsOf), stops: sum(stopsOf) };
 };
 
 /**
@@ -2682,14 +2870,14 @@ function fit(surfaces) {
   let full = false;
   return Object.fromEntries(surfaces.map(([id, commands]) => [id, { commands: commands.filter((command, index) => {
     // A command costs its bytes, and a comma after the first command of its surface. The commands before it were kept, as none is kept after the first that does not fit.
-    const cost = { commands: 1, pairs: pairsOf(command), chars: charsOf(command), bytes: hostBytes(command) + (index ? 1 : 0) };
+    const cost = { commands: countOf(command), pairs: pairsOf(command), chars: charsOf(command), bytes: hostBytes(command) + (index ? 1 : 0), segments: segmentsOf(command), stops: stopsOf(command) };
     full ||= Object.keys(LIMITS).some((key) => used[key] + cost[key] > LIMITS[key]);
     if (!full) for (const key of Object.keys(cost)) used[key] += cost[key];
     return !full;
   }) }]));
 }
 
-return { BAR_SURFACE, sideOf, LIMITS, PALETTE, utf8, hostBytes, fixed, commandsOf, barOf, MODEL, STAGE, ACCENTS, accentOf, polygonsOf, budgetOf, fit };
+return { BAR_SURFACE, sideOf, LIMITS, PALETTE, colorOf, utf8, hostBytes, commandsOf, barOf, MODEL, STAGE, ACCENTS, accentOf, polygonsOf, budgetOf, fit };
 })();
 // drag.js
 const { IDLE, dragged } = (() => {
@@ -3361,7 +3549,7 @@ const MAX_SURFACES = 4;
 /** The fields of the change of a value that an animate moves: its start and end values, its start and end times in ms of the host's clock, and its value now. */
 const RUN = { type: "object", fields: { from: "number", to: "number", start: "number", end: "number", at: "number" } };
 /** The limits of one reply by their unit in a fault. */
-const UNITS = { commands: "commands", pairs: "coordinate pairs", chars: "text characters", bytes: "bytes" };
+const UNITS = { commands: "commands", pairs: "coordinate pairs", chars: "text characters", bytes: "bytes", segments: "path segments", stops: "gradient stops" };
 
 /**
  * The definition of the app, its language beside it, and the faults of what the emitter cannot build. app is the compiled
@@ -3806,10 +3994,12 @@ function nextState(file, { app, definition, owners, objects }, previous, build) 
 return { BLOCKS, MISMATCH, isRecord, nextState };
 })();
 // form-base.js
-const { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, SHAPES, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, SENTENCE_END, cut, cutLong, headFault, textCardFault, colored, colorFault } = (() => {
+const { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, FEW_OPTIONS, optionCap, optionFault, labelsFault, optionsFault, SENTENCE_END, cut, cutLong, headFault, textCardFault, namedColors, colored, colorFault } = (() => {
 // What each template form uses (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): the first line, the budget, the drawing size,
 // the faults of a text, of the first line, and of a card with a text, the cut of a long text, and the colors of a shape. Each form has a
 // module of its own (forms.js), and template.js reads, merges, expands, and builds a template file with them.
+
+
 
 
 
@@ -3822,16 +4012,35 @@ const TEMPLATE_HEAD = /^\s*(scene|items|cells|compare|table|chart|nodata)\s*\(/;
  * sentence inside the cap (cut). Each other text past its cap, a long text with no sentence end inside its cap, and a list past its cap are faults.
  * A narration line (say) is cut the same way, and one with no sentence end inside its cap is left out with no fault (template.js).
  */
-const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, sign: 14, text: 28, options: 6, items: 6, shapes: 12, cells: 100, say: 110 };
+const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, fewOption: 16, sign: 14, text: 28, options: 6, items: 6, shapes: 20, cells: 100, say: 110 };
 /** The common color names that the kit takes with no call, by their small letters: the template check had one repair for a color name. */
 const COLOR_NAMES = { red: "#dc2626", orange: "#ea580c", yellow: "#facc15", green: "#16a34a", blue: "#2563eb", purple: "#9333ea", violet: "#7c3aed", pink: "#db2777",
-  brown: "#a16207", gray: "#64748b", grey: "#64748b", cyan: "#0891b2", teal: "#0d9488", indigo: "#4f46e5", black: "ink", white: "surface" };
+  brown: "#a16207", gray: "#64748b", grey: "#64748b", cyan: "#0891b2", teal: "#0d9488", indigo: "#4f46e5", amber: "#d97706", graphite: "#4b5563", black: "ink", white: "surface" };
 const PALETTES = ["teal", "green", "blue", "amber", "orange", "red", "pink", "purple", "indigo", "brown", "graphite"];
-/** The shapes of a scene, with the place of the color among their arguments (core.js SHAPES). */
-const SHAPES = { circle: 3, rect: 4, line: 4, text: 3, polygon: 1 };
-/** The drawing of each template, fixed from the first line: the picture has its final size before its first part. */
+const NAMED_COLOR = new RegExp(`^(${Object.keys(COLOR_NAMES).join("|")})([+-][123])?(?:@(\\d{1,2}|100))?$`);
+/**
+ * A color name (COLOR_NAMES, each name of palette= too) in any case, with a tone step and an alpha as for a role, such as "red+2", "orange-1",
+ * or "red@40", as a color of the kit, else null (fix list 3, H1). A name is a fixed hex, so "red" is red in each palette and in both themes, and
+ * the kit mixes its tone as for the hex roles (draw.js toneColor). black and white stay the roles ink and surface.
+ */
+function namedColor(text) {
+  const [, name, step = "", alpha = "100"] = NAMED_COLOR.exec(String(text).toLowerCase()) ?? [];
+  if (!name) return null;
+  return toneColor(COLOR_NAMES[name], step, Number(alpha));
+}
+/**
+ * A color with a tone step ("+1" to "+3", "-1" to "-3", or "") and an alpha in percent: a hex color mixed as draw.js colorOf mixes a tone of a
+ * hex role, and a role as its tone text, such as "ink+1@40". It reuses colorOf with a role of that color, so the run-time keeps one mix.
+ */
+const toneColor = (base, step, alpha) => colorOf(`ink${step}@${alpha}`, { ink: base });
+/** The place of the color among the arguments of a shape kind (kinds.js), or undefined for a library line, which names its color. */
+const colorAt = (name) => (Object.hasOwn(KINDS, name) ? KINDS[name].args.length : undefined);
+/**
+ * The drawing of each template, fixed from the first line: the picture has its final size before its first part. It is square (stage 6, L3):
+ * on a phone the picture fills the width and grows into the empty zone under the app, and the fold keeps it in its column.
+ */
 const WIDTH = 300;
-const HEIGHT = 220;
+const HEIGHT = 300;
 
 const isText = (node) => node?.k === "lit" && typeof node.v === "string";
 /** A number in the line, also a negative one, else undefined. */
@@ -3848,6 +4057,40 @@ function textFault(what, node, cap, formula = false, factor = 1) {
   const long = nodesIn(node, isText).find((text) => [...text.v].length > Math.floor(cap * factor));
   return long ? `${what} has ${[...long.v].length} characters, and its cap is ${cap}. Write it shorter` : null;
 }
+/** The most options of a choice whose options have the cap BUDGET.fewOption, else BUDGET.option (optionFault). */
+const FEW_OPTIONS = 4;
+/**
+ * The cap of each option of a choice, or each step of a steps control, of count items (fix list 3, H3, and fix list 5, L2). A steps control is
+ * a choice on the stage. A choice of 2 to 4 has the cap BUDGET.fewOption: by the widths of the labels, two options fit one row on the phone,
+ * and three or four wrap into two rows of whole cells (the fit gate holds scene-caps4 and steps-caps4). 5 or 6 keep BUDGET.option. A label
+ * is never cut: a line of the scene compares $/v with it.
+ */
+const optionCap = (count) => (count <= FEW_OPTIONS ? BUDGET.fewOption : BUDGET.option);
+/** The hint of a fault of labels from BUDGET.option to BUDGET.fewOption long in a list of more than FEW_OPTIONS. */
+const fewer = (count, lengths, word) => (count > FEW_OPTIONS && lengths.every((length) => length <= BUDGET.fewOption) ? `, or keep at most ${FEW_OPTIONS} ${word}s: their cap is ${BUDGET.fewOption}` : "");
+/** The fault of one label of a list of count labels, such as an item label of items, which is an option of its choice. */
+function optionFault(what, node, count, word = "option") {
+  const fault = textFault(what, node, optionCap(count));
+  return fault && isText(node) && [...node.v].length > optionCap(count) ? fault + fewer(count, [[...node.v].length], word) : fault;
+}
+/** "1", "1 and 2", or "1, 2, and 3". */
+const listed = (values) => (values.length < 3 ? values.join(" and ") : `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`);
+/**
+ * One fault for the labels of one line, such as the options of a choice (fix list 5, L1): it names each label over its cap with its number and
+ * its length, so one repair can correct each of them. A label that is no text in quotes, or an empty one, is the fault. Null with no fault.
+ */
+function labelsFault(word, labels, cap, hint = () => "") {
+  const wrong = labels.map((label, index) => (isText(label) && label.v.trim() ? null : textFault(`${word} ${index + 1}`, label, cap))).find(Boolean);
+  if (wrong) return wrong;
+  const over = labels.map((label, index) => [index + 1, [...label.v].length]).filter(([, length]) => length > cap), lengths = over.map(([, length]) => length);
+  if (!over.length) return null;
+  const tail = hint(lengths);
+  if (over.length === 1) return `${word} ${over[0][0]} has ${over[0][1]} characters, and its cap is ${cap}. Write it shorter${tail}`;
+  const same = lengths.every((length) => length === lengths[0]);
+  return `${word}s ${listed(over.map(([number, length]) => (same ? number : `${number} (${length} characters)`)))} ${same ? `have ${lengths[0]} characters, and their cap is` : "are over their cap of"} ${cap}. Write each one shorter${tail}`;
+}
+/** The fault of the options of a choice or the steps of a steps control: each label over the cap of their number (optionCap), in one text. */
+const optionsFault = (word, options) => labelsFault(word, options, optionCap(options.length), (lengths) => fewer(options.length, lengths, word));
 
 /** A sentence end: . ! ? or …, or 。！？ of Chinese and Japanese, with the closing quote marks and brackets after it. */
 const SENTENCE_END = /[.!?…。！？]["'»”’)\]}」』）]*$/u;
@@ -3894,24 +4137,567 @@ function textCardFault(tree, word) {
 /** The values of a color: the color, or each value of a choice (test ? a : b, or if(test, a, b)), as choices in parts.js reads them. map gives each value again. */
 const colorValues = (node, map) => node?.k === "if" ? { ...node, yes: colorValues(node.yes, map), no: colorValues(node.no, map) }
   : node?.k === "call" && node.name === "if" && node.args.length === 3 ? { ...node, args: [node.args[0], ...node.args.slice(1).map((value) => colorValues(value, map))] } : map(node);
-/** A shape with each color name of its color as the kit's color. A text of a text shape and a text that a choice compares stay texts. */
+/** A color node with each color name (namedColor) of its values as the kit's color: a text that a choice compares stays a text. */
+const namedColors = (node) => colorValues(node, (one) => (isText(one) && namedColor(one.v) ? { k: "lit", v: namedColor(one.v) } : one));
+/** A shape with each color name of its color and of gradient= as the kit's color (namedColors). A text of a text shape stays a text. */
 function colored(tree) {
-  const at = SHAPES[tree.name], swap = (node) => (isText(node) && Object.hasOwn(COLOR_NAMES, node.v.toLowerCase()) ? { k: "lit", v: COLOR_NAMES[node.v.toLowerCase()] } : node);
-  return { ...tree, args: tree.args.map((arg, index) => (index === at ? colorValues(arg, swap) : arg)) };
+  const at = colorAt(tree.name), named = tree.named.gradient ? { ...tree.named, gradient: namedColors(tree.named.gradient) } : tree.named;
+  return { ...tree, args: tree.args.map((arg, index) => (index === at ? namedColors(arg) : arg)), named };
 }
 const colorFault = (tree) => {
   const values = [];
-  colorValues(tree.args[SHAPES[tree.name]], (node) => values.push(node));
-  const wrong = values.find((node) => isText(node) && !Object.hasOwn(TONES, node.v) && !HEX.test(node.v));
-  return wrong ? `the color ${show(wrong)} is not a color of the kit. Use one of ${Object.keys(TONES).join(", ")}, one of ${Object.keys(COLOR_NAMES).join(", ")}, or a hex such as "#336699"` : null;
+  if (colorAt(tree.name) !== undefined) colorValues(tree.args[colorAt(tree.name)], (node) => values.push(node));
+  if (tree.named.gradient) colorValues(tree.named.gradient, (node) => values.push(node));
+  const wrong = values.find((node) => isText(node) && !isColor(node.v));
+  return wrong ? `the color ${show(wrong)} is not a color of the kit. Use one of ${Object.keys(TONES).join(", ")}, a tone of one such as "water+1" or "accent-1@50", one of ${Object.keys(COLOR_NAMES).join(", ")}, or a hex such as "#336699"` : null;
 };
 
-return { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, SHAPES, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, SENTENCE_END, cut, cutLong, headFault, textCardFault, colored, colorFault };
+return { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, FEW_OPTIONS, optionCap, optionFault, labelsFault, optionsFault, SENTENCE_END, cut, cutLong, headFault, textCardFault, namedColors, colored, colorFault };
+})();
+// elements.js
+const { toneOf, ELEMENTS } = (() => {
+// The registry of the generic elements (stage 6, L4; spec 12.5): things that a rule draws from numbers, for any subject. A template line places
+// one with use(NAME, X, Y, SIZE, [NUMBERS]) (library.js). An element is one entry here: its group, its numbers with their defaults, its color,
+// its prompt text, and its draw rule. A draw rule gives shape texts in a box of 100 × 100 units around 0, 0: library.js puts them into one
+// group at X, Y, scaled to SIZE, so the element costs one shape of the scene. A number may be a formula of $/v.
+//
+// The look (stage 6 look target): a ball, a block, and a container have volume (a gradient between two tone steps and a soft highlight),
+// and a bar, an axis, and a grid are flat (a soft fill with a thin outline in a darker tone of the role).
+
+
+
+/** A number text as a number, or null for a formula. */
+const num = (text) => (/^-?\d+(?:\.\d+)?$/.test(String(text)) ? Number(text) : null);
+/** A tone step of a color text: "accent" with step 1 is "accent+1", and a hex is mixed as the kit mixes a tone of a hex role. A formula stays as it is. */
+function toneOf(color, step = 0, alpha) {
+  let name;
+  try { name = JSON.parse(color); } catch { return color; }
+  if (typeof name === "string" && /^#[0-9a-fA-F]{6}$/.test(name)) return JSON.stringify(toneColor(name, step > 0 ? `+${step}` : step < 0 ? String(step) : "", alpha ?? 100));
+  if (typeof name !== "string" || !/^[a-z]+$/.test(name)) return color;
+  return JSON.stringify(`${name}${step > 0 ? `+${step}` : step < 0 ? step : ""}${alpha !== undefined ? `@${alpha}` : ""}`);
+}
+const T = toneOf;
+/** The shapes i = 0 to count - 1: all of them for a number, else max shapes, each one visible while i < count. */
+const upTo = (count, max, shape) => {
+  const known = num(count);
+  return known !== null ? Array.from({ length: Math.max(0, Math.min(max, Math.round(known))) }, (_, i) => shape(i, ""))
+    : Array.from({ length: max }, (_, i) => shape(i, `, visible=${count} > ${i}`));
+};
+/** A ball with volume: a radial gradient from a light tone to a dark tone, and a soft highlight. */
+const ball = (x, y, r, c, more = "") => [`circle(${x}, ${y}, ${r}, ${T(c, 1)}, gradient=${T(c, -1)}, radial=1${more})`,
+  `circle(${x} - ${r} * 0.34, ${y} - ${r} * 0.38, ${r} * 0.3, ${T(c, 3, 80)}, gradient=${T(c, 3, 0)}, radial=0${more})`];
+/** A flat box: a soft fill and a thin outline in a darker tone of its role. */
+const flat = (x, y, w, h, c, step = 2, more = "") => [`rect(${x}, ${y}, ${w}, ${h}, ${T(c, step)}${more})`, `rect(${x}, ${y}, ${w}, ${h}, ${T(c, -1)}, stroke=true${more})`];
+/** A text that keeps its size in the picture: size px at each size of the element (u is 100 / SIZE). */
+const label = (x, y, value, color, size, u, more = "") => `text(${x}, ${y}, ${value}, ${color}, ${u} * ${size}${more})`;
+
+/**
+ * The generic elements by name: group is the group of spec 12.5, numbers names the numbers in order with defaults, color is the role when the
+ * line gives none, prompt is the line of the template prompt, turn is the index of a number that turns the whole element, label is the point
+ * of label= in units ([x, y, align]; by default under it), and text is true when label= is the content of the element. draw({n, c, u}) gives
+ * the shape texts: n are the number texts, c the color text, and u the text of 100 / SIZE. caps names the largest value of a number that the
+ * draw rule shows: a plain number above it is a fault of the line, and a formula above it draws the cap.
+ */
+const ELEMENTS = {
+  straight_arrow: { group: "arrows", numbers: ["angle"], defaults: [0], color: "accent", turn: 0, prompt: "a solid arrow along angle",
+    draw: ({ c }) => [`arrow(-46, 0, 46, 0, ${c}, 9)`] },
+  curved_arrow: { group: "arrows", numbers: ["sweep"], defaults: [120], color: "accent", prompt: "an arrow along a part of a circle, sweep degrees clockwise",
+    // The head is a solid arrow along the end of the arc, so the body is a third of the head (F4).
+    draw: ({ n: [s], c }) => {
+      const [cos, sin] = [`cos(90 - ${s} / 2)`, `sin(90 - ${s} / 2)`];
+      return [`arc(0, 0, 40, 90 + ${s} / 2, 0 - ${s}, ${c}, 6)`,
+        `arrow(40 * ${cos} - 2 * ${sin}, 0 - 40 * ${sin} - 2 * ${cos}, 40 * ${cos} + 20 * ${sin}, 0 - 40 * ${sin} + 20 * ${cos}, ${c}, 6)`];
+    } },
+  two_way_arrow: { group: "arrows", numbers: ["angle"], defaults: [0], color: "accent", turn: 0, prompt: "an arrow with a head at each end",
+    // The two bodies overlap, so the rounded tails do not show in the middle.
+    draw: ({ c }) => [`arrow(-12, 0, 50, 0, ${c}, 8)`, `arrow(12, 0, -50, 0, ${c}, 8)`] },
+  flow: { group: "arrows", numbers: ["angle", "shift"], defaults: [0, 0], color: "accent", turn: 0, prompt: "marks that flow along a line; shift from 0 to 1 moves them",
+    draw: ({ n: [, s], c }) => [`line(-50, 0, 50, 0, ${T(c, 0, 35)}, 2)`,
+      ...[0, 1, 2, 3, 4].map((i) => `polygon([${-44 + 20 * i} + ${s} * 20 + 6, 0, ${-44 + 20 * i} + ${s} * 20 - 4, -7, ${-44 + 20 * i} + ${s} * 20 - 4, 7], ${c})`)] },
+  link: { group: "arrows", numbers: [], defaults: [], color: "ink", label: [0, -10, "center"], prompt: "a line between two things, with label= over its middle",
+    draw: ({ c }) => [`line(-46, 0, 46, 0, ${T(c, 0, 70)}, 2)`, `circle(-46, 0, 4, ${c})`, `circle(46, 0, 4, ${c})`] },
+
+  leader_label: { group: "marks", numbers: [], defaults: [], color: "ink", label: [46, -34, "start"], prompt: "a point with a thin line up and right to label=",
+    draw: ({ c }) => [`circle(-40, 30, 4, ${c})`, `line(-40, 30, 40, -34, ${T(c, 0, 55)}, 1.5)`] },
+  brace: { group: "marks", numbers: ["angle"], defaults: [0], color: "ink", turn: 0, label: [0, -18, "center"], prompt: "a curly brace over a span, with label= above it",
+    draw: ({ c }) => [`path([-50, 10, -46, 2, -8, 2, 0, -8, 8, 2, 46, 2, 50, 10], ${c}, 3, smooth=true)`] },
+  ring: { group: "marks", numbers: [], defaults: [], color: "accent", prompt: "a ring around a part, to point at it",
+    draw: ({ c }) => [`arc(0, 0, 46, 0, 360, ${c}, 4)`] },
+  pulse: { group: "marks", numbers: ["phase"], defaults: [0], color: "accent", prompt: "rings that spread from a point; phase from 0 to 1",
+    draw: ({ n: [p], c }) => [`circle(0, 0, 8, ${c}, glow=true)`,
+      ...[0, 1, 2].map((i) => `arc(0, 0, 12 + (${15 * i} + ${p} * 15) % 45, 0, 360, ${c}, 3, opacity=1 - (${15 * i} + ${p} * 15) % 45 / 50)`)] },
+  check: { group: "marks", numbers: [], defaults: [], color: "success", prompt: "a check mark", draw: ({ c }) => [`path([-38, 0, -12, 26, 40, -30], ${c}, 13)`] },
+  cross: { group: "marks", numbers: [], defaults: [], color: "error", prompt: "a cross", draw: ({ c }) => [`line(-32, -32, 32, 32, ${c}, 13)`, `line(-32, 32, 32, -32, ${c}, 13)`] },
+  plus: { group: "marks", numbers: [], defaults: [], color: "ink", prompt: "a plus sign", draw: ({ c }) => [`rect(-40, -7, 80, 14, ${c}, 7)`, `rect(-7, -40, 14, 80, ${c}, 7)`] },
+  minus: { group: "marks", numbers: [], defaults: [], color: "ink", prompt: "a minus sign", draw: ({ c }) => [`rect(-40, -7, 80, 14, ${c}, 7)`] },
+  equals: { group: "marks", numbers: [], defaults: [], color: "ink", prompt: "an equals sign", draw: ({ c }) => [`rect(-40, -20, 80, 13, ${c}, 6)`, `rect(-40, 7, 80, 13, ${c}, 6)`] },
+  question: { group: "marks", numbers: [], defaults: [], color: "accent", prompt: "a question mark in a soft disk",
+    draw: ({ c }) => [`circle(0, 0, 48, ${T(c, 2, 45)})`, `text(0, 4, "?", ${c}, 72)`] },
+
+  formula: { group: "formulas", numbers: [], defaults: [], color: "ink", text: true,
+    prompt: "the formula of label=, such as \"a^2 + b^2 = c^2\", \"H_2O\", \"frac{m}{V}\", or \"sqrt{x}\": ^ raises, _ lowers, frac{a}{b} is a fraction, sqrt{x} a root",
+    draw: ({ c, u, text }) => formulaShapes(text, c, u) },
+
+  axis: { group: "measures", numbers: ["min", "max"], defaults: [0, 10], color: "ink", label: [0, 30, "center"], prompt: "a number axis with 6 ticks from min to max",
+    draw: ({ n: [a, b], c, u }) => [`line(-50, 0, 50, 0, ${c}, 2)`, `polygon([52, 0, 44, -5, 44, 5], ${c})`,
+      ...[0, 1, 2, 3, 4, 5].flatMap((i) => [`line(${-45 + 17 * i}, -4, ${-45 + 17 * i}, 4, ${c}, 1.5)`, label(-45 + 17 * i, 14, `text(round(${a} + (${b} - ${a}) * ${i / 5}, 1))`, T(c, 0, 75), 11, u)])] },
+  grid: { group: "measures", numbers: ["columns", "rows"], defaults: [5, 5], caps: { columns: 10, rows: 10 }, color: "ink", prompt: "a flat grid of columns × rows",
+    draw: ({ n: [x, y], c }) => [`rect(-50, -50, 100, 100, ${T(c, 0, 4)})`,
+      ...upTo(`${x} + 1`, 11, (i, v) => `line(-50 + 100 * ${i} / ${x}, -50, -50 + 100 * ${i} / ${x}, 50, ${T(c, 0, 30)}, 1${v})`),
+      ...upTo(`${y} + 1`, 11, (i, v) => `line(-50, -50 + 100 * ${i} / ${y}, 50, -50 + 100 * ${i} / ${y}, ${T(c, 0, 30)}, 1${v})`)] },
+  number_line: { group: "measures", numbers: ["min", "max", "value"], defaults: [0, 10, 3], color: "accent", prompt: "a number line from min to max with a point at value",
+    draw: ({ n: [a, b, v], c, u }) => [`line(-48, 0, 48, 0, "ink", 2)`, ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => `line(${-45 + 9 * i}, -4, ${-45 + 9 * i}, 4, "ink", 1.2)`),
+      label(-45, 14, `text(${a})`, '"ink@75"', 11, u), label(45, 14, `text(${b})`, '"ink@75"', 11, u),
+      ...ball(`-45 + 90 * (${v} - ${a}) / (${b} - ${a})`, 0, 6, c), label(`-45 + 90 * (${v} - ${a}) / (${b} - ${a})`, -15, `text(${v})`, c, 12, u)] },
+  ruler: { group: "measures", numbers: ["length"], defaults: [10], caps: { length: 20 }, color: "wood", prompt: "a ruler with marks from 0 to length",
+    draw: ({ n: [l], c, u }) => [...flat(-50, -14, 100, 28, c, 2),
+      ...upTo(`${l} + 1`, 21, (i, v) => `line(-46 + 92 * ${i} / ${l}, -14, -46 + 92 * ${i} / ${l}, -4, ${T(c, -2)}, 1.2${v})`),
+      label(-46, 6, '"0"', T(c, -2), 10, u), label(46, 6, `text(${l})`, T(c, -2), 10, u)] },
+  angle_mark: { group: "measures", numbers: ["degrees"], defaults: [60], color: "accent", prompt: "two rays from a point with the angle between them marked",
+    draw: ({ n: [d], c, u }) => [`line(-40, 30, 50, 30, "ink", 2)`, `line(-40, 30, -40 + 80 * cos(${d}), 30 - 80 * sin(${d}), "ink", 2)`,
+      `arc(-40, 30, 24, 0, ${d}, ${c}, 3)`, label(`-40 + 40 * cos(${d} / 2)`, `30 - 40 * sin(${d} / 2)`, `text(${d}) + "°"`, c, 12, u)] },
+  dial: { group: "measures", numbers: ["value"], defaults: [0.5], color: "accent", prompt: "a dial with a needle; value from 0 to 1",
+    draw: ({ n: [v], c }) => [`arc(0, 20, 44, 180, -180, ${T(c, 2, 50)}, 10)`, `arc(0, 20, 44, 180, 0 - 180 * ${v}, ${c}, 10)`,
+      `line(0, 20, 34 * cos(180 - 180 * ${v}), 20 - 34 * sin(180 - 180 * ${v}), "ink", 3)`, `circle(0, 20, 5, "ink")`] },
+  level_bar: { group: "measures", numbers: ["value"], defaults: [0.6], color: "accent", prompt: "an upright bar filled to value from 0 to 1",
+    draw: ({ n: [v], c }) => [`rect(-14, -48, 28, 96, ${T(c, 2, 45)}, 6)`, `rect(-14, 48 - 96 * ${v}, 28, 96 * ${v}, ${c}, 6)`, `rect(-14, -48, 28, 96, ${T(c, -1)}, stroke=true)`] },
+  thermometer: { group: "measures", numbers: ["value"], defaults: [0.5], color: "error", prompt: "a thermometer filled to value from 0 to 1",
+    draw: ({ n: [v], c }) => [`rect(-9, -48, 18, 84, "surface", 9)`, `rect(-9, -48, 18, 84, "ink@40", stroke=true)`, `rect(-4.5, 30 - 70 * ${v}, 9, 70 * ${v} + 8, ${c}, 4)`,
+      ...[0, 1, 2, 3, 4].map((i) => `line(10, ${-36 + 16 * i}, 17, ${-36 + 16 * i}, "ink@55", 1.5)`), ...ball(0, 36, 13, c)] },
+  clock: { group: "measures", numbers: ["hours", "minutes"], defaults: [3, 0], color: "ink", prompt: "a clock face that shows hours and minutes",
+    draw: ({ n: [h, m], c }) => [`circle(0, 0, 48, "surface")`, `circle(0, 0, 48, ${T(c, 0, 60)}, stroke=true)`,
+      ...Array.from({ length: 12 }, (_, i) => `line(${fixed(40 * Math.cos((i * Math.PI) / 6))}, ${fixed(40 * Math.sin((i * Math.PI) / 6))}, ${fixed(46 * Math.cos((i * Math.PI) / 6))}, ${fixed(46 * Math.sin((i * Math.PI) / 6))}, ${c}, ${i % 3 ? 1.5 : 3})`),
+      `line(0, 0, 24 * cos(90 - 30 * (${h} + ${m} / 60)), 0 - 24 * sin(90 - 30 * (${h} + ${m} / 60)), ${c}, 5)`,
+      `line(0, 0, 36 * cos(90 - 6 * ${m}), 0 - 36 * sin(90 - 6 * ${m}), "accent", 3)`, `circle(0, 0, 4, ${c})`] },
+  time_line: { group: "measures", numbers: ["count", "marked"], defaults: [5, 1], caps: { count: 8 }, color: "accent", prompt: "a time line of count points with the point marked (1 is the first)",
+    draw: ({ n: [k, m], c }) => [`line(-50, 0, 50, 0, "ink@60", 2)`,
+      ...upTo(k, 8, (i, v) => `circle(-44 + 88 * ${i} / max(1, ${k} - 1), 0, ${m} == ${i + 1} ? 8 : 5, ${m} == ${i + 1} ? ${c} : "ink@70"${v})`)] },
+
+  bar: { group: "quantities", numbers: ["value"], defaults: [0.6], color: "accent", prompt: "a flat bar of height value from 0 to 1",
+    draw: ({ n: [v], c }) => flat(-22, `48 - 96 * ${v}`, 44, `96 * ${v}`, c, 1) },
+  stacked_bar: { group: "quantities", numbers: ["a", "b", "c"], defaults: [1, 1, 1], color: "accent", prompt: "a bar of three stacked shares a, b, c",
+    draw: ({ n: [a, b, d], c }) => {
+      const sum = `(${a} + ${b} + ${d})`;
+      return [...flat(-22, `48 - 96 * ${a} / ${sum}`, 44, `96 * ${a} / ${sum}`, c, -1), ...flat(-22, `48 - 96 * (${a} + ${b}) / ${sum}`, 44, `96 * ${b} / ${sum}`, c, 0),
+        ...flat(-22, -48, 44, `96 * ${d} / ${sum}`, c, 2)];
+    } },
+  sector: { group: "quantities", numbers: ["share"], defaults: [0.25], color: "accent", prompt: "a circle with a sector of share from 0 to 1",
+    draw: ({ n: [s], c }) => [`circle(0, 0, 46, ${T(c, 2, 45)})`,
+      `polygon([0, 0, ${Array.from({ length: 13 }, (_, i) => `46 * cos(90 - 360 * ${s} * ${i / 12}), 0 - 46 * sin(90 - 360 * ${s} * ${i / 12})`).join(", ")}], ${c})`,
+      `circle(0, 0, 46, ${T(c, -1)}, stroke=true)`] },
+  donut: { group: "quantities", numbers: ["share"], defaults: [0.7], color: "accent", prompt: "a ring filled to share from 0 to 1, with the percent in it",
+    draw: ({ n: [s], c, u }) => [`arc(0, 0, 38, 0, 360, ${T(c, 2, 45)}, 14)`, `arc(0, 0, 38, 90, 0 - 360 * ${s}, ${c}, 14)`, label(0, 0, `text(round(${s} * 100)) + "%"`, '"ink"', 18, u)] },
+  fraction_bar: { group: "quantities", numbers: ["parts", "filled"], defaults: [4, 1], caps: { parts: 12 }, color: "accent", prompt: "a strip of equal parts with filled parts in color",
+    draw: ({ n: [p, f], c }) => upTo(p, 12, (i, v) => [`rect(-50 + 100 * ${i} / ${p}, -14, 100 / ${p}, 28, ${f} > ${i} ? ${T(c, 0)} : ${T(c, 2, 35)}${v})`,
+      `rect(-50 + 100 * ${i} / ${p}, -14, 100 / ${p}, 28, ${T(c, -1)}, stroke=true${v})`]).flat() },
+  dots: { group: "quantities", numbers: ["count"], defaults: [5], caps: { count: 20 }, color: "accent", prompt: "a count of round dots, 5 in a row, up to 20",
+    draw: ({ n: [k], c }) => upTo(k, 20, (i, v) => `circle(${-40 + 20 * (i % 5)}, ${-30 + 20 * Math.floor(i / 5)}, 8, ${T(c, 1)}, gradient=${T(c, -1)}, radial=1${v})`) },
+
+  wave: { group: "motion", numbers: ["cycles", "amplitude", "shift"], defaults: [2, 1, 0], color: "accent", prompt: "a wave of cycles; amplitude from 0 to 1; shift in degrees moves it, such as $/v * 3.6 for a running wave",
+    draw: ({ n: [k, a, s], c }) => [`line(-50, 0, 50, 0, "ink@30", 1)`,
+      `path([${Array.from({ length: 25 }, (_, i) => `${-50 + (100 * i) / 24}, 0 - 40 * ${a} * sin(360 * ${k} * ${i / 24} - ${s})`).join(", ")}], ${c}, 4, smooth=true)`] },
+  spring: { group: "motion", numbers: ["stretch"], defaults: [0.5], color: "ink", prompt: "a spring along x; stretch from 0 to 1",
+    draw: ({ n: [s], c }) => [`path([${Array.from({ length: 22 }, (_, i) => `-50 + (40 + 60 * ${s}) * ${fixed(i / 21)}, ${i === 0 || i === 21 ? 0 : i % 2 ? -14 : 14}`).join(", ")}], ${c}, 3)`,
+      `rect(-10 + 60 * ${s}, -18, 10, 36, ${T(c, 0, 70)}, 3)`] },
+  gear: { group: "motion", numbers: ["teeth", "turn"], defaults: [10, 0], caps: { teeth: 16 }, color: "muted", turn: 1, prompt: "a gear of 6 to 16 teeth, turned by turn degrees",
+    draw: ({ n: [t], c }) => {
+      const teeth = Math.min(16, Math.max(6, Math.round(num(t) ?? 10))), points = Array.from({ length: 4 * teeth }, (_, i) => {
+        const angle = (2 * Math.PI * (i + 0.5)) / (4 * teeth), r = i % 4 < 2 ? 47 : 37;
+        return `${fixed(r * Math.cos(angle))}, ${fixed(r * Math.sin(angle))}`;
+      });
+      return [`polygon([${points.join(", ")}], ${T(c, 0)}, gradient=${T(c, -2)}, radial=1)`, `circle(0, 0, 12, "surface")`, `circle(0, 0, 12, ${T(c, -2)}, stroke=true)`];
+    } },
+  wheel: { group: "motion", numbers: ["turn"], defaults: [0], color: "ink", turn: 0, prompt: "a wheel with spokes, turned by turn degrees",
+    draw: ({ c }) => [`circle(0, 0, 47, ${T(c, 1)}, gradient=${T(c, -1)}, radial=1)`, `circle(0, 0, 35, "surface")`,
+      ...[0, 60, 120].map((a) => `line(${fixed(-34 * Math.cos((a * Math.PI) / 180))}, ${fixed(-34 * Math.sin((a * Math.PI) / 180))}, ${fixed(34 * Math.cos((a * Math.PI) / 180))}, ${fixed(34 * Math.sin((a * Math.PI) / 180))}, ${T(c, 0, 70)}, 3)`),
+      `circle(0, 0, 7, ${c})`] },
+  pendulum: { group: "motion", numbers: ["angle", "length"], defaults: [20, 1], color: "accent", prompt: "a pendulum turned by angle from straight down; length of its string from 0.3 to 1",
+    draw: ({ n: [a, l], c }) => [`rect(-26, -50, 52, 6, "ink@70", 3)`,
+      `group(0, -44, 1, [line(0, 0, 0, 74 * ${l}, "ink", 2), ${ball(0, `(76 * ${l})`, 13, c).join(", ")}], turn=${a})`] },
+  force_arrow: { group: "motion", numbers: ["angle", "length"], defaults: [0, 1], color: "accent", turn: 0, label: [0, -22, "center"], prompt: "a solid force arrow along angle; length from 0 to 1; label= for its value",
+    draw: ({ n: [, l], c }) => [`arrow(-46, 0, -46 + 92 * max(0.2, ${l}), 0, ${c}, 11)`] },
+
+  box: { group: "containers", numbers: [], defaults: [], color: "wood", prompt: "a block with volume",
+    draw: ({ c }) => [`path([-44, 40, -10, 47, 44, 40, -10, 33], "#000000", closed=true, smooth=true, opacity=0.12)`, `rect(-44, -20, 70, 58, ${T(c, 1)}, gradient=${T(c, -1)})`,
+      `polygon([-44, -20, -28, -38, 44, -38, 26, -20], ${T(c, 2)})`, `polygon([26, -20, 44, -38, 44, 20, 26, 38], ${T(c, -2)})`] },
+  tank: { group: "containers", numbers: ["level"], defaults: [0.5], color: "water", prompt: "an open tank with water to level from 0 to 1",
+    draw: ({ n: [v], c }) => [`rect(-40, -44, 80, 90, "ink@6")`, `rect(-38, 46 - 88 * ${v}, 76, 88 * ${v}, ${T(c, 1)}, gradient=${T(c, -1)})`,
+      `line(-38, 46 - 88 * ${v}, 38, 46 - 88 * ${v}, ${T(c, 2)}, 2)`, `path([-40, -46, -40, 46, 40, 46, 40, -46], "ink@70", 3)`] },
+  beaker: { group: "containers", numbers: ["level"], defaults: [0.5], color: "accent", prompt: "a lab beaker with liquid to level from 0 to 1",
+    draw: ({ n: [v], c }) => [`rect(-28, 42 - 80 * ${v}, 56, 80 * ${v}, ${T(c, 1, 85)}, gradient=${T(c, -1, 85)}, radius=4)`,
+      `path([-36, -46, -30, -40, -30, 40, -24, 46, 24, 46, 30, 40, 30, -40, 36, -46], "ink@60", 3)`,
+      ...[0, 1, 2].map((i) => `line(16, ${-18 + 20 * i}, 26, ${-18 + 20 * i}, "ink@45", 1.5)`)] },
+  layers: { group: "containers", numbers: ["count"], defaults: [4], caps: { count: 8 }, color: "sand", prompt: "a stack of count layers, up to 8",
+    draw: ({ n: [k], c }) => upTo(k, 8, (i, v) => [`rect(-48, -46 + 92 * ${i} / ${k}, 96, 92 / ${k}, ${T(c, [1, 0, -1, -2][i % 4])}${v})`,
+      `line(-48, -46 + 92 * ${i} / ${k}, 48, -46 + 92 * ${i} / ${k}, ${T(c, -2)}, 1${v})`]).flat() },
+
+  node: { group: "structure", numbers: [], defaults: [], color: "accent", prompt: "a round node of a scheme", draw: ({ c }) => ball(0, 0, 40, c) },
+  branch: { group: "structure", numbers: ["count"], defaults: [3], caps: { count: 6 }, color: "accent", prompt: "one node above count nodes, joined by lines, up to 6",
+    draw: ({ n: [k], c }) => [...upTo(k, 6, (i, v) => `line(0, -32, -40 + 80 * ${i} / max(1, ${k} - 1), 32, "ink@55", 2${v})`),
+      ...ball(0, -32, 12, c), ...upTo(k, 6, (i, v) => ball(`-40 + 80 * ${i} / max(1, ${k} - 1)`, 32, 9, T(c, 1), v)).flat()] },
+  cell_block: { group: "structure", numbers: ["columns", "rows", "filled"], defaults: [4, 3, 5], caps: { columns: 6, rows: 6 }, color: "accent", prompt: "a block of columns × rows cells with filled cells in color, up to 6 × 6",
+    draw: ({ n: [x, y, f], c }) => {
+      const [cols, rows] = [x, y].map((value) => Math.min(6, Math.max(1, Math.round(num(value) ?? 6))));
+      return Array.from({ length: cols * rows }, (_, i) => {
+        const [col, row] = [i % cols, Math.floor(i / cols)];
+        return `rect(${fixed(-48 + (96 * col) / cols + 1.5)}, ${fixed(-48 + (96 * row) / rows + 1.5)}, ${fixed(96 / cols - 3)}, ${fixed(96 / rows - 3)}, ${f} > ${i} ? ${T(c, 0)} : ${T(c, 2, 40)}, 3)`;
+      });
+    } },
+  bubble: { group: "structure", numbers: [], defaults: [], color: "accent", text: true, prompt: "a speech bubble with the text of label=",
+    draw: ({ c, u, text }) => [`rect(-48, -36, 96, 58, ${T(c, 0, 25)}, 14)`, `polygon([-22, 21, -32, 44, -6, 21], ${T(c, 0, 25)})`, ...(text ? [label(0, -7, text, '"ink"', 13, u)] : [])] },
+};
+
+/** A sum such as x - r keeps 2 decimals. */
+function fixed(value) { return Math.round(value * 100) / 100; }
+
+/** Unicode marks of a raised and a lowered character, for ^ and _ in a formula. */
+const RAISED = Object.fromEntries([..."0123456789+-=()ni"].map((char, index) => [char, "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ"[index]]));
+const LOWERED = Object.fromEntries([..."0123456789+-=()aeoxhklmnpst"].map((char, index) => [char, "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ"[index]]));
+/** The text of a formula with ^x, ^{xy}, _x, and _{xy} as raised and lowered characters, where Unicode has them. */
+const marked = (text) => text.replace(/([\^_])(\{[^}]*\}|[^\s{])/g, (all, mark, what) => {
+  const chars = [...what.replace(/^\{|\}$/g, "")], table = mark === "^" ? RAISED : LOWERED;
+  return chars.every((char) => table[char]) ? chars.map((char) => table[char]).join("") : all;
+});
+/**
+ * The shapes of a formula text (formula and bubble): runs of text, frac{a}{b} as a fraction with a bar, and sqrt{x} as a root, side by side
+ * around 0, 0. A label that is a formula of $/v is one text.
+ */
+function formulaShapes(text, c, u) {
+  let value;
+  try { value = JSON.parse(text ?? ""); } catch { return text ? [label(0, 0, text, c, 22, u)] : []; }
+  const size = 22, wide = (part) => [...part].length * size * 0.55, parts = [];
+  for (const match of String(value).matchAll(/frac\{([^}]*)\}\{([^}]*)\}|sqrt\{([^}]*)\}|((?:(?!frac\{|sqrt\{).)+)/g)) {
+    const [, top, bottom, root, run] = match;
+    if (run) parts.push({ w: wide(marked(run)), shapes: (x) => [`text(${x + wide(marked(run)) / 2}, 0, ${JSON.stringify(marked(run))}, ${c}, ${size})`] });
+    else if (root !== undefined) {
+      const w = wide(marked(root)) + 14;
+      parts.push({ w, shapes: (x) => [`path([${x}, 2, ${x + 4}, 0, ${x + 9}, 13, ${x + 14}, -15, ${x + w}, -15], ${c}, 2)`, `text(${x + 14 + (w - 14) / 2}, 0, ${JSON.stringify(marked(root))}, ${c}, ${size})`] });
+    } else {
+      const w = Math.max(wide(marked(top)), wide(marked(bottom))) * 0.8 + 6;
+      parts.push({ w, shapes: (x) => [`text(${x + w / 2}, -13, ${JSON.stringify(marked(top))}, ${c}, ${size * 0.8})`, `line(${x}, 0, ${x + w}, 0, ${c}, 2)`,
+        `text(${x + w / 2}, 14, ${JSON.stringify(marked(bottom))}, ${c}, ${size * 0.8})`] });
+    }
+  }
+  // The parts sit side by side in pixels, centered at 0: a group of scale u cancels the scale of the element, so the formula stays at 22 px.
+  const total = parts.reduce((sum, part) => sum + part.w, 0);
+  let x = -total / 2;
+  const shapes = parts.flatMap((part) => { const out = part.shapes(fixed(x)); x += part.w; return out; });
+  return [`group(0, 0, ${u}, [${shapes.map((shape) => shape.replace(/(-?\d+\.\d{3,})/g, (n) => String(fixed(Number(n))))).join(", ")}])`];
+}
+
+return { toneOf, ELEMENTS };
+})();
+// catalog.js
+const { OBJECTS } = (() => {
+// Built by kit/build.js from kit/library/objects. Do not edit: run bun kit/build.js.
+
+/** The ready objects of the library by their name: the box, the layers, and the parts of each one (library.js). */
+const OBJECTS = {"brain":{"id":"body.brain","box":[100,91.4],"image":true,"parts":[{"id":"cerebrum","names":{"ru":"большие полушария","en":"cerebrum"},"label":[-23.9,-23.4],"ring":15.2},{"id":"cerebellum","names":{"ru":"мозжечок","en":"cerebellum"},"label":[15.2,22.3],"ring":10.8},{"id":"brain_stem","names":{"ru":"ствол мозга","en":"brain stem"},"label":[4.3,37.5],"ring":6.5}]},"dna":{"id":"body.dna","box":[54.9,100],"image":true,"parts":[{"id":"strand","names":{"ru":"цепочка","en":"strand"},"label":[-19,-38.1],"ring":7.5},{"id":"base_pair","names":{"ru":"пара оснований","en":"base pair"},"label":[3.6,-34.8],"ring":7.5}]},"ear":{"id":"body.ear","box":[100,79.1],"image":true,"parts":[{"id":"outer_ear","names":{"ru":"ушная раковина","en":"outer ear"},"label":[-39.1,-12],"ring":10.2},{"id":"ear_canal","names":{"ru":"слуховой проход","en":"ear canal"},"label":[-16.6,4.4],"ring":6.1},{"id":"eardrum","names":{"ru":"барабанная перепонка","en":"eardrum"},"label":[-3.2,4.4],"ring":6.1},{"id":"small_bones","names":{"ru":"слуховые косточки","en":"small bones"},"label":[8.1,-3.8],"ring":7.1},{"id":"cochlea","names":{"ru":"улитка","en":"cochlea"},"label":[33.7,9.5],"ring":10.2}]},"eye":{"id":"body.eye","box":[100,86],"image":true,"parts":[{"id":"cornea","names":{"ru":"роговица","en":"cornea"},"label":[-44.9,-11],"ring":5.1},{"id":"iris","names":{"ru":"радужка","en":"iris"},"label":[-33,-13.2],"ring":6.5},{"id":"lens","names":{"ru":"хрусталик","en":"lens"},"label":[-18.9,2],"ring":7.5},{"id":"retina","names":{"ru":"сетчатка","en":"retina"},"label":[29.9,-21.8],"ring":8.6},{"id":"optic_nerve","names":{"ru":"зрительный нерв","en":"optic nerve"},"label":[45,6.3],"ring":5}]},"heart":{"id":"body.heart","box":[68.6,100],"image":true,"parts":[{"id":"vena_cava","names":{"ru":"полая вена","en":"vena cava"},"label":[-20.2,-35],"ring":6.3},{"id":"aorta","names":{"ru":"аорта","en":"aorta"},"label":[-3.3,-39.2],"ring":7.3},{"id":"pulmonary_artery","names":{"ru":"лёгочная артерия","en":"pulmonary artery"},"label":[24.1,-24.4],"ring":6.3},{"id":"right_atrium","names":{"ru":"правое предсердие","en":"right atrium"},"label":[-25.5,-4.4],"ring":8.7},{"id":"left_atrium","names":{"ru":"левое предсердие","en":"left atrium"},"label":[26.2,-6.5],"ring":8},{"id":"right_ventricle","names":{"ru":"правый желудочек","en":"right ventricle"},"label":[-11.8,23],"ring":12.6},{"id":"left_ventricle","names":{"ru":"левый желудочек","en":"left ventricle"},"label":[17.7,20.9],"ring":12.6}]},"lungs":{"id":"body.lungs","box":[92.7,100],"image":true,"parts":[{"id":"trachea","names":{"ru":"трахея","en":"trachea"},"label":[0.3,-34.4],"ring":6.4},{"id":"bronchi","names":{"ru":"бронхи","en":"bronchi"},"label":[-8.2,-1.3],"ring":6.4},{"id":"right_lung","names":{"ru":"правое лёгкое","en":"right lung"},"label":[-31.8,19],"ring":14.5},{"id":"left_lung","names":{"ru":"левое лёгкое","en":"left lung"},"label":[32.4,19],"ring":13.9}]},"muscle":{"id":"body.muscle","box":[98.8,100],"image":true,"parts":[{"id":"biceps","names":{"ru":"бицепс","en":"biceps"},"label":[-3.1,9.4],"ring":11.1},{"id":"forearm_bones","names":{"ru":"кости предплечья","en":"forearm bones"},"label":[-38.9,-5.1],"ring":7.8},{"id":"elbow","names":{"ru":"локоть","en":"elbow"},"label":[-32.2,39.7],"ring":7.8},{"id":"humerus","names":{"ru":"плечевая кость","en":"humerus"},"label":[19.3,-14.1],"ring":7.8},{"id":"shoulder_blade","names":{"ru":"лопатка","en":"shoulder blade"},"label":[41.7,-8.5],"ring":7.6}]},"skeleton":{"id":"body.skeleton","box":[43.9,100],"image":true,"parts":[{"id":"skull","names":{"ru":"череп","en":"skull"},"label":[-2,-40.6],"ring":7.1},{"id":"rib_cage","names":{"ru":"грудная клетка","en":"rib cage"},"label":[-6.1,-22.2],"ring":8.1},{"id":"spine","names":{"ru":"позвоночник","en":"spine"},"label":[1.1,-7.8],"ring":5.1},{"id":"pelvis","names":{"ru":"таз","en":"pelvis"},"label":[6.2,1.4],"ring":6.1},{"id":"thigh_bone","names":{"ru":"бедренная кость","en":"thigh bone"},"label":[-7.1,22.9],"ring":6.1}]},"skin":{"id":"body.skin","box":[95.1,100],"image":true,"parts":[{"id":"epidermis","names":{"ru":"эпидермис","en":"epidermis"},"label":[22.6,-29.7],"ring":7.8},{"id":"dermis","names":{"ru":"дерма","en":"dermis"},"label":[-40.2,5],"ring":7.3},{"id":"hair","names":{"ru":"волос","en":"hair"},"label":[-5.4,-35.3],"ring":6.7},{"id":"sweat_gland","names":{"ru":"потовая железа","en":"sweat gland"},"label":[15.8,11.8],"ring":8.9},{"id":"fat_layer","names":{"ru":"жировой слой","en":"fat layer"},"label":[-22.2,34.2],"ring":10}]},"stomach":{"id":"body.stomach","box":[63.4,100],"image":true,"parts":[{"id":"esophagus","names":{"ru":"пищевод","en":"esophagus"},"label":[-1.2,-43.6],"ring":5.1},{"id":"stomach","names":{"ru":"желудок","en":"stomach"},"label":[15.3,-31.3],"ring":10.2},{"id":"small_intestine","names":{"ru":"тонкая кишка","en":"small intestine"},"label":[4,16],"ring":12.3},{"id":"large_intestine","names":{"ru":"толстая кишка","en":"large intestine"},"label":[-24.8,7.8],"ring":6.8}]},"tooth":{"id":"body.tooth","box":[75.3,100],"image":true,"parts":[{"id":"enamel","names":{"ru":"эмаль","en":"enamel"},"label":[-23.4,-39.6],"ring":6.5},{"id":"dentin","names":{"ru":"дентин","en":"dentin"},"label":[-23.4,-11.1],"ring":6.5},{"id":"pulp","names":{"ru":"пульпа","en":"pulp"},"label":[9.6,-17.7],"ring":7.6},{"id":"root","names":{"ru":"корень","en":"root"},"label":[16.2,28.5],"ring":6.5},{"id":"gum","names":{"ru":"десна","en":"gum"},"label":[-28.9,27.4],"ring":8.7}]},"water_molecule":{"id":"chem.water_molecule","box":[100,66],"layers":[{"part":"bonds","role":"muted","tone":1,"line":true,"open":true,"width":7,"path":[0,-8,-34,18]},{"part":"bonds","role":"muted","tone":1,"line":true,"open":true,"width":7,"path":[0,-8,34,18]},{"part":"hydrogen","role":"muted","tone":3,"gradient":[3,1,"radial"],"circle":[-34,18,14],"highlight":[-39,12,4.5]},{"part":"hydrogen","role":"muted","tone":3,"gradient":[3,1,"radial"],"circle":[34,18,14],"highlight":[29,12,4.5]},{"part":"oxygen","role":"error","tone":0,"gradient":[1,-1,"radial"],"circle":[0,-8,24],"highlight":[-8,-17,7]}],"parts":[{"id":"oxygen","names":{"ru":"атом кислорода","en":"oxygen atom"},"label":[8,-16]},{"id":"hydrogen","names":{"ru":"атом водорода","en":"hydrogen atom"},"label":[36,20]},{"id":"bonds","names":{"ru":"связь","en":"bond"},"label":[-17,5]}]},"circle_radius":{"id":"math.circle_radius","box":[100,100],"layers":[{"part":"circle","role":"water","tone":2,"outline":-2,"circle":[0,0,47]},{"part":"diameter","role":"water","tone":-2,"line":true,"open":true,"width":1.6,"path":[-47,0,47,0]},{"part":"radius","role":"water","tone":-2,"line":true,"open":true,"width":2.4,"path":[0,0,33.2,-33.2]},{"part":"center","role":"water","tone":-2,"circle":[0,0,3]}],"parts":[{"id":"circle","names":{"ru":"окружность","en":"circle"},"label":[-33.2,-33.2]},{"id":"center","names":{"ru":"центр","en":"center"},"label":[-1,1]},{"id":"radius","names":{"ru":"радиус","en":"radius"},"label":[16.6,-16.6]},{"id":"diameter","names":{"ru":"диаметр","en":"diameter"},"label":[-30,0]}]},"cone":{"id":"math.cone","box":[80,100],"layers":[{"role":"error","tone":2,"outline":-2,"path":[0,-48,-36,34,-31.2,39.5,-18,43.5,0,45,18,43.5,31.2,39.5,36,34]},{"part":"base","role":"error","tone":1,"outline":-2,"ellipse":[0,34,36,11]},{"part":"height","role":"error","tone":-2,"line":true,"open":true,"width":1.6,"path":[0,-48,0,34]},{"part":"slant","role":"error","tone":-2,"line":true,"open":true,"width":3,"path":[0,-48,-36,34]},{"part":"apex","role":"error","tone":-3,"circle":[0,-48,3]}],"parts":[{"id":"apex","names":{"ru":"вершина","en":"apex"},"label":[0,-48]},{"id":"slant","names":{"ru":"образующая","en":"slant height"},"label":[-18,-7]},{"id":"height","names":{"ru":"высота","en":"height"},"label":[0,5]},{"id":"base","names":{"ru":"основание","en":"base"},"label":[20,38]}]},"coordinate_plane":{"id":"math.coordinate_plane","box":[100,100],"layers":[{"part":"grid","role":"muted","tone":0,"line":true,"open":true,"width":1,"path":[-40,-48,-40,48]},{"part":"grid","role":"muted","tone":0,"line":true,"open":true,"width":1,"path":[-20,-48,-20,48]},{"part":"grid","role":"muted","tone":0,"line":true,"open":true,"width":1,"path":[20,-48,20,48]},{"part":"grid","role":"muted","tone":0,"line":true,"open":true,"width":1,"path":[40,-48,40,48]},{"part":"grid","role":"muted","tone":0,"line":true,"open":true,"width":1,"path":[-48,-40,48,-40]},{"part":"grid","role":"muted","tone":0,"line":true,"open":true,"width":1,"path":[-48,-20,48,-20]},{"part":"grid","role":"muted","tone":0,"line":true,"open":true,"width":1,"path":[-48,20,48,20]},{"part":"grid","role":"muted","tone":0,"line":true,"open":true,"width":1,"path":[-48,40,48,40]},{"part":"x_axis","role":"ink","tone":0,"line":true,"open":true,"width":2.4,"path":[-48,0,44,0]},{"part":"x_axis","role":"ink","tone":0,"path":[50,0,42,-4,42,4]},{"part":"y_axis","role":"ink","tone":0,"line":true,"open":true,"width":2.4,"path":[0,48,0,-44]},{"part":"y_axis","role":"ink","tone":0,"path":[0,-50,-4,-42,4,-42]},{"part":"origin","role":"ink","tone":0,"circle":[0,0,3]},{"part":"point","role":"error","tone":0,"circle":[20,-20,4]}],"parts":[{"id":"x_axis","names":{"ru":"ось x","en":"x axis"},"label":[36,0]},{"id":"y_axis","names":{"ru":"ось y","en":"y axis"},"label":[-1,-36]},{"id":"origin","names":{"ru":"начало координат","en":"origin"},"label":[-2,2]},{"id":"point","names":{"ru":"точка","en":"point"},"label":[20,-20]},{"id":"grid","names":{"ru":"сетка","en":"grid"},"label":[-40,30]}]},"cube":{"id":"math.cube","box":[100,100],"layers":[{"part":"face","role":"water","tone":1,"outline":-2,"path":[-50,-20,20,-20,20,50,-50,50]},{"role":"water","tone":2,"outline":-2,"path":[-50,-20,-20,-50,50,-50,20,-20]},{"role":"water","tone":0,"outline":-2,"path":[20,-20,50,-50,50,20,20,50]},{"part":"edge","role":"water","tone":-2,"line":true,"open":true,"width":3,"path":[20,-20,20,50]},{"part":"vertex","role":"water","tone":-3,"circle":[50,-50,3]}],"parts":[{"id":"face","names":{"ru":"грань","en":"face"},"label":[-15,15]},{"id":"edge","names":{"ru":"ребро","en":"edge"},"label":[20,30]},{"id":"vertex","names":{"ru":"вершина","en":"vertex"},"label":[50,-50]}]},"cylinder":{"id":"math.cylinder","box":[80,100],"layers":[{"part":"side","role":"land","tone":2,"outline":-2,"path":[-30,-38,-30,38,-26,43,-15,46.7,0,48,15,46.7,26,43,30,38,30,-38]},{"part":"base","role":"land","tone":1,"outline":-2,"ellipse":[0,-38,30,10]},{"part":"radius","role":"land","tone":-2,"line":true,"open":true,"width":2,"path":[0,-38,30,-38]},{"part":"height","role":"land","tone":-2,"line":true,"open":true,"width":2,"path":[38,-38,38,38]}],"parts":[{"id":"base","names":{"ru":"основание","en":"base"},"label":[-15,-38]},{"id":"side","names":{"ru":"боковая поверхность","en":"lateral surface"},"label":[-15,10]},{"id":"radius","names":{"ru":"радиус","en":"radius"},"label":[15,-38]},{"id":"height","names":{"ru":"высота","en":"height"},"label":[38,0]}]},"right_triangle":{"id":"math.right_triangle","box":[100,70],"layers":[{"role":"land","tone":2,"path":[-46,33,46,33,-46,-33]},{"part":"leg_a","role":"land","tone":-2,"line":true,"open":true,"width":2.4,"path":[-46,-33,-46,33]},{"part":"leg_b","role":"land","tone":-2,"line":true,"open":true,"width":2.4,"path":[-46,33,46,33]},{"part":"hypotenuse","role":"land","tone":-2,"line":true,"open":true,"width":2.4,"path":[46,33,-46,-33]},{"part":"right_angle","role":"land","tone":-2,"line":true,"open":true,"width":1.6,"path":[-46,22,-35,22,-35,33]}],"parts":[{"id":"leg_a","names":{"ru":"катет a","en":"leg a"},"label":[-46,0]},{"id":"leg_b","names":{"ru":"катет b","en":"leg b"},"label":[10,33]},{"id":"hypotenuse","names":{"ru":"гипотенуза c","en":"hypotenuse c"},"label":[4,-3]},{"id":"right_angle","names":{"ru":"прямой угол","en":"right angle"},"label":[-40,28]}]},"square_grid":{"id":"math.square_grid","box":[100,100],"layers":[{"part":"side","role":"sun","tone":2,"outline":-2,"path":[-48,-48,48,-48,48,48,-48,48]},{"part":"cell","role":"sun","tone":0,"path":[-48,-48,-24,-48,-24,-24,-48,-24]},{"part":"grid","role":"sun","tone":-2,"line":true,"open":true,"width":1,"path":[-24,-48,-24,48]},{"part":"grid","role":"sun","tone":-2,"line":true,"open":true,"width":1,"path":[0,-48,0,48]},{"part":"grid","role":"sun","tone":-2,"line":true,"open":true,"width":1,"path":[24,-48,24,48]},{"part":"grid","role":"sun","tone":-2,"line":true,"open":true,"width":1,"path":[-48,-24,48,-24]},{"part":"grid","role":"sun","tone":-2,"line":true,"open":true,"width":1,"path":[-48,0,48,0]},{"part":"grid","role":"sun","tone":-2,"line":true,"open":true,"width":1,"path":[-48,24,48,24]},{"part":"side","role":"sun","tone":-2,"line":true,"open":true,"width":3,"path":[-48,48,48,48]},{"part":"vertex","role":"sun","tone":-3,"circle":[48,-48,3]}],"parts":[{"id":"side","names":{"ru":"сторона","en":"side"},"label":[10,48]},{"id":"cell","names":{"ru":"клетка","en":"unit square"},"label":[-36,-36]},{"id":"grid","names":{"ru":"сетка","en":"grid"},"label":[0,12]},{"id":"vertex","names":{"ru":"вершина","en":"vertex"},"label":[48,-48]}]},"comet":{"id":"space.comet","box":[100,82.4],"image":true,"parts":[{"id":"nucleus","names":{"ru":"ядро","en":"nucleus"},"label":[-34.5,22.4],"ring":9.7},{"id":"tail","names":{"ru":"хвост","en":"tail"},"label":[24.7,-25],"ring":10.7}]},"earth":{"id":"space.earth","box":[100,99.2],"image":true,"parts":[{"id":"ocean","names":{"ru":"океан","en":"ocean"},"label":[-8.8,-6.3],"ring":7.9},{"id":"south_america","names":{"ru":"Южная Америка","en":"South America"},"label":[-13.4,15.4],"ring":9.1},{"id":"clouds","names":{"ru":"облака","en":"clouds"},"label":[-40.7,1.7],"ring":6.8},{"id":"africa","names":{"ru":"Африка","en":"Africa"},"label":[29.9,8.6],"ring":11.3},{"id":"europe","names":{"ru":"Европа","en":"Europe"},"label":[20.8,-25.6],"ring":7.9}]},"galaxy":{"id":"space.galaxy","box":[100,93.8],"image":true,"parts":[{"id":"core","names":{"ru":"ядро","en":"core"},"label":[-3.2,-1.1],"ring":8.7},{"id":"spiral_arm","names":{"ru":"спиральный рукав","en":"spiral arm"},"label":[37.2,-24],"ring":9.8}]},"moon":{"id":"space.moon","box":[99.6,100],"image":true,"parts":[{"id":"crater","names":{"ru":"кратер","en":"crater"},"label":[-29.6,18.1],"ring":6.8},{"id":"mare","names":{"ru":"лунное море","en":"lunar sea"},"label":[25,-4.7],"ring":10.2}]},"rocket":{"id":"space.rocket","box":[65.2,100],"image":true,"parts":[{"id":"nose_cone","names":{"ru":"носовой обтекатель","en":"nose cone"},"label":[-3.7,-40.1],"ring":7.3},{"id":"window","names":{"ru":"иллюминатор","en":"window"},"label":[2.7,-7.4],"ring":9.4},{"id":"body","names":{"ru":"корпус","en":"body"},"label":[16.4,-23.3],"ring":7.3},{"id":"fins","names":{"ru":"стабилизаторы","en":"fins"},"label":[-24.7,27.4],"ring":7.9},{"id":"nozzle","names":{"ru":"сопло","en":"nozzle"},"label":[-5.8,44.2],"ring":5.7}]},"satellite":{"id":"space.satellite","box":[100,66.6],"image":true,"parts":[{"id":"solar_panels","names":{"ru":"солнечные батареи","en":"solar panels"},"label":[-36.9,3.6],"ring":9.2},{"id":"body","names":{"ru":"корпус","en":"body"},"label":[-4,17],"ring":8.2},{"id":"dish","names":{"ru":"антенна","en":"dish antenna"},"label":[10.4,-21.1],"ring":9.2}]},"saturn":{"id":"space.saturn","box":[100,61.6],"image":true,"parts":[{"id":"planet","names":{"ru":"газовый шар","en":"ball of gas"},"label":[-18.6,-7.9],"ring":12.3},{"id":"bands","names":{"ru":"полосы облаков","en":"cloud bands"},"label":[6.1,20.9],"ring":7.2},{"id":"rings","names":{"ru":"кольца","en":"rings"},"label":[43.3,-7.9],"ring":6.7}]},"star":{"id":"space.star","box":[100,96.5],"image":true,"parts":[]},"sun":{"id":"space.sun","box":[99.6,100],"image":true,"parts":[{"id":"surface","names":{"ru":"поверхность","en":"surface"},"label":[-13.1,9.6],"ring":13.4},{"id":"prominence","names":{"ru":"протуберанец","en":"prominence"},"label":[40.8,-35.4],"ring":8.9}]}};
+
+return { OBJECTS };
+})();
+// library.js
+const { UNITS, SMALLEST, LEAST, SEGMENTS, USE_NAMED, LIBRARY, entryOf, partName, missOf, useFault, LABEL, lineWidth, labelLines, layoutOf, useShapes, segmentsOfEntry } = (() => {
+// The library of a scene (stage 6, L4 to L6): the generic elements (elements.js) and the ready objects (catalog.js, which build.js writes
+// from kit/library/objects). A template line places one of them:
+//
+//   s3 = use("heart", 150, 150, 180, mark="left_ventricle", parts=true)      a ready object: its name, its center, its size
+//   s4 = use("thermometer", 60, 150, 120, [0.7], label="Вода")              an element: its name, its center, its size, and its numbers
+//
+// The kit expands the line into the shapes of the kind registry (kinds.js) when it expands the file (template.js), so the run-time draws
+// no catalog. A name that the library does not have is a fault with that name (the miss log of spec 12.8).
+//
+// A ready object is a vector entry (layers of paths in the roles of the theme) or an image entry (stage 6, I1): a ready picture that the host
+// draws from its assets with its own colors, in both themes. Both kinds have the same names, parts, labels, and marks.
+
+
+
+
+
+
+
+
+/** The size of the box of an object in the units of its entry: its longer side. */
+const UNITS = 100;
+/** The size at which each entry must read as its thing (L5, the review sheet): a rule of the catalog review, not of a scene. */
+const SMALLEST = 56;
+/** The smallest SIZE of an object in a scene (fix list 3, H2): a small Sun beside a large Earth is meant. */
+const LEAST = 24;
+/** The largest number of path segments of one entry (L5). A gradient, a highlight, and the ground shadow cost no segment. */
+const SEGMENTS = 40;
+/** The named arguments of a library line. */
+const USE_NAMED = { label: "a text under it", mark: "the name of a part to mark", parts: "true to name each part", turn: "degrees", color: "a color of an element" };
+
+/** The state of the library in one call of the host: the ids of the image entries whose image the host cannot open (compile.js sets it). */
+const LIBRARY = { missing: new Set() };
+
+/** The entry of a name: an object or an element, by its name or by the id of an object (area.name). An image entry with no image is no entry. */
+function entryOf(name) {
+  if (typeof name !== "string") return null;
+  const key = name.includes(".") ? name.split(".").pop() : name;
+  if (Object.hasOwn(OBJECTS, key) && (key === name || OBJECTS[key].id === name) && !LIBRARY.missing.has(OBJECTS[key].id)) return { kind: "object", name: key, entry: OBJECTS[key] };
+  return Object.hasOwn(ELEMENTS, name) ? { kind: "element", name, entry: ELEMENTS[name] } : null;
+}
+
+const isText = (node) => node?.k === "lit" && typeof node.v === "string";
+const numberOf = (node) => (node?.k === "lit" && typeof node.v === "number" ? node.v : node?.k === "un" && node.op === "-" && typeof node.arg?.v === "number" ? -node.arg.v : undefined);
+const pathIn = (node) => node && typeof node === "object" && (node.k === "path" || Object.values(node).some(pathIn));
+/** The names of the parts of an object in a language, with English for a language that the entry does not have. */
+const partName = (part, lang) => part.names[lang] ?? part.names.en;
+
+/** The name of a library line whose name the library does not have (the miss log of spec 12.8), or null. */
+const missOf = (tree) => (tree?.k === "call" && tree.name === "use" && isText(tree.args?.[0]) && !entryOf(tree.args[0].v) ? tree.args[0].v : null);
+
+/**
+ * The fault of a library line use(NAME, X, Y, SIZE, [NUMBERS], ...), or null. A mark, a label, and the numbers are literals or formulas of
+ * $/v. An unknown name is a fault that names it (missOf), so the repair draws the thing with shapes or an emoji. lang is the language of the
+ * scene, whose part names must fit at the sides of the object.
+ */
+function useFault(tree, picture = [300, 300], lang = "en") {
+  const [name, ...rest] = tree.args ?? [], form = "a library line is use(NAME, X, Y, SIZE), with [NUMBERS] of an element after SIZE";
+  if (!isText(name)) return `${form}, and NAME is a name in quotes`;
+  const found = entryOf(name.v);
+  if (!found) return `the library has no ${JSON.stringify(name.v)}. Draw it with shapes, or with an emoji in a text shape`;
+  if (rest.length < 3 || rest.length > (found.kind === "element" ? 4 : 3)) return found.kind === "element" ? `${form}: ${name.v}(${found.entry.numbers.join(", ")})` : `${form}, and ${name.v} is an object: it takes no numbers`;
+  if (rest.length === 4 && rest[3].k !== "list") return `the numbers of ${name.v} are a list: [${found.entry.numbers.join(", ")}]`;
+  if (rest.length === 4 && rest[3].items.length > found.entry.numbers.length) return `${name.v} takes at most ${found.entry.numbers.length} numbers: ${found.entry.numbers.join(", ")}`;
+  // A plain number above the cap of its element would draw a wrong picture (the draw rule shows at most the cap), so it is a fault to repair.
+  const over = rest.length === 4 && found.entry.numbers.map((number, index) => [number, numberOf(rest[3].items[index]), found.entry.caps?.[number]]).find(([, value, cap]) => value > cap);
+  if (over) return `the ${over[0]} of ${name.v} is at most ${over[2]}, and this line has ${over[1]}`;
+  const other = Object.keys(tree.named).find((key) => key !== "visible" && !Object.hasOwn(USE_NAMED, key));
+  if (other) return `a library line takes only ${Object.keys(USE_NAMED).join("=, ")}=, and visible= by name, and ${other}= is not one`;
+  if (tree.named.label && !(isText(tree.named.label) && tree.named.label.v.trim()) && !pathIn(tree.named.label)) return "label= is a text in quotes";
+  if (isText(tree.named.label) && [...tree.named.label.v].length > 28) return `label= has ${[...tree.named.label.v].length} characters, and its cap is 28`;
+  const parts = found.entry.parts ?? [], mark = tree.named.mark;
+  if (mark && found.kind === "element") return `${name.v} is an element: it has no parts to mark`;
+  if (isText(mark) && !parts.some((part) => part.id === mark.v || Object.values(part.names).includes(mark.v))) return `${name.v} has no part ${JSON.stringify(mark.v)}. Its parts are ${parts.map((part) => part.id).join(", ")}`;
+  if (tree.named.color && found.entry.image) return `${name.v} is a ready picture with its own colors, so it takes no color=`;
+  if (tree.named.color && isText(tree.named.color) && !isColor(tree.named.color.v) && !namedColor(tree.named.color.v)) return `the color ${JSON.stringify(tree.named.color.v)} is not a color of the kit`;
+  if (found.entry.text && !tree.named.label) return `${name.v} shows the text of label=, and this line has no label=`;
+  // A SIZE under LEAST or past the picture is a fault (H2).
+  const size = numberOf(rest[2]), least = found.kind === "object" ? LEAST : 12;
+  if (size !== undefined && (size < least || size > 300)) return `the SIZE of ${name.v} is from ${least} to 300, and this line has ${size}`;
+  // The names of the parts stand at the sides of the object, inside the picture, and leave the object its SIZE, or SMALLEST for a larger SIZE.
+  const at = rest.slice(0, 3).map(numberOf);
+  const placed = found.kind === "object" && at.every((value) => value !== undefined) ? layoutOf(found, tree.named, at, picture, lang) : null;
+  if (placed && (placed.size < Math.min(SMALLEST, at[2]) - 0.01 || placed.labels.some((one) => one.clipped))) {
+    return `the names of the parts of ${name.v} leave it too little room: name fewer parts, or give it more height`;
+  }
+  return null;
+}
+
+/** An expression with each sum, product, and sin or cos of plain numbers computed, so a line of plain numbers expands to plain numbers. */
+function folded(node) {
+  if (!node || typeof node !== "object") return node;
+  const out = Array.isArray(node) ? node.map(folded) : Object.fromEntries(Object.entries(node).map(([key, inner]) => [key, folded(inner)]));
+  const n = (inner) => numberOf(inner), round = (value) => ({ k: "lit", v: Math.round(value * 100) / 100 });
+  if (out.k === "bin" && n(out.left) !== undefined && n(out.right) !== undefined && "+-*/".includes(out.op) && !(out.op === "/" && n(out.right) === 0)) {
+    const [a, b] = [n(out.left), n(out.right)];
+    return round(out.op === "+" ? a + b : out.op === "-" ? a - b : out.op === "*" ? a * b : a / b);
+  }
+  if (out.k === "call" && ["sin", "cos"].includes(out.name) && out.args.length === 1 && n(out.args[0]) !== undefined) return round(Math[out.name]((n(out.args[0]) * Math.PI) / 180));
+  return out;
+}
+/** A shape text with its plain sums computed (folded). */
+const tidy = (text) => show(folded(parseExpression(text)));
+/** An argument as a part of a formula: a number as it is, else the formula in brackets. */
+const term = (node) => (numberOf(node) !== undefined ? String(numberOf(node)) : `(${show(node)})`);
+
+/** The color of a layer: its role with its tone step, such as "error+1". */
+const tone = (role, step = 0, alpha) => `${role}${step > 0 ? `+${step}` : step < 0 ? step : ""}${alpha !== undefined ? `@${alpha}` : ""}`;
+/** The points of an ellipse as a smooth closed path: 8 points, turned deg degrees around its center (clockwise on the screen). */
+const ellipse = ([cx, cy, rx, ry, deg = 0]) => {
+  const [c, s] = [Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180)];
+  return Array.from({ length: 8 }, (_, index) => {
+    const [ex, ey] = [rx * Math.cos((index * Math.PI) / 4), ry * Math.sin((index * Math.PI) / 4)];
+    return [cx + ex * c - ey * s, cy + ex * s + ey * c].map((v) => Math.round(v * 10) / 10);
+  }).flat();
+};
+
+/**
+ * The shapes of one layer of an object, in the units of its entry: the fill (a path, a circle, or an ellipse) with its tone, its gradient
+ * between two tone steps, its outline in a darker tone (a flat figure), and its highlight. paint gives the color text of a tone of the
+ * role, and opacity is the opacity text, or null.
+ */
+function layerShapes(layer, paint, opacity) {
+  const fade = opacity ? `, opacity=${opacity}` : "", out = [];
+  const [from = layer.tone ?? 0, to, kind] = layer.gradient ?? [], shade = layer.gradient ? `, gradient=${paint(to)}, ${kind === "linear" ? "" : "radial=1, "}`.replace(/, $/, "") : "";
+  const fill = layer.circle ? `circle(${layer.circle.join(", ")}, ${paint(from)}${shade}${fade})`
+    : `path([${(layer.ellipse ? ellipse(layer.ellipse) : layer.path).join(", ")}], ${paint(from)}, smooth=${Boolean(layer.ellipse || layer.smooth)}, closed=true${shade}${fade})`;
+  if (!layer.line) out.push(fill);
+  if (layer.outline !== undefined || layer.line) {
+    const width = layer.width ?? 1.4, shape = layer.circle ? `circle(${layer.circle.join(", ")}, ${paint(layer.outline ?? layer.tone ?? 0, undefined, true)}, stroke=true${fade})`
+      : `path([${(layer.ellipse ? ellipse(layer.ellipse) : layer.path).join(", ")}], ${paint(layer.outline ?? layer.tone ?? 0, undefined, true)}, ${width}, smooth=${Boolean(layer.ellipse || layer.smooth)}, closed=${!layer.open}, stroke=true${fade})`;
+    out.push(shape);
+  }
+  if (layer.highlight) {
+    const [x, y, r] = layer.highlight;
+    out.push(`circle(${x}, ${y}, ${r}, ${paint(3, 80)}, gradient=${paint(3, 0)}, radial=0${fade})`);
+  }
+  return out;
+}
+
+/**
+ * The parts that a line names: each part with parts=true or with a mark that is a formula (only the marked one shows), else the marked part when
+ * the mark is a name. A turned object names no part.
+ */
+function namedParts(found, { mark, parts, turn }) {
+  const list = found.kind === "object" ? found.entry.parts ?? [] : [];
+  return turn ? [] : parts?.v === true || (mark && !isText(mark)) ? list : isText(mark) ? list.filter((part) => part.id === mark.v || Object.values(part.names).includes(mark.v)) : [];
+}
+/** The size, the line height, the gap to the object, and the margin of the part labels, in the units of the picture. */
+const LABEL = { size: 12, line: 14, gap: 8, margin: 4 };
+/** The width of a text line of the part labels: a wide letter (м, ю, m, w, a capital) takes 0.85 of the size, each other character 0.56. */
+const lineWidth = (text) => [...text].reduce((sum, char) => sum + (/[мшщжюыфmw]/.test(char) || char !== char.toLowerCase() ? 0.85 : 0.56), 0) * LABEL.size;
+/** The lines of a part label: a name of more than 8 characters breaks at the space that gives the shortest longer line, if each line keeps 3 characters. */
+function labelLines(text) {
+  const chars = [...text];
+  if (chars.length <= 8) return [text];
+  const breaks = chars.map((char, index) => (char === " " && index >= 3 && chars.length - index - 1 >= 3 ? index : -1)).filter((index) => index > 0);
+  if (!breaks.length) return [text];
+  const best = breaks.reduce((a, b) => (Math.max(a, chars.length - a - 1) <= Math.max(b, chars.length - b - 1) ? a : b));
+  return [chars.slice(0, best).join(""), chars.slice(best + 1).join("")];
+}
+
+/**
+ * The place of an object with the labels of its named parts (F2), as {x, y, size, labels}. A part in the left half of the object gets its
+ * label at the left, each other part at the right. With labels, the object stands in the middle of the space that the two label columns
+ * leave in the width of the picture, as large as that space permits and at most SIZE, at the height Y. Each label is {part, lines, px, py, x,
+ * y, align, clipped}: px, py is the point of its part, x, y the end of its leader line, and clipped is true for a label that leaves the
+ * picture. With no named part, the object keeps X, Y, and SIZE.
+ */
+function layoutOf(found, named, [X, Y, S], [width, height], lang) {
+  const parts = namedParts(found, named), [w, h] = found.entry.box, { line, gap, margin } = LABEL;
+  if (!parts.length) return { x: X, y: Y, size: S, labels: [] };
+  const items = parts.map((part) => ({ part, lines: labelLines(partName(part, lang)), left: part.label[0] < 0 }));
+  const column = (left) => Math.max(0, ...items.filter((one) => one.left === left).flatMap((one) => one.lines.map(lineWidth)));
+  const [L, R] = [column(true), column(false)];
+  const xl = margin + (L ? L + gap : 0), xr = width - margin - (R ? R + gap : 0);
+  const size = Math.max(0, Math.min(S, ((xr - xl) * UNITS) / w, ((height - 2 * margin) * UNITS) / h));
+  const k = size / UNITS, x = (xl + xr) / 2, y = Math.min(Math.max(Y, margin + (h * k) / 2), height - margin - (h * k) / 2);
+  const labels = [];
+  for (const left of [true, false]) {
+    const side = items.filter((one) => one.left === left).map((one) => ({ ...one, px: x + one.part.label[0] * k, py: y + one.part.label[1] * k })).sort((a, b) => a.py - b.py);
+    // Each label starts at the height of its point. Then the labels of one side move down, so none overlaps the one above it, and up, so the
+    // last one stays inside the picture.
+    let bottom = -Infinity;
+    for (const one of side) { one.y = Math.max(one.py, bottom + 2 + (one.lines.length * line) / 2); bottom = one.y + (one.lines.length * line) / 2; }
+    let top = height - margin;
+    for (const one of [...side].reverse()) { one.y = Math.min(one.y, top - (one.lines.length * line) / 2); top = one.y - (one.lines.length * line) / 2 - 2; }
+    for (const one of side) {
+      labels.push({ ...one, align: left ? "end" : "start", x: left ? x - (w * k) / 2 - gap : x + (w * k) / 2 + gap, clipped: one.y - (one.lines.length * line) / 2 < margin - 0.5 });
+    }
+  }
+  return { x, y, size, labels };
+}
+
+/**
+ * The shapes of a library line (useFault gives it no fault), as {shapes, lines}: an object as one group of its layers with its part labels at
+ * the sides, or an element as one group of the shapes of its draw rule. lines are app lines before the drawing: a mark that is a formula of
+ * $/v becomes the value $/KEYm once, so each layer reads it with no copy of the formula. lang picks the names of the parts, and picture is
+ * [width, height] of the drawing, for the places of the labels.
+ */
+function useShapes(tree, lang, picture = [300, 300], key = "s") {
+  const [name, x, y, size, numbers] = tree.args, found = entryOf(name.v), { label, mark: given, parts, turn, color, visible } = tree.named;
+  const shown = visible ? `, visible=${show(visible)}` : "", [X, Y, S] = [x, y, size].map(term), lines = [];
+  if (found.kind === "element") {
+    // A number that is a formula becomes the value $/KEYa, $/KEYb, … once (fix list 2, G2): a draw rule writes each number into many shapes.
+    const entry = found.entry, values = numbers?.items ?? [], n = entry.numbers.map((_, index) => {
+      const value = values[index];
+      if (!value) return String(entry.defaults[index]);
+      if (numberOf(value) !== undefined || value.k === "path") return term(value);
+      const name = `$/${key}${"abc"[index]}`;
+      lines.push(`${name} := ${show(value)}`);
+      return name;
+    });
+    const c = color ? show(namedColors(color)) : JSON.stringify(entry.color), u = numberOf(size) !== undefined ? String(fixed(100 / numberOf(size))) : `(100 / ${S})`;
+    // An element that an angle turns (entry.turn) adds turn= of the line to it.
+    const turned = [entry.turn !== undefined ? n[entry.turn] : null, turn ? `(${show(turn)})` : null].filter((one) => one && one !== "0").join(" + ");
+    const shapes = [tidy(`group(${X}, ${Y}, ${S} / 100, [${entry.draw({ n, c, u, text: entry.text && label ? show(label) : undefined }).join(", ")}]${turned ? `, turn=${turned}` : ""}${shown})`)];
+    if (label && !entry.text) {
+      const [lx, ly, align] = entry.label ?? [0, 62, "center"];
+      shapes.push(tidy(`text(${X} + ${S} * ${lx / 100}, ${Y} + ${S} * ${ly / 100}, ${show(label)}, "ink", 13${align === "center" ? "" : `, align=${JSON.stringify(align)}`}${shown})`));
+    }
+    return { shapes, lines };
+  }
+  const entry = found.entry, [, h] = entry.box, list = entry.parts ?? [];
+  const fixedMark = isText(given) ? list.find((part) => part.id === given.v || Object.values(part.names).includes(given.v)) : null;
+  // A mark that is a formula becomes the id of its part once: $/KEYn is its text in lower case, and $/KEYm the id of the part that it names, so
+  // each layer compares one value with one id and the source stays small.
+  const mark = given && !fixedMark ? `$/${key}m` : null;
+  if (mark) {
+    const raw = `$/${key}n`, names = list.filter((part) => partName(part, lang).toLowerCase() !== part.id);
+    lines.push(`${raw} := lower(${show(given)})`, `${mark} := ${names.reduceRight((rest, part) => `(${raw} == ${JSON.stringify(partName(part, lang).toLowerCase())} ? ${JSON.stringify(part.id)} : ${rest})`, raw)}`);
+  }
+  const marked = (part) => (!given || !part ? "false" : fixedMark ? String(fixedMark === part) : `${mark} == ${JSON.stringify(part.id)}`);
+  const choose = (on, yes, no) => (on === "false" ? JSON.stringify(no) : on === "true" ? JSON.stringify(yes) : `(${on} ? ${JSON.stringify(yes)} : ${JSON.stringify(no)})`);
+  const shapes = [];
+  // The ground shadow darkens what is under it in both themes, so it is black with an alpha: the draw path gives it, not the entry.
+  if (entry.shadow) shapes.push(`path([${ellipse(entry.shadow).join(", ")}], "#40000000", smooth=true, closed=true, gradient="#00000000", radial=0)`);
+  if (entry.image) {
+    // An image entry (I4, I5): its picture fills a square of UNITS around the center, and its box is the part of the square that the picture
+    // covers. Over the picture, a marked part gets an accent ring of its mark radius around its point. The picture keeps its colors.
+    shapes.push(`image(${-UNITS / 2}, ${-UNITS / 2}, ${UNITS}, ${UNITS}, ${JSON.stringify(entry.id)})`);
+    for (const part of list) {
+      const on = marked(part);
+      if (on !== "false") shapes.push(`arc(${part.label.join(", ")}, ${part.ring}, 0, 360, "accent", ${MARK_RIM}${on === "true" ? "" : `, visible=${on}`})`);
+    }
+  }
+  // A marked part keeps its own colors, and each other part keeps its full opacity (F3). Under the first layer of the marked part, an accent
+  // rim of MARK_RIM units follows the outline of each of its layers, so the rim shows only around the part.
+  const ringed = new Set();
+  for (const layer of entry.layers ?? []) {
+    const part = list.find((one) => one.id === layer.part), on = marked(part);
+    if (on !== "false" && !ringed.has(part)) {
+      ringed.add(part);
+      const when = on === "true" ? "" : `, visible=${on}`;
+      shapes.push(...entry.layers.filter((one) => one.part === part.id).map((one) => rimOf(one, when)));
+    }
+    shapes.push(...layerShapes(layer, (step, alpha) => JSON.stringify(tone(layer.role, step, alpha)), null));
+  }
+  // The labels of the parts: with parts=true each part, else the marked part. Each one is a text at the side and a thin leader line to its point.
+  // With a mark that is a formula and no parts=true, each label shows only while its part is the marked one. With labels, the kit places the
+  // object between the two label columns (layoutOf).
+  const at = [X, Y, S].map(Number), alone = mark && parts?.v !== true;
+  const placed = at.every(Number.isFinite) ? layoutOf(found, tree.named, at, picture, lang) : null;
+  const [GX, GY, GS] = placed?.labels.length ? [placed.x, placed.y, placed.size].map(fixed) : [X, Y, S];
+  const out = [tidy(`group(${GX}, ${GY}, ${GS} / ${UNITS}, [${shapes.join(", ")}]${turn ? `, turn=${show(turn)}` : ""}${shown})`)];
+  for (const one of placed?.labels ?? []) {
+    const ink = alone ? '"accent"' : choose(marked(one.part), "accent", "ink"), end = one.align === "end" ? one.x + 3 : one.x - 3, [px, py, ty] = [one.px, one.py, one.y].map(fixed);
+    const seen = alone ? `, visible=${visible ? `(${show(visible)}) && ` : ""}${marked(one.part)}` : shown;
+    out.push(`line(${px}, ${py}, ${fixed(end)}, ${ty}, "ink@55", 1${seen})`, `circle(${px}, ${py}, 2.5, ${ink}${seen})`,
+      ...one.lines.map((text, index) => `text(${fixed(one.x)}, ${fixed(one.y + (index - (one.lines.length - 1) / 2) * LABEL.line)}, ${JSON.stringify(text)}, ${ink}, ${LABEL.size}, align=${JSON.stringify(one.align)}${seen})`));
+  }
+  if (label) out.push(tidy(`text(${GX}, ${GY} + ${GS} * ${h / 200} + 12, ${show(label)}, "ink", 13${shown})`));
+  return { shapes: out, lines };
+}
+
+/** The width of the accent rim of a marked part, in the units of its entry (F3). */
+const MARK_RIM = 3;
+/** The accent rim of one layer of a marked part: a stroke of its outline, MARK_RIM wider at each side than its fill or its line. when is its visible= text. */
+function rimOf(layer, when) {
+  const width = layer.line ? (layer.width ?? 1.4) + 2 * MARK_RIM : 2 * MARK_RIM;
+  if (layer.circle) return `arc(${layer.circle.join(", ")}, 0, 360, "accent", ${width}${when})`;
+  const points = layer.ellipse ? ellipse(layer.ellipse) : layer.path;
+  return `path([${points.join(", ")}], "accent", ${width}, smooth=${Boolean(layer.ellipse || layer.smooth)}, closed=${!(layer.line && layer.open)}, stroke=true${when})`;
+}
+
+/** The number of path segments that an entry draws: each point of a path or an ellipse, again for its outline (L5 limit). An image entry draws none. */
+const segmentsOfEntry = (entry) => (entry.layers ?? []).reduce((sum, layer) => {
+  const points = layer.circle ? 0 : layer.ellipse ? 8 : layer.path.length / 2;
+  return sum + (layer.line ? 0 : points) + (layer.outline !== undefined || layer.line ? points : 0);
+}, 0);
+
+return { UNITS, SMALLEST, LEAST, SEGMENTS, USE_NAMED, LIBRARY, entryOf, partName, missOf, useFault, LABEL, lineWidth, labelLines, layoutOf, useShapes, segmentsOfEntry };
 })();
 // form-scene.js
 const { SCENE_FORM } = (() => {
-// The template scene (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): a picture of the shapes s1 to s12, one slider or choice,
-// and a card with a text. The kit draws the shapes as they are (template.js expandTemplate).
+// The template scene (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): a picture of the shapes s1 to s20, one slider or choice,
+// and a card with a text. The kit draws each shape as it is, and a library line as the shapes of its element or object (library.js). The
+// shape kinds and their properties come from the registry of kinds.js, so a new kind needs no edit here.
+
+
+
 
 
 
@@ -3920,8 +4706,8 @@ const CONTROL = "slider(LABEL, MIN, MAX, STEP, START) with numbers, choice(LABEL
 /** The form of scene (forms.js TemplateForm). */
 const SCENE_FORM = {
   word: "scene",
-  part: /^s(?:[1-9]|1[0-2])$/,
-  lines: "control, s1 to s12 (at most 12 shapes), and card",
+  part: new RegExp(`^s(?:${Array.from({ length: BUDGET.shapes }, (_, index) => index + 1).join("|")})$`),
+  lines: `control, s1 to s${BUDGET.shapes} (at most ${BUDGET.shapes} shapes), and card`,
   control: CONTROL,
   /** The fault of a control line. The kit checks the bounds and the start of a slider and of a choice when it compiles the expansion. */
   controlFault(tree) {
@@ -3935,20 +4721,31 @@ const SCENE_FORM = {
       if (args.length < 2 || args.length > 3 || !options || (args[2] && !isText(args[2]))) return form;
       if (options.length > BUDGET.options) return `the ${tree.name} control has ${options.length} ${what}, and its cap is ${BUDGET.options}. Keep the ones that matter most`;
       if (options.length < 2) return `a ${tree.name} control needs at least 2 ${what}`;
-      const fault = options.map((option, index) => textFault(`option ${index + 1}`, option, BUDGET.option)).find(Boolean);
+      const fault = optionsFault(tree.name === "steps" ? "step" : "option", options);
       if (fault) return fault;
     } else return form;
     return textFault("the label", args[0], BUDGET.control);
   },
-  partFault(tree) {
-    if (tree.k !== "call" || !Object.hasOwn(SHAPES, tree.name)) return "a shape is circle, rect, line, text, or polygon";
-    const other = Object.keys(tree.named).find((key) => key !== "visible" && key !== "stroke");
-    if (other) return `a shape takes only visible= and stroke= by name, and ${other}= is not one`;
-    if (tree.name === "text") return textFault("the text", tree.args[2], BUDGET.text, true, INSIDE);
-    // The kit compiles a shorter or an odd list clean: it draws nothing for two points and drops the last number of an odd list.
-    const points = tree.name === "polygon" && tree.args[0]?.k === "list" ? tree.args[0].items.length : 6;
-    if (points < 6 || points % 2) return `the points of a polygon are a list of x and y numbers for at least 3 points (6 numbers), and this list has ${points} numbers`;
+  partFault(tree, lang) {
+    if (tree.k === "call" && tree.name === "use") return useFault(tree, [WIDTH, HEIGHT], lang ?? "en");
+    const kinds = Object.keys(KINDS).filter((name) => KINDS[name].prompt !== null), kind = tree.k === "call" && kinds.includes(tree.name) ? KINDS[tree.name] : null;
+    if (!kind) return `a shape is ${kinds.join(", ")}, or use(NAME, X, Y, SIZE) of the library`;
+    const named = [...Object.keys(PROPERTIES).filter((key) => PROPERTIES[key].prompt !== null), ...(kind.named ?? [])], other = Object.keys(tree.named).find((key) => !named.includes(key));
+    if (other) return `a shape takes only ${named.map((key) => `${key}=`).join(", ")} by name, and ${other}= is not one`;
+    const text = kind.args.indexOf("text");
+    if (text >= 0) return textFault("the text", tree.args[text], BUDGET.text, true, INSIDE);
+    // The kit compiles a shorter or an odd list clean: it draws nothing for too few points and drops the last number of an odd list.
+    const points = kind.points && tree.args[0]?.k === "list" ? tree.args[0].items.length : 2 * (kind.points ?? 0);
+    if (kind.points && (points < 2 * kind.points || points % 2)) return `the points of a ${tree.name} are a list of x and y numbers for at least ${kind.points} points (${2 * kind.points} numbers), and this list has ${points} numbers`;
     return null;
+  },
+  /**
+   * The shapes of the drawing: each shape as it is, and each library line as its shapes, with the part names in the language of the first
+   * line. A library line can add app lines before the drawing (library.js useShapes).
+   */
+  expand(parts, control, head) {
+    const used = parts.map((part) => (part.tree.k === "call" && part.tree.name === "use" ? useShapes(part.tree, head.named.lang?.v ?? "en", [WIDTH, HEIGHT], part.name) : { shapes: [show(part.tree)], lines: [] }));
+    return { shapes: used.flatMap((one) => one.shapes), lines: used.flatMap((one) => one.lines) };
   },
   cardFault: (tree) => textCardFault(tree, "scene"),
   /** A scene whose first line and control alone have faults gives them to control (template.js ownersOf). */
@@ -3983,7 +4780,12 @@ const ITEMS_FORM = {
   },
   partFault(tree) {
     if (tree.k !== "call" || tree.name !== "item" || tree.args.length !== 3 || Object.keys(tree.named).length) return "an item is item(LABEL, SIGN, TEXT)";
-    return textFault("the label", tree.args[0], BUDGET.option) ?? textFault("the sign", tree.args[1], BUDGET.sign, false, INSIDE) ?? textFault("the text", tree.args[2], BUDGET.cardText);
+    return textFault("the label", tree.args[0], BUDGET.fewOption) ?? textFault("the sign", tree.args[1], BUDGET.sign, false, INSIDE) ?? textFault("the text", tree.args[2], BUDGET.cardText);
+  },
+  /** The labels are the options of the choice, so their cap follows the number of items and the control (optionFault), which only the whole file knows. */
+  context(lines) {
+    const items = lines.filter((line) => line.tree && ITEMS_FORM.part.test(line.name));
+    return items.flatMap((line) => [optionFault("the label", line.tree.args[0], items.length, "item")].filter(Boolean).map((fault) => [line.name, fault]));
   },
   cardFault(tree) {
     if (tree.k !== "call" || tree.name !== "card" || tree.args.length !== 1 || Object.keys(tree.named).length) return "the card of items is card(TITLE): it shows the text of the chosen item";
@@ -4091,9 +4893,10 @@ function rowFault(tree, max) {
   if (tree.k !== "call" || tree.name !== "row" || tree.args.length !== 2 || Object.keys(tree.named).length || tree.args[1]?.k !== "list") return "a row is row(LABEL, [VALUE, …])";
   const values = tree.args[1].items;
   if (!values.length || values.length > max) return `a row has 1 to ${max} values, and this one has ${values.length}`;
-  return labelFault("the label", tree.args[0]) ?? values.map((value, index) => (cellText(value) === undefined ? `value ${index + 1} is a text in quotes or a number`
-    : !cellText(value).trim() ? `value ${index + 1} is empty` : [...cellText(value)].length > DATA_BUDGET.value
-      ? `value ${index + 1} has ${[...cellText(value)].length} characters, and its cap is ${DATA_BUDGET.value}. Write it shorter, such as with a unit in the label` : null)).find(Boolean) ?? null;
+  const wrong = values.map((value, index) => (cellText(value) === undefined ? `value ${index + 1} is a text in quotes or a number` : !cellText(value).trim() ? `value ${index + 1} is empty` : null)).find(Boolean);
+  // Each value over the cap in one fault (fix list 5, L1), a number by its text.
+  return labelFault("the label", tree.args[0]) ?? wrong ?? labelsFault("value", values.map((value) => ({ k: "lit", v: cellText(value) })), DATA_BUDGET.value,
+    () => ", such as with a unit in the label");
 }
 
 /** The fault of the control mark(ROW) of a form, or mark(ROW, COLUMN) when column is true. ROW and COLUMN name a row or a column of the form. */
@@ -4429,6 +5232,7 @@ const { isTemplateFile, readTemplate, mergeTemplate, checkData, expandTemplate, 
 
 
 
+
 const isTemplateFile = (text) => typeof text === "string" && TEMPLATE_HEAD.test(text.split("\n").find((line) => line.trim()) ?? "");
 
 const readsV = (node) => node.k === "path" && node.abs && node.segs.length === 1 && node.segs[0] === "v";
@@ -4462,10 +5266,11 @@ function narrationOf(name, raw) {
  * line as "NAME: message", where NAME is the template word for the first line and for a line with no name. A line of a known name has the tree
  * of its value, with the kit's color for each color name, or null when it has a fault. A second line of a name, a line of a name that the
  * template does not have, and a line with no name are faults and not lines. The kit-written line $/v = VALUE is the line control.
+ * misses names each library name that a line places and the library does not have (library.js missOf): the miss log of spec 12.8.
  */
 function readTemplate(text) {
   const [first = "", ...rest] = text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#")), word = TEMPLATE_HEAD.exec(first)?.[1], form = FORMS_BY_WORD[word];
-  const faults = [], lines = [], fault = (name, message) => { faults.push(`${name}: ${message}`); return message; };
+  const faults = [], lines = [], misses = [], fault = (name, message) => { faults.push(`${name}: ${message}`); return message; };
   const read = (raw, parse) => { try { return parse(raw.trim()); } catch (failure) { if (failure instanceof DslError) return failure; throw failure; } };
   const head = read(first, parseExpression), headless = head instanceof DslError ? head.message : headFault(head, word, form.head) ?? form.headFault?.(head) ?? null;
   if (headless) fault(word, headless);
@@ -4485,13 +5290,14 @@ function readTemplate(text) {
     if (lines.some((line) => line.name === name)) { fault(name, `this is a second line ${name}. Each line has its own name`); continue; }
     const entry = read(raw, parseLine);
     let tree = entry instanceof DslError ? null : entry.tree, message = entry instanceof DslError ? entry.message : null, source = raw.trim();
+    if (missOf(tree)) misses.push(missOf(tree));
     if (tree && name === "control") message = entry.kind === "state" ? (isText(tree) || numberOf(tree) !== undefined ? null : "$/v = VALUE takes a number or a text in quotes") : form.controlFault(tree);
     else if (tree) {
       // The kept line has the cut text, so the stored file and a later change have it too.
       const long = cutLong(tree, name, word), short = form.cut ? form.cut(long, name) : long;
       if (show(short) !== show(tree)) { tree = short; source = `${name} = ${show(tree)}`; }
       const shape = name !== "card" && word === "scene", path = nodesIn(tree, (node) => node.k === "path" && !readsV(node))[0];
-      message = (name === "card" ? form.cardFault(tree) : name === "source" ? sourceFault(tree) : form.partFault(tree))
+      message = (name === "card" ? form.cardFault(tree) : name === "source" ? sourceFault(tree) : form.partFault(tree, head?.named?.lang?.v))
         ?? (path ? `a line reads only $/v, the value of the control, and this line reads ${show(path)}` : null);
       if (shape && !message) message = colorFault(tree = colored(tree));
       // The choice of items shows their labels, so it cannot tell two items of one label apart.
@@ -4513,7 +5319,7 @@ function readTemplate(text) {
     if (say) lines.push({ name: "say", raw: say, tree: { k: "lit", v: "say" } });
   }
   lines.sort((a, b) => rank(a.name, word) - rank(b.name, word));
-  return { word, lines, faults };
+  return { word, lines, faults, misses };
 }
 
 /**
@@ -4576,7 +5382,7 @@ function expandTemplate(read, leftOut) {
   if (form.file) return form.file(head, parts, control, card, line("source")?.tree);
   const out = [`app(${title}, lang=${show(head.named.lang)}, preset="clean", palette=${show(head.named.palette ?? { k: "lit", v: "blue" })})`];
   // What the form gives in place of the defaults (forms.js TemplateForm expand).
-  const own = FORMS_BY_WORD[read.word].expand?.(parts, control) ?? {}, shapes = own.shapes ?? parts.map((part) => show(part.tree));
+  const own = FORMS_BY_WORD[read.word].expand?.(parts, control, head) ?? {}, shapes = own.shapes ?? parts.map((part) => show(part.tree));
   out.push(...(own.lines ?? []), `need picture = drawing(${title}, ${WIDTH}, ${HEIGHT}, [${shapes.join(", ")}])`);
   const [label, ...args] = control?.args ?? [], start = show(startOf(read, leftOut));
   if (control?.k !== "call") out.push(`$/v = ${control ? show(control) : start}`);
@@ -4610,7 +5416,7 @@ function ownersOf(read, leftOut, faults, build) {
  * takes it). stored is the template file of the stored app of a change, or null for a new screen.
  * A line with a fault is left out: a change takes the stored version of that line instead. A control that no line reads changes nothing, so
  * it is left out too. When the expansion has kit faults, each owner (ownersOf) is left out and the kit compiles once more.
- * Returns {built, word, kept, expanded, leftOut, holds}. built is the result of build for expanded, the expansion of kept, with each fault of a line that
+ * Returns {built, word, kept, expanded, leftOut, holds, misses}, where misses are the library names that the file placed and the library does not have. built is the result of build for expanded, the expansion of kept, with each fault of a line that
  * was left out. A whole fault gives built with no definition and expanded null: a fault of the first line, no part with no fault, a cells file
  * with no control, or a kit fault of the last compile.
  * preview is true for the lines so far of a stream (compile.js previewStep): a control that no line reads yet stays, and only a fault of the first
@@ -4645,6 +5451,7 @@ function buildTemplate(text, stored, build, preview = false) {
     : read.word === "cells" ? (drawn(cells) ? null : "cells: the cells need a line control = slider(LABEL, 0, COUNT, 1, START) with no fault")
       : drawnParts(read, leftOut).length ? null : `${read.word}: the picture needs a ${read.word === "scene" ? "shape" : "item"} with no fault`);
   read = readTemplate(text);
+  const misses = read.misses;
   faults.push(...read.faults);
   read.lines.filter((line) => !line.tree).forEach((line) => out.add(line.name));
   settle();
@@ -4662,7 +5469,7 @@ function buildTemplate(text, stored, build, preview = false) {
   const unique = [...new Set(faults)], broken = Boolean(lacking) || built.faults.length > 0;
   const holds = drawn((line) => line.name === "card") ? "card" : drawnParts(read, leftOut).length || (read.word === "cells" && drawn(cells)) ? "parts" : "frame";
   return { built: broken ? { faults: unique, notes: built?.notes ?? [], definition: null, language: null, hole: false } : { ...built, faults: unique },
-    word: read.word, kept, expanded: broken ? null : expanded, leftOut: [...leftOut], holds };
+    word: read.word, kept, expanded: broken ? null : expanded, leftOut: [...leftOut], holds, misses };
 }
 
 return { isTemplateFile, readTemplate, mergeTemplate, checkData, expandTemplate, buildTemplate };
@@ -4672,6 +5479,7 @@ const { compileAppFile, linesOf, readPlanReply, LINE, NEED_NAME, needsIn, patchA
 // The compile of the kit: an app file in, the report of the host and the app definition out. kit/build.js makes compileStep (one step of
 // the host with compileAppFile, patchAppFile, and readPlanReply) and previewStep (the frame of the lines so far of a stream) the globals of
 // the bundle: the sandbox entries.
+
 
 
 
@@ -4726,7 +5534,7 @@ async function compileAppFile(text, previous, preview = false) {
   const storedTemplate = isTemplateFile(previous?.appFile), template = isTemplateFile(text) && buildTemplate(text, storedTemplate ? previous.appFile : null, build, preview);
   const stored = storedTemplate ? { ...previous, appFile: expandTemplate(readTemplate(previous.appFile), new Set()) } : previous;
   const { file, emitted, ...built } = template ? template.built : build(text), result = { ...built, blockedBySavedData: false, savedDataMismatch: false };
-  if (template) Object.assign(result, { template: template.word, kept: template.kept, expanded: template.expanded, leftOut: template.leftOut });
+  if (template) Object.assign(result, { template: template.word, kept: template.kept, expanded: template.expanded, leftOut: template.leftOut, misses: template.misses });
   const framed = (out) => (out.definition ? { ...out, frame: frameOf(out.definition, out.state ?? out.definition.initialState, preview && template ? template.holds : "whole") } : out);
   if (!stored || !result.definition) return framed({ ...result, state: null });
   try {
@@ -4790,7 +5598,9 @@ function patchAppFile(plan, reply) {
  * data is {excerpts, site, time} for a new searched data screen, or null: the merged text then gets the host check of template.js checkData
  * before the compile, and result.rejected is the value that no excerpt holds, or null.
  */
-async function compileStep({ text, plan, read, previous, cap, data = null }) {
+async function compileStep({ text, plan, read, previous, cap, data = null, missing = [] }) {
+  // An image entry whose image the host cannot open is no entry of this call: its name is a miss (library.js LIBRARY).
+  LIBRARY.missing = new Set(missing);
   const reply = read ? readPlanReply(text) : { kind: "plan", text };
   if (reply.kind !== "plan") return reply;
   const { text: merged, rejected } = data ? checkData(mergedOf(plan, reply.text), data) : { text: mergedOf(plan, reply.text), rejected: null };
@@ -4809,7 +5619,8 @@ const storedOf = (previous) => previous && { appFile: previous.appFile, stateSch
  * of a template: a line with a fault is left out with no repair (a change keeps its stored version), and the first line alone gives the frame with
  * the picture card at its final size. A free plan gives holds "whole". An outside reply, a text with no usable first line, and each throw give none.
  */
-async function previewStep({ text, plan = null, previous = null, data = null }) {
+async function previewStep({ text, plan = null, previous = null, data = null, missing = [] }) {
+  LIBRARY.missing = new Set(missing);
   const gate = settings.gate;
   settings.gate = "off";
   try {
@@ -4827,7 +5638,7 @@ async function previewStep({ text, plan = null, previous = null, data = null }) 
 
 return { compileAppFile, linesOf, readPlanReply, LINE, NEED_NAME, needsIn, patchAppFile, compileStep, previewStep };
 })();
-runtime.text = "let handle;const __handle=(f)=>{handle=f};\n(()=>{var nQ={\"||\":1,\"&&\":2,\"==\":3,\"!=\":3,\"<\":4,\"<=\":4,\">\":4,\">=\":4,\"+\":5,\"-\":5,\"*\":6,\"/\":6,\"%\":6};class R extends Error{}function SZ(Q){let Z=[],$=0,q=(K)=>{throw new R(\"\")};while($<Q.length){let K=Q[$];if(/\\s/.test(K)){$++;continue}if(K==='\"'){let z=$+1,X=\"\";while(z<Q.length&&Q[z]!=='\"'){if(Q[z]===\"\\\\\")z++,X+={n:`\n`,t:\"\\t\"}[Q[z]]??Q[z];else X+=Q[z];z++}if(z>=Q.length)q(\"\");Z.push({t:\"str\",v:X}),$=z+1;continue}if(K===\"$\"){let z=/^\\$(\\/?)([\\p{L}_][\\p{L}\\p{N}_]*(?:\\/[\\p{L}_][\\p{L}\\p{N}_]*)*)/u.exec(Q.slice($));if(!z)q(\"\");Z.push({t:\"path\",abs:z[1]===\"/\",segs:z[2].split(\"/\")}),$+=z[0].length;continue}let J=/^(\\d+\\.?\\d*|\\.\\d+)(e[+-]?\\d+)?/i.exec(Q.slice($));if(J){Z.push({t:\"num\",v:Number(J[0])}),$+=J[0].length;continue}let W=/^[\\p{L}_][\\p{L}\\p{N}_]*/u.exec(Q.slice($));if(W){Z.push({t:\"id\",v:W[0]}),$+=W[0].length;continue}let G=Q.slice($,$+2);if([\":=\",\"==\",\"!=\",\"<=\",\">=\",\"&&\",\"||\"].includes(G)){Z.push({t:\"op\",v:G}),$+=2;continue}if(\"()[]{},:=+-*/%<>!?.\".includes(K)){Z.push({t:\"op\",v:K}),$++;continue}q(\"\")}return Z}function EZ(Q,Z=0){let $=Z,q=0,K=(V)=>Q[$]&&Q[$].t===\"op\"&&Q[$].v===V,J=(V)=>{if(!K(V))throw new R(\"\");$++},W=(V)=>{if((q+=V)>100)throw new R(\"\")};function G(){return z()}function z(){let V=Q[$];if(!V)throw new R(\"\");if($++,V.t===\"num\")return{k:\"lit\",v:V.v};if(V.t===\"str\")return{k:\"lit\",v:V.v};if(V.t===\"path\")return{k:\"path\",abs:V.abs,segs:V.segs};if(V.t===\"id\"){if(V.v===\"true\"||V.v===\"false\")return{k:\"lit\",v:V.v===\"true\"};if(V.v===\"null\")return{k:\"lit\",v:null};if(!K(\"(\"))return{k:\"ref\",name:V.v};$++;let j=[],Y={};while(!K(\")\")){if(Q[$]?.t===\"id\"&&Q[$+1]?.t===\"op\"&&Q[$+1].v===\"=\"){let H=Q[$].v;$+=2,Y[H]=L()}else j.push(L());if(!K(\")\"))J(\",\")}return $++,{k:\"call\",name:V.v,args:j,named:Y}}if(V.t===\"op\"&&V.v===\"(\"){let j=L();return J(\")\"),j}if(V.t===\"op\"&&V.v===\"[\"){let j=[];while(!K(\"]\"))if(j.push(L()),!K(\"]\"))J(\",\");return $++,{k:\"list\",items:j}}if(V.t===\"op\"&&V.v===\"{\"){let j=[];while(!K(\"}\")){let Y=Q[$++];if(!Y||Y.t!==\"id\"&&Y.t!==\"str\")throw new R(\"\");if(J(\":\"),j.push([Y.v,L()]),!K(\"}\"))J(\",\")}return $++,{k:\"map\",entries:j}}if(V.t===\"op\"&&(V.v===\"-\"||V.v===\"!\"))return{k:\"un\",op:V.v,arg:X()};throw new R(\"\")}function X(){let V=G();for(;;){let j=Q[$+1];if(K(\".\")){$++;let Y=Q[$++];if(!Y||Y.t!==\"id\")throw new R(\"\");V={k:\"field\",of:V,name:Y.v}}else if(K(\"[\")){$++;let Y=L();J(\"]\"),V={k:\"index\",of:V,at:Y}}else if(K(\"/\")&&j?.t===\"id\"&&![\"true\",\"false\",\"null\"].includes(j.v)&&!(Q[$+2]?.t===\"op\"&&Q[$+2].v===\"(\"))V={k:\"field\",of:V,name:j.v},$+=2;else return V}}function U(V){let j=X(),Y=0;while(Q[$]?.t===\"op\"&&nQ[Q[$].v]>=V){let H=Q[$++].v;j={k:\"bin\",op:H,left:j,right:U(nQ[H]+1)}}return j}function L(){let V=U(1);if(!K(\"?\"))return V;$++;let j=L();J(\":\");let Y=L();return{k:\"if\",test:V,yes:j,no:Y}}return{tree:L(),used:$-Z}}function hQ(Q){let Z=SZ(Q),{tree:$,used:q}=EZ(Z);if(q!==Z.length)throw new R(\"\");return $}function bZ(Q){let Z=Q.trim();if(!Z||Z.startsWith(\"#\"))return null;let $=(K,J,W)=>{let G=hQ(W);if([\"need\",\"app\",\"check\"].includes(K)&&(G.k!==\"call\"||K!==\"need\"&&G.name!==K))throw new R(\"\");return{kind:K,key:J,tree:G,raw:Z}},q;if(q=/^delete\\s+check\\s*\\(\\s*\"(.*)\"\\s*\\)$/.exec(Z))return{kind:\"delete\",key:\"check:\"+q[1],tree:null,raw:Z};if(q=/^delete\\s+(?:need\\s+)?(\\S+)$/.exec(Z))return{kind:\"delete\",key:q[1],tree:null,raw:Z};if(q=/^need\\s+([\\p{L}_][\\p{L}\\p{N}_]*)\\s*=(?!=)(.*)$/u.exec(Z))return $(\"need\",q[1],q[2]);if(q=/^(\\$\\/[\\p{L}\\p{N}_/]+)\\s*:=(.*)$/u.exec(Z))return $(\"formula\",q[1],q[2]);if(q=/^(\\$\\/[\\p{L}\\p{N}_/]+)\\s*=(?!=)(.*)$/u.exec(Z))return $(\"state\",q[1],q[2]);if(/^app\\s*\\(/.test(Z))return $(\"app\",\"app\",Z);if(/^check\\s*\\(/.test(Z)){let K=$(\"check\",\"\",Z);return{...K,key:\"check:\"+(K.tree.args[0]?.v??\"\")}}if(q=/^([\\p{L}_][\\p{L}\\p{N}_]*)\\s*=(?!=)(.*)$/u.exec(Z))return $(\"component\",q[1],q[2]);throw new R(\"\")}class vQ{constructor(){this.entries=new Map,this.faults=[],this.partFaults=[],this.tops=new Map,this.removed=new Set}beginStep(){this.faults=[]}feed(Q,Z=null,$=\"author\"){let q;try{q=bZ(Q)}catch(J){if(!(J instanceof R))throw J;return this.faults.push({line:Z,text:Q.trim(),message:J.message}),null}if(!q)return null;if(q.kind===\"delete\"){let J=[...this.entries.keys()].find((W)=>W===q.key||W===\"need:\"+q.key);if(J)this.entries.delete(J),this.removed.add(J);else this.faults.push({line:Z,text:q.raw,message:\"\"});return q}let K=q.kind===\"need\"?\"need:\"+q.key:q.key;if(q.origin=$,$===\"author\")this.removed.delete(K);return this.entries.set(K,q),q}feedText(Q){return Q.split(`\n`).forEach((Z,$)=>this.feed(Z,$+1)),this}open(Q){return!this.removed.has(Q)&&(this.entries.get(Q)?.origin??\"part\")===\"part\"}of(Q){return[...this.entries.values()].filter((Z)=>Z.kind===Q)}get(Q){return this.entries.get(Q)}text(){return[...this.entries.values()].map((Q)=>Q.raw).join(`\n`)+`\n`}}var _Q={Column:[\"children\"],Row:[\"children\"],Card:[\"children\"],Section:[\"title\",\"children\"],Text:[\"text\"],Heading:[\"text\"],Metric:[\"label\",\"value\"],Emoji:[\"value\",\"label\"],Badge:[\"value\"],Grid:[\"children\"],Progress:[\"value\",\"max\",\"label\"],Ring:[\"value\",\"max\",\"text\",\"label\"],Divider:[],Notice:[\"text\"],Button:[\"label\",\"action\"],IconButton:[\"icon\",\"action\",\"label\"],TextField:[\"label\",\"bind\"],NumberField:[\"label\",\"bind\"],Slider:[\"label\",\"bind\"],RangeSlider:[\"label\",\"bind\"],Toggle:[\"label\",\"bind\"],CheckBox:[\"label\",\"bind\"],Segmented:[\"label\",\"bind\",\"options\"],Select:[\"label\",\"bind\",\"options\"],List:[\"items\",\"template\",\"group\"],Chart:[\"items\",\"point\",\"value\",\"label\",\"bind\"],Table:[\"label\",\"heads\",\"rows\",\"bind\",\"column\",\"signs\"],Tabs:[\"titles\",\"groups\",\"label\"],Dialog:[\"title\",\"children\"],DateField:[\"label\",\"bind\"],TimeField:[\"label\",\"bind\"],Picture:[\"text\",\"found\"],Choices:[\"label\",\"bind\",\"options\"],Timer:[\"label\",\"seconds\"],Drawing:[\"label\",\"width\",\"height\",\"shapes\"],Model3d:[\"label\",\"bodies\",\"bind\",\"exploded\",\"selected\"],Link:[\"label\",\"url\",\"text\"]},eQ={ArrowUp:\"Arrow\",ArrowDown:\"Sort\",ArrowLeft:\"Back\",ArrowRight:\"Chevron\",Edit:\"Pencil\"},hZ=new Set([\"visible\",\"enabled\",\"variant\",\"tone\",\"emphasis\",\"weight\",\"min\",\"max\",\"step\",\"empty\",\"placeholder\",\"gap\",\"selected\",\"kind\",\"size\",\"align\",\"columns\",\"icon\",\"fit\"]),vZ=new Set([\"set\",\"toggle\",\"inc\",\"dec\",\"append\",\"remove\",\"clear\",\"when\",\"move\",\"flip\",\"animate\"]),wZ={circle:[\"x\",\"y\",\"r\"],rect:[\"x\",\"y\",\"w\",\"h\"],line:[\"x1\",\"y1\",\"x2\",\"y2\"],text:[\"x\",\"y\",\"text\"],polygon:[\"points\"]},fZ={box:[\"part\",\"x\",\"y\",\"z\",\"w\",\"h\",\"d\"],cylinder:[\"part\",\"x\",\"y\",\"z\",\"radius\",\"length\",\"axis\"]},yZ=new Set([\"text\",\"part\",\"axis\"]),mZ=[\"radius\",\"width\",\"size\",\"stroke\"],kZ={text:\"size\",line:\"width\",rect:\"radius\"},HQ={ink:\"#0f172a\",muted:\"#94a3b8\",accent:null,surface:\"#ffffff\",water:\"#38bdf8\",land:\"#65a30d\",sun:\"#facc15\",sand:\"#e7d3a8\",wood:\"#a16207\",success:\"#16a34a\",warning:\"#ea580c\"},NQ=/^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,QZ=200000,uZ=20000,xZ=4096,zQ=(Q,Z=0)=>{let $=10**Z;return Math.round((Q+Number.EPSILON)*$)/$},PQ=(Q)=>Array.isArray(Q)?Q.map(PQ):Q&&typeof Q===\"object\"?Object.fromEntries(Object.entries(Q).map(([Z,$])=>[Z,PQ($)])):Q;function fQ(Q){let Z=[\"x\",\"y\",\"z\"].map(($)=>Q.reduce((q,K)=>q+K[$],0)/(Q.length||1));return Q.map(($)=>$.part?{...$,...Object.fromEntries([\"x\",\"y\",\"z\"].map((q,K)=>[q,zQ($[q]+($[q]-Z[K])/2,2)]))}:$)}var tQ={de:\".,\",es:\".,\",it:\".,\",pt:\".,\",tr:\".,\",ru:\" ,\",fr:\" ,\",pl:\" ,\",uk:\" ,\"};function MQ(Q,Z,$,q){let[K,J]=Object.hasOwn(tQ,Q)?tQ[Q]:\",.\",W=Number(Z).toFixed($),G=/^-?(\\d+)\\.?(\\d*)$/.exec(W);if(!G)return W;let[,z,X]=G,U=q?X.replace(/0+$/,\"\"):X;return(Number(W)<0?\"-\":\"\")+(z.length<5&&/^(es|pl|pt)$/.test(Q)?z:z.replace(/\\B(?=(\\d{3})+$)/g,K))+(U?J+U:\"\")}var cZ={fixed:(Q,Z,$=2)=>MQ(Q,Z,$),money:(Q,Z,$=\"\")=>$+MQ(Q,Z,/^(ja|ko)$/.test(Q)?0:2),percent:(Q,Z,$=0)=>MQ(Q,Z,$)+\"%\",amount:(Q,Z,$=0)=>typeof Z==\"number\"?MQ(Q,zQ(Z,$),$,!0):Z},pZ={round:zQ,floor:Math.floor,ceil:Math.ceil,abs:Math.abs,sin:(Q)=>zQ(Math.sin(Q*Math.PI/180),12)+0,cos:(Q)=>zQ(Math.cos(Q*Math.PI/180),12)+0,pow:Math.pow,sqrt:Math.sqrt,exp:Math.exp,ln:Math.log,log10:Math.log10,min:(...Q)=>Q.flat(3).length?Math.min(...Q.flat(3)):0,max:(...Q)=>Q.flat(3).length?Math.max(...Q.flat(3)):0,clamp:(Q,Z,$)=>Math.min($,Math.max(Z,Q)),len:(Q)=>Q==null?0:Q.length,text:(Q)=>String(Q??\"\"),number:(Q)=>Number(Q)||0,pad2:(Q)=>String(Math.floor(Q)).padStart(2,\"0\"),join:(Q,Z=\", \")=>{let $=Q||[];if($.length*String(Z).length>QZ)throw new R(\"\");return $.join(Z)},upper:(Q)=>String(Q).toUpperCase(),lower:(Q)=>String(Q).toLowerCase(),at:(Q,Z)=>Array.isArray(Q)?Q[Z]??null:null,streak:(Q)=>(Q??[]).reduce(([Z,$],q)=>q?[Math.max(Z,$+1),$+1]:[Z,0],[0,0])[0],near:(Q,Z)=>Math.abs(Q-Z)<=Math.max(0.01,Math.abs(Z)/1000),trim:(Q)=>String(Q).trim(),contains:(Q,Z)=>String(Q).toLowerCase().includes(String(Z).toLowerCase()),has:(Q,Z)=>Array.isArray(Q)&&Q.includes(Z),hours:(Q,Z)=>{let[$,q]=[Q,Z].map(yQ);return $===null||q===null?0:(q-$+1440)%1440/60},today:()=>{let Q=new Date(VQ.now());return`${Q.getFullYear()}-${String(Q.getMonth()+1).padStart(2,\"0\")}-${String(Q.getDate()).padStart(2,\"0\")}`},split:(Q,Z=\",\")=>String(Q??\"\").split(String(Z)||\",\").map(($)=>$.trim()).filter(Boolean),weekday:(Q)=>{let Z=qQ(Q);return Z===null?0:(new Date(Z*86400000).getUTCDay()+6)%7+1},month:(Q)=>qQ(Q)===null?0:Number(String(Q).trim().slice(5,7)),year:(Q)=>qQ(Q)===null?0:Number(String(Q).trim().slice(0,4)),days:(Q,Z)=>{let[$,q]=[qQ(Q),qQ(Z)];return $===null||q===null?0:q-$},addDays:(Q,Z)=>{let $=qQ(Q);return $===null?null:new Date(($+Math.round(Number(Z)||0))*86400000).toISOString().slice(0,10)}};function qQ(Q){let Z=/^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(String(Q??\"\").trim());if(!Z)return null;let $=Date.UTC(Number(Z[1]),Number(Z[2])-1,Number(Z[3])),q=new Date($);return q.getUTCMonth()===Number(Z[2])-1&&q.getUTCDate()===Number(Z[3])?$/86400000:null}function yQ(Q){let Z=/^(\\d{1,2}):(\\d{2})$/.exec(String(Q??\"\").trim());return Z&&Number(Z[1])<24&&Number(Z[2])<60?Number(Z[1])*60+Number(Z[2]):null}var ZZ=(Q,Z)=>Array.isArray(Q)&&Array.isArray(Z)?Q.reduce(($,q,K)=>$||ZZ(q,Z[K]),0):Q<Z?-1:Q>Z?1:0,lZ={count:(Q,Z)=>Z?Q.filter(Z).length:Q.length,sum:(Q,Z)=>Q.reduce(($,q)=>$+Number(Z?Z(q):q),0),avg:(Q,Z)=>Q.length?Q.reduce(($,q)=>$+Number(Z?Z(q):q),0)/Q.length:0,filter:(Q,Z)=>Q.filter(Z),any:(Q,Z)=>Q.some(Z),all:(Q,Z)=>Q.every(Z),map:(Q,Z)=>Q.map(Z),find:(Q,Z)=>Q.find(Z)??null,sort:(Q,Z,$)=>[...Q].sort((q,K)=>ZZ(Z(q),Z(K))*($===\"desc\"?-1:1)),groups:(Q,Z,$)=>{if(!Z)throw new R(\"\");let q=new Map;for(let K of Q)q.set(Z(K),(q.get(Z(K))??0)+Number($?$(K):1));return[...q].map(([K,J])=>({key:K,value:J}))}};function wQ(Q,Z){if(Q===Z)return!0;if(typeof Q!==\"object\"||typeof Z!==\"object\"||!Q||!Z||Array.isArray(Q)!==Array.isArray(Z))return!1;let $=(q)=>Object.keys(q).filter((K)=>K!==\"id\");return $(Q).length===$(Z).length&&$(Q).every((q)=>wQ(Q[q],Z[q]))}var iZ=(Q)=>Q.rest&&Q.rest.v!==0||Q.rounds&&Q.rounds.v!==1,mQ=(Q)=>Q.named.alert?.v===!0&&!iZ(Q.named),sZ=(Q)=>Q.of(\"need\").filter((Z)=>Z.tree.name===\"entries\"&&Z.tree.named?.show?.k===\"map\").flatMap((Z)=>Z.tree.named.show.entries),m=(Q,Z)=>Object.hasOwn(Q,Z)?Q[Z]:void 0,$Z=12,kQ=(Q)=>({...Object.fromEntries((m(_Q,Q.name)??[]).map((Z,$)=>[Z,Q.args[$]])),...Q.named});class uQ{constructor(Q,Z=!0){if(this.file=Q,this.faults=[],this.nextId=1,this.state={},this.seen=new Map,this.steps=0,this.tripped=!1,Z)this.follow()}follow(){for(let Q of this.file.of(\"state\")){if(this.seen.get(Q.key)===Q.raw)continue;this.seen.set(Q.key,Q.raw),this.write(this.pathOf(Q.key),this.attempt(Q,()=>PQ(this.value(Q.tree,{}))),{})}this.tagRows(this.state),this.recompute()}fault(Q,Z){this.faults.push({where:Q,message:Z})}step(Q=1){if((this.steps+=Q)>QZ||this.tripped)this.stop(\"\")}stop(Q){throw this.tripped=!0,new R(Q)}charge(Q){if(typeof Q===\"string\")this.step(Q.length>>4);else if(Q&&typeof Q===\"object\"){this.step();for(let Z of Object.values(Q))this.charge(Z)}return Q}attempt(Q,Z){try{return Z()}catch($){return this.fault(Q.key,$.message),null}}pathOf(Q){return{k:\"path\",abs:!0,segs:Q.slice(2).split(\"/\")}}tagRows(Q){if(Array.isArray(Q))Q.forEach((Z)=>{if(Z&&typeof Z===\"object\"&&!Array.isArray(Z))Z.id??=\"r\"+this.nextId++,this.tagRows(Z)});else if(Q&&typeof Q===\"object\")Object.values(Q).forEach((Z)=>this.tagRows(Z))}read(Q,Z){let $=Q.abs?this.state:Z.it;for(let q of Q.segs)$=$==null?void 0:m($,q);return $}place(Q,Z){if(Q.k===\"path\"){let q=Q.abs?this.state:Z.it;if(q==null)throw new R(\"\");if(typeof q!==\"object\")throw new R(\"\");for(let K of Q.segs.slice(0,-1))q=m(q,K)??(q[K]={});return[q,Q.segs.at(-1)]}if(Q.k!==\"field\"&&Q.k!==\"index\")throw new R(\"\");let $=this.value(Q.of,Z);if($==null||typeof $!==\"object\")throw new R(\"\");return[$,Q.k===\"field\"?Q.name:this.value(Q.at,Z)]}write(Q,Z,$){let[q,K]=this.place(Q,$);q[K]=Z}value(Q,Z){switch(this.step(),Q.k){case\"lit\":return Q.v;case\"path\":if(!Q.abs&&Q.segs[0]===\"it\")return Q.segs.slice(1).reduce(($,q)=>$==null?void 0:m($,q),Z.it);if(!Q.abs&&Z.each!==void 0&&Q.segs.join()===\"index\"&&!(Z.it&&typeof Z.it===\"object\"&&Object.hasOwn(Z.it,\"index\")))return Z.each;if(!Q.abs&&Z.it===void 0)throw new R(\"\");if(!Q.abs&&Z.it!==void 0&&(Z.it===null||typeof Z.it!==\"object\"))throw new R(\"\");if(!Q.abs&&Z.it&&!Object.hasOwn(Z.it,Q.segs[0])){let $=Q.segs[0];if(this.shown??=Object.fromEntries(sZ(this.file)),Q.segs.length===1&&m(this.shown,$)&&!Z.busy?.includes($))return this.value(this.shown[$],{...Z,busy:[...Z.busy??[],$]});throw new R(\"\")}return this.read(Q,Z);case\"list\":return this.charge(Q.items.map(($)=>this.value($,Z)));case\"map\":return this.charge(Object.fromEntries(Q.entries.map(([$,q])=>[$,this.value(q,Z)])));case\"field\":{let $=this.value(Q.of,Z);return $==null?void 0:m($,Q.name)}case\"index\":{let $=this.value(Q.of,Z);return Array.isArray($)?m($,this.value(Q.at,Z))??null:null}case\"un\":return Q.op===\"-\"?-this.value(Q.arg,Z):!this.value(Q.arg,Z);case\"if\":return this.value(Q.test,Z)?this.value(Q.yes,Z):this.value(Q.no,Z);case\"bin\":{if(Q.op===\"&&\")return this.value(Q.left,Z)&&this.value(Q.right,Z);if(Q.op===\"||\")return this.value(Q.left,Z)||this.value(Q.right,Z);let $=this.value(Q.left,Z),q=this.value(Q.right,Z);switch(Q.op){case\"+\":return this.charge(Array.isArray($)&&Array.isArray(q)?[...$,...q]:typeof $===\"string\"||typeof q===\"string\"?String($??\"\")+String(q??\"\"):$+q);case\"-\":return $-q;case\"*\":return $*q;case\"/\":return $/q;case\"%\":return $%q;case\"==\":return wQ($,q);case\"!=\":return!wQ($,q);case\"<\":return $<q;case\"<=\":return $<=q;case\">\":return $>q;case\">=\":return $>=q}break}case\"call\":{if(Q.name===\"if\")return this.value(Q.args[0],Z)?this.value(Q.args[1],Z):this.value(Q.args[2],Z);let $=m(lZ,Q.name),q=m(pZ,Q.name),K=m(cZ,Q.name);if($){let J=this.value(Q.args[0],Z);if(!Array.isArray(J))throw new R(\"\");let W=(G)=>G&&((z)=>this.value(G,{...Z,it:z}));return this.charge($(J,W(Q.args[1]),Q.name===\"groups\"?W(Q.args[2]):Q.args[2]&&this.value(Q.args[2],Z)))}if(q)return this.charge(q(...Q.args.map((J)=>this.value(J,Z))));if(K)return this.charge(K(this.file.get(\"app\")?.tree.named.lang?.v,...Q.args.map((J)=>this.value(J,Z))));if(m(_Q,Q.name))throw new R(\"\");throw new R(\"\")}case\"ref\":throw new R(\"\")}throw new R(\"\")}drawn(Q,Z,$,q){if(this.step(),$.k===\"list\")return $.items.flatMap((C)=>this.drawn(Q,Z,C,q));let{name:K=\"\",args:J=[],named:W={}}=$.k===\"call\"?$:{};if(K===\"each\"&&J.length===2){let C=this.value(J[0],q),V=Array.isArray(C)?C:Number.isInteger(C)&&C>=0&&C<=500?Array.from({length:C},(j,Y)=>Y):null;if(!V)throw new R(\"\");return V.flatMap((j,Y)=>this.drawn(Q,Z,J[1],{...q,it:j,each:Y}))}let G=Object.hasOwn(Q,K)?Q[K]:null;if(!G)throw new R(\"\");let z=kZ[K],X=\"\";if(J.length<G.length||J.length>G.length+(z?2:1))throw new R(\"\");if(W.visible&&!this.value(W.visible,q))return[];let U=(C,V)=>{if(C===null||C===\"\"||typeof C===\"boolean\"||!Number.isFinite(Number(C)))throw new R(\"\");return zQ(Number(C),2)},L={[Z]:K};if(G.forEach((C,V)=>{let j=this.value(J[V],q);L[C]=yZ.has(C)?String(j??\"\"):C===\"points\"?[j].flat().map((Y)=>U(Y,C)):U(j,C)}),L.axis!==void 0&&![\"x\",\"y\",\"z\"].includes(L.axis))throw new R(\"\");if(L.color=String((J[G.length]?this.value(J[G.length],q):null)??\"ink\"),J.length===G.length+2)L[z]=U(this.value(J[G.length+1],q),z);for(let[C,V]of Object.entries(W)){if(C===\"visible\")continue;if(!mZ.includes(C))throw new R(\"\");let j=this.value(V,q);if(C!==\"stroke\")L[C]=U(j,C);else if(j)L.stroke=!0}if(++this.shapes>xZ)this.stop(\"\");return[L]}recompute(){let Q=this.file.of(\"formula\");for(let Z=0;Z<=Q.length;Z++){let $=JSON.stringify(this.state);for(let q of Q){if(this.tripped)return;this.attempt(q,()=>this.write(this.pathOf(q.key),this.value(q.tree,{}),{}))}if(JSON.stringify(this.state)===$)return}}act(Q,Z={}){for(let $ of Q.k===\"list\"?Q.items:[Q]){if($.k!==\"call\"||!vZ.has($.name))throw new R(\"\");let[q,K]=$.args;if($!==(Q.k===\"list\"?Q.items[0]:Q))this.recompute();let J=()=>{if(![\"path\",\"field\",\"index\"].includes(q?.k))throw new R(\"\");return q},W=(G)=>{let z=this.value(G,Z);if(!Array.isArray(z))throw new R(\"\");return z};switch($.name){case\"set\":this.write(J(),PQ(this.charge(this.value(K,Z))),Z);break;case\"toggle\":this.write(J(),!this.value(J(),Z),Z);break;case\"inc\":this.write(J(),this.charge((this.value(J(),Z)||0)+(K?this.value(K,Z):1)),Z);break;case\"dec\":this.write(J(),(this.value(J(),Z)||0)-(K?this.value(K,Z):1),Z);break;case\"clear\":this.write(J(),[],Z);break;case\"flip\":{let G=W(J()),z=this.charge(this.value(K,Z));this.write(J(),G.includes(z)?G.filter((X)=>X!==z):[...G,z],Z);break}case\"move\":{let G=$.args.length===1;if(G&&!Z.list)throw new R(\"\");let z=G?this.read(Z.list,{}):W(J()),X=G?z.indexOf(Z.it):z.findIndex((L)=>this.value(K,{...Z,it:L})),U=X+this.value(G?q:$.args[2],Z);if(X>=0&&U>=0&&U<z.length)z.splice(U,0,z.splice(X,1)[0]);break}case\"when\":if(this.value(q,Z))this.act(K,Z);else this.recompute();break;case\"animate\":{if(q?.k!==\"path\"||!q.abs)throw new R(\"\");let G=q.segs.join(\"/\"),z=Number(this.value(q,Z))||0,X=K?Number(this.value(K,Z)):NaN,U=$.args[2]?Number(this.value($.args[2],Z)):0;if(!Number.isFinite(X)||!Number.isFinite(U))throw new R(\"\");let L=(this.state._run??[]).filter((V)=>V.path!==G),C=VQ.now();if(U>0&&X!==z)L.push({path:G,from:z,to:X,start:C,end:C+U,at:z});else this.write(q,X,Z);if(L.length)this.state._run=L;else delete this.state._run;break}case\"append\":{let G=PQ(this.charge(this.value(K,Z)));W(J()).push(G),this.tagRows([G]);break}case\"remove\":{if(!q){if(!Z.list)throw new R(\"\");this.write(Z.list,this.read(Z.list,{}).filter((G)=>G!==Z.it),{})}else this.write(J(),W(J()).filter((G)=>!this.value(K,{...Z,it:G})),Z);break}}}this.recompute()}tree(Q=!1){this.reached=new Set;let Z=0,$=0,q=(J,W,G,z,X)=>{if(this.step(),++$>uZ)this.stop(\"\");if(z>40)throw new R(\"\");if(J.k===\"ref\"){let V=this.file.get(J.name);if(this.reached.add(J.name),!V||V.kind!==\"component\")return{type:\"Missing\",name:J.name,props:{},children:[]};return q(V.tree,W,J.name,z+1,[...X,J.name])}if(J.k!==\"call\"||!m(_Q,J.name))return this.fault(G??\"?\",\"\"),{type:\"Missing\",name:G,props:{},children:[]};let U={type:J.name,name:G,props:{},children:[],row:W.it,rowIndex:W.index,list:W.list,call:J},L=kQ(J),C=[];for(let[V,j]of Object.entries(L)){if(j===void 0)continue;if(!_Q[J.name].includes(V)&&!hZ.has(V)&&!(V===\"action\"&&L.bind)){this.fault(G??J.name,\"\");continue}if(J.name===\"Chart\"&&(V===\"point\"||V===\"value\")||J.name===\"List\"&&V===\"group\"||V===\"shapes\"||V===\"bodies\")continue;try{if(V===\"children\")U.children=(j.k===\"list\"?j.items:[j]).map((H)=>q(H,W,void 0,z+1,X));else if(V===\"groups\")C=j.k===\"list\"?j.items:[j];else if(V===\"action\")U.props.action=j;else if(V===\"bind\"){if(![\"path\",\"field\",\"index\"].includes(j.k))throw new R(\"\");U.props.bind=j,U.props.value=j.k===\"path\"?this.read(j,W):this.value(j,W)}else if(V===\"template\")U.template=j;else U.props[V]=this.value(j,W);let Y=U.props.options;if(V===\"options\"&&Y&&typeof Y===\"object\"&&!Array.isArray(Y))[U.props.options,U.props.labels]=[Object.keys(Y),Object.values(Y)]}catch(Y){this.fault(G??J.name,\"\")}}if(J.name===\"Chart\"){try{U.props.points=(Array.isArray(U.props.items)?U.props.items:[]).map((V)=>({label:L.point?this.value(L.point,{...W,it:V}):\"\",value:Number(L.value?this.value(L.value,{...W,it:V}):V)||0}))}catch(V){this.fault(G??J.name,\"\")}delete U.props.items}if(J.name===\"Drawing\"||J.name===\"Model3d\"){let V=J.name===\"Drawing\"?\"shapes\":\"bodies\",j=L[V]??{k:\"list\",items:[]};if(this.shapes=0,U.props[V]=(j.k===\"list\"?j.items:[j]).flatMap((Y)=>{try{return this.drawn(V===\"shapes\"?wZ:fZ,V===\"shapes\"?\"shape\":\"body\",Y,W)}catch(H){return this.fault(G??J.name,\"\"),[]}}),V===\"bodies\"&&U.props.exploded)U.props.bodies=fQ(U.props.bodies)}if(J.name===\"Choices\"){let V=Array.isArray(U.props.value)?U.props.value:[],j=U.props.max!==void 0&&V.length>=U.props.max;U.children=(U.props.options??[]).map((Y,H)=>({type:\"Button\",name:G&&`${G}_opt${H}`,children:[],props:{label:String(U.props.labels?.[H]??Y),selected:V.includes(Y),enabled:V.includes(Y)||!j,action:{k:\"call\",name:\"flip\",args:[L.bind,{k:\"lit\",v:Y}],named:{}}}}))}if(J.name===\"Tabs\"){let V={k:\"path\",abs:!0,segs:[\"_ui\",G??\"tabs\"+Z++]},j=this.read(V,{})??0;U.props.value=j,U.children=[{type:\"Row\",props:{},children:(U.props.titles??[]).map((Y,H)=>({type:\"Button\",name:G&&`${G}_tab${H}`,tab:!0,children:[],props:{label:Y,selected:H===j,action:{k:\"call\",name:\"set\",args:[V,{k:\"lit\",v:H}],named:{}}}}))},...C.map((Y,H)=>({type:\"Column\",props:{visible:H===j},children:(Y.k===\"list\"?Y.items:[Y]).map((P)=>q(P,W,void 0,z+1,X))}))]}if(J.name===\"List\"&&U.template&&Array.isArray(U.props.items)){let V=(P,N=0)=>{if(!P||N>8)return null;if(P.k===\"call\"&&[\"sort\",\"filter\"].includes(P.name))return V(P.args[0],N+1);if(P.k===\"if\")return V(P.yes,N+1)??V(P.no,N+1);if(P.k!==\"path\")return null;let T=P.abs?this.file.get(\"$/\"+P.segs.join(\"/\")):null;return T?.kind===\"formula\"?V(T.tree,N+1):P},j=V(L.items),Y=U.props.items,H=[];if(L.group)try{let P=Y.map((T)=>this.value(L.group,{...W,it:T})),N=[...new Set(P)].flatMap((T)=>Y.map((g,v)=>[g,T,v]).filter((g)=>P[g[2]]===T));Y=N.map((T)=>T[0]),H=N.map((T,g)=>g===0||N[g-1][1]!==T[1]?[{type:\"Heading\",props:{text:String(T[1]??\"\")},children:[]}]:[])}catch(P){this.fault(G??J.name,\"\")}U.children=Y.flatMap((P,N)=>[...H[N]??[],q(U.template,{it:P,index:N,list:j},void 0,z+1,X)]),U.source=j,U.blank=(P)=>q(U.template,{it:P,index:0,list:j},void 0,z+1,X)}return U},K=this.file.get(\"root\");if(!K)return{type:\"Missing\",name:\"root\",props:{},children:[]};try{return q(K.tree,{},\"root\",0,[\"root\"])}catch(J){return this.fault(\"root\",J.message),{type:\"Missing\",name:\"root\",props:{},children:[]}}}find(Q,Z){let $=(q)=>q.name===Q&&(Z===void 0||q.rowIndex===Z)?q:q.children.reduce((K,J)=>K??$(J),null);return $(this.tree())}tick(){let Q=VQ.now(),Z=this.state;if(Z._run){if(Z._run=Z._run.filter(($)=>{let q=this.pathOf(\"$/\"+$.path);if(this.read(q,{})!==$.at)return!1;return $.at=Q>=$.end?$.to:$.from+($.to-$.from)*Math.max(0,Q-$.start)/($.end-$.start),this.write(q,$.at,{}),Q<$.end}),!Z._run.length)delete Z._run;this.recompute()}for(let $ of this.file.of(\"need\")){if($.tree.name!==\"timer\"||mQ($.tree))continue;let q=$.key,K=(W,G)=>{try{return Number(W?this.value(W,{}):G)||0}catch{return 0}},J=()=>Number(Z[q+\"_phase\"])||0;if(!Z[q+\"_on\"]){Z[q+\"_end\"]=0;continue}if(!Z[q+\"_end\"])Z[q+\"_end\"]=Q+Math.max(0,J()-Z[q+\"_spent\"])*1000;for(let W=0;Z[q+\"_on\"]&&Q>=Z[q+\"_end\"]&&W<1000;W++){let G=$.tree.named,z=Z[q+\"_end\"],X=K(G.rounds,1),U=Z[q+\"_round\"]>=X;if(!Z[q+\"_resting\"])Z[q]+=1;if(!Z[q+\"_resting\"]&&(!U||X<=1||G.cycle?.v===!0)&&K(G.rest,0)>0)Z[q+\"_resting\"]=!0,Z[q+\"_spent\"]=0;else if(U)Z[q+\"_over\"]=!0,Z[q+\"_on\"]=!1,Z[q+\"_spent\"]=J(),Z[q+\"_end\"]=0;else Z[q+\"_round\"]+=1,Z[q+\"_resting\"]=!1,Z[q+\"_spent\"]=0;if(this.recompute(),Z[q+\"_on\"])Z[q+\"_end\"]=z+J()*1000}if(Z[q+\"_on\"])Z[q+\"_spent\"]=Math.max(0,J()-(Z[q+\"_end\"]-Q)/1000);this.recompute()}}change(Q,Z){this.tick();try{if(this.write(Q.props.bind,Z,{it:Q.row}),Q.props.action)this.act(Q.props.action,{it:Q.row,list:Q.list});else this.recompute()}catch($){return this.failed(Q,$)}return this.tick(),\"\"}fire(Q){if(Q.props.enabled===!1||Q.props.visible===!1)return`${Q.name??Q.type} is not active`;this.tick();try{this.act(Q.props.action,{it:Q.row,list:Q.list})}catch(Z){return this.failed(Q,Z)}return this.tick(),\"\"}failed(Q,Z){return`${Q.name??Q.type}: ${Z.message}`}input(Q,Z,$){this.steps=0;let q=this.find(Q,$);if(q?.props.bind)return this.change(q,Z);return(!q?`no field named ${Q}`:q.props.action?`${Q} is not a field: use tap(${Q})`:`${Q} only shows a value and cannot be set. A check sets a field, such as a NumberField`)+($===void 0?\"\":` in row ${$}`)}press(Q,Z){this.steps=0;let $=this.find(Q,Z);if($?.props.action)return this.fire($);return($?.props.bind?`${Q} is a field with no action: use set(${Q}, value)`:`no control named ${Q}`)+(Z===void 0?\"\":` in row ${Z}`)}}var VQ={gate:\"smoke\",now:()=>Date.now()};var dZ=/^[A-Za-z][A-Za-z0-9_]{0,47}$/,rZ=new Set([\"__proto__\",\"prototype\",\"constructor\"]);var RQ=100,aZ={time:\"number\",date:\"string\"},oZ=(Q)=>dZ.test(Q)&&!rZ.has(Q)&&!/^[dv]\\d*$/.test(Q);function xQ(Q={},Z=new Set(Object.values(Q))){let $=new Map,q=0;return(K,J=K)=>{if($.has(K))return $.get(K);let W=Object.hasOwn(Q,K)?Q[K]:J;if(!Object.hasOwn(Q,K)&&(!oZ(W)||Z.has(W))){while(Z.has(\"f\"+q))q++;W=Q[K]=\"f\"+q}return $.set(K,W),Z.add(W),W}}var UQ=(Q)=>Q.replaceAll(\":\",\"_\"),qZ=(Q)=>String(Q).padStart(2,\"0\"),TQ=(Q)=>{let Z=Math.min(1439,Math.max(0,Math.round(Number(Q)||0)));return`${qZ(Math.floor(Z/60))}:${qZ(Z%60)}`},KZ=2048,n=(Q,Z,$)=>Q===\"time\"?yQ(Z)??0:Q===\"date\"?qQ(Z)===null?$:String(Z).trim():Q===\"number\"?Number.isFinite(Z)?Math.min(Number.MAX_SAFE_INTEGER,Math.max(-Number.MAX_SAFE_INTEGER,Z)):0:Q===\"boolean\"?Z===!0:(Z===null||Z===void 0||typeof Z===\"object\"?\"\":String(Z)).slice(0,KZ),cQ=(Q,Z,$)=>({id:String(Q?.id??\"\"),...Object.fromEntries(Z.map(([q,K,J])=>[K,n(J,Q?.[q],$)]))}),IQ=(Q)=>Q?.k===\"path\"&&!Q.abs&&Q.segs.length===1?Q.segs[0]:null;function JZ(Q,Z,$,q,K,J,W){let{kit:G,name:z,walk:X,day:U,fields:L,lists:C,views:V,viewSchemas:j,viewOwners:Y,listRoots:H}=Q,P=Z.source,N=P?.k===\"path\"&&P.abs&&P.segs.length===1&&C[P.segs[0]]?P.segs[0]:null;if(!N||!Z.blank)return J.fault(\"\"),null;let T=C[N],g=xQ();g(\"$id\",\"id\"),T.forEach(([M,D])=>g(\"$\"+M,D));let v={key:$,name:g,stored:new Map(T.map(([M,D,f])=>[M,[D,f]])),computed:new Map,flags:{moves:!1},out:null,id:null},k={id:\"\",...Object.fromEntries(T.map(([M,,D])=>[M,D===\"number\"?0:D===\"boolean\"?!1:\"\"]))},o=(M)=>M.name??`${$}:row`,e=Z.blank(k),KQ=X(e,o(e),q,{scope:v,weighted:!1}),s=K.group,JQ=v.stored.get(IQ(s)),d=s?JQ&&JQ[1]!==\"time\"?JQ[0]:g(\"~group\",\"group\"):null;if(s&&!(JQ&&JQ[1]!==\"time\"))v.computed.set(d,\"string\");let LQ=(M)=>M?.k===\"path\"?M.abs&&M.segs.length===1&&M.segs[0]===N:M?.k===\"call\"&&M.name===\"filter\"&&LQ(M.args[0]),WQ=v.flags.moves,QQ=WQ?g(\"~label\",\"label\"):null;if(QQ)v.computed.set(QQ,\"string\");let bQ=Z.children.filter((M)=>M.row).map((M)=>{let D={};if(X(M,o(M),q,{scope:{...v,out:D,id:String(M.row.id??\"\")},weighted:!1,off:J.off}),v.computed.has(d))try{D[d]=n(\"string\",G.value(s,{it:M.row}))}catch{D[d]=\"\"}if(QQ)D[QQ]=(T.filter(([,,f])=>f===\"string\").map(([f])=>n(\"string\",M.row[f]).trim()).find(Boolean)??String(M.row.id)).slice(0,300);return{...cQ(M.row,T,U),...D}}),gQ=!(K.items?.k===\"path\"&&LQ(K.items))||v.computed.size>0,F=gQ?z(\"view:\"+$,UQ($)):L.get(N);if(gQ){let M={id:\"string\",...Object.fromEntries(T.map(([,f,u])=>[f,m(aZ,u)??u])),...Object.fromEntries(v.computed)},D=Object.keys(M).length;V[F]=bQ,j[F]={type:\"list\",maxItems:RQ,fields:M},Y.push(q)}let O=WQ&&J.action((M)=>{let D=G.read(P,{}),f=D.findIndex((E)=>E.id===M?.sourceKey),u=D.findIndex((E)=>E.id===M?.destinationKey);return f<0||u<0?!1:G.fire({props:{action:{k:\"call\",name:\"move\",args:[{k:\"lit\",v:u-f}],named:{}}},row:D[f],list:P})},\"_move\"),w={type:d?\"groupedList\":\"list\",text:J.caption(W),bind:F,...d&&{groupBy:d},...Z.props.empty&&{emptyText:J.plain(Z.props.empty).slice(0,300)},...O&&{reorder:{action:O,labelField:QQ}},rowTemplate:KQ};return H.set(w,N),w}var r={width:1024,height:64},iQ=(Q)=>Math.min(2048,Math.max(64,Math.round(Number(Q))||0)),lQ={commands:512,pairs:2048,chars:2048,bytes:32768},nZ={ink:\"default\",muted:\"muted\",accent:\"accent\",success:\"success\",warning:\"warning\",surface:\"surface\"},tZ=Object.fromEntries(Object.keys(HQ).map((Q)=>[Q,nZ[Q]??HQ[Q]])),eZ=(Q,Z)=>Object.hasOwn(Z,Q)?Z[Q]:NQ.test(Q)?Q:\"default\",Q0=(Q)=>{let Z=0;for(let $ of Q){let q=$.codePointAt(0);Z+=q<128?1:q<2048?2:q<65536?3:4}return Z},SQ=(Q)=>Q0(JSON.stringify(Q).replace(/\\//g,\"\\\\/\")),a=(Q)=>Math.round(Q*100)/100,pQ=(Q,Z,$)=>Math.min($,Math.max(Z,Q)),YQ=(Q)=>Q.every((Z)=>Number.isFinite(Z)&&Math.abs(Z)<=8192),VZ=(Q)=>({type:\"polyline\",points:[...Q,Q[0]],stroke:2}),Z0=(Q,Z,$)=>Q.reduce((q,[K,J],W)=>{let[G,z]=Q.at(W-1),X=(K-G)*($-z)-(Z-G)*(J-z);return q+(z<=$?+(J>$&&X>0):-(J<=$&&X<0))},0)!==0;function $0({shape:Q,x:Z,y:$,r:q,w:K,h:J,x1:W,y1:G,x2:z,y2:X,text:U,points:L,radius:C,width:V,size:j,stroke:Y}){if(Q===\"circle\"){if(!(q>=0&&q<=2048)||!YQ([Z-q,$-q,Z+q,$+q]))return null;let H=a(2*q);return Y?{type:\"arc\",x:a(Z-q),y:a($-q),width:H,height:H,start:0,sweep:360,stroke:2}:{type:\"circle\",x:Z,y:$,radius:q}}if(Q===\"rect\"){let H={x:Math.min(Z,a(Z+K)),y:Math.min($,a($+J)),width:Math.abs(K),height:Math.abs(J)},P=a(H.x+H.width),N=a(H.y+H.height);if(!YQ([H.x,H.y,P,N])||H.width>8192||H.height>8192)return null;if(Y)return VZ([[H.x,H.y],[P,H.y],[P,N],[H.x,N]]);return C?{type:\"roundRect\",...H,radius:pQ(C,0,1024)}:{type:\"rect\",...H}}if(Q===\"line\")return YQ([W,G,z,X])?{type:\"line\",x:W,y:G,x2:z,y2:X,stroke:pQ(V??2,0.1,128)}:null;if(Q===\"text\")return YQ([Z,$])?{type:\"text\",x:Z,y:$,size:pQ(j??14,1,128),text:U.slice(0,lQ.chars),align:\"center\",baseline:\"middle\"}:null;if(Q===\"polygon\"){let H=[];for(let P=0;P+1<L.length;P+=2)H.push([L[P],L[P+1]]);if(!YQ(H.flat())||H.length<(Y?2:3)||H.length>(Y?2047:2048))return null;return Y?VZ(H):{type:\"polygon\",points:H}}return null}var sQ=(Q,Z=tZ)=>Q.reduce(($,q)=>{let K=$0(q),J=eZ(q.color,Z),W;if(K?.type===\"text\"){let{x:G,y:z}=K;for(let{type:X,x:U,y:L,radius:C,width:V,height:j,points:Y,color:H}of $)if(X===\"circle\"?(G-U)**2+(z-L)**2<=C**2:X===\"polygon\"?Z0(Y,G,z):/^r/.test(X)&&G>=U&&G<=U+V&&z>=L&&z<=L+j)W=H;J=NQ.test(W)?FZ(W).reduce((X,U,L)=>X+[0,2126,7152,722][L]*(U/255)**2.2,0)>1800?\"#000000\":\"#ffffff\":W===\"muted\"?\"default\":W&&W!==\"surface\"?\"surface\":J===\"surface\"?\"default\":J}if(K)$.push({...K,color:J});return $},[]),HZ=(Q,Z)=>[{shape:\"rect\",x:0,y:0,w:r.width,h:r.height,color:\"muted\",radius:r.height/2},{shape:\"circle\",x:r.width-r.height,y:r.height/2,r:10,color:Z},{shape:\"rect\",x:0,y:0,w:Math.round(r.width*Q),h:r.height,color:Z,radius:r.height/2}],FQ={width:320,height:240},UZ={type:\"rect\",x:0,y:0,...FQ,color:\"muted\"},OQ={graphite:\"#242424\",blue:\"#0056d0\",teal:\"#006b5f\",green:\"#006e1d\",amber:\"#7f5700\",orange:\"#b02e00\",red:\"#c00015\",pink:\"#bc004f\",purple:\"#9e00c3\",indigo:\"#1a41ff\",brown:\"#a83900\"},WZ={clean:\"blue\",soft:\"teal\",expressive:\"purple\",editorial:\"brown\",technical:\"indigo\"},YZ=(Q,Z)=>{let $=Q||(Object.hasOwn(WZ,Z)?WZ[Z]:\"orange\");return Object.hasOwn(OQ,$)?OQ[$]:OQ.graphite},q0=[-0.42,0.76,0.5],AQ=0.38,DQ=12,FZ=(Q,Z)=>{let $=Q===\"accent\"?Z:Object.hasOwn(HQ,Q)?HQ[Q]:NQ.test(Q)?Q:HQ.ink,q=$.length===7?\"ff\"+$.slice(1):$.slice(1);return[0,2,4,6].map((K)=>parseInt(q.slice(K,K+2),16))},GZ=(Q)=>Math.min(255,Math.max(0,Math.round(Q))).toString(16).padStart(2,\"0\"),XQ=(Q,Z)=>Q.map(($,q)=>$-Z[q]),K0=(Q,Z)=>[Q[1]*Z[2]-Q[2]*Z[1],Q[2]*Z[0]-Q[0]*Z[2],Q[0]*Z[1]-Q[1]*Z[0]],zZ=(Q,Z)=>Q[0]*Z[0]+Q[1]*Z[1]+Q[2]*Z[2];function J0({body:Q,x:Z,y:$,z:q,w:K,h:J,d:W,radius:G,length:z,axis:X}){let U=[Z,$,q];if(Q===\"box\"){let Y=[K,J,W].map((P)=>Math.abs(P)/2),H=[];for(let P of[0,1,2])for(let N of[-1,1]){let T=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([g,v])=>{let k=[0,0,0];return k[P]=N,k[(P+1)%3]=g,k[(P+2)%3]=v,U.map((o,e)=>o+k[e]*Y[e])});H.push(N>0?T:T.reverse())}return H}let L=Math.max(0,\"xyz\".indexOf(X)),C=(Y)=>Array.from({length:DQ},(H,P)=>{let N=P/DQ*2*Math.PI,T=[...U];return T[L]+=Y*Math.abs(z)/2,T[(L+1)%3]+=Math.cos(N)*Math.abs(G),T[(L+2)%3]+=Math.sin(N)*Math.abs(G),T}),[V,j]=[C(-1),C(1)];return[[...V].reverse(),j,...V.map((Y,H)=>[Y,V[(H+1)%DQ],j[(H+1)%DQ],j[H]])]}function jZ(Q,Z,$,q,K,J,W=OQ.graphite){let G=($?fQ(Q):Q).flatMap((Y)=>J0(Y).map((H)=>({body:Y,points:H}))),z=G.flatMap((Y)=>Y.points),X=[0,1,2].map((Y)=>(z.reduce((H,P)=>Math.min(H,P[Y]),1/0)+z.reduce((H,P)=>Math.max(H,P[Y]),-1/0))/2),U=z.reduce((Y,H)=>Math.max(Y,Math.hypot(...XQ(H,X))),0.000001),L=(Number.isFinite(Z)?Z:0)*Math.PI/180,C=Math.min(K,J)*0.44/U,V=[0,0,U*5],j=(Y)=>{let[H,P,N]=XQ(Y,X),T=H*Math.cos(L)+N*Math.sin(L),g=-H*Math.sin(L)+N*Math.cos(L);return[T,P*Math.cos(AQ)-g*Math.sin(AQ),P*Math.sin(AQ)+g*Math.cos(AQ)]};return G.map(({body:Y,points:H})=>{let P=H.map(j);return{body:Y,seen:P,normal:K0(XQ(P[1],P[0]),XQ(P[2],P[0])),depth:P.reduce((N,T)=>N+T[2],0)/P.length}}).filter(({seen:Y,normal:H})=>zZ(H,XQ(V,Y[0]))>0).sort((Y,H)=>Y.depth-H.depth).flatMap(({body:Y,seen:H,normal:P})=>{let N=0.7+0.3*Math.abs(zZ(P,q0)/Math.hypot(...P)),[T,...g]=FZ(String(Y.color),W),v=H.map(([o,e,KQ])=>{let s=V[2]/(V[2]-KQ);return[a(K/2+o*C*s),a(J/2-e*C*s)]});if(!YQ(v.flat()))return[];let k=GZ(T*(q&&Y.part!==q?0.4:1));return[{type:\"polygon\",points:v,color:`#${k===\"ff\"?\"\":k}${g.map((o)=>GZ(o*N)).join(\"\")}`}]})}var BZ=(Q)=>Q.points?.length??(Q.type===\"line\"?2:1),PZ=(Q)=>Q.text?.length??0,V0=(Q)=>{let Z=Q.flatMap(([,$])=>$);return{commands:Z.length,pairs:Z.reduce(($,q)=>$+BZ(q),0),chars:Z.reduce(($,q)=>$+PZ(q),0),bytes:SQ(Object.fromEntries(Q.map(([$,q])=>[$,{commands:q}])))}};function XZ(Q){let Z=V0(Q.map(([q])=>[q,[]])),$=!1;return Object.fromEntries(Q.map(([q,K])=>[q,{commands:K.filter((J,W)=>{let G={commands:1,pairs:BZ(J),chars:PZ(J),bytes:SQ(J)+(W?1:0)};if($||=Object.keys(lQ).some((z)=>Z[z]+G[z]>lQ[z]),!$)for(let z of Object.keys(G))Z[z]+=G[z];return!$})}]))}var W0=0.6,jQ=Object.freeze({surface:\"\",pointer:0,x:0}),G0=(Q)=>a((Q%360+360)%360);function LZ(Q,Z,{surfaceId:$,x:q,phase:K,pointer:J}){let W=Z.find((X)=>X.id===$)?.model,G=Q.state._drag??jQ;if(!W||!Number.isFinite(q))return!1;if(K===\"down\"){if(G.surface&&G.pointer!==J)return!1;return Q.state._drag={surface:$,pointer:J,x:q},\"\"}if(![\"move\",\"up\",\"cancel\"].includes(K)||G.surface!==$||G.pointer!==J)return!1;Q.state._drag=K===\"move\"?{...G,x:q}:jQ;let z=Number.isFinite(W.props.value)?W.props.value:0;return K===\"cancel\"?\"\":Q.change(W,G0(a(z+(q-G.x)*W0)))}var CZ=32,z0=512,H0=49152;var MZ=256,U0=8,Y0={vibrationMs:600,toneMs:600};var _Z=1000,F0=86400000,j0=1000,B0=50,P0={from:0,to:0,start:0,end:0,at:0};function X0(Q){let Z=Q.file.get(\"app\")?.tree,$=(q)=>q?Q.value(q,{}):void 0;return{title:$(Z?.args[0]),...Object.fromEntries(Object.entries(Z?.named??{}).map(([q,K])=>[q,$(K)]))}}var TZ=(Q)=>Q.value({k:\"call\",name:\"today\",args:[]},{}),IZ={eyebrow:{emphasis:\"label\",tone:\"accent\"},muted:{tone:\"muted\"},source:{emphasis:\"source\",tone:\"muted\"}},L0=new Set([\"List\",\"Dialog\",\"Chart\",\"Table\",\"Tabs\",\"Timer\",\"Drawing\",\"Model3d\"]);var dQ=(Q,Z)=>Number.isFinite(Q)&&Number.isFinite(Z)&&Z>0?Math.min(100,Math.max(0,Q/Z*100)):0,oQ=(Q)=>Q?.k===\"call\"?Q.name===\"append\"||Q.args.some(oQ):Q?.k===\"list\"&&Q.items.some(oQ),EQ=(Q,Z)=>Object.fromEntries(Z.filter(($)=>Q[$]!==void 0).map(($)=>[$,Q[$]])),BQ=(Q,Z,$)=>{let q={...$,...EQ(Q.props,Z)};return Object.keys(q).length?{style:q}:{}},NZ=(Q,Z=Q.props.align)=>BQ(Q,[\"gap\"],Z&&{crossAlign:Z}),t=(Q)=>Q.props.icon===void 0?{}:{icon:m(eQ,Q.props.icon)??Q.props.icon},C0=30,M0=100,AZ=(Q,Z,$)=>{let q=Array.isArray(Q.props.options)?Q.props.options:[],K=typeof($??q[0]),J=new Set,W=[];return q.forEach((G,z)=>{let X=Z.plain(Q.props.labels?.[z]??G),U=K+G;if(typeof G!==K||![\"string\",\"number\",\"boolean\"].includes(K)||K===\"number\"&&!Number.isFinite(G)?1:J.has(U)?2:!X.trim()?3:W.length===C0?4:0)return;J.add(U),W.push({text:X.slice(0,M0),value:G})}),W},RZ=(Q,Z)=>{let $=AZ(Q,Z,Q.props.value),q=$.length>6;if(!$.length)return null;return Z.inside($),{type:q?\"select\":\"segmented\",...Z.field(),...q&&t(Q),options:$}},rQ=(Q,Z,$,q)=>(K,J)=>{let{min:W=Z,max:G=$,step:z,value:X}=K.props,U=(C)=>Number.isFinite(C)&&C>=W&&C<=G,L=q?(C)=>Array.isArray(C)&&C.length===2&&C.every(U)&&C[0]<=C[1]:U;if(!q&&!U(X))J.keep(Number.isFinite(X)?Math.min(G,Math.max(W,X)):W);return{type:Q,...J.field(q&&((C)=>L(C)?C:void 0)),min:W,max:G,...EQ(K.props,[\"step\"]),...t(K)}},_0={TextField:(Q)=>typeof Q===\"string\",Slider:Number.isFinite},N0={Column:(Q,Z)=>Z.form()??{type:\"column\",...BQ(Q,[\"gap\"]),children:Z.children(!0)},Row:(Q,Z)=>Z.form()??{...Q.children.some(($)=>$.props.weight!==void 0)?{type:\"row\",wrap:!1,...NZ(Q,Q.props.align??\"center\"),children:Z.children(!0)}:{type:\"flowRow\",...NZ(Q),children:Z.children()},...Q.props.max&&{layout:{maxWidth:Q.props.max}}},Grid:(Q,Z)=>({type:\"grid\",columns:Q.props.columns??2,children:Z.children()}),Card:(Q,Z)=>({type:\"card\",...Q.props.variant===\"hero\"&&{variant:\"hero\"},...t(Q),children:Z.children()}),Section:(Q,Z)=>{let $=Z.plain(Q.props.title);return{type:\"section\",...$&&{text:$},children:Z.children()}},Text:(Q,Z)=>({type:\"text\",...Z.text(\"text\"),...BQ(Q,[\"emphasis\",\"align\",\"tone\"],m(IZ,Q.props.variant))}),Heading:(Q,Z)=>({type:\"text\",...Z.text(\"text\"),style:{emphasis:\"title\"}}),Metric:(Q,Z)=>({type:\"metric\",text:Z.plain(Q.props.label),bind:Z.shown(\"value\"),...t(Q),...BQ(Q,[\"emphasis\",\"tone\"])}),Badge:(Q,Z)=>({type:\"badge\",...Z.text(\"value\"),...t(Q),...BQ(Q,[\"tone\"])}),Emoji:(Q,Z)=>({type:\"emoji\",text:Z.plain(Q.props.label)||Z.plain(Q.props.value)||Z.caption(),...Z.value(\"value\"),...EQ(Q.props,[\"size\"])}),Divider:()=>({type:\"divider\"}),Notice:(Q,Z)=>({type:\"banner\",...t(Q),...BQ(Q,[\"tone\"]),children:[{type:\"text\",...Z.text(\"text\")}]}),Button:(Q,Z)=>{let $=Q.props.variant??(Q.props.selected===void 0?void 0:Q.props.selected?\"filled\":\"tonal\");return{type:\"button\",text:Z.caption(Q.props.label),action:Z.action(),...$&&{variant:$},...t(Q)}},IconButton:(Q,Z)=>({type:\"icon\",name:t(Q).icon,text:Z.caption(Q.props.label),...Q.props.action&&{action:Z.action()}}),NumberField:rQ(\"numberInput\",0,1e6),Slider:rQ(\"slider\",0,100),RangeSlider:rQ(\"rangeSlider\",0,100,1),TextField:(Q,Z)=>({type:\"input\",...Z.field(),...t(Q)}),Toggle:(Q,Z)=>({type:\"toggle\",...Z.field()}),CheckBox:(Q,Z)=>({type:\"checkbox\",...Z.field(),...EQ(Q.props,[\"variant\"])}),Segmented:RZ,Select:RZ,DateField:(Q,Z)=>({type:\"dateInput\",...Z.field(),...t(Q)}),TimeField:(Q,Z)=>({type:\"timeInput\",...Z.field(TQ),...t(Q)}),Choices:(Q,Z)=>{let $=AZ(Q,Z,Array.isArray(Q.props.value)?Q.props.value[0]:void 0);if(!$.length)return null;return Z.inside($),{type:\"multiChoice\",...Z.field((q)=>Array.isArray(q)&&!(Q.props.max!==void 0&&q.length>Q.props.max)?q:void 0),options:$}},Dialog:(Q,Z)=>Z.modal(),List:(Q,Z)=>Z.list(),Progress:(Q,Z)=>{let{value:$,max:q}=Q.props,K=Q.props.variant===\"dots\"&&!Z.scope&&Number.isInteger(q)&&q>=1&&q<=$Z;return Z.drawn(dQ($,q)/100)??{type:\"progress\",text:Z.label(),variant:K?\"dots\":\"bar\",min:0,max:K?q:100,bind:Z.computed(\"value\",K?Number.isFinite($)?Math.min(q,Math.max(0,$)):0:dQ($,q))}},Timer:(Q,Z)=>{let $=Math.round(Number(Q.props.seconds)*1000);return{type:\"timer\",text:Z.label(),mode:\"countdown\",action:Z.action(()=>!1),foreground:{durationMs:Number.isFinite($)?Math.min(F0,Math.max(_Z,$)):_Z,...Y0}}},Ring:(Q,Z)=>({type:\"progressRing\",text:Z.label(),size:\"large\",min:0,max:100,bind:Z.computed(\"value\",dQ(Q.props.value,Q.props.max)),...Q.props.text!==void 0&&{children:[{type:\"text\",...Z.text(\"text\"),style:{emphasis:\"display\"}}]}}),Chart:(Q,Z)=>Z.chart(),Table:(Q,Z)=>Z.table(),Tabs:(Q,Z)=>Z.tabs(),Drawing:(Q,Z)=>Z.canvas(sQ(Q.props.shapes),iQ(Q.props.width),iQ(Q.props.height)),Model3d:(Q,Z)=>Z.canvas([UZ,...jZ(Q.props.bodies??[],Q.props.value??30,!1,Q.props.selected,FQ.width,FQ.height,Z.accent)],FQ.width,FQ.height,!1,Q.props.bind?Q:void 0)},R0=(Q)=>Q?.k===\"path\"&&Q.abs?[Q,!1]:Q?.k===\"un\"&&Q.op===\"!\"&&Q.arg.k===\"path\"&&Q.arg.abs?[Q.arg,!0]:Q?.k===\"bin\"&&Q.op===\"!=\"&&Q.left.k===\"path\"&&Q.left.abs&&Q.right.k===\"lit\"?[Q.left,Q.right.v]:null;function aQ(Q,Z,$=!1){let q=xQ(Z.names,new Set([...Object.values(Z.names),...Z.fields.flatMap(([,F])=>F.split(\".\")),...Z.anim?[Z.anim.field]:[],...Z.drag?[Z.drag]:[]])),K=new Map(Z.fields),J=Z.kinds??{},W=Z.lists??{},G=TZ(Q),z=(F,O)=>$?Z.types[F]??=typeof O===\"number\"?\"number\":\"string\":Z.types[F]??\"string\",X=[],U=new Map,L=new Set,C=new Map,V=new Map,j=new Map,Y=[],H={},P={},N=[],T={d:new Map,v:new Map},g={},v=new Map(Q.file.of(\"need\").filter((F)=>F.tree.name===\"timer\"&&!mQ(F.tree)).map((F)=>[`${F.key}_bar`,F.key])),k=[],{kind:o,preset:e,palette:KQ}=X0(Q),s=(F,O,w,M,D)=>{let f=D.scope;if(f){let l=f.stored.get(IQ(w));if(l&&l[1]!==\"time\"&&(F===\"d\"||l[1]===\"boolean\"))return l[0];let $Q=f.name(`${F}:${O}`,O.replace(/\\W/g,\"_\")),GQ=F===\"v\"?\"boolean\":z(`${f.key}/${$Q}`,M);if(f.computed.set($Q,GQ),f.out)f.out[$Q]=F===\"v\"?Boolean(M):n(GQ,M);return $Q}let u=w?.k===\"path\"&&w.abs?w.segs:null;if(u?.length===1&&K.has(u[0])&&J[u[0]]!==\"time\"&&(F===\"d\"||typeof M===\"boolean\"))return K.get(u[0]);let E=q(`${F}:${O}`,u?u.join(\"_\"):O.replace(/\\W/g,\"_\"));if(!T[F].has(E)){let l=F+(T[F].size<CZ?\"\":Math.floor(T[F].size/CZ)+1);T[F].set(E,`${l}.${E}`),(g[l]??={})[E]=F===\"v\"?Boolean(M):n(z(E,M),M)}return T[F].get(E)},JQ=(F,O,w)=>{if(!F)return U.set(O,w);if(F.id===null)return;let M=C.get(O);if(!M)C.set(O,M=new Map),U.set(O,(D)=>M.get(D?.key)?.(D.value)??!1);M.set(F.id,w)},d=(F,O,w,M)=>{w=F.name??w;let D=M.scope,f=m(N0,F.type),u=(B)=>X.push([w,B]);if(!f)return u(\"\"),null;if(D&&L0.has(F.type))return u(\"\"),null;let E=F.call?kQ(F.call):{},l=M.off||[\"visible\",\"enabled\"].some((B)=>E[B]&&!F.props[B]);if(D&&E.action?.k===\"call\"&&E.action.name===\"move\"&&E.action.args.length===1)return D.flags.moves=!0,null;let $Q={...M,off:l,...F.type===\"Section\"&&{title:F.props.title}},GQ=(B,_=!1)=>E[B]&&(_||E[B].k!==\"lit\")?s(\"d\",`${O}.${B}`,E[B],F.props[B],A):null,A={scope:D,fault:u,off:l,rowOptions:!1,blank:Boolean(D&&!D.out),children:(B=!1,_=$Q)=>F.children.map((I,S)=>d(I,I.name??`${O}:${S}`,w,{..._,weighted:B})).filter(Boolean),caption:(B)=>A.plain(B)||(F.name?F.name:`${w} ${F.props.icon??F.type}`).replace(/_/g,\" \"),label:()=>A.caption(A.plain(F.props.label)||M.title),text:(B)=>{let _=String(F.props[B]??\"\"),I=!D&&E[B]?.k===\"lit\"&&_.length>300,S=GQ(B,I);if(S)return{text:\"\",bind:S};return{text:A.plain(F.props[B])}},plain:(B)=>{if(B!==null&&typeof B===\"object\")return\"\";return String(B??\"\").slice(0,300)},value:(B)=>{let _=GQ(B);return _?{bind:_}:{[B]:F.props[B]}},shown:(B)=>GQ(B)??A.computed(B,F.props[B]),computed:(B,_)=>s(\"d\",`${O}.${B}`,null,_,A),keep:(B)=>{if(!A.blank)Y.push([F,B])},inside:(B)=>{let _=F.props.value,I=B.map((h)=>h.value),S=F.type!==\"Choices\"?I.includes(_)?_:I[0]:(Array.isArray(_)?_:[]).filter((h,c,x)=>I.includes(h)&&x.indexOf(h)===c);if(JSON.stringify(S)===JSON.stringify(_))return;A.keep(S)},field:(B=(_)=>_)=>{let _;if(D)_=D.stored.get(IQ(E.bind))?.[0];else{let h=E.bind?.k===\"path\"&&E.bind.abs&&E.bind.segs.length===1?E.bind.segs[0]:null;_=K.get(h)}let I=m(_0,F.type),S=A.action((h)=>{if(I&&(l||!I(h)))return!1;let c=B(h);return c===void 0?!1:Q.change(F,c)});if(I)L.add(S);return{text:A.caption(F.props.label),bind:_,action:S,...I&&{inputMode:\"live\"}}},action:(B=()=>{let I=M.sheet?.add===F&&Q.nextId,S=Q.fire(F);if(S===\"\"&&I&&Q.nextId>I)Q.state[M.sheet.flag]=!1;return S},_=\"\")=>{let I=q(\"@\"+O+_,UQ(O+_));return JQ(D,I,B),I},form:()=>{let B=`${O}:open`;if(!K.has(B))return null;let _=F.children.find((h)=>h.type===\"Button\"&&oQ(h.props.action)),I=A.caption(_?.props.label),S=(h)=>()=>{return Q.state[B]=h,\"\"};return{type:\"column\",children:[{type:\"button\",text:I,action:A.action(S(!0),\"_open\"),variant:\"filled\",icon:\"Plus\"},{type:\"bottomSheet\",text:I,visibleBind:K.get(B),dismissAction:A.action(S(!1),\"_dismiss\"),children:A.children(!1,{...$Q,off:l||!Q.state[B],sheet:{flag:B,add:_}})}]}},modal:()=>{let B=R0(E.visible),_=(S)=>S.props.bind!==void 0||S.children.some(_),I=A.action(()=>{if(!B)return!1;return Q.write(B[0],B[1],{}),Q.recompute(),\"\"},\"_dismiss\");return{type:F.children.some(_)?\"bottomSheet\":\"dialog\",text:A.caption(F.props.title),dismissAction:I,children:A.children()}},list:()=>JZ(LQ,F,O,w,E,A,M.title),drawn:(B)=>{let _=!D&&v.get(F.name);return _?A.canvas(sQ(HZ(B,Q.state[_+\"_resting\"]?\"success\":\"accent\")),r.width,r.height,Boolean(Q.state[_+\"_on\"])):null},canvas:(B,_,I,S=!1,h=void 0)=>{let c=q(\"surface:\"+O,UQ(O));return k.push({id:c,width:_,height:I,running:S,commands:B,line:w,model:h}),{type:\"canvas\",text:A.label(),surfaces:[c]}},accent:YZ(KQ,e??\"clean\"),chart:()=>{let B=F.props.kind??\"bar\",_=A.label().slice(0,100),I=(Array.isArray(F.props.points)?F.props.points:[]).slice(-MZ),[S,h]=[[\"labels\",\"string\",\"label\"],[\"values\",\"number\",\"value\"]].map(([p,b,y])=>{let i=q(`chart:${O}:${p}`,UQ(`${O}_${p}`));return H[i]=I.map((CQ)=>n(b,CQ[y])),P[i]={type:\"array\",maxItems:MZ,items:b},N.push(w),i}),c=I.map((p)=>n(\"string\",p.label)),x=F.props.bind&&A.field((p)=>p===\"\"||c.includes(p)?p:void 0);return{type:\"chart\",text:_,kind:B,categories:S,series:[{text:_,bind:h}],...x&&{action:x.action,selectedKeyBind:x.bind}}},table:()=>{let B=(Array.isArray(F.props.heads)?F.props.heads:[]).map((b)=>A.plain(b).slice(0,100)||\" \"),_=(Array.isArray(F.props.rows)?F.props.rows:[]).map((b)=>Array.isArray(b)?b:[b]),I=q(`table:${O}:rows`,UQ(`${O}_rows`)),S=(b)=>`c${b}`;H[I]=_.map((b)=>({id:A.plain(b[0]).slice(0,128)||\" \",...Object.fromEntries(B.map((y,i)=>[S(i),A.plain(b[i]??\"\")]))})),P[I]={type:\"list\",maxItems:RQ,fields:{id:\"string\",...Object.fromEntries(B.map((b,y)=>[S(y),\"string\"]))}},N.push(w);let h=H[I].map((b)=>b.id),c=F.props.bind&&A.field((b)=>b===\"\"||h.includes(b)?b:void 0),x=F.props.column,p=F.props.signs;return{type:\"table\",text:A.plain(F.props.label).slice(0,100)||A.caption(),bind:I,columns:B.map((b,y)=>({text:b,field:S(y)})),...Array.isArray(p)&&{variant:\"compare\",signs:p.map((b)=>A.plain(b).slice(0,16))},visibleRows:U0,...c&&{action:c.action,selectedKeyBind:c.bind},...c&&Number.isInteger(x)&&x>0&&x<B.length&&{markColumn:S(x)}}},tabs:()=>{let B=`${F.name}:tab`,_=F.children.slice(1),I=(Array.isArray(F.props.titles)?F.props.titles:[]).map((y)=>A.plain(y)),S=_.findIndex((y)=>!y.children.length),h=!F.name||!K.has(B)?\"a Tabs needs a line of its own, such as pages = Tabs(titles, groups), for the field of its open tab\":!_.length||_.length>30?`a Tabs has 1 to 30 groups, and this one has ${_.length}`:S>=0?`group ${S+1} of this Tabs is empty, and Alphy draws no empty group. Put a component into it`:null;if(h)return u(h),null;let x=I.length===_.length&&new Set(I).size===I.length&&I.every((y)=>y.trim()&&y.length<=100)?I:_.map((y,i)=>String(i+1));if(!x.includes(Q.state[B]))Q.state[B]=x[0];let p=Q.state[B],b=(y)=>{if(!x.includes(y))return!1;return Q.state[B]=y,\"\"};return{type:\"column\",children:[{type:\"tabs\",text:A.label(),bind:K.get(B),action:A.action(b),options:x.map((y)=>({text:y,value:y}))},..._.map((y,i)=>({type:\"column\",visibleBind:s(\"v\",`${O}.tab${i}`,null,x[i]===p,A),children:y.children.map((CQ,OZ)=>d(CQ,CQ.name??`${O}:tab${i}:${OZ}`,w,{...$Q,off:l||x[i]!==p,weighted:!0})).filter(Boolean)}))]}}},ZQ=f(F,A);if(!ZQ)return null;V.set(ZQ,w);for(let B of[\"visible\",\"enabled\"]){if(!E[B])continue;if(E[B].k!==\"lit\")ZQ[B+\"Bind\"]=s(\"v\",`${O}.${B}`,E[B],F.props[B],A);else if(!F.props[B])ZQ[B]=!1}if(F.props.weight!==void 0&&M.weighted)ZQ.layout={...ZQ.layout,weight:F.props.weight};if(F.props.fit)ZQ.layout={...ZQ.layout,fillWidth:!1};return ZQ},LQ={kit:Q,name:q,walk:d,day:G,fields:K,lists:W,views:H,viewSchemas:P,viewOwners:N,listRoots:j},WQ=Q.tree(),QQ=d(WQ,\"root\",\"root\",{scope:null,weighted:!0}),bQ=[...o?[{type:\"text\",text:String(o),style:IZ.eyebrow}]:[],...WQ.type===\"Column\"?QQ?.children??[]:[QQ].filter(Boolean)];return{ui:{type:\"theme\",preset:e??\"clean\",...KQ&&{palette:KQ},cornerRadius:20,children:[{type:\"column\",style:{gap:\"medium\",...WQ.type===\"Column\"&&QQ?.style,padding:\"medium\"},children:bQ}]},values:g,views:H,viewSchemas:P,viewOwners:N,controls:U,liveIds:L,fixes:Y,faults:X,owners:V,listRoots:j,drawn:k}}function T0(Q,Z,$,q){let K=Q.kinds?.[Z];if(K===\"list\")return Array.isArray($)?$.map((J)=>cQ(J,Q.lists[Z],q)):[];if(K===\"array\")return Array.isArray($)?$:[];return K===\"time\"||K===\"date\"?n(K,$,q):typeof $===\"number\"||typeof $===\"string\"?n(typeof $,$):$}function I0(Q,Z,$,q={}){let K={},J=TZ(Q);for(let[W,G]of Z.fields){let[z,X]=G.split(\".\"),U=T0(Z,W,Q.state[W],J);if(X)(K[z]??={})[X]=U;else K[z]=U}for(let W of Z.keep??[])K[W]=q[W];if(Z.anim)K[Z.anim.field]=Object.fromEntries(Z.anim.keys.map(([W,G])=>{let z=Q.state._run?.find((X)=>X.path===W);return[G,z?{from:z.from,to:z.to,start:z.start,end:z.end,at:z.at}:P0]}));if(Z.drag)K[Z.drag]=Q.state._drag??jQ;return{...K,...$.views,...$.values}}function A0(Q,Z,$){let q=Z.kinds??{},K=Q.nextId-1;for(let[W,G]of Z.fields){let[z,X]=G.split(\".\"),U=X?$[z]?.[X]:$[z];if(U===void 0)continue;if(q[W]===\"list\")Q.state[W]=(Array.isArray(U)?U:[]).map((L)=>{return K=Math.max(K,Number(/^r(\\d+)$/.exec(L.id)?.[1]??0)),{id:L.id,...Object.fromEntries(Z.lists[W].map(([C,V,j])=>[C,j===\"time\"?TQ(L[V]):L[V]]))}});else Q.state[W]=q[W]===\"time\"?TQ(U):q[W]===\"array\"&&Array.isArray(U)?[...U]:q[W]===\"record\"?{...U}:U}if(Z.drag)Q.state._drag={...jQ,...$[Z.drag]};Q.nextId=K+1;let J=Z.anim?Z.anim.keys.map(([W,G])=>({path:W,...$[Z.anim.field]?.[G]})).filter((W)=>W.end):[];if(J.length)Q.state._run=J;else delete Q.state._run;Q.recompute()}function D0(Q,Z){let $=new uQ(new vQ().feedText(Q.lines),!1);if($.nextId=Q.next,Q.shown)$.shown=Object.fromEntries(hQ(Q.shown).entries);return A0($,Q,Z),$}function DZ(Q,Z,$=Date.now()){let{state:q,event:K}=Q;if(K.type===\"preview\"||K.type===\"render\")return{state:q};let J=VQ.now;VQ.now=()=>$;let W;try{W=D0(Z,q);let G=Z.kinds??{},z=aQ(W,Z);if(Z.drag&&K.type===\"open\")W.state._drag=jQ;let X=K.type===\"open\"||K.type===\"timer\"&&(K.timerId===Z.anim?.field?Boolean(W.state._run):z.drawn.some((H)=>H.id===K.timerId&&H.running)),L=K.type===(z.liveIds.has(K.actionId)?\"liveInput\":\"action\")?z.controls.get(K.actionId):X?()=>W.tick():K.type===\"pointer\"?()=>LZ(W,z.drawn,K):void 0;if(!L||L(K.value)===!1)return{state:q};for(let[H,P]of Object.entries(G))if(P===\"list\"&&W.state[H]?.length>(m(Z.caps,H)??RQ)||P===\"array\"&&W.state[H]?.length>z0)return{state:q};let C=!1;for(let[H,P]of Z.fields){let[N,T]=P.split(\".\"),g=T?q[N]?.[T]:q[N],v=W.state[H],k=typeof g;if(G[H]||![\"string\",\"number\",\"boolean\"].includes(k)||(k===\"number\"?Number.isFinite(v):typeof v===k))continue;W.state[H]=k===\"number\"?g:n(k,v),C=!0}if(C)W.recompute();let V=aQ(W,Z);if(V.fixes.length){for(let[H,P]of V.fixes)W.write(H.props.bind,P,{it:H.row});W.recompute(),V=aQ(W,Z)}let j=I0(W,Z,V,q),Y=JSON.stringify(V.ui)===JSON.stringify(z.ui)?{state:j}:{state:j,ui:V.ui};if(W.tripped||SQ(j)>H0)return{state:q};if(V.drawn.length){if(Y.surfaces=XZ(V.drawn.map(({id:H,commands:P})=>[H,P])),K.type!==\"liveInput\")Y.timers=[...V.drawn.filter((H)=>H.running).map(({id:H})=>({id:H,intervalMs:j0})),...W.state._run?[{id:Z.anim.field,intervalMs:B0}]:[]]}return Y}catch(G){if(W?.tripped)return{state:q};throw G}finally{VQ.now=J}}__handle(DZ);})();";
+runtime.text = "let handle;const __handle=(f)=>{handle=f};\n(()=>{var WZ={\"||\":1,\"&&\":2,\"==\":3,\"!=\":3,\"<\":4,\"<=\":4,\">\":4,\">=\":4,\"+\":5,\"-\":5,\"*\":6,\"/\":6,\"%\":6};class R extends Error{}function pZ(Q){let Z=[],$=0,q=(J)=>{throw new R(\"\")};while($<Q.length){let J=Q[$];if(/\\s/.test(J)){$++;continue}if(J==='\"'){let H=$+1,j=\"\";while(H<Q.length&&Q[H]!=='\"'){if(Q[H]===\"\\\\\")H++,j+={n:`\n`,t:\"\\t\"}[Q[H]]??Q[H];else j+=Q[H];H++}if(H>=Q.length)q(\"\");Z.push({t:\"str\",v:j}),$=H+1;continue}if(J===\"$\"){let H=/^\\$(\\/?)([\\p{L}_][\\p{L}\\p{N}_]*(?:\\/[\\p{L}_][\\p{L}\\p{N}_]*)*)/u.exec(Q.slice($));if(!H)q(\"\");Z.push({t:\"path\",abs:H[1]===\"/\",segs:H[2].split(\"/\")}),$+=H[0].length;continue}let V=/^(\\d+\\.?\\d*|\\.\\d+)(e[+-]?\\d+)?/i.exec(Q.slice($));if(V){Z.push({t:\"num\",v:Number(V[0])}),$+=V[0].length;continue}let K=/^[\\p{L}_][\\p{L}\\p{N}_]*/u.exec(Q.slice($));if(K){Z.push({t:\"id\",v:K[0]}),$+=K[0].length;continue}let W=Q.slice($,$+2);if([\":=\",\"==\",\"!=\",\"<=\",\">=\",\"&&\",\"||\"].includes(W)){Z.push({t:\"op\",v:W}),$+=2;continue}if(\"()[]{},:=+-*/%<>!?.\".includes(J)){Z.push({t:\"op\",v:J}),$++;continue}q(\"\")}return Z}function lZ(Q,Z=0){let $=Z,q=0,J=(G)=>Q[$]&&Q[$].t===\"op\"&&Q[$].v===G,V=(G)=>{if(!J(G))throw new R(\"\");$++},K=(G)=>{if((q+=G)>100)throw new R(\"\")};function W(){return H()}function H(){let G=Q[$];if(!G)throw new R(\"\");if($++,G.t===\"num\")return{k:\"lit\",v:G.v};if(G.t===\"str\")return{k:\"lit\",v:G.v};if(G.t===\"path\")return{k:\"path\",abs:G.abs,segs:G.segs};if(G.t===\"id\"){if(G.v===\"true\"||G.v===\"false\")return{k:\"lit\",v:G.v===\"true\"};if(G.v===\"null\")return{k:\"lit\",v:null};if(!J(\"(\"))return{k:\"ref\",name:G.v};$++;let U=[],F={};while(!J(\")\")){if(Q[$]?.t===\"id\"&&Q[$+1]?.t===\"op\"&&Q[$+1].v===\"=\"){let Y=Q[$].v;$+=2,F[Y]=P()}else U.push(P());if(!J(\")\"))V(\",\")}return $++,{k:\"call\",name:G.v,args:U,named:F}}if(G.t===\"op\"&&G.v===\"(\"){let U=P();return V(\")\"),U}if(G.t===\"op\"&&G.v===\"[\"){let U=[];while(!J(\"]\"))if(U.push(P()),!J(\"]\"))V(\",\");return $++,{k:\"list\",items:U}}if(G.t===\"op\"&&G.v===\"{\"){let U=[];while(!J(\"}\")){let F=Q[$++];if(!F||F.t!==\"id\"&&F.t!==\"str\")throw new R(\"\");if(V(\":\"),U.push([F.v,P()]),!J(\"}\"))V(\",\")}return $++,{k:\"map\",entries:U}}if(G.t===\"op\"&&(G.v===\"-\"||G.v===\"!\"))return{k:\"un\",op:G.v,arg:j()};throw new R(\"\")}function j(){let G=W();for(;;){let U=Q[$+1];if(J(\".\")){$++;let F=Q[$++];if(!F||F.t!==\"id\")throw new R(\"\");G={k:\"field\",of:G,name:F.v}}else if(J(\"[\")){$++;let F=P();V(\"]\"),G={k:\"index\",of:G,at:F}}else if(J(\"/\")&&U?.t===\"id\"&&![\"true\",\"false\",\"null\"].includes(U.v)&&!(Q[$+2]?.t===\"op\"&&Q[$+2].v===\"(\"))G={k:\"field\",of:G,name:U.v},$+=2;else return G}}function z(G){let U=j(),F=0;while(Q[$]?.t===\"op\"&&WZ[Q[$].v]>=G){let Y=Q[$++].v;U={k:\"bin\",op:Y,left:U,right:z(WZ[Y]+1)}}return U}function P(){let G=z(1);if(!J(\"?\"))return G;$++;let U=P();V(\":\");let F=P();return{k:\"if\",test:G,yes:U,no:F}}return{tree:P(),used:$-Z}}function uQ(Q){let Z=pZ(Q),{tree:$,used:q}=lZ(Z);if(q!==Z.length)throw new R(\"\");return $}function iZ(Q){let Z=Q.trim();if(!Z||Z.startsWith(\"#\"))return null;let $=(J,V,K)=>{let W=uQ(K);if([\"need\",\"app\",\"check\"].includes(J)&&(W.k!==\"call\"||J!==\"need\"&&W.name!==J))throw new R(\"\");return{kind:J,key:V,tree:W,raw:Z}},q;if(q=/^delete\\s+check\\s*\\(\\s*\"(.*)\"\\s*\\)$/.exec(Z))return{kind:\"delete\",key:\"check:\"+q[1],tree:null,raw:Z};if(q=/^delete\\s+(?:need\\s+)?(\\S+)$/.exec(Z))return{kind:\"delete\",key:q[1],tree:null,raw:Z};if(q=/^need\\s+([\\p{L}_][\\p{L}\\p{N}_]*)\\s*=(?!=)(.*)$/u.exec(Z))return $(\"need\",q[1],q[2]);if(q=/^(\\$\\/[\\p{L}\\p{N}_/]+)\\s*:=(.*)$/u.exec(Z))return $(\"formula\",q[1],q[2]);if(q=/^(\\$\\/[\\p{L}\\p{N}_/]+)\\s*=(?!=)(.*)$/u.exec(Z))return $(\"state\",q[1],q[2]);if(/^app\\s*\\(/.test(Z))return $(\"app\",\"app\",Z);if(/^check\\s*\\(/.test(Z)){let J=$(\"check\",\"\",Z);return{...J,key:\"check:\"+(J.tree.args[0]?.v??\"\")}}if(q=/^([\\p{L}_][\\p{L}\\p{N}_]*)\\s*=(?!=)(.*)$/u.exec(Z))return $(\"component\",q[1],q[2]);throw new R(\"\")}class xQ{constructor(){this.entries=new Map,this.faults=[],this.partFaults=[],this.tops=new Map,this.removed=new Set}beginStep(){this.faults=[]}feed(Q,Z=null,$=\"author\"){let q;try{q=iZ(Q)}catch(V){if(!(V instanceof R))throw V;return this.faults.push({line:Z,text:Q.trim(),message:V.message}),null}if(!q)return null;if(q.kind===\"delete\"){let V=[...this.entries.keys()].find((K)=>K===q.key||K===\"need:\"+q.key);if(V)this.entries.delete(V),this.removed.add(V);else this.faults.push({line:Z,text:q.raw,message:\"\"});return q}let J=q.kind===\"need\"?\"need:\"+q.key:q.key;if(q.origin=$,$===\"author\")this.removed.delete(J);return this.entries.set(J,q),q}feedText(Q){return Q.split(`\n`).forEach((Z,$)=>this.feed(Z,$+1)),this}open(Q){return!this.removed.has(Q)&&(this.entries.get(Q)?.origin??\"part\")===\"part\"}of(Q){return[...this.entries.values()].filter((Z)=>Z.kind===Q)}get(Q){return this.entries.get(Q)}text(){return[...this.entries.values()].map((Q)=>Q.raw).join(`\n`)+`\n`}}var N=(Q)=>Math.round(Q*100)/100,s=(Q)=>Q.every((Z)=>Number.isFinite(Z)&&Math.abs(Z)<=8192),qQ=(Q,Z,$)=>Math.min($,Math.max(Z,Q)),GZ=(Q)=>({type:\"polyline\",points:[...Q,Q[0]],stroke:2}),HZ=(Q)=>{let Z=[];for(let $=0;$+1<Q.length;$+=2)Z.push([Q[$],Q[$+1]]);return Z},XQ=(Q)=>({x:N(Q[0]),y:N(Q[1])});function dZ(Q,Z,$){let q=Q.length,J=[{type:\"move\",...XQ(Q[0])}],V=(K)=>Q[$?(K+q)%q:qQ(K,0,q-1)];for(let K=1;K<q+($?1:0);K++){let[W,H,j,z]=[V(K-2),V(K-1),V(K),V(K+1)];if(!Z){J.push({type:\"line\",...XQ(j)});continue}J.push({type:\"cubic\",cx1:N(H[0]+(j[0]-W[0])/6),cy1:N(H[1]+(j[1]-W[1])/6),cx2:N(j[0]-(z[0]-H[0])/6),cy2:N(j[1]-(z[1]-H[1])/6),...XQ(j)})}if($)J.push({type:\"close\"});return J}function sZ(Q,Z){let $=Q.length,q=(V,K,W)=>{let H=Math.hypot(K[0]-V[0],K[1]-V[1]),j=Math.min(0.5,W/(H||1));return[V[0]+(K[0]-V[0])*j,V[1]+(K[1]-V[1])*j]},J=[];return Q.forEach((V,K)=>{let[W,H]=[q(V,Q[(K+$-1)%$],Z),q(V,Q[(K+1)%$],Z)];J.push({type:K?\"line\":\"move\",...XQ(W)},{type:\"quad\",cx:N(V[0]),cy:N(V[1]),...XQ(H)})}),[...J,{type:\"close\"}]}var RQ={circle:{args:[\"x\",\"y\",\"r\"],prompt:\"\",draw({x:Q,y:Z,r:$,stroke:q}){if(!($>=0&&$<=2048)||!s([Q-$,Z-$,Q+$,Z+$]))return null;let J=N(2*$);return q?{type:\"arc\",x:N(Q-$),y:N(Z-$),width:J,height:J,start:0,sweep:360,stroke:2}:{type:\"circle\",x:Q,y:Z,radius:$}}},rect:{args:[\"x\",\"y\",\"w\",\"h\"],last:\"radius\",prompt:\"\",draw({x:Q,y:Z,w:$,h:q,radius:J,stroke:V}){let K={x:Math.min(Q,N(Q+$)),y:Math.min(Z,N(Z+q)),width:Math.abs($),height:Math.abs(q)},W=N(K.x+K.width),H=N(K.y+K.height);if(!s([K.x,K.y,W,H])||K.width>8192||K.height>8192)return null;if(V)return GZ([[K.x,K.y],[W,K.y],[W,H],[K.x,H]]);return J?{type:\"roundRect\",...K,radius:qQ(J,0,1024)}:{type:\"rect\",...K}}},line:{args:[\"x1\",\"y1\",\"x2\",\"y2\"],last:\"width\",prompt:\"\",draw:({x1:Q,y1:Z,x2:$,y2:q,width:J})=>s([Q,Z,$,q])?{type:\"line\",x:Q,y:Z,x2:$,y2:q,stroke:qQ(J??2,0.1,128)}:null},text:{args:[\"x\",\"y\",\"text\"],last:\"size\",prompt:\"\",draw:({x:Q,y:Z,text:$,size:q,align:J})=>s([Q,Z])?{type:\"text\",x:Q,y:Z,size:qQ(q??14,1,128),text:$.slice(0,2048),align:J??\"center\",baseline:\"middle\"}:null},polygon:{args:[\"points\"],points:3,prompt:\"\",draw({points:Q,stroke:Z}){let $=HZ(Q);if(!s($.flat())||$.length<(Z?2:3)||$.length>(Z?2047:2048))return null;return Z?GZ($):{type:\"polygon\",points:$}}},path:{args:[\"points\"],last:\"width\",points:2,named:[\"smooth\",\"closed\"],prompt:\"\",draw({points:Q,width:Z,smooth:$,closed:q,stroke:J}){let V=HZ(Q);if(!s(V.flat())||V.length<2||V.length>200)return null;let K=dZ(V,Boolean($),Boolean(q));return q&&!J?{type:\"path\",segments:K}:{type:\"path\",segments:K,stroke:qQ(Z??2,0.1,128)}}},arrow:{args:[\"x1\",\"y1\",\"x2\",\"y2\"],last:\"width\",prompt:\"\",draw({x1:Q,y1:Z,x2:$,y2:q,width:J}){let V=Math.hypot($-Q,q-Z),K=qQ(J??4,1,24);if(!s([Q,Z,$,q])||V<1)return null;let[W,H]=[($-Q)/V,(q-Z)/V],j=Math.min(V*0.5,2.8*K+4),z=1.5*K,P=K/2,C=[$-W*j,q-H*j],G=(F,Y)=>[F[0]-H*Y,F[1]+W*Y],U=[G([Q,Z],P),G(C,P),G(C,z),[$,q],G(C,-z),G(C,-P),G([Q,Z],-P)];return{type:\"path\",segments:sZ(U,Math.max(1,K*0.4))}}},arc:{args:[\"x\",\"y\",\"r\",\"from\",\"sweep\"],last:\"width\",prompt:\"\",draw({x:Q,y:Z,r:$,from:q,sweep:J,width:V}){if(!($>0&&$<=2048)||!s([Q-$,Z-$,Q+$,Z+$]))return null;return{type:\"arc\",x:N(Q-$),y:N(Z-$),width:N(2*$),height:N(2*$),start:N(qQ(-q,-360,360)),sweep:N(qQ(-J,-360,360)),stroke:qQ(V??3,0.1,128)}}},group:{args:[\"x\",\"y\",\"scale\",\"shapes\"],prompt:null,draw:()=>null},image:{args:[\"x\",\"y\",\"w\",\"h\",\"image\"],color:!1,prompt:null,draw:({x:Q,y:Z,w:$,h:q,image:J})=>$>0&&q>0&&s([Q,Z,Q+$,Z+q])?{type:\"image\",id:J,x:Q,y:Z,width:$,height:q}:null}},zZ={visible:{kind:\"test\",prompt:\"\"},stroke:{kind:\"boolean\",prompt:\"\"},smooth:{kind:\"boolean\",prompt:null},closed:{kind:\"boolean\",prompt:null},gradient:{kind:\"color\",prompt:\"\"},radial:{kind:\"number\",prompt:\"\"},glow:{kind:\"boolean\",prompt:\"\"},opacity:{kind:\"number\",prompt:\"\"},turn:{kind:\"number\",prompt:\"\"},align:{kind:\"text\",prompt:null},radius:{kind:\"number\",prompt:null},width:{kind:\"number\",prompt:null},size:{kind:\"number\",prompt:null}};function cQ(Q){let{type:Z,x:$,y:q,radius:J,width:V,height:K,x2:W,y2:H,points:j,segments:z}=Q;if(Z===\"circle\")return{x:$-J,y:q-J,w:2*J,h:2*J};if(Z===\"line\")return{x:Math.min($,W),y:Math.min(q,H),w:Math.abs(W-$),h:Math.abs(H-q)};let P=j??(z?z.flatMap((C)=>[[C.x,C.y],[C.cx1,C.cy1],[C.cx2,C.cy2]]).filter(([C])=>C!==void 0):null);if(P){let C=P.map(([Y])=>Y),G=P.map(([,Y])=>Y),U=Math.min(...C),F=Math.min(...G);return{x:U,y:F,w:Math.max(...C)-U,h:Math.max(...G)-F}}return{x:$,y:q,w:V??0,h:K??0}}var AQ={Column:[\"children\"],Row:[\"children\"],Card:[\"children\"],Section:[\"title\",\"children\"],Text:[\"text\"],Heading:[\"text\"],Metric:[\"label\",\"value\"],Emoji:[\"value\",\"label\"],Badge:[\"value\"],Grid:[\"children\"],Progress:[\"value\",\"max\",\"label\"],Ring:[\"value\",\"max\",\"text\",\"label\"],Divider:[],Notice:[\"text\"],Button:[\"label\",\"action\"],IconButton:[\"icon\",\"action\",\"label\"],TextField:[\"label\",\"bind\"],NumberField:[\"label\",\"bind\"],Slider:[\"label\",\"bind\"],RangeSlider:[\"label\",\"bind\"],Toggle:[\"label\",\"bind\"],CheckBox:[\"label\",\"bind\"],Segmented:[\"label\",\"bind\",\"options\"],Select:[\"label\",\"bind\",\"options\"],List:[\"items\",\"template\",\"group\"],Chart:[\"items\",\"point\",\"value\",\"label\",\"bind\"],Table:[\"label\",\"heads\",\"rows\",\"bind\",\"column\",\"signs\"],Tabs:[\"titles\",\"groups\",\"label\"],Dialog:[\"title\",\"children\"],DateField:[\"label\",\"bind\"],TimeField:[\"label\",\"bind\"],Picture:[\"text\",\"found\"],Choices:[\"label\",\"bind\",\"options\"],Timer:[\"label\",\"seconds\"],Drawing:[\"label\",\"width\",\"height\",\"shapes\"],Model3d:[\"label\",\"bodies\",\"bind\",\"exploded\",\"selected\"],Link:[\"label\",\"url\",\"text\"]},YZ={ArrowUp:\"Arrow\",ArrowDown:\"Sort\",ArrowLeft:\"Back\",ArrowRight:\"Chevron\",Edit:\"Pencil\"},aZ=new Set([\"visible\",\"enabled\",\"variant\",\"tone\",\"emphasis\",\"weight\",\"min\",\"max\",\"step\",\"empty\",\"placeholder\",\"gap\",\"selected\",\"kind\",\"size\",\"align\",\"columns\",\"icon\",\"fit\"]),oZ=new Set([\"set\",\"toggle\",\"inc\",\"dec\",\"append\",\"remove\",\"clear\",\"when\",\"move\",\"flip\",\"animate\"]),nZ={box:{args:[\"part\",\"x\",\"y\",\"z\",\"w\",\"h\",\"d\"]},cylinder:{args:[\"part\",\"x\",\"y\",\"z\",\"radius\",\"length\",\"axis\"]}},tZ=new Set([\"text\",\"part\",\"axis\",\"image\"]),HQ={ink:\"#0f172a\",muted:\"#94a3b8\",accent:null,surface:\"#ffffff\",water:\"#38bdf8\",land:\"#65a30d\",sun:\"#facc15\",sand:\"#e7d3a8\",wood:\"#a16207\",success:\"#16a34a\",warning:\"#ea580c\",error:\"#dc2626\"},CQ=/^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,lQ=new RegExp(`^(${Object.keys(HQ).join(\"|\")})([+-][123])?(?:@(\\\\d{1,2}|100))?$`);var FZ=200000,eZ=20000,Q0=4096,YQ=(Q,Z=0)=>{let $=10**Z;return Math.round((Q+Number.EPSILON)*$)/$},LQ=(Q)=>Array.isArray(Q)?Q.map(LQ):Q&&typeof Q===\"object\"?Object.fromEntries(Object.entries(Q).map(([Z,$])=>[Z,LQ($)])):Q;function iQ(Q){let Z=[\"x\",\"y\",\"z\"].map(($)=>Q.reduce((q,J)=>q+J[$],0)/(Q.length||1));return Q.map(($)=>$.part?{...$,...Object.fromEntries([\"x\",\"y\",\"z\"].map((q,J)=>[q,YQ($[q]+($[q]-Z[J])/2,2)]))}:$)}var UZ={de:\".,\",es:\".,\",it:\".,\",pt:\".,\",tr:\".,\",ru:\" ,\",fr:\" ,\",pl:\" ,\",uk:\" ,\"};function TQ(Q,Z,$,q){let[J,V]=Object.hasOwn(UZ,Q)?UZ[Q]:\",.\",K=Number(Z).toFixed($),W=/^-?(\\d+)\\.?(\\d*)$/.exec(K);if(!W)return K;let[,H,j]=W,z=q?j.replace(/0+$/,\"\"):j;return(Number(K)<0?\"-\":\"\")+(H.length<5&&/^(es|pl|pt)$/.test(Q)?H:H.replace(/\\B(?=(\\d{3})+$)/g,J))+(z?V+z:\"\")}var Z0={fixed:(Q,Z,$=2)=>TQ(Q,Z,$),money:(Q,Z,$=\"\")=>$+TQ(Q,Z,/^(ja|ko)$/.test(Q)?0:2),percent:(Q,Z,$=0)=>TQ(Q,Z,$)+\"%\",amount:(Q,Z,$=0)=>typeof Z==\"number\"?TQ(Q,YQ(Z,$),$,!0):Z},$0={round:YQ,floor:Math.floor,ceil:Math.ceil,abs:Math.abs,sin:(Q)=>YQ(Math.sin(Q*Math.PI/180),12)+0,cos:(Q)=>YQ(Math.cos(Q*Math.PI/180),12)+0,pow:Math.pow,sqrt:Math.sqrt,exp:Math.exp,ln:Math.log,log10:Math.log10,min:(...Q)=>Q.flat(3).length?Math.min(...Q.flat(3)):0,max:(...Q)=>Q.flat(3).length?Math.max(...Q.flat(3)):0,clamp:(Q,Z,$)=>Math.min($,Math.max(Z,Q)),len:(Q)=>Q==null?0:Q.length,text:(Q)=>String(Q??\"\"),number:(Q)=>Number(Q)||0,pad2:(Q)=>String(Math.floor(Q)).padStart(2,\"0\"),join:(Q,Z=\", \")=>{let $=Q||[];if($.length*String(Z).length>FZ)throw new R(\"\");return $.join(Z)},upper:(Q)=>String(Q).toUpperCase(),lower:(Q)=>String(Q).toLowerCase(),at:(Q,Z)=>Array.isArray(Q)?Q[Z]??null:null,streak:(Q)=>(Q??[]).reduce(([Z,$],q)=>q?[Math.max(Z,$+1),$+1]:[Z,0],[0,0])[0],near:(Q,Z)=>Math.abs(Q-Z)<=Math.max(0.01,Math.abs(Z)/1000),trim:(Q)=>String(Q).trim(),contains:(Q,Z)=>String(Q).toLowerCase().includes(String(Z).toLowerCase()),has:(Q,Z)=>Array.isArray(Q)&&Q.includes(Z),hours:(Q,Z)=>{let[$,q]=[Q,Z].map(dQ);return $===null||q===null?0:(q-$+1440)%1440/60},today:()=>{let Q=new Date(GQ.now());return`${Q.getFullYear()}-${String(Q.getMonth()+1).padStart(2,\"0\")}-${String(Q.getDate()).padStart(2,\"0\")}`},split:(Q,Z=\",\")=>String(Q??\"\").split(String(Z)||\",\").map(($)=>$.trim()).filter(Boolean),weekday:(Q)=>{let Z=VQ(Q);return Z===null?0:(new Date(Z*86400000).getUTCDay()+6)%7+1},month:(Q)=>VQ(Q)===null?0:Number(String(Q).trim().slice(5,7)),year:(Q)=>VQ(Q)===null?0:Number(String(Q).trim().slice(0,4)),days:(Q,Z)=>{let[$,q]=[VQ(Q),VQ(Z)];return $===null||q===null?0:q-$},addDays:(Q,Z)=>{let $=VQ(Q);return $===null?null:new Date(($+Math.round(Number(Z)||0))*86400000).toISOString().slice(0,10)}};function VQ(Q){let Z=/^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(String(Q??\"\").trim());if(!Z)return null;let $=Date.UTC(Number(Z[1]),Number(Z[2])-1,Number(Z[3])),q=new Date($);return q.getUTCMonth()===Number(Z[2])-1&&q.getUTCDate()===Number(Z[3])?$/86400000:null}function dQ(Q){let Z=/^(\\d{1,2}):(\\d{2})$/.exec(String(Q??\"\").trim());return Z&&Number(Z[1])<24&&Number(Z[2])<60?Number(Z[1])*60+Number(Z[2]):null}var jZ=(Q,Z)=>Array.isArray(Q)&&Array.isArray(Z)?Q.reduce(($,q,J)=>$||jZ(q,Z[J]),0):Q<Z?-1:Q>Z?1:0,q0={count:(Q,Z)=>Z?Q.filter(Z).length:Q.length,sum:(Q,Z)=>Q.reduce(($,q)=>$+Number(Z?Z(q):q),0),avg:(Q,Z)=>Q.length?Q.reduce(($,q)=>$+Number(Z?Z(q):q),0)/Q.length:0,filter:(Q,Z)=>Q.filter(Z),any:(Q,Z)=>Q.some(Z),all:(Q,Z)=>Q.every(Z),map:(Q,Z)=>Q.map(Z),find:(Q,Z)=>Q.find(Z)??null,sort:(Q,Z,$)=>[...Q].sort((q,J)=>jZ(Z(q),Z(J))*($===\"desc\"?-1:1)),groups:(Q,Z,$)=>{if(!Z)throw new R(\"\");let q=new Map;for(let J of Q)q.set(Z(J),(q.get(Z(J))??0)+Number($?$(J):1));return[...q].map(([J,V])=>({key:J,value:V}))}};function pQ(Q,Z){if(Q===Z)return!0;if(typeof Q!==\"object\"||typeof Z!==\"object\"||!Q||!Z||Array.isArray(Q)!==Array.isArray(Z))return!1;let $=(q)=>Object.keys(q).filter((J)=>J!==\"id\");return $(Q).length===$(Z).length&&$(Q).every((q)=>pQ(Q[q],Z[q]))}var J0=(Q)=>Q.rest&&Q.rest.v!==0||Q.rounds&&Q.rounds.v!==1,sQ=(Q)=>Q.named.alert?.v===!0&&!J0(Q.named),V0=(Q)=>Q.of(\"need\").filter((Z)=>Z.tree.name===\"entries\"&&Z.tree.named?.show?.k===\"map\").flatMap((Z)=>Z.tree.named.show.entries),m=(Q,Z)=>Object.hasOwn(Q,Z)?Q[Z]:void 0,BZ=12,rQ=(Q)=>({...Object.fromEntries((m(AQ,Q.name)??[]).map((Z,$)=>[Z,Q.args[$]])),...Q.named});class aQ{constructor(Q,Z=!0){if(this.file=Q,this.faults=[],this.nextId=1,this.state={},this.seen=new Map,this.steps=0,this.tripped=!1,Z)this.follow()}follow(){for(let Q of this.file.of(\"state\")){if(this.seen.get(Q.key)===Q.raw)continue;this.seen.set(Q.key,Q.raw),this.write(this.pathOf(Q.key),this.attempt(Q,()=>LQ(this.value(Q.tree,{}))),{})}this.tagRows(this.state),this.recompute()}fault(Q,Z){this.faults.push({where:Q,message:Z})}step(Q=1){if((this.steps+=Q)>FZ||this.tripped)this.stop(\"\")}stop(Q){throw this.tripped=!0,new R(Q)}charge(Q){if(typeof Q===\"string\")this.step(Q.length>>4);else if(Q&&typeof Q===\"object\"){this.step();for(let Z of Object.values(Q))this.charge(Z)}return Q}attempt(Q,Z){try{return Z()}catch($){return this.fault(Q.key,$.message),null}}pathOf(Q){return{k:\"path\",abs:!0,segs:Q.slice(2).split(\"/\")}}tagRows(Q){if(Array.isArray(Q))Q.forEach((Z)=>{if(Z&&typeof Z===\"object\"&&!Array.isArray(Z))Z.id??=\"r\"+this.nextId++,this.tagRows(Z)});else if(Q&&typeof Q===\"object\")Object.values(Q).forEach((Z)=>this.tagRows(Z))}read(Q,Z){let $=Q.abs?this.state:Z.it;for(let q of Q.segs)$=$==null?void 0:m($,q);return $}place(Q,Z){if(Q.k===\"path\"){let q=Q.abs?this.state:Z.it;if(q==null)throw new R(\"\");if(typeof q!==\"object\")throw new R(\"\");for(let J of Q.segs.slice(0,-1))q=m(q,J)??(q[J]={});return[q,Q.segs.at(-1)]}if(Q.k!==\"field\"&&Q.k!==\"index\")throw new R(\"\");let $=this.value(Q.of,Z);if($==null||typeof $!==\"object\")throw new R(\"\");return[$,Q.k===\"field\"?Q.name:this.value(Q.at,Z)]}write(Q,Z,$){let[q,J]=this.place(Q,$);q[J]=Z}value(Q,Z){switch(this.step(),Q.k){case\"lit\":return Q.v;case\"path\":if(!Q.abs&&Q.segs[0]===\"it\")return Q.segs.slice(1).reduce(($,q)=>$==null?void 0:m($,q),Z.it);if(!Q.abs&&Z.each!==void 0&&Q.segs.join()===\"index\"&&!(Z.it&&typeof Z.it===\"object\"&&Object.hasOwn(Z.it,\"index\")))return Z.each;if(!Q.abs&&Z.it===void 0)throw new R(\"\");if(!Q.abs&&Z.it!==void 0&&(Z.it===null||typeof Z.it!==\"object\"))throw new R(\"\");if(!Q.abs&&Z.it&&!Object.hasOwn(Z.it,Q.segs[0])){let $=Q.segs[0];if(this.shown??=Object.fromEntries(V0(this.file)),Q.segs.length===1&&m(this.shown,$)&&!Z.busy?.includes($))return this.value(this.shown[$],{...Z,busy:[...Z.busy??[],$]});throw new R(\"\")}return this.read(Q,Z);case\"list\":return this.charge(Q.items.map(($)=>this.value($,Z)));case\"map\":return this.charge(Object.fromEntries(Q.entries.map(([$,q])=>[$,this.value(q,Z)])));case\"field\":{let $=this.value(Q.of,Z);return $==null?void 0:m($,Q.name)}case\"index\":{let $=this.value(Q.of,Z);return Array.isArray($)?m($,this.value(Q.at,Z))??null:null}case\"un\":return Q.op===\"-\"?-this.value(Q.arg,Z):!this.value(Q.arg,Z);case\"if\":return this.value(Q.test,Z)?this.value(Q.yes,Z):this.value(Q.no,Z);case\"bin\":{if(Q.op===\"&&\")return this.value(Q.left,Z)&&this.value(Q.right,Z);if(Q.op===\"||\")return this.value(Q.left,Z)||this.value(Q.right,Z);let $=this.value(Q.left,Z),q=this.value(Q.right,Z);switch(Q.op){case\"+\":return this.charge(Array.isArray($)&&Array.isArray(q)?[...$,...q]:typeof $===\"string\"||typeof q===\"string\"?String($??\"\")+String(q??\"\"):$+q);case\"-\":return $-q;case\"*\":return $*q;case\"/\":return $/q;case\"%\":return $%q;case\"==\":return pQ($,q);case\"!=\":return!pQ($,q);case\"<\":return $<q;case\"<=\":return $<=q;case\">\":return $>q;case\">=\":return $>=q}break}case\"call\":{if(Q.name===\"if\")return this.value(Q.args[0],Z)?this.value(Q.args[1],Z):this.value(Q.args[2],Z);let $=m(q0,Q.name),q=m($0,Q.name),J=m(Z0,Q.name);if($){let V=this.value(Q.args[0],Z);if(!Array.isArray(V))throw new R(\"\");let K=(W)=>W&&((H)=>this.value(W,{...Z,it:H}));return this.charge($(V,K(Q.args[1]),Q.name===\"groups\"?K(Q.args[2]):Q.args[2]&&this.value(Q.args[2],Z)))}if(q)return this.charge(q(...Q.args.map((V)=>this.value(V,Z))));if(J)return this.charge(J(this.file.get(\"app\")?.tree.named.lang?.v,...Q.args.map((V)=>this.value(V,Z))));if(m(AQ,Q.name))throw new R(\"\");throw new R(\"\")}case\"ref\":throw new R(\"\")}throw new R(\"\")}drawn(Q,Z,$,q){if(this.step(),$.k===\"list\")return $.items.flatMap((U)=>this.drawn(Q,Z,U,q));let{name:J=\"\",args:V=[],named:K={}}=$.k===\"call\"?$:{};if(J===\"each\"&&V.length===2){let U=this.value(V[0],q),F=Array.isArray(U)?U:Number.isInteger(U)&&U>=0&&U<=500?Array.from({length:U},(Y,X)=>X):null;if(!F)throw new R(\"\");return F.flatMap((Y,X)=>this.drawn(Q,Z,V[1],{...q,it:Y,each:X}))}let W=Object.hasOwn(Q,J)?Q[J].args:null;if(!W)throw new R(\"\");let H=Q[J].last,j=W.at(-1)!==\"shapes\"&&Q[J].color!==!1,z=\"\";if(V.length<W.length||V.length>W.length+(H?2:j?1:0))throw new R(\"\");if(K.visible&&!this.value(K.visible,q))return[];let P=(U,F)=>{if(U===null||U===\"\"||typeof U===\"boolean\"||!Number.isFinite(Number(U)))throw new R(\"\");return YQ(Number(U),2)},C=(U,F)=>{return String(U??\"ink\")},G={[Z]:J};if(W.forEach((U,F)=>{if(U===\"shapes\"){G.shapes=this.drawn(Q,Z,V[F],q);return}let Y=this.value(V[F],q);G[U]=tZ.has(U)?String(Y??\"\"):U===\"points\"?[Y].flat().map((X)=>P(X,U)):P(Y,U)}),G.axis!==void 0&&![\"x\",\"y\",\"z\"].includes(G.axis))throw new R(\"\");if(j)G.color=C(V[W.length]?this.value(V[W.length],q):null,\"color\");if(V.length===W.length+2)G[H]=P(this.value(V[W.length+1],q),H);for(let[U,F]of Object.entries(K)){let Y=Z===\"shape\"||[\"radius\",\"width\",\"size\",\"stroke\"].includes(U)?zZ[U]:void 0;if(U===\"visible\")continue;if(!Y)throw new R(\"\");let X=this.value(F,q);if(Y.kind===\"boolean\"){if(X)G[U]=!0}else G[U]=Y.kind===\"color\"?C(X,U):Y.kind===\"text\"?String(X??\"\"):P(X,U)}if(++this.shapes>Q0)this.stop(\"\");return[G]}recompute(){let Q=this.file.of(\"formula\");for(let Z=0;Z<=Q.length;Z++){let $=JSON.stringify(this.state);for(let q of Q){if(this.tripped)return;this.attempt(q,()=>this.write(this.pathOf(q.key),this.value(q.tree,{}),{}))}if(JSON.stringify(this.state)===$)return}}act(Q,Z={}){for(let $ of Q.k===\"list\"?Q.items:[Q]){if($.k!==\"call\"||!oZ.has($.name))throw new R(\"\");let[q,J]=$.args;if($!==(Q.k===\"list\"?Q.items[0]:Q))this.recompute();let V=()=>{if(![\"path\",\"field\",\"index\"].includes(q?.k))throw new R(\"\");return q},K=(W)=>{let H=this.value(W,Z);if(!Array.isArray(H))throw new R(\"\");return H};switch($.name){case\"set\":this.write(V(),LQ(this.charge(this.value(J,Z))),Z);break;case\"toggle\":this.write(V(),!this.value(V(),Z),Z);break;case\"inc\":this.write(V(),this.charge((this.value(V(),Z)||0)+(J?this.value(J,Z):1)),Z);break;case\"dec\":this.write(V(),(this.value(V(),Z)||0)-(J?this.value(J,Z):1),Z);break;case\"clear\":this.write(V(),[],Z);break;case\"flip\":{let W=K(V()),H=this.charge(this.value(J,Z));this.write(V(),W.includes(H)?W.filter((j)=>j!==H):[...W,H],Z);break}case\"move\":{let W=$.args.length===1;if(W&&!Z.list)throw new R(\"\");let H=W?this.read(Z.list,{}):K(V()),j=W?H.indexOf(Z.it):H.findIndex((P)=>this.value(J,{...Z,it:P})),z=j+this.value(W?q:$.args[2],Z);if(j>=0&&z>=0&&z<H.length)H.splice(z,0,H.splice(j,1)[0]);break}case\"when\":if(this.value(q,Z))this.act(J,Z);else this.recompute();break;case\"animate\":{if(q?.k!==\"path\"||!q.abs)throw new R(\"\");let W=q.segs.join(\"/\"),H=Number(this.value(q,Z))||0,j=J?Number(this.value(J,Z)):NaN,z=$.args[2]?Number(this.value($.args[2],Z)):0;if(!Number.isFinite(j)||!Number.isFinite(z))throw new R(\"\");let P=(this.state._run??[]).filter((G)=>G.path!==W),C=GQ.now();if(z>0&&j!==H)P.push({path:W,from:H,to:j,start:C,end:C+z,at:H});else this.write(q,j,Z);if(P.length)this.state._run=P;else delete this.state._run;break}case\"append\":{let W=LQ(this.charge(this.value(J,Z)));K(V()).push(W),this.tagRows([W]);break}case\"remove\":{if(!q){if(!Z.list)throw new R(\"\");this.write(Z.list,this.read(Z.list,{}).filter((W)=>W!==Z.it),{})}else this.write(V(),K(V()).filter((W)=>!this.value(J,{...Z,it:W})),Z);break}}}this.recompute()}tree(Q=!1){this.reached=new Set;let Z=0,$=0,q=(V,K,W,H,j)=>{if(this.step(),++$>eZ)this.stop(\"\");if(H>40)throw new R(\"\");if(V.k===\"ref\"){let G=this.file.get(V.name);if(this.reached.add(V.name),!G||G.kind!==\"component\")return{type:\"Missing\",name:V.name,props:{},children:[]};return q(G.tree,K,V.name,H+1,[...j,V.name])}if(V.k!==\"call\"||!m(AQ,V.name))return this.fault(W??\"?\",\"\"),{type:\"Missing\",name:W,props:{},children:[]};let z={type:V.name,name:W,props:{},children:[],row:K.it,rowIndex:K.index,list:K.list,call:V},P=rQ(V),C=[];for(let[G,U]of Object.entries(P)){if(U===void 0)continue;if(!AQ[V.name].includes(G)&&!aZ.has(G)&&!(G===\"action\"&&P.bind)){this.fault(W??V.name,\"\");continue}if(V.name===\"Chart\"&&(G===\"point\"||G===\"value\")||V.name===\"List\"&&G===\"group\"||G===\"shapes\"||G===\"bodies\")continue;try{if(G===\"children\")z.children=(U.k===\"list\"?U.items:[U]).map((Y)=>q(Y,K,void 0,H+1,j));else if(G===\"groups\")C=U.k===\"list\"?U.items:[U];else if(G===\"action\")z.props.action=U;else if(G===\"bind\"){if(![\"path\",\"field\",\"index\"].includes(U.k))throw new R(\"\");z.props.bind=U,z.props.value=U.k===\"path\"?this.read(U,K):this.value(U,K)}else if(G===\"template\")z.template=U;else z.props[G]=this.value(U,K);let F=z.props.options;if(G===\"options\"&&F&&typeof F===\"object\"&&!Array.isArray(F))[z.props.options,z.props.labels]=[Object.keys(F),Object.values(F)]}catch(F){this.fault(W??V.name,\"\")}}if(V.name===\"Chart\"){try{z.props.points=(Array.isArray(z.props.items)?z.props.items:[]).map((G)=>({label:P.point?this.value(P.point,{...K,it:G}):\"\",value:Number(P.value?this.value(P.value,{...K,it:G}):G)||0}))}catch(G){this.fault(W??V.name,\"\")}delete z.props.items}if(V.name===\"Drawing\"||V.name===\"Model3d\"){let G=V.name===\"Drawing\"?\"shapes\":\"bodies\",U=P[G]??{k:\"list\",items:[]};if(this.shapes=0,z.props[G]=(U.k===\"list\"?U.items:[U]).flatMap((F)=>{try{return this.drawn(G===\"shapes\"?RQ:nZ,G===\"shapes\"?\"shape\":\"body\",F,K)}catch(Y){return this.fault(W??V.name,\"\"),[]}}),G===\"bodies\"&&z.props.exploded)z.props.bodies=iQ(z.props.bodies)}if(V.name===\"Choices\"){let G=Array.isArray(z.props.value)?z.props.value:[],U=z.props.max!==void 0&&G.length>=z.props.max;z.children=(z.props.options??[]).map((F,Y)=>({type:\"Button\",name:W&&`${W}_opt${Y}`,children:[],props:{label:String(z.props.labels?.[Y]??F),selected:G.includes(F),enabled:G.includes(F)||!U,action:{k:\"call\",name:\"flip\",args:[P.bind,{k:\"lit\",v:F}],named:{}}}}))}if(V.name===\"Tabs\"){let G={k:\"path\",abs:!0,segs:[\"_ui\",W??\"tabs\"+Z++]},U=this.read(G,{})??0;z.props.value=U,z.children=[{type:\"Row\",props:{},children:(z.props.titles??[]).map((F,Y)=>({type:\"Button\",name:W&&`${W}_tab${Y}`,tab:!0,children:[],props:{label:F,selected:Y===U,action:{k:\"call\",name:\"set\",args:[G,{k:\"lit\",v:Y}],named:{}}}}))},...C.map((F,Y)=>({type:\"Column\",props:{visible:Y===U},children:(F.k===\"list\"?F.items:[F]).map((X)=>q(X,K,void 0,H+1,j))}))]}if(V.name===\"List\"&&z.template&&Array.isArray(z.props.items)){let G=(X,I=0)=>{if(!X||I>8)return null;if(X.k===\"call\"&&[\"sort\",\"filter\"].includes(X.name))return G(X.args[0],I+1);if(X.k===\"if\")return G(X.yes,I+1)??G(X.no,I+1);if(X.k!==\"path\")return null;let T=X.abs?this.file.get(\"$/\"+X.segs.join(\"/\")):null;return T?.kind===\"formula\"?G(T.tree,I+1):X},U=G(P.items),F=z.props.items,Y=[];if(P.group)try{let X=F.map((T)=>this.value(P.group,{...K,it:T})),I=[...new Set(X)].flatMap((T)=>F.map((v,h)=>[v,T,h]).filter((v)=>X[v[2]]===T));F=I.map((T)=>T[0]),Y=I.map((T,v)=>v===0||I[v-1][1]!==T[1]?[{type:\"Heading\",props:{text:String(T[1]??\"\")},children:[]}]:[])}catch(X){this.fault(W??V.name,\"\")}z.children=F.flatMap((X,I)=>[...Y[I]??[],q(z.template,{it:X,index:I,list:U},void 0,H+1,j)]),z.source=U,z.blank=(X)=>q(z.template,{it:X,index:0,list:U},void 0,H+1,j)}return z},J=this.file.get(\"root\");if(!J)return{type:\"Missing\",name:\"root\",props:{},children:[]};try{return q(J.tree,{},\"root\",0,[\"root\"])}catch(V){return this.fault(\"root\",V.message),{type:\"Missing\",name:\"root\",props:{},children:[]}}}find(Q,Z){let $=(q)=>q.name===Q&&(Z===void 0||q.rowIndex===Z)?q:q.children.reduce((J,V)=>J??$(V),null);return $(this.tree())}tick(){let Q=GQ.now(),Z=this.state;if(Z._run){if(Z._run=Z._run.filter(($)=>{let q=this.pathOf(\"$/\"+$.path);if(this.read(q,{})!==$.at)return!1;return $.at=Q>=$.end?$.to:$.from+($.to-$.from)*Math.max(0,Q-$.start)/($.end-$.start),this.write(q,$.at,{}),Q<$.end}),!Z._run.length)delete Z._run;this.recompute()}for(let $ of this.file.of(\"need\")){if($.tree.name!==\"timer\"||sQ($.tree))continue;let q=$.key,J=(K,W)=>{try{return Number(K?this.value(K,{}):W)||0}catch{return 0}},V=()=>Number(Z[q+\"_phase\"])||0;if(!Z[q+\"_on\"]){Z[q+\"_end\"]=0;continue}if(!Z[q+\"_end\"])Z[q+\"_end\"]=Q+Math.max(0,V()-Z[q+\"_spent\"])*1000;for(let K=0;Z[q+\"_on\"]&&Q>=Z[q+\"_end\"]&&K<1000;K++){let W=$.tree.named,H=Z[q+\"_end\"],j=J(W.rounds,1),z=Z[q+\"_round\"]>=j;if(!Z[q+\"_resting\"])Z[q]+=1;if(!Z[q+\"_resting\"]&&(!z||j<=1||W.cycle?.v===!0)&&J(W.rest,0)>0)Z[q+\"_resting\"]=!0,Z[q+\"_spent\"]=0;else if(z)Z[q+\"_over\"]=!0,Z[q+\"_on\"]=!1,Z[q+\"_spent\"]=V(),Z[q+\"_end\"]=0;else Z[q+\"_round\"]+=1,Z[q+\"_resting\"]=!1,Z[q+\"_spent\"]=0;if(this.recompute(),Z[q+\"_on\"])Z[q+\"_end\"]=H+V()*1000}if(Z[q+\"_on\"])Z[q+\"_spent\"]=Math.max(0,V()-(Z[q+\"_end\"]-Q)/1000);this.recompute()}}change(Q,Z){this.tick();try{if(this.write(Q.props.bind,Z,{it:Q.row}),Q.props.action)this.act(Q.props.action,{it:Q.row,list:Q.list});else this.recompute()}catch($){return this.failed(Q,$)}return this.tick(),\"\"}fire(Q){if(Q.props.enabled===!1||Q.props.visible===!1)return`${Q.name??Q.type} is not active`;this.tick();try{this.act(Q.props.action,{it:Q.row,list:Q.list})}catch(Z){return this.failed(Q,Z)}return this.tick(),\"\"}failed(Q,Z){return`${Q.name??Q.type}: ${Z.message}`}input(Q,Z,$){this.steps=0;let q=this.find(Q,$);if(q?.props.bind)return this.change(q,Z);return(!q?`no field named ${Q}`:q.props.action?`${Q} is not a field: use tap(${Q})`:`${Q} only shows a value and cannot be set. A check sets a field, such as a NumberField`)+($===void 0?\"\":` in row ${$}`)}press(Q,Z){this.steps=0;let $=this.find(Q,Z);if($?.props.action)return this.fire($);return($?.props.bind?`${Q} is a field with no action: use set(${Q}, value)`:`no control named ${Q}`)+(Z===void 0?\"\":` in row ${Z}`)}}var GQ={gate:\"smoke\",now:()=>Date.now()};var K0=/^[A-Za-z][A-Za-z0-9_]{0,47}$/,W0=new Set([\"__proto__\",\"prototype\",\"constructor\"]);var IQ=100,G0={time:\"number\",date:\"string\"},H0=(Q)=>K0.test(Q)&&!W0.has(Q)&&!/^[dv]\\d*$/.test(Q);function oQ(Q={},Z=new Set(Object.values(Q))){let $=new Map,q=0;return(J,V=J)=>{if($.has(J))return $.get(J);let K=Object.hasOwn(Q,J)?Q[J]:V;if(!Object.hasOwn(Q,J)&&(!H0(K)||Z.has(K))){while(Z.has(\"f\"+q))q++;K=Q[J]=\"f\"+q}return $.set(J,K),Z.add(K),K}}var FQ=(Q)=>Q.replaceAll(\":\",\"_\"),PZ=(Q)=>String(Q).padStart(2,\"0\"),DQ=(Q)=>{let Z=Math.min(1439,Math.max(0,Math.round(Number(Q)||0)));return`${PZ(Math.floor(Z/60))}:${PZ(Z%60)}`},XZ=2048,t=(Q,Z,$)=>Q===\"time\"?dQ(Z)??0:Q===\"date\"?VQ(Z)===null?$:String(Z).trim():Q===\"number\"?Number.isFinite(Z)?Math.min(Number.MAX_SAFE_INTEGER,Math.max(-Number.MAX_SAFE_INTEGER,Z)):0:Q===\"boolean\"?Z===!0:(Z===null||Z===void 0||typeof Z===\"object\"?\"\":String(Z)).slice(0,XZ),nQ=(Q,Z,$)=>({id:String(Q?.id??\"\"),...Object.fromEntries(Z.map(([q,J,V])=>[J,t(V,Q?.[q],$)]))}),SQ=(Q)=>Q?.k===\"path\"&&!Q.abs&&Q.segs.length===1?Q.segs[0]:null;function LZ(Q,Z,$,q,J,V,K){let{kit:W,name:H,walk:j,day:z,fields:P,lists:C,views:G,viewSchemas:U,viewOwners:F,listRoots:Y}=Q,X=Z.source,I=X?.k===\"path\"&&X.abs&&X.segs.length===1&&C[X.segs[0]]?X.segs[0]:null;if(!I||!Z.blank)return V.fault(\"\"),null;let T=C[I],v=oQ();v(\"$id\",\"id\"),T.forEach(([M,S])=>v(\"$\"+M,S));let h={key:$,name:v,stored:new Map(T.map(([M,S,y])=>[M,[S,y]])),computed:new Map,flags:{moves:!1},out:null,id:null},u={id:\"\",...Object.fromEntries(T.map(([M,,S])=>[M,S===\"number\"?0:S===\"boolean\"?!1:\"\"]))},n=(M)=>M.name??`${$}:row`,QQ=Z.blank(u),KQ=j(QQ,n(QQ),q,{scope:h,weighted:!1}),r=J.group,WQ=h.stored.get(SQ(r)),a=r?WQ&&WQ[1]!==\"time\"?WQ[0]:v(\"~group\",\"group\"):null;if(r&&!(WQ&&WQ[1]!==\"time\"))h.computed.set(a,\"string\");let _Q=(M)=>M?.k===\"path\"?M.abs&&M.segs.length===1&&M.segs[0]===I:M?.k===\"call\"&&M.name===\"filter\"&&_Q(M.args[0]),zQ=h.flags.moves,ZQ=zQ?v(\"~label\",\"label\"):null;if(ZQ)h.computed.set(ZQ,\"string\");let kQ=Z.children.filter((M)=>M.row).map((M)=>{let S={};if(j(M,n(M),q,{scope:{...h,out:S,id:String(M.row.id??\"\")},weighted:!1,off:V.off}),h.computed.has(a))try{S[a]=t(\"string\",W.value(r,{it:M.row}))}catch{S[a]=\"\"}if(ZQ)S[ZQ]=(T.filter(([,,y])=>y===\"string\").map(([y])=>t(\"string\",M.row[y]).trim()).find(Boolean)??String(M.row.id)).slice(0,300);return{...nQ(M.row,T,z),...S}}),mQ=!(J.items?.k===\"path\"&&_Q(J.items))||h.computed.size>0,B=mQ?H(\"view:\"+$,FQ($)):P.get(I);if(mQ){let M={id:\"string\",...Object.fromEntries(T.map(([,y,x])=>[y,m(G0,x)??x])),...Object.fromEntries(h.computed)},S=Object.keys(M).length;G[B]=kQ,U[B]={type:\"list\",maxItems:IQ,fields:M},F.push(q)}let O=zQ&&V.action((M)=>{let S=W.read(X,{}),y=S.findIndex((b)=>b.id===M?.sourceKey),x=S.findIndex((b)=>b.id===M?.destinationKey);return y<0||x<0?!1:W.fire({props:{action:{k:\"call\",name:\"move\",args:[{k:\"lit\",v:x-y}],named:{}}},row:S[y],list:X})},\"_move\"),f={type:a?\"groupedList\":\"list\",text:V.caption(K),bind:B,...a&&{groupBy:a},...Z.props.empty&&{emptyText:V.plain(Z.props.empty).slice(0,300)},...O&&{reorder:{action:O,labelField:ZQ}},rowTemplate:KQ};return Y.set(f,I),f}var o={width:1024,height:64},eQ=(Q)=>Math.min(2048,Math.max(64,Math.round(Number(Q))||0)),CZ={commands:512,pairs:2048,chars:2048,bytes:32768,segments:512,stops:128},z0={ink:\"default\",muted:\"muted\",accent:\"accent\",success:\"success\",warning:\"warning\",error:\"error\",surface:\"surface\"},RZ=Object.fromEntries(Object.keys(HQ).map((Q)=>[Q,z0[Q]??HQ[Q]])),gQ=(Q,Z,$)=>Math.min($,Math.max(Z,Q));function tQ(Q,Z=RZ,$=1){let[,q,J=\"\",V=\"100\"]=lQ.exec(Q)??[],K=Math.round(gQ(Number(V)*$,0,100)),W=q?Z[q]:CQ.test(Q)?Q:\"default\";if(!CQ.test(W)||!J&&K===100)return J||K<100?`${W}${J}${K<100?`@${K}`:\"\"}`:W;let[H,...j]=QZ(W),z=Number(J)>0,P=z?0.3*Number(J):-0.25*Number(J),C=j.map((G)=>vQ(G+((z?255:0)-G)*P)).join(\"\");return H===255&&K===100?`#${C}`:`#${vQ(H*K/100)}${C}`}var U0=(Q)=>{let Z=0;for(let $ of Q){let q=$.codePointAt(0);Z+=q<128?1:q<2048?2:q<65536?3:4}return Z},wQ=(Q)=>U0(JSON.stringify(Q).replace(/\\//g,\"\\\\/\")),Y0=(Q,Z,$)=>Q.reduce((q,[J,V],K)=>{let[W,H]=Q.at(K-1),j=(J-W)*($-H)-(Z-W)*(V-H);return q+(H<=$?+(V>$&&j>0):-(V<=$&&j<0))},0)!==0;function F0(Q,Z,$){let q=gQ(Z.opacity??1,0,1),J=tQ(Z.color,$,q);if(!Z.gradient||Q.type===\"text\"||Q.type===\"line\"||Q.type===\"arc\"||Q.stroke)return{...Q,color:J};let{x:V,y:K,w:W,h:H}=cQ(Q),j=[{offset:0,color:J},{offset:1,color:tQ(Z.gradient,$,q)}],z=gQ(Z.radial??0,0,1),P=Z.radial!==void 0?{type:\"radial\",x:N(V+W*(0.5-0.12*z)),y:N(K+H*(0.5-0.16*z)),radius:N(Math.max(0.1,Math.max(W,H)*(0.5+0.3*z))),stops:j}:{type:\"linear\",x:N(V+W/2),y:N(K),x2:N(V+W/2),y2:N(K+Math.max(H,0.1)),stops:j};return{...Q,gradient:P}}var MZ=(Q,Z,$,q)=>{let J=Q*Math.PI/180,V=Math.cos(J)*Z,K=Math.sin(J)*Z,W=(H)=>Math.round(H*1e4)/1e4;return[W(V),W(-K),W(K),W(V),N($),N(q)]};function j0(Q,Z){if(Q.shape===\"group\"){let P=Number.isFinite(Q.scale)&&Q.scale>0?Math.min(Q.scale,64):1;return s([Q.x,Q.y])?[{type:\"group\",transform:MZ(Q.turn??0,P,Q.x,Q.y),children:hQ(Q.shapes??[],Z)}]:[]}let $=RQ[Q.shape]?.draw(Q);if(!$)return[];if($.type===\"image\")return[$];let q=cQ($),[J,V]=[q.x+q.w/2,q.y+q.h/2],K=[];if(Q.glow){let P=N(Math.max(4,Math.max(q.w,q.h)*0.7)),C=(G)=>tQ(Q.color,Z,G*gQ(Q.opacity??1,0,1));if(s([J-P,V-P,J+P,V+P]))K.push({type:\"circle\",x:N(J),y:N(V),radius:P,gradient:{type:\"radial\",x:N(J),y:N(V),radius:P,stops:[{offset:0,color:C(0.55)},{offset:1,color:C(0)}]}})}if(K.push(F0($,Q,Z)),!Q.turn)return K;let[W,H,j,z]=MZ(Q.turn,1,0,0);return[{type:\"group\",transform:[W,H,j,z,N(J-W*J-j*V),N(V-H*J-z*V)],children:K}]}var hQ=(Q,Z=RZ)=>Q.reduce(($,q)=>{let J=j0(q,Z),V=J.length===1?J[0]:null;if(V?.type!==\"text\")return $.push(...J),$;let K=V.color,W;{let{x:H,y:j}=V;for(let{type:z,x:P,y:C,radius:G,width:U,height:F,points:Y,color:X}of $)if(z===\"circle\"?(H-P)**2+(j-C)**2<=G**2:z===\"polygon\"?Y0(Y,H,j):/^r/.test(z)&&H>=P&&H<=P+U&&j>=C&&j<=C+F)W=X;K=CQ.test(W)?QZ(W).reduce((z,P,C)=>z+[0,2126,7152,722][C]*(P/255)**2.2,0)>1800?\"#000000\":\"#ffffff\":W===\"muted\"||Number(lQ.exec(W??\"\")?.[3]??100)<=50?\"default\":W&&W!==\"surface\"?\"surface\":K===\"surface\"?\"default\":K}return $.push({...V,color:K}),$},[]),TZ=(Q,Z)=>[{shape:\"rect\",x:0,y:0,w:o.width,h:o.height,color:\"muted\",radius:o.height/2},{shape:\"circle\",x:o.width-o.height,y:o.height/2,r:10,color:Z},{shape:\"rect\",x:0,y:0,w:Math.round(o.width*Q),h:o.height,color:Z,radius:o.height/2}],jQ={width:320,height:240},AZ={type:\"rect\",x:0,y:0,...jQ,color:\"muted\"},bQ={graphite:\"#242424\",blue:\"#0056d0\",teal:\"#006b5f\",green:\"#006e1d\",amber:\"#7f5700\",orange:\"#b02e00\",red:\"#c00015\",pink:\"#bc004f\",purple:\"#9e00c3\",indigo:\"#1a41ff\",brown:\"#a83900\"},_Z={clean:\"blue\",soft:\"teal\",expressive:\"purple\",editorial:\"brown\",technical:\"indigo\"},IZ=(Q,Z)=>{let $=Q||(Object.hasOwn(_Z,Z)?_Z[Z]:\"orange\");return Object.hasOwn(bQ,$)?bQ[$]:bQ.graphite},B0=[-0.42,0.76,0.5],OQ=0.38,EQ=12,QZ=(Q,Z)=>{let $=Q===\"accent\"?Z:Object.hasOwn(HQ,Q)?HQ[Q]:CQ.test(Q)?Q:HQ.ink,q=$.length===7?\"ff\"+$.slice(1):$.slice(1);return[0,2,4,6].map((J)=>parseInt(q.slice(J,J+2),16))},vQ=(Q)=>Math.min(255,Math.max(0,Math.round(Q))).toString(16).padStart(2,\"0\"),MQ=(Q,Z)=>Q.map(($,q)=>$-Z[q]),P0=(Q,Z)=>[Q[1]*Z[2]-Q[2]*Z[1],Q[2]*Z[0]-Q[0]*Z[2],Q[0]*Z[1]-Q[1]*Z[0]],NZ=(Q,Z)=>Q[0]*Z[0]+Q[1]*Z[1]+Q[2]*Z[2];function X0({body:Q,x:Z,y:$,z:q,w:J,h:V,d:K,radius:W,length:H,axis:j}){let z=[Z,$,q];if(Q===\"box\"){let F=[J,V,K].map((X)=>Math.abs(X)/2),Y=[];for(let X of[0,1,2])for(let I of[-1,1]){let T=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([v,h])=>{let u=[0,0,0];return u[X]=I,u[(X+1)%3]=v,u[(X+2)%3]=h,z.map((n,QQ)=>n+u[QQ]*F[QQ])});Y.push(I>0?T:T.reverse())}return Y}let P=Math.max(0,\"xyz\".indexOf(j)),C=(F)=>Array.from({length:EQ},(Y,X)=>{let I=X/EQ*2*Math.PI,T=[...z];return T[P]+=F*Math.abs(H)/2,T[(P+1)%3]+=Math.cos(I)*Math.abs(W),T[(P+2)%3]+=Math.sin(I)*Math.abs(W),T}),[G,U]=[C(-1),C(1)];return[[...G].reverse(),U,...G.map((F,Y)=>[F,G[(Y+1)%EQ],U[(Y+1)%EQ],U[Y]])]}function DZ(Q,Z,$,q,J,V,K=bQ.graphite){let W=($?iQ(Q):Q).flatMap((F)=>X0(F).map((Y)=>({body:F,points:Y}))),H=W.flatMap((F)=>F.points),j=[0,1,2].map((F)=>(H.reduce((Y,X)=>Math.min(Y,X[F]),1/0)+H.reduce((Y,X)=>Math.max(Y,X[F]),-1/0))/2),z=H.reduce((F,Y)=>Math.max(F,Math.hypot(...MQ(Y,j))),0.000001),P=(Number.isFinite(Z)?Z:0)*Math.PI/180,C=Math.min(J,V)*0.44/z,G=[0,0,z*5],U=(F)=>{let[Y,X,I]=MQ(F,j),T=Y*Math.cos(P)+I*Math.sin(P),v=-Y*Math.sin(P)+I*Math.cos(P);return[T,X*Math.cos(OQ)-v*Math.sin(OQ),X*Math.sin(OQ)+v*Math.cos(OQ)]};return W.map(({body:F,points:Y})=>{let X=Y.map(U);return{body:F,seen:X,normal:P0(MQ(X[1],X[0]),MQ(X[2],X[0])),depth:X.reduce((I,T)=>I+T[2],0)/X.length}}).filter(({seen:F,normal:Y})=>NZ(Y,MQ(G,F[0]))>0).sort((F,Y)=>F.depth-Y.depth).flatMap(({body:F,seen:Y,normal:X})=>{let I=0.7+0.3*Math.abs(NZ(X,B0)/Math.hypot(...X)),[T,...v]=QZ(String(F.color),K),h=Y.map(([n,QQ,KQ])=>{let r=G[2]/(G[2]-KQ);return[N(J/2+n*C*r),N(V/2-QQ*C*r)]});if(!s(h.flat()))return[];let u=vQ(T*(q&&F.part!==q?0.4:1));return[{type:\"polygon\",points:h,color:`#${u===\"ff\"?\"\":u}${v.map((n)=>vQ(n*I)).join(\"\")}`}]})}var L0={move:1,line:1,quad:2,cubic:3,close:0},ZZ=(Q)=>Q.type===\"group\"?1+Q.children.reduce((Z,$)=>Z+ZZ($),0):(Q.points?.length??(Q.segments?Q.segments.reduce((Z,$)=>Z+L0[$.type],0):Q.type===\"line\"?2:1))+(Q.gradient?Q.gradient.type===\"linear\"?2:1:0),fQ=(Q)=>(Z)=>Z.type===\"group\"?Z.children.reduce(($,q)=>$+fQ(Q)(q),0):Q(Z),SZ=fQ((Q)=>Q.text?.length??0),$Z=(Q)=>Q.type===\"group\"?1+Q.children.reduce((Z,$)=>Z+$Z($),0):1,OZ=fQ((Q)=>Q.segments?.length??0),EZ=fQ((Q)=>Q.gradient?.stops.length??0),C0=(Q)=>{let Z=Q.flatMap(([,q])=>q),$=(q)=>Z.reduce((J,V)=>J+q(V),0);return{commands:$($Z),pairs:$(ZZ),chars:$(SZ),bytes:wQ(Object.fromEntries(Q.map(([q,J])=>[q,{commands:J}]))),segments:$(OZ),stops:$(EZ)}};function bZ(Q){let Z=C0(Q.map(([q])=>[q,[]])),$=!1;return Object.fromEntries(Q.map(([q,J])=>[q,{commands:J.filter((V,K)=>{let W={commands:$Z(V),pairs:ZZ(V),chars:SZ(V),bytes:wQ(V)+(K?1:0),segments:OZ(V),stops:EZ(V)};if($||=Object.keys(CZ).some((H)=>Z[H]+W[H]>CZ[H]),!$)for(let H of Object.keys(W))Z[H]+=W[H];return!$})}]))}var M0=0.6,BQ=Object.freeze({surface:\"\",pointer:0,x:0}),_0=(Q)=>N((Q%360+360)%360);function gZ(Q,Z,{surfaceId:$,x:q,phase:J,pointer:V}){let K=Z.find((j)=>j.id===$)?.model,W=Q.state._drag??BQ;if(!K||!Number.isFinite(q))return!1;if(J===\"down\"){if(W.surface&&W.pointer!==V)return!1;return Q.state._drag={surface:$,pointer:V,x:q},\"\"}if(![\"move\",\"up\",\"cancel\"].includes(J)||W.surface!==$||W.pointer!==V)return!1;Q.state._drag=J===\"move\"?{...W,x:q}:BQ;let H=Number.isFinite(K.props.value)?K.props.value:0;return J===\"cancel\"?\"\":Q.change(K,_0(N(H+(q-W.x)*M0)))}var vZ=32,N0=512,R0=49152;var wZ=256,T0=8,A0={vibrationMs:600,toneMs:600};var hZ=1000,I0=86400000,D0=1000,S0=50,O0={from:0,to:0,start:0,end:0,at:0};function E0(Q){let Z=Q.file.get(\"app\")?.tree,$=(q)=>q?Q.value(q,{}):void 0;return{title:$(Z?.args[0]),...Object.fromEntries(Object.entries(Z?.named??{}).map(([q,J])=>[q,$(J)]))}}var kZ=(Q)=>Q.value({k:\"call\",name:\"today\",args:[]},{}),mZ={eyebrow:{emphasis:\"label\",tone:\"accent\"},muted:{tone:\"muted\"},source:{emphasis:\"source\",tone:\"muted\"}},b0=new Set([\"List\",\"Dialog\",\"Chart\",\"Table\",\"Tabs\",\"Timer\",\"Drawing\",\"Model3d\"]);var qZ=(Q,Z)=>Number.isFinite(Q)&&Number.isFinite(Z)&&Z>0?Math.min(100,Math.max(0,Q/Z*100)):0,KZ=(Q)=>Q?.k===\"call\"?Q.name===\"append\"||Q.args.some(KZ):Q?.k===\"list\"&&Q.items.some(KZ),yQ=(Q,Z)=>Object.fromEntries(Z.filter(($)=>Q[$]!==void 0).map(($)=>[$,Q[$]])),PQ=(Q,Z,$)=>{let q={...$,...yQ(Q.props,Z)};return Object.keys(q).length?{style:q}:{}},fZ=(Q,Z=Q.props.align)=>PQ(Q,[\"gap\"],Z&&{crossAlign:Z}),e=(Q)=>Q.props.icon===void 0?{}:{icon:m(YZ,Q.props.icon)??Q.props.icon},g0=30,v0=100,uZ=(Q,Z,$)=>{let q=Array.isArray(Q.props.options)?Q.props.options:[],J=typeof($??q[0]),V=new Set,K=[];return q.forEach((W,H)=>{let j=Z.plain(Q.props.labels?.[H]??W),z=J+W;if(typeof W!==J||![\"string\",\"number\",\"boolean\"].includes(J)||J===\"number\"&&!Number.isFinite(W)?1:V.has(z)?2:!j.trim()?3:K.length===g0?4:0)return;V.add(z),K.push({text:j.slice(0,v0),value:W})}),K},yZ=(Q,Z)=>{let $=uZ(Q,Z,Q.props.value),q=$.length>6;if(!$.length)return null;return Z.inside($),{type:q?\"select\":\"segmented\",...Z.field(),...q&&e(Q),options:$}},JZ=(Q,Z,$,q)=>(J,V)=>{let{min:K=Z,max:W=$,step:H,value:j}=J.props,z=(C)=>Number.isFinite(C)&&C>=K&&C<=W,P=q?(C)=>Array.isArray(C)&&C.length===2&&C.every(z)&&C[0]<=C[1]:z;if(!q&&!z(j))V.keep(Number.isFinite(j)?Math.min(W,Math.max(K,j)):K);return{type:Q,...V.field(q&&((C)=>P(C)?C:void 0)),min:K,max:W,...yQ(J.props,[\"step\"]),...e(J)}},w0={TextField:(Q)=>typeof Q===\"string\",Slider:Number.isFinite},h0={Column:(Q,Z)=>Z.form()??{type:\"column\",...PQ(Q,[\"gap\"]),children:Z.children(!0)},Row:(Q,Z)=>Z.form()??{...Q.children.some(($)=>$.props.weight!==void 0)?{type:\"row\",wrap:!1,...fZ(Q,Q.props.align??\"center\"),children:Z.children(!0)}:{type:\"flowRow\",...fZ(Q),children:Z.children()},...Q.props.max&&{layout:{maxWidth:Q.props.max}}},Grid:(Q,Z)=>({type:\"grid\",columns:Q.props.columns??2,children:Z.children()}),Card:(Q,Z)=>({type:\"card\",...Q.props.variant===\"hero\"&&{variant:\"hero\"},...e(Q),children:Z.children()}),Section:(Q,Z)=>{let $=Z.plain(Q.props.title);return{type:\"section\",...$&&{text:$},children:Z.children()}},Text:(Q,Z)=>({type:\"text\",...Z.text(\"text\"),...PQ(Q,[\"emphasis\",\"align\",\"tone\"],m(mZ,Q.props.variant))}),Heading:(Q,Z)=>({type:\"text\",...Z.text(\"text\"),style:{emphasis:\"title\"}}),Metric:(Q,Z)=>({type:\"metric\",text:Z.plain(Q.props.label),bind:Z.shown(\"value\"),...e(Q),...PQ(Q,[\"emphasis\",\"tone\"])}),Badge:(Q,Z)=>({type:\"badge\",...Z.text(\"value\"),...e(Q),...PQ(Q,[\"tone\"])}),Emoji:(Q,Z)=>({type:\"emoji\",text:Z.plain(Q.props.label)||Z.plain(Q.props.value)||Z.caption(),...Z.value(\"value\"),...yQ(Q.props,[\"size\"])}),Divider:()=>({type:\"divider\"}),Notice:(Q,Z)=>({type:\"banner\",...e(Q),...PQ(Q,[\"tone\"]),children:[{type:\"text\",...Z.text(\"text\")}]}),Button:(Q,Z)=>{let $=Q.props.variant??(Q.props.selected===void 0?void 0:Q.props.selected?\"filled\":\"tonal\");return{type:\"button\",text:Z.caption(Q.props.label),action:Z.action(),...$&&{variant:$},...e(Q)}},IconButton:(Q,Z)=>({type:\"icon\",name:e(Q).icon,text:Z.caption(Q.props.label),...Q.props.action&&{action:Z.action()}}),NumberField:JZ(\"numberInput\",0,1e6),Slider:JZ(\"slider\",0,100),RangeSlider:JZ(\"rangeSlider\",0,100,1),TextField:(Q,Z)=>({type:\"input\",...Z.field(),...e(Q)}),Toggle:(Q,Z)=>({type:\"toggle\",...Z.field()}),CheckBox:(Q,Z)=>({type:\"checkbox\",...Z.field(),...yQ(Q.props,[\"variant\"])}),Segmented:yZ,Select:yZ,DateField:(Q,Z)=>({type:\"dateInput\",...Z.field(),...e(Q)}),TimeField:(Q,Z)=>({type:\"timeInput\",...Z.field(DQ),...e(Q)}),Choices:(Q,Z)=>{let $=uZ(Q,Z,Array.isArray(Q.props.value)?Q.props.value[0]:void 0);if(!$.length)return null;return Z.inside($),{type:\"multiChoice\",...Z.field((q)=>Array.isArray(q)&&!(Q.props.max!==void 0&&q.length>Q.props.max)?q:void 0),options:$}},Dialog:(Q,Z)=>Z.modal(),List:(Q,Z)=>Z.list(),Progress:(Q,Z)=>{let{value:$,max:q}=Q.props,J=Q.props.variant===\"dots\"&&!Z.scope&&Number.isInteger(q)&&q>=1&&q<=BZ;return Z.drawn(qZ($,q)/100)??{type:\"progress\",text:Z.label(),variant:J?\"dots\":\"bar\",min:0,max:J?q:100,bind:Z.computed(\"value\",J?Number.isFinite($)?Math.min(q,Math.max(0,$)):0:qZ($,q))}},Timer:(Q,Z)=>{let $=Math.round(Number(Q.props.seconds)*1000);return{type:\"timer\",text:Z.label(),mode:\"countdown\",action:Z.action(()=>!1),foreground:{durationMs:Number.isFinite($)?Math.min(I0,Math.max(hZ,$)):hZ,...A0}}},Ring:(Q,Z)=>({type:\"progressRing\",text:Z.label(),size:\"large\",min:0,max:100,bind:Z.computed(\"value\",qZ(Q.props.value,Q.props.max)),...Q.props.text!==void 0&&{children:[{type:\"text\",...Z.text(\"text\"),style:{emphasis:\"display\"}}]}}),Chart:(Q,Z)=>Z.chart(),Table:(Q,Z)=>Z.table(),Tabs:(Q,Z)=>Z.tabs(),Drawing:(Q,Z)=>Z.canvas(hQ(Q.props.shapes),eQ(Q.props.width),eQ(Q.props.height)),Model3d:(Q,Z)=>Z.canvas([AZ,...DZ(Q.props.bodies??[],Q.props.value??30,!1,Q.props.selected,jQ.width,jQ.height,Z.accent)],jQ.width,jQ.height,!1,Q.props.bind?Q:void 0)},f0=(Q)=>Q?.k===\"path\"&&Q.abs?[Q,!1]:Q?.k===\"un\"&&Q.op===\"!\"&&Q.arg.k===\"path\"&&Q.arg.abs?[Q.arg,!0]:Q?.k===\"bin\"&&Q.op===\"!=\"&&Q.left.k===\"path\"&&Q.left.abs&&Q.right.k===\"lit\"?[Q.left,Q.right.v]:null;function VZ(Q,Z,$=!1){let q=oQ(Z.names,new Set([...Object.values(Z.names),...Z.fields.flatMap(([,B])=>B.split(\".\")),...Z.anim?[Z.anim.field]:[],...Z.drag?[Z.drag]:[]])),J=new Map(Z.fields),V=Z.kinds??{},K=Z.lists??{},W=kZ(Q),H=(B,O)=>$?Z.types[B]??=typeof O===\"number\"?\"number\":\"string\":Z.types[B]??\"string\",j=[],z=new Map,P=new Set,C=new Map,G=new Map,U=new Map,F=[],Y={},X={},I=[],T={d:new Map,v:new Map},v={},h=new Map(Q.file.of(\"need\").filter((B)=>B.tree.name===\"timer\"&&!sQ(B.tree)).map((B)=>[`${B.key}_bar`,B.key])),u=[],{kind:n,preset:QQ,palette:KQ}=E0(Q),r=(B,O,f,M,S)=>{let y=S.scope;if(y){let i=y.stored.get(SQ(f));if(i&&i[1]!==\"time\"&&(B===\"d\"||i[1]===\"boolean\"))return i[0];let JQ=y.name(`${B}:${O}`,O.replace(/\\W/g,\"_\")),UQ=B===\"v\"?\"boolean\":H(`${y.key}/${JQ}`,M);if(y.computed.set(JQ,UQ),y.out)y.out[JQ]=B===\"v\"?Boolean(M):t(UQ,M);return JQ}let x=f?.k===\"path\"&&f.abs?f.segs:null;if(x?.length===1&&J.has(x[0])&&V[x[0]]!==\"time\"&&(B===\"d\"||typeof M===\"boolean\"))return J.get(x[0]);let b=q(`${B}:${O}`,x?x.join(\"_\"):O.replace(/\\W/g,\"_\"));if(!T[B].has(b)){let i=B+(T[B].size<vZ?\"\":Math.floor(T[B].size/vZ)+1);T[B].set(b,`${i}.${b}`),(v[i]??={})[b]=B===\"v\"?Boolean(M):t(H(b,M),M)}return T[B].get(b)},WQ=(B,O,f)=>{if(!B)return z.set(O,f);if(B.id===null)return;let M=C.get(O);if(!M)C.set(O,M=new Map),z.set(O,(S)=>M.get(S?.key)?.(S.value)??!1);M.set(B.id,f)},a=(B,O,f,M)=>{f=B.name??f;let S=M.scope,y=m(h0,B.type),x=(L)=>j.push([f,L]);if(!y)return x(\"\"),null;if(S&&b0.has(B.type))return x(\"\"),null;let b=B.call?rQ(B.call):{},i=M.off||[\"visible\",\"enabled\"].some((L)=>b[L]&&!B.props[L]);if(S&&b.action?.k===\"call\"&&b.action.name===\"move\"&&b.action.args.length===1)return S.flags.moves=!0,null;let JQ={...M,off:i,...B.type===\"Section\"&&{title:B.props.title}},UQ=(L,_=!1)=>b[L]&&(_||b[L].k!==\"lit\")?r(\"d\",`${O}.${L}`,b[L],B.props[L],D):null,D={scope:S,fault:x,off:i,rowOptions:!1,blank:Boolean(S&&!S.out),children:(L=!1,_=JQ)=>B.children.map((A,E)=>a(A,A.name??`${O}:${E}`,f,{..._,weighted:L})).filter(Boolean),caption:(L)=>D.plain(L)||(B.name?B.name:`${f} ${B.props.icon??B.type}`).replace(/_/g,\" \"),label:()=>D.caption(D.plain(B.props.label)||M.title),text:(L)=>{let _=String(B.props[L]??\"\"),A=!S&&b[L]?.k===\"lit\"&&_.length>300,E=UQ(L,A);if(E)return{text:\"\",bind:E};return{text:D.plain(B.props[L])}},plain:(L)=>{if(L!==null&&typeof L===\"object\")return\"\";return String(L??\"\").slice(0,300)},value:(L)=>{let _=UQ(L);return _?{bind:_}:{[L]:B.props[L]}},shown:(L)=>UQ(L)??D.computed(L,B.props[L]),computed:(L,_)=>r(\"d\",`${O}.${L}`,null,_,D),keep:(L)=>{if(!D.blank)F.push([B,L])},inside:(L)=>{let _=B.props.value,A=L.map((w)=>w.value),E=B.type!==\"Choices\"?A.includes(_)?_:A[0]:(Array.isArray(_)?_:[]).filter((w,p,c)=>A.includes(w)&&c.indexOf(w)===p);if(JSON.stringify(E)===JSON.stringify(_))return;D.keep(E)},field:(L=(_)=>_)=>{let _;if(S)_=S.stored.get(SQ(b.bind))?.[0];else{let w=b.bind?.k===\"path\"&&b.bind.abs&&b.bind.segs.length===1?b.bind.segs[0]:null;_=J.get(w)}let A=m(w0,B.type),E=D.action((w)=>{if(A&&(i||!A(w)))return!1;let p=L(w);return p===void 0?!1:Q.change(B,p)});if(A)P.add(E);return{text:D.caption(B.props.label),bind:_,action:E,...A&&{inputMode:\"live\"}}},action:(L=()=>{let A=M.sheet?.add===B&&Q.nextId,E=Q.fire(B);if(E===\"\"&&A&&Q.nextId>A)Q.state[M.sheet.flag]=!1;return E},_=\"\")=>{let A=q(\"@\"+O+_,FQ(O+_));return WQ(S,A,L),A},form:()=>{let L=`${O}:open`;if(!J.has(L))return null;let _=B.children.find((w)=>w.type===\"Button\"&&KZ(w.props.action)),A=D.caption(_?.props.label),E=(w)=>()=>{return Q.state[L]=w,\"\"};return{type:\"column\",children:[{type:\"button\",text:A,action:D.action(E(!0),\"_open\"),variant:\"filled\",icon:\"Plus\"},{type:\"bottomSheet\",text:A,visibleBind:J.get(L),dismissAction:D.action(E(!1),\"_dismiss\"),children:D.children(!1,{...JQ,off:i||!Q.state[L],sheet:{flag:L,add:_}})}]}},modal:()=>{let L=f0(b.visible),_=(E)=>E.props.bind!==void 0||E.children.some(_),A=D.action(()=>{if(!L)return!1;return Q.write(L[0],L[1],{}),Q.recompute(),\"\"},\"_dismiss\");return{type:B.children.some(_)?\"bottomSheet\":\"dialog\",text:D.caption(B.props.title),dismissAction:A,children:D.children()}},list:()=>LZ(_Q,B,O,f,b,D,M.title),drawn:(L)=>{let _=!S&&h.get(B.name);return _?D.canvas(hQ(TZ(L,Q.state[_+\"_resting\"]?\"success\":\"accent\")),o.width,o.height,Boolean(Q.state[_+\"_on\"])):null},canvas:(L,_,A,E=!1,w=void 0)=>{let p=q(\"surface:\"+O,FQ(O));return u.push({id:p,width:_,height:A,running:E,commands:L,line:f,model:w}),{type:\"canvas\",text:D.label(),surfaces:[p]}},accent:IZ(KQ,QQ??\"clean\"),chart:()=>{let L=B.props.kind??\"bar\",_=D.label().slice(0,100),A=(Array.isArray(B.props.points)?B.props.points:[]).slice(-wZ),[E,w]=[[\"labels\",\"string\",\"label\"],[\"values\",\"number\",\"value\"]].map(([l,g,k])=>{let d=q(`chart:${O}:${l}`,FQ(`${O}_${l}`));return Y[d]=A.map((NQ)=>t(g,NQ[k])),X[d]={type:\"array\",maxItems:wZ,items:g},I.push(f),d}),p=A.map((l)=>t(\"string\",l.label)),c=B.props.bind&&D.field((l)=>l===\"\"||p.includes(l)?l:void 0);return{type:\"chart\",text:_,kind:L,categories:E,series:[{text:_,bind:w}],...c&&{action:c.action,selectedKeyBind:c.bind}}},table:()=>{let L=(Array.isArray(B.props.heads)?B.props.heads:[]).map((g)=>D.plain(g).slice(0,100)||\" \"),_=(Array.isArray(B.props.rows)?B.props.rows:[]).map((g)=>Array.isArray(g)?g:[g]),A=q(`table:${O}:rows`,FQ(`${O}_rows`)),E=(g)=>`c${g}`;Y[A]=_.map((g)=>({id:D.plain(g[0]).slice(0,128)||\" \",...Object.fromEntries(L.map((k,d)=>[E(d),D.plain(g[d]??\"\")]))})),X[A]={type:\"list\",maxItems:IQ,fields:{id:\"string\",...Object.fromEntries(L.map((g,k)=>[E(k),\"string\"]))}},I.push(f);let w=Y[A].map((g)=>g.id),p=B.props.bind&&D.field((g)=>g===\"\"||w.includes(g)?g:void 0),c=B.props.column,l=B.props.signs;return{type:\"table\",text:D.plain(B.props.label).slice(0,100)||D.caption(),bind:A,columns:L.map((g,k)=>({text:g,field:E(k)})),...Array.isArray(l)&&{variant:\"compare\",signs:l.map((g)=>D.plain(g).slice(0,16))},visibleRows:T0,...p&&{action:p.action,selectedKeyBind:p.bind},...p&&Number.isInteger(c)&&c>0&&c<L.length&&{markColumn:E(c)}}},tabs:()=>{let L=`${B.name}:tab`,_=B.children.slice(1),A=(Array.isArray(B.props.titles)?B.props.titles:[]).map((k)=>D.plain(k)),E=_.findIndex((k)=>!k.children.length),w=!B.name||!J.has(L)?\"a Tabs needs a line of its own, such as pages = Tabs(titles, groups), for the field of its open tab\":!_.length||_.length>30?`a Tabs has 1 to 30 groups, and this one has ${_.length}`:E>=0?`group ${E+1} of this Tabs is empty, and Alphy draws no empty group. Put a component into it`:null;if(w)return x(w),null;let c=A.length===_.length&&new Set(A).size===A.length&&A.every((k)=>k.trim()&&k.length<=100)?A:_.map((k,d)=>String(d+1));if(!c.includes(Q.state[L]))Q.state[L]=c[0];let l=Q.state[L],g=(k)=>{if(!c.includes(k))return!1;return Q.state[L]=k,\"\"};return{type:\"column\",children:[{type:\"tabs\",text:D.label(),bind:J.get(L),action:D.action(g),options:c.map((k)=>({text:k,value:k}))},..._.map((k,d)=>({type:\"column\",visibleBind:r(\"v\",`${O}.tab${d}`,null,c[d]===l,D),children:k.children.map((NQ,cZ)=>a(NQ,NQ.name??`${O}:tab${d}:${cZ}`,f,{...JQ,off:i||c[d]!==l,weighted:!0})).filter(Boolean)}))]}}},$Q=y(B,D);if(!$Q)return null;G.set($Q,f);for(let L of[\"visible\",\"enabled\"]){if(!b[L])continue;if(b[L].k!==\"lit\")$Q[L+\"Bind\"]=r(\"v\",`${O}.${L}`,b[L],B.props[L],D);else if(!B.props[L])$Q[L]=!1}if(B.props.weight!==void 0&&M.weighted)$Q.layout={...$Q.layout,weight:B.props.weight};if(B.props.fit)$Q.layout={...$Q.layout,fillWidth:!1};return $Q},_Q={kit:Q,name:q,walk:a,day:W,fields:J,lists:K,views:Y,viewSchemas:X,viewOwners:I,listRoots:U},zQ=Q.tree(),ZQ=a(zQ,\"root\",\"root\",{scope:null,weighted:!0}),kQ=[...n?[{type:\"text\",text:String(n),style:mZ.eyebrow}]:[],...zQ.type===\"Column\"?ZQ?.children??[]:[ZQ].filter(Boolean)];return{ui:{type:\"theme\",preset:QQ??\"clean\",...KQ&&{palette:KQ},cornerRadius:20,children:[{type:\"column\",style:{gap:\"medium\",...zQ.type===\"Column\"&&ZQ?.style,padding:\"medium\"},children:kQ}]},values:v,views:Y,viewSchemas:X,viewOwners:I,controls:z,liveIds:P,fixes:F,faults:j,owners:G,listRoots:U,drawn:u}}function y0(Q,Z,$,q){let J=Q.kinds?.[Z];if(J===\"list\")return Array.isArray($)?$.map((V)=>nQ(V,Q.lists[Z],q)):[];if(J===\"array\")return Array.isArray($)?$:[];return J===\"time\"||J===\"date\"?t(J,$,q):typeof $===\"number\"||typeof $===\"string\"?t(typeof $,$):$}function k0(Q,Z,$,q={}){let J={},V=kZ(Q);for(let[K,W]of Z.fields){let[H,j]=W.split(\".\"),z=y0(Z,K,Q.state[K],V);if(j)(J[H]??={})[j]=z;else J[H]=z}for(let K of Z.keep??[])J[K]=q[K];if(Z.anim)J[Z.anim.field]=Object.fromEntries(Z.anim.keys.map(([K,W])=>{let H=Q.state._run?.find((j)=>j.path===K);return[W,H?{from:H.from,to:H.to,start:H.start,end:H.end,at:H.at}:O0]}));if(Z.drag)J[Z.drag]=Q.state._drag??BQ;return{...J,...$.views,...$.values}}function m0(Q,Z,$){let q=Z.kinds??{},J=Q.nextId-1;for(let[K,W]of Z.fields){let[H,j]=W.split(\".\"),z=j?$[H]?.[j]:$[H];if(z===void 0)continue;if(q[K]===\"list\")Q.state[K]=(Array.isArray(z)?z:[]).map((P)=>{return J=Math.max(J,Number(/^r(\\d+)$/.exec(P.id)?.[1]??0)),{id:P.id,...Object.fromEntries(Z.lists[K].map(([C,G,U])=>[C,U===\"time\"?DQ(P[G]):P[G]]))}});else Q.state[K]=q[K]===\"time\"?DQ(z):q[K]===\"array\"&&Array.isArray(z)?[...z]:q[K]===\"record\"?{...z}:z}if(Z.drag)Q.state._drag={...BQ,...$[Z.drag]};Q.nextId=J+1;let V=Z.anim?Z.anim.keys.map(([K,W])=>({path:K,...$[Z.anim.field]?.[W]})).filter((K)=>K.end):[];if(V.length)Q.state._run=V;else delete Q.state._run;Q.recompute()}function u0(Q,Z){let $=new aQ(new xQ().feedText(Q.lines),!1);if($.nextId=Q.next,Q.shown)$.shown=Object.fromEntries(uQ(Q.shown).entries);return m0($,Q,Z),$}function xZ(Q,Z,$=Date.now()){let{state:q,event:J}=Q;if(J.type===\"preview\"||J.type===\"render\")return{state:q};let V=GQ.now;GQ.now=()=>$;let K;try{K=u0(Z,q);let W=Z.kinds??{},H=VZ(K,Z);if(Z.drag&&J.type===\"open\")K.state._drag=BQ;let j=J.type===\"open\"||J.type===\"timer\"&&(J.timerId===Z.anim?.field?Boolean(K.state._run):H.drawn.some((Y)=>Y.id===J.timerId&&Y.running)),P=J.type===(H.liveIds.has(J.actionId)?\"liveInput\":\"action\")?H.controls.get(J.actionId):j?()=>K.tick():J.type===\"pointer\"?()=>gZ(K,H.drawn,J):void 0;if(!P||P(J.value)===!1)return{state:q};for(let[Y,X]of Object.entries(W))if(X===\"list\"&&K.state[Y]?.length>(m(Z.caps,Y)??IQ)||X===\"array\"&&K.state[Y]?.length>N0)return{state:q};let C=!1;for(let[Y,X]of Z.fields){let[I,T]=X.split(\".\"),v=T?q[I]?.[T]:q[I],h=K.state[Y],u=typeof v;if(W[Y]||![\"string\",\"number\",\"boolean\"].includes(u)||(u===\"number\"?Number.isFinite(h):typeof h===u))continue;K.state[Y]=u===\"number\"?v:t(u,h),C=!0}if(C)K.recompute();let G=VZ(K,Z);if(G.fixes.length){for(let[Y,X]of G.fixes)K.write(Y.props.bind,X,{it:Y.row});K.recompute(),G=VZ(K,Z)}let U=k0(K,Z,G,q),F=JSON.stringify(G.ui)===JSON.stringify(H.ui)?{state:U}:{state:U,ui:G.ui};if(K.tripped||wQ(U)>R0)return{state:q};if(G.drawn.length){if(F.surfaces=bZ(G.drawn.map(({id:Y,commands:X})=>[Y,X])),J.type!==\"liveInput\")F.timers=[...G.drawn.filter((Y)=>Y.running).map(({id:Y})=>({id:Y,intervalMs:D0})),...K.state._run?[{id:Z.anim.field,intervalMs:S0}]:[]]}return F}catch(W){if(K?.tripped)return{state:q};throw W}finally{GQ.now=V}}__handle(xZ);})();";
 globalThis.compileStep = compileStep;
 globalThis.previewStep = previewStep;
 })();

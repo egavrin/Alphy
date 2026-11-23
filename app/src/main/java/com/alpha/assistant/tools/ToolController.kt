@@ -321,7 +321,7 @@ class ToolController internal constructor(private val app: Application, private 
         // The stage previews of a screen run have the key of its early plan, whose frames it goes on with, else a key of their own: the end of
         // a key drops each later frame of it, and a later run of this operation (the new screen after a change fallback) shows its own frames.
         val previewKey = if (screen?.early != null) operationId else "$operationId:${previewRuns.incrementAndGet()}"
-        val run = screen?.let { ScreenRun(it.early, it.template, previewSink(previewKey, target?.id, trace).takeIf { previewStream }, scope, it.data, it.check) }
+        val run = screen?.let { ScreenRun(it.early, it.template, previewSink(previewKey, target?.id, trace).takeIf { previewStream }, scope, it.data, it.check, it.library) }
         var stored: ToolRecord? = null
         try {
             prepared()
@@ -494,13 +494,15 @@ class ToolController internal constructor(private val app: Application, private 
      * The caller passes [EarlyPlan.use] to a screen run (ScreenRun), and calls [EarlyPlan.stop] when its request ends.
      * The template call with [template] goes first, and its reply outside sends [prompt] to the plan call.
      */
-    internal fun startEarlyPlan(template: String, prompt: String, key: String, operationId: String): EarlyPlan? {
+    internal fun startEarlyPlan(template: String, prompt: String, key: String, operationId: String, library: String? = null): EarlyPlan? {
         val limits = planStep() ?: return null
         val session = CloudSession()
         // Only phases: the generation run of the request marks the end of the operation.
         val trace = traceFor(operationId)
         val run = trace?.Run()
         run?.phase(AppFileNames.EARLY_PLAN_START)
+        // The candidates of its template call, which the early plan sends first (fix list 4, K4).
+        library?.let { run?.phase(AppFileNames.LIBRARY_CANDIDATES, it) }
         // Its frames have the key of the operation, which the screen run that uses the plan keeps (generateAutomatic).
         val frames = EarlyFrames(!previewBeforeRouting, { showPreview(operationId, it, null, trace) }) { endPreview(operationId, trace) }
         val sink = { frame: StagePreviewFrame -> scope.launch(Dispatchers.Main) { frames.offer(frame) }; Unit }.takeIf { previewStream }

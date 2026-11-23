@@ -1,0 +1,54 @@
+{
+ "id": "space.galaxy",
+ "names": {
+  "ru": [
+   "галактика"
+  ],
+  "en": [
+   "galaxy"
+  ]
+ },
+ "words": {
+  "ru": [
+   "млечный путь",
+   "спиральная галактика",
+   "звёздная система"
+  ],
+  "en": [
+   "milky way",
+   "spiral galaxy"
+  ]
+ },
+ "line": "a spiral galaxy",
+ "image": "galaxy.webp",
+ "box": [
+  100.0,
+  93.8
+ ],
+ "parts": [
+  {
+   "id": "core",
+   "names": {
+    "ru": "ядро",
+    "en": "core"
+   },
+   "label": [
+    -3.2,
+    -1.1
+   ],
+   "ring": 8.7
+  },
+  {
+   "id": "spiral_arm",
+   "names": {
+    "ru": "спиральный рукав",
+    "en": "spiral arm"
+   },
+   "label": [
+    37.2,
+    -24.0
+   ],
+   "ring": 9.8
+  }
+ ]
+}

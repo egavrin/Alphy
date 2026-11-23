@@ -1,0 +1,30 @@
+{
+ "id": "space.star",
+ "names": {
+  "ru": [
+   "звезда"
+  ],
+  "en": [
+   "star"
+  ]
+ },
+ "words": {
+  "ru": [
+   "звёзды",
+   "ночное небо",
+   "свечение"
+  ],
+  "en": [
+   "stars",
+   "night sky",
+   "shining star"
+  ]
+ },
+ "line": "a star",
+ "image": "star.webp",
+ "box": [
+  100.0,
+  96.5
+ ],
+ "parts": []
+}

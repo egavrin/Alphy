@@ -1,0 +1,75 @@
+{
+ "id": "space.saturn",
+ "names": {
+  "ru": [
+   "сатурн",
+   "планета"
+  ],
+  "en": [
+   "saturn",
+   "planet"
+  ]
+ },
+ "words": {
+  "ru": [
+   "планета с кольцами",
+   "газовый гигант",
+   "кольца сатурна",
+   "солнечная система",
+   "небесное тело",
+   "космос"
+  ],
+  "en": [
+   "ringed planet",
+   "gas giant",
+   "planet rings",
+   "solar system",
+   "celestial body",
+   "space"
+  ]
+ },
+ "line": "the planet Saturn, a gas giant with its rings; it also serves as a planet in general",
+ "image": "saturn.webp",
+ "box": [
+  100.0,
+  61.6
+ ],
+ "parts": [
+  {
+   "id": "planet",
+   "names": {
+    "ru": "газовый шар",
+    "en": "ball of gas"
+   },
+   "label": [
+    -18.6,
+    -7.9
+   ],
+   "ring": 12.3
+  },
+  {
+   "id": "bands",
+   "names": {
+    "ru": "полосы облаков",
+    "en": "cloud bands"
+   },
+   "label": [
+    6.1,
+    20.9
+   ],
+   "ring": 7.2
+  },
+  {
+   "id": "rings",
+   "names": {
+    "ru": "кольца",
+    "en": "rings"
+   },
+   "label": [
+    43.3,
+    -7.9
+   ],
+   "ring": 6.7
+  }
+ ]
+}

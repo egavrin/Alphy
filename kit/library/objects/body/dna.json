@@ -1,0 +1,55 @@
+{
+ "id": "body.dna",
+ "names": {
+  "ru": [
+   "днк"
+  ],
+  "en": [
+   "dna"
+  ]
+ },
+ "words": {
+  "ru": [
+   "двойная спираль",
+   "гены",
+   "наследственность"
+  ],
+  "en": [
+   "double helix",
+   "genes",
+   "heredity"
+  ]
+ },
+ "line": "a DNA double helix",
+ "image": "dna.webp",
+ "box": [
+  54.9,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "strand",
+   "names": {
+    "ru": "цепочка",
+    "en": "strand"
+   },
+   "label": [
+    -19.0,
+    -38.1
+   ],
+   "ring": 7.5
+  },
+  {
+   "id": "base_pair",
+   "names": {
+    "ru": "пара оснований",
+    "en": "base pair"
+   },
+   "label": [
+    3.6,
+    -34.8
+   ],
+   "ring": 7.5
+  }
+ ]
+}

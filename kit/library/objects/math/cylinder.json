@@ -1,0 +1,142 @@
+{
+ "id": "math.cylinder",
+ "names": {
+  "ru": [
+   "цилиндр"
+  ],
+  "en": [
+   "cylinder"
+  ]
+ },
+ "words": {
+  "ru": [
+   "основание",
+   "высота",
+   "объём цилиндра"
+  ],
+  "en": [
+   "base",
+   "height",
+   "volume"
+  ]
+ },
+ "line": "a cylinder",
+ "box": [
+  80,
+  100
+ ],
+ "layers": [
+  {
+   "part": "side",
+   "role": "land",
+   "tone": 2,
+   "outline": -2,
+   "path": [
+    -30,
+    -38,
+    -30.0,
+    38.0,
+    -26.0,
+    43.0,
+    -15.0,
+    46.7,
+    0.0,
+    48.0,
+    15.0,
+    46.7,
+    26.0,
+    43.0,
+    30.0,
+    38.0,
+    30,
+    -38
+   ]
+  },
+  {
+   "part": "base",
+   "role": "land",
+   "tone": 1,
+   "outline": -2,
+   "ellipse": [
+    0,
+    -38,
+    30,
+    10
+   ]
+  },
+  {
+   "part": "radius",
+   "role": "land",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 2,
+   "path": [
+    0,
+    -38,
+    30,
+    -38
+   ]
+  },
+  {
+   "part": "height",
+   "role": "land",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 2,
+   "path": [
+    38,
+    -38,
+    38,
+    38
+   ]
+  }
+ ],
+ "parts": [
+  {
+   "id": "base",
+   "names": {
+    "ru": "основание",
+    "en": "base"
+   },
+   "label": [
+    -15,
+    -38
+   ]
+  },
+  {
+   "id": "side",
+   "names": {
+    "ru": "боковая поверхность",
+    "en": "lateral surface"
+   },
+   "label": [
+    -15,
+    10
+   ]
+  },
+  {
+   "id": "radius",
+   "names": {
+    "ru": "радиус",
+    "en": "radius"
+   },
+   "label": [
+    15,
+    -38
+   ]
+  },
+  {
+   "id": "height",
+   "names": {
+    "ru": "высота",
+    "en": "height"
+   },
+   "label": [
+    38,
+    0
+   ]
+  }
+ ]
+}

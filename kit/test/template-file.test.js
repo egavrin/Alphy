@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { compileAppFile, compileStep } from "../src/compile.js";
-import { isTemplateFile } from "../src/template.js";
+import { isTemplateFile, mergeTemplate } from "../src/template.js";
 import { parseExpression, parseLine } from "../src/dsl.js";
 import { TONES } from "../src/core.js";
 import { plansIn } from "../build.js";
@@ -35,7 +35,7 @@ test("theThreeExamplesCompileClean", async () => {
     expect([name, result.faults, result.template, result.leftOut]).toEqual([name, [], word, []]);
     expect(result.definition).not.toBeNull();
     expect(result.kept).toBe(text);
-    expect(result.definition.surfaces.map(({ width, height }) => [width, height])).toEqual([[300, 220]]);
+    expect(result.definition.surfaces.map(({ width, height }) => [width, height])).toEqual([[300, 300]]);
   }
 });
 
@@ -124,8 +124,9 @@ test("hardCapsOutsideThePictureAndOneAndAQuarterInside", async () => {
   const pairs = [
     ["scene", 30, (n) => head(chars(n)), 30],
     ["control", 28, (n) => put(ship, "control", `control = choice("${chars(n)}", ["Корабль", "Гвоздь"])`), 28],
-    ["control", 12, (n) => put(ship, "control", `control = choice("Предмет", ["Корабль", "${chars(n)}"])`), 12],
-    ["i1", 12, (n) => put(items, "i1", `i1 = item("${chars(n)}", "пере-", "Стоит перед корнем.")`), 12],
+    // A choice of 2 to 4 options, and the 4 items of word-parts, have the option cap 16 (fix list 3, H3).
+    ["control", 16, (n) => put(ship, "control", `control = choice("Предмет", ["Корабль", "${chars(n)}"])`), 16],
+    ["i1", 16, (n) => put(items, "i1", `i1 = item("${chars(n)}", "пере-", "Стоит перед корнем.")`), 16],
     ["card", 32, (n) => put(ship, "card", `card = card("${chars(n)}", "Вода держит корабль.")`), 32],
     ["i1", 14, (n) => put(items, "i1", `i1 = item("Приставка", "${chars(n)}", "Стоит перед корнем.")`), 17],
     ["s3", 28, (n) => put(ship, "s3", `s3 = text(150, 50, "${chars(n)}", "ink", 12, visible=$/v == "Корабль")`), 35],
@@ -141,9 +142,11 @@ test("hardCapsOutsideThePictureAndOneAndAQuarterInside", async () => {
   expect(named((await compileAppFile(put(ship, "control", `control = choice("Предмет", ["Корабль", ${options.join(", ")}])`))).faults, "control")).toHaveLength(1);
   const seven = put(put(put(items, "i5", 'i5 = item("Основа", "ход", "Слово без окончания.")'), "i6", 'i6 = item("Постфикс", "-ся", "Стоит после окончания.")'), "i7", 'i7 = item("Нуль", "∅", "Окончание без звуков.")');
   expect(named((await compileAppFile(seven)).faults, "i7")).toHaveLength(1);
-  let thirteen = ship;
-  for (let index = 4; index <= 13; index++) thirteen = put(thirteen, `s${index}`, `s${index} = circle(${index * 20}, 200, 5, "ink")`);
-  expect(named((await compileAppFile(thirteen)).faults, "s13")).toHaveLength(1);
+  // A scene has at most 20 shapes (stage 6, L3), so s21 is a fault and s20 is not.
+  let many = ship;
+  for (let index = 4; index <= 21; index++) many = put(many, `s${index}`, `s${index} = circle(${index * 12}, 200, 5, "ink")`);
+  const faults = (await compileAppFile(many)).faults;
+  expect([named(faults, "s21").length, named(faults, "s20").length]).toEqual([1, 0]);
   expect(named((await compileAppFile(put(cells, "control", 'control = slider("Votes for", 0, 101, 1, 11)'))).faults, "control")).toHaveLength(1);
 });
 
@@ -272,7 +275,7 @@ test("outsideStillReads", async () => {
 const len = (node) => [...node.v].length;
 test("theCapFixturesCompileClean", async () => {
   for (const [name, factor] of [["scene-caps", 1], ["items-caps", 1], ["cells-caps", 1], ["scene-caps125", 1.25], ["items-caps125", 1.25], ["cells-caps125", 1.25],
-    ["steps-caps", 1], ["items-steps-caps", 1]]) {
+    ["steps-caps", 1], ["items-steps-caps", 1], ["scene-caps4", 1], ["items-caps4", 1], ["steps-caps4", 1]]) {
     // A text inside the picture (a shape text, a sign) is at floor(1.25 × cap) in a caps125 file. Each other text is at its cap in each file.
     const text = template(name), inside = (n) => Math.floor(n * factor), result = await compileAppFile(text);
     expect([name, result.faults, result.kept]).toEqual([name, [], text]);
@@ -281,20 +284,61 @@ test("theCapFixturesCompileClean", async () => {
     const seen = { title: len(head.args[0]), control: len(control.args[0]), cardTitle: len(card.args[0]) }, want = { title: 30, control: 28, cardTitle: 32 };
     if (head.name === "scene") {
       Object.assign(seen, { options: control.args[1].items.map(len), shapes: parts.length, texts: parts.filter((part) => part.name === "text").map((part) => len(part.args[2])), cardText: len(card.args[1]) });
-      Object.assign(want, { options: Array(6).fill(12), shapes: 12, texts: Array(seen.texts.length).fill(inside(28)), cardText: 140 });
+      // A choice of 2 to 4 options has options of 16 characters, and one of 5 or 6 options has 12 (fix list 3, H3).
+      const few = name.endsWith("caps4");
+      Object.assign(want, { options: few ? Array(4).fill(16) : Array(6).fill(12), shapes: 12, texts: Array(seen.texts.length).fill(inside(28)), cardText: 140 });
       expect(seen.texts.length).toBeGreaterThan(0);
     } else if (head.name === "items") {
       Object.assign(seen, { items: parts.map((part) => part.args.map(len)) });
-      Object.assign(want, { items: Array(6).fill([12, inside(14), 140]) });
+      Object.assign(want, { items: name.endsWith("caps4") ? Array(4).fill([16, 14, 140]) : Array(6).fill([12, inside(14), 140]) });
     } else {
       Object.assign(seen, { count: control.args[2].v, cardText: len(card.args[1]) });
       Object.assign(want, { count: 100, cardText: 140 });
     }
     // A steps file has six narration lines at their cap (plan "one scene", Task 25).
     const says = Object.keys(lines).filter((key) => /^say\d+$/.test(key)).map((key) => len(lines[key]));
-    expect([name, says]).toEqual([name, name.includes("steps") ? Array(6).fill(110) : []]);
+    expect([name, says]).toEqual([name, name.includes("steps") ? Array(name.endsWith("caps4") ? 4 : 6).fill(110) : []]);
     expect([name, seen]).toEqual([name, want]);
   }
+});
+
+test("H3 and L2: an option or a step of a list of 2 to 4 has the cap 16, one of 5 or 6 has the cap 12, and a label is never cut", async () => {
+  const scene = template("scene-caps"), items = template("items-caps4");
+  const options = (list) => `control = choice("Color of the light to follow", [${list.map((one) => JSON.stringify(one)).join(", ")}], ${JSON.stringify(list[0])})`;
+  const four = ["Violet light ray", "Indigo light ray", "Yellow light ray", "Orange light ray"], faultOf = async (text, name) => (await compileAppFile(text)).faults.filter((one) => one.startsWith(`${name}:`));
+  expect(await faultOf(put(scene, "control", options(four)), "control")).toEqual([]);
+  expect(await faultOf(put(scene, "control", options([...four.slice(0, 3), "Orange light rays"])), "control")).toEqual(["control: option 4 has 17 characters, and its cap is 16. Write it shorter"]);
+  expect(await faultOf(put(scene, "control", options([...four, "Purple light"])), "control")).toEqual(["control: options 1, 2, 3, and 4 have 16 characters, and their cap is 12. Write each one shorter, or keep at most 4 options: their cap is 16"]);
+  // A steps control is a choice on the stage, so its steps have the same caps (fix list 5, L2).
+  expect(await faultOf(put(scene, "control", 'control = steps("Color of the light to follow", ["Violet light ray", "Indigo"])'), "control")).toEqual([]);
+  expect(await faultOf(put(scene, "control", 'control = steps("Color of the light to follow", ["Violet light ray", "A", "B", "C", "D"])'), "control"))
+    .toEqual(["control: step 1 has 16 characters, and its cap is 12. Write it shorter, or keep at most 4 steps: their cap is 16"]);
+  // The labels of items are the options of its choice: a fifth item brings the cap of each label to 12, with a choice and with steps.
+  const five = put(items, "i5", 'i5 = item("Хлоропласт", "Свет", "Здесь свет становится пищей.")');
+  expect(await faultOf(five, "i1")).toEqual(["i1: the label has 16 characters, and its cap is 12. Write it shorter, or keep at most 4 items: their cap is 16"]);
+  expect(await faultOf(put(items, "control", 'control = steps("Раздел клетки для просмотра.")'), "i2")).toEqual([]);
+  expect(await faultOf(put(five, "control", 'control = steps("Раздел клетки для просмотра.")'), "i2")).toEqual(["i2: the label has 16 characters, and its cap is 12. Write it shorter, or keep at most 4 items: their cap is 16"]);
+  expect(await faultOf(put(items, "i1", 'i1 = item("Ядро клетки и его ДНК", "ДНК", "Ядро.")'), "i1")).toEqual(["i1: the label has 21 characters, and its cap is 16. Write it shorter"]);
+  // A label is not cut: the kept file has each label as the reply wrote it.
+  expect((await compileAppFile(items)).kept).toBe(items);
+});
+
+test("L1: one fault of a control names each option or step over the cap, and one repair of the control line corrects each of them", async () => {
+  // The first reply of the live heart talk (live-6b-uxHeart) with a fifth step: steps 1 and 2 have 13 characters.
+  const steps = (list) => `control = steps("Путь крови", [${list.map((one) => JSON.stringify(one)).join(", ")}], ${JSON.stringify(list.at(-1))})`;
+  const live = ["Правое предс.", "Правый желуд.", "Левое предс.", "Левый желуд."], scene = template("scene-caps").replace(/visible=\$\/v == "[^"]*"/g, "visible=$/v != \"\"");
+  const faultOf = async (text) => (await compileAppFile(text)).faults.filter((one) => one.startsWith("control:"));
+  expect(await faultOf(put(scene, "control", steps(live)))).toEqual([]);
+  const long = put(scene, "control", steps([...live, "Аорта"]));
+  expect(await faultOf(long)).toEqual(["control: steps 1 and 2 have 13 characters, and their cap is 12. Write each one shorter, or keep at most 4 steps: their cap is 16"]);
+  expect(await faultOf(put(scene, "control", steps(["Правое предсердие!", "Правый желудочек", "Левое предс.", "Левый желуд.", "Аорта"]))))
+    .toEqual(["control: steps 1 (18 characters) and 2 (16 characters) are over their cap of 12. Write each one shorter"]);
+  // A repair reply of the control line with both steps shorter merges by name, and the file compiles clean.
+  const repaired = mergeTemplate(long, steps(["Правое пред.", "Правый жел.", "Левое предс.", "Левый желуд.", "Аорта"]) + "\n");
+  expect((await compileAppFile(repaired)).faults).toEqual([]);
+  // The values of a row: each value over the cap in one fault.
+  const table = template("table-caps"), row = (await compileAppFile(put(table, "r1", 'r1 = row("Меркурий", ["1234567890123", "2", "1234567890123"])'))).faults.filter((one) => one.startsWith("r1:"));
+  expect(row).toEqual(["r1: values 1 and 3 have 13 characters, and their cap is 12. Write each one shorter, such as with a unit in the label"]);
 });
 
 test("aFreeAppFileIsNotATemplate", () => {

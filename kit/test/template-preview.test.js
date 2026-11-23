@@ -26,7 +26,7 @@ const nodes = (frame, type) => every(frame.ui).filter((node) => node.type === ty
 test("theFirstLineAloneGivesAFrame", async () => {
   const frame = await frameOf(first(ship, 1));
   expect(frame.holds).toBe("frame");
-  expect(frame.definition.surfaces.map(({ id, width, height }) => [id, width, height])).toEqual([[Object.keys(frame.drawing)[0], 300, 220]]);
+  expect(frame.definition.surfaces.map(({ id, width, height }) => [id, width, height])).toEqual([[Object.keys(frame.drawing)[0], 300, 300]]);
   expect(Object.keys(frame.drawing)).toHaveLength(1);
   expect(commands(frame)).toEqual([]);
   // The title is the text of the picture, in the picture card.

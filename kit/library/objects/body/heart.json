@@ -1,0 +1,131 @@
+{
+ "id": "body.heart",
+ "names": {
+  "ru": [
+   "сердце"
+  ],
+  "en": [
+   "heart"
+  ]
+ },
+ "words": {
+  "ru": [
+   "сердце человека",
+   "камеры сердца",
+   "предсердие",
+   "желудочек",
+   "кровообращение",
+   "пульс",
+   "сердцебиение",
+   "аорта",
+   "клапан",
+   "кардиология",
+   "орган"
+  ],
+  "en": [
+   "human heart",
+   "heart chambers",
+   "atrium",
+   "ventricle",
+   "blood circulation",
+   "pulse",
+   "heartbeat",
+   "aorta",
+   "valve",
+   "cardiac",
+   "organ"
+  ]
+ },
+ "line": "a human heart in front view: four chambers, the aorta, the pulmonary artery, and the vena cava",
+ "image": "heart.webp",
+ "box": [
+  68.6,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "vena_cava",
+   "names": {
+    "ru": "полая вена",
+    "en": "vena cava"
+   },
+   "label": [
+    -20.2,
+    -35.0
+   ],
+   "ring": 6.3
+  },
+  {
+   "id": "aorta",
+   "names": {
+    "ru": "аорта",
+    "en": "aorta"
+   },
+   "label": [
+    -3.3,
+    -39.2
+   ],
+   "ring": 7.3
+  },
+  {
+   "id": "pulmonary_artery",
+   "names": {
+    "ru": "лёгочная артерия",
+    "en": "pulmonary artery"
+   },
+   "label": [
+    24.1,
+    -24.4
+   ],
+   "ring": 6.3
+  },
+  {
+   "id": "right_atrium",
+   "names": {
+    "ru": "правое предсердие",
+    "en": "right atrium"
+   },
+   "label": [
+    -25.5,
+    -4.4
+   ],
+   "ring": 8.7
+  },
+  {
+   "id": "left_atrium",
+   "names": {
+    "ru": "левое предсердие",
+    "en": "left atrium"
+   },
+   "label": [
+    26.2,
+    -6.5
+   ],
+   "ring": 8.0
+  },
+  {
+   "id": "right_ventricle",
+   "names": {
+    "ru": "правый желудочек",
+    "en": "right ventricle"
+   },
+   "label": [
+    -11.8,
+    23.0
+   ],
+   "ring": 12.6
+  },
+  {
+   "id": "left_ventricle",
+   "names": {
+    "ru": "левый желудочек",
+    "en": "left ventricle"
+   },
+   "label": [
+    17.7,
+    20.9
+   ],
+   "ring": 12.6
+  }
+ ]
+}

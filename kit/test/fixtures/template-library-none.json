@@ -1,0 +1,12 @@
+[
+  {"id": "o-volcano", "expect": "template", "request": "Как устроен вулкан и почему он извергается?"},
+  {"id": "o-sunflower", "expect": "template", "request": "Почему подсолнух поворачивается к солнцу?"},
+  {"id": "o-fridge", "expect": "template", "request": "How does a fridge keep food cold?"},
+  {"id": "o-mill", "expect": "template", "request": "Как ветряная мельница мелет муку?"},
+  {"id": "o-seasons", "expect": "template", "request": "Почему летом тепло, а зимой холодно?"},
+  {"id": "o-bicycle", "expect": "template", "request": "Почему велосипед не падает, когда едет?"},
+  {"id": "o-bridge", "expect": "template", "request": "Почему висячий мост не падает?"},
+  {"id": "o-plane", "expect": "template", "request": "Как самолёт держится в воздухе?"},
+  {"id": "o-leaf-cell", "expect": "template", "request": "What is inside a plant cell?"},
+  {"id": "o-lighthouse", "expect": "template", "request": "Как маяк предупреждает корабли ночью?"}
+]

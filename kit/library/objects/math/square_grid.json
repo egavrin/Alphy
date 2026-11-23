@@ -1,0 +1,215 @@
+{
+ "id": "math.square_grid",
+ "names": {
+  "ru": [
+   "квадрат на сетке"
+  ],
+  "en": [
+   "square on a grid"
+  ]
+ },
+ "words": {
+  "ru": [
+   "площадь",
+   "клетки",
+   "квадрат"
+  ],
+  "en": [
+   "area",
+   "cells",
+   "square"
+  ]
+ },
+ "line": "a square on a grid",
+ "box": [
+  100,
+  100
+ ],
+ "layers": [
+  {
+   "part": "side",
+   "role": "sun",
+   "tone": 2,
+   "outline": -2,
+   "path": [
+    -48,
+    -48,
+    48,
+    -48,
+    48,
+    48,
+    -48,
+    48
+   ]
+  },
+  {
+   "part": "cell",
+   "role": "sun",
+   "tone": 0,
+   "path": [
+    -48,
+    -48,
+    -24,
+    -48,
+    -24,
+    -24,
+    -48,
+    -24
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "sun",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    -24,
+    -48,
+    -24,
+    48
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "sun",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    0,
+    -48,
+    0,
+    48
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "sun",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    24,
+    -48,
+    24,
+    48
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "sun",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    -48,
+    -24,
+    48,
+    -24
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "sun",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    -48,
+    0,
+    48,
+    0
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "sun",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    -48,
+    24,
+    48,
+    24
+   ]
+  },
+  {
+   "part": "side",
+   "role": "sun",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 3,
+   "path": [
+    -48,
+    48,
+    48,
+    48
+   ]
+  },
+  {
+   "part": "vertex",
+   "role": "sun",
+   "tone": -3,
+   "circle": [
+    48,
+    -48,
+    3
+   ]
+  }
+ ],
+ "parts": [
+  {
+   "id": "side",
+   "names": {
+    "ru": "сторона",
+    "en": "side"
+   },
+   "label": [
+    10,
+    48
+   ]
+  },
+  {
+   "id": "cell",
+   "names": {
+    "ru": "клетка",
+    "en": "unit square"
+   },
+   "label": [
+    -36,
+    -36
+   ]
+  },
+  {
+   "id": "grid",
+   "names": {
+    "ru": "сетка",
+    "en": "grid"
+   },
+   "label": [
+    0,
+    12
+   ]
+  },
+  {
+   "id": "vertex",
+   "names": {
+    "ru": "вершина",
+    "en": "vertex"
+   },
+   "label": [
+    48,
+    -48
+   ]
+  }
+ ]
+}

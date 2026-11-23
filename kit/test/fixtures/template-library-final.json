@@ -1,0 +1,22 @@
+[
+  {"id": "m2-brain", "expect": "template", "request": "Какие отделы есть у мозга и за что отвечает мозжечок?"},
+  {"id": "m2-ear", "expect": "template", "request": "How does sound get from the outer ear to the cochlea?"},
+  {"id": "m2-skin", "expect": "template", "request": "Зачем коже потовые железы?"},
+  {"id": "m2-skeleton", "expect": "template", "request": "Сколько костей в скелете человека и какая самая длинная?"},
+  {"id": "m2-gut", "expect": "template", "request": "Как пища проходит от желудка до толстой кишки?"},
+  {"id": "m2-dna", "expect": "template", "request": "What do the base pairs in DNA hold together?"},
+  {"id": "m2-rocket", "expect": "template", "request": "Из каких частей состоит ракета?"},
+  {"id": "m2-comet", "expect": "template", "request": "Why does a comet have a tail?"},
+  {"id": "m2-moon-spots", "expect": "template", "request": "Почему на Луне видны тёмные пятна?"},
+  {"id": "m2-satellite", "expect": "template", "request": "Чем спутник получает энергию на орбите?"},
+  {"id": "m2-circle", "expect": "template", "request": "Как найти длину окружности, если известен радиус?"},
+  {"id": "m2-cube", "expect": "template", "request": "How many faces, edges and corners does a cube have?"},
+  {"id": "m2-cone", "expect": "template", "request": "Чем конус отличается от цилиндра?"},
+  {"id": "m2-point", "expect": "template", "request": "Where is the point (3, -2) on a coordinate plane?"},
+  {"id": "m2-three-quarters", "expect": "template", "request": "Сколько будет три четверти от 20?"},
+  {"id": "m2-lever", "expect": "template", "request": "How does a lever make it easier to lift a heavy box?"},
+  {"id": "m2-kettle", "expect": "template", "request": "Почему при нагревании вода в чайнике поднимается вверх?"},
+  {"id": "m2-clock", "expect": "template", "request": "Show how the minute hand moves in 15 minutes."},
+  {"id": "m2-angle", "expect": "template", "request": "Как измерить угол в 60 градусов?"},
+  {"id": "m2-tank", "expect": "template", "request": "What happens to the level in a tank when you add 2 liters?"}
+]

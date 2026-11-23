@@ -1,0 +1,68 @@
+{
+ "id": "body.brain",
+ "names": {
+  "ru": [
+   "мозг",
+   "головной мозг"
+  ],
+  "en": [
+   "brain"
+  ]
+ },
+ "words": {
+  "ru": [
+   "полушария",
+   "нейроны",
+   "нервная система"
+  ],
+  "en": [
+   "hemispheres",
+   "neurons",
+   "nervous system"
+  ]
+ },
+ "line": "the brain",
+ "image": "brain.webp",
+ "box": [
+  100.0,
+  91.4
+ ],
+ "parts": [
+  {
+   "id": "cerebrum",
+   "names": {
+    "ru": "большие полушария",
+    "en": "cerebrum"
+   },
+   "label": [
+    -23.9,
+    -23.4
+   ],
+   "ring": 15.2
+  },
+  {
+   "id": "cerebellum",
+   "names": {
+    "ru": "мозжечок",
+    "en": "cerebellum"
+   },
+   "label": [
+    15.2,
+    22.3
+   ],
+   "ring": 10.8
+  },
+  {
+   "id": "brain_stem",
+   "names": {
+    "ru": "ствол мозга",
+    "en": "brain stem"
+   },
+   "label": [
+    4.3,
+    37.5
+   ],
+   "ring": 6.5
+  }
+ ]
+}

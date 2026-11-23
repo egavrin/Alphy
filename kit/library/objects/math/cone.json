@@ -1,0 +1,147 @@
+{
+ "id": "math.cone",
+ "names": {
+  "ru": [
+   "конус"
+  ],
+  "en": [
+   "cone"
+  ]
+ },
+ "words": {
+  "ru": [
+   "вершина",
+   "образующая"
+  ],
+  "en": [
+   "apex",
+   "slant height"
+  ]
+ },
+ "line": "a cone",
+ "box": [
+  80,
+  100
+ ],
+ "layers": [
+  {
+   "role": "error",
+   "tone": 2,
+   "outline": -2,
+   "path": [
+    0,
+    -48,
+    -36.0,
+    34.0,
+    -31.2,
+    39.5,
+    -18.0,
+    43.5,
+    0.0,
+    45.0,
+    18.0,
+    43.5,
+    31.2,
+    39.5,
+    36.0,
+    34.0
+   ]
+  },
+  {
+   "part": "base",
+   "role": "error",
+   "tone": 1,
+   "outline": -2,
+   "ellipse": [
+    0,
+    34,
+    36,
+    11
+   ]
+  },
+  {
+   "part": "height",
+   "role": "error",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 1.6,
+   "path": [
+    0,
+    -48,
+    0,
+    34
+   ]
+  },
+  {
+   "part": "slant",
+   "role": "error",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 3,
+   "path": [
+    0,
+    -48,
+    -36,
+    34
+   ]
+  },
+  {
+   "part": "apex",
+   "role": "error",
+   "tone": -3,
+   "circle": [
+    0,
+    -48,
+    3
+   ]
+  }
+ ],
+ "parts": [
+  {
+   "id": "apex",
+   "names": {
+    "ru": "вершина",
+    "en": "apex"
+   },
+   "label": [
+    0,
+    -48
+   ]
+  },
+  {
+   "id": "slant",
+   "names": {
+    "ru": "образующая",
+    "en": "slant height"
+   },
+   "label": [
+    -18,
+    -7
+   ]
+  },
+  {
+   "id": "height",
+   "names": {
+    "ru": "высота",
+    "en": "height"
+   },
+   "label": [
+    0,
+    5
+   ]
+  },
+  {
+   "id": "base",
+   "names": {
+    "ru": "основание",
+    "en": "base"
+   },
+   "label": [
+    20,
+    38
+   ]
+  }
+ ]
+}

@@ -113,6 +113,17 @@ class FollowTurnRehearsalTest {
         assertTrue(message.spoken)
     }
 
+    /** Fix list 4, K2: the template call of a follow screen has the ready objects of the words of the person of that turn. */
+    @Test fun aFollowScreenSendsTheReadyObjectsOfItsWords() = live(StreamTalk(listOf(stepped(), stepped()))) { model, talk, phases ->
+        talk.follow = CloudEvent.Follow("screen", "Четыре камеры сердца", "", answered = true)
+        val first = rig.steppedScene(model)
+        voiceOnly(HEART_WORDS, "Две камеры принимают кровь, две её выталкивают.", 3_000)
+        robot.waitUntil(60_000) { model.stageToolId.let { it != null && it != first.id } && !model.tools.busy }
+        val text = talk.calls.filter { it.generationStage == APP_FILE_TEMPLATE }.last().turns.joinToString("\n") { it.text }
+        assertTrue(text, text.startsWith("User request: $HEART_WORDS\nReady objects that may fit this request") && "\n- heart: " in text)
+        assertTrue(phases.toString(), phases.any { it.startsWith("library_candidates:") && !it.endsWith(" none") })
+    }
+
     /** L1 of the stage 5 live check: a follow screen of the family data sends one data call with no search, and a data form shows. */
     @Test fun followScreenOfTheDataFamilyShowsADataForm() = live(StreamTalk(listOf(stepped(), Streamed(listOf(DataTalk.PLANETS), gapMs = 30)))) { model, talk, _ ->
         talk.follow = CloudEvent.Follow("screen", "Земля и Марс", "", answered = true, family = "data")
@@ -262,6 +273,7 @@ class FollowTurnRehearsalTest {
 
     private companion object {
         const val TYPED = "Который час"
+        const val HEART_WORDS = "А почему у сердца четыре камеры"
         const val SMALL_TALK = "Как дела?"
         const val SMALL_REPLY = "Хорошо, спасибо."
     }

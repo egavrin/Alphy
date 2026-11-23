@@ -248,14 +248,28 @@ class StageChangeWorkflowTest {
     }
 
     // Plan of stage templates, Task 5: a spoken change of a template screen sends the template file, and the kit merges the changed lines.
-    @Test fun aSpokenChangeOfATemplateScreenSendsTheTemplateFile() = templateChange(Scripted.Text(SHIP_S4)) { model, talk, before, _ ->
+    @Test fun aSpokenChangeOfATemplateScreenSendsTheTemplateFile() = templateChange(Scripted.Text(SHIP_S4)) { model, talk, before, phases ->
         assertEquals(List(2) { APP_FILE_TEMPLATE }, talk.stages)
         val call = talk.calls[1]
         assertEquals(prompt.template, call.systemInstructions)
-        assertEquals(listOf(prompt.templateChangeText(changeTask, ship)), call.turns.map { it.text })
+        val (task, count) = TemplateTalk.withoutLibrary(call.turns.single().text)
+        assertEquals(prompt.templateChangeText(changeTask, ship), task)
         val saved = saved(model, before)
         assertEquals(listOf(shipWithS4(), NAIL), listOf(appFileOf(saved), shipSubject(saved)))
+        assertEquals(listOf(count), TemplateTalk.libraryMarks(phases))
     }
+
+    // Fix list 4, K3 and K4: the template change call of a spoken change has the ready objects of the words of the change, and one trace mark.
+    @Test fun aSpokenChangeSendsTheReadyObjectsOfItsWords() =
+        templateChange(Scripted.Text(SHIP_S4), request = TemplateTalk.HEART_CHANGE) { _, talk, _, phases ->
+            assertEquals(List(2) { APP_FILE_TEMPLATE }, talk.stages)
+            val text = talk.calls[1].turns.single().text
+            assertTrue(text, text.startsWith("User request: ${TemplateTalk.HEART_CHANGE}\nReady objects that may fit this request") && "\n- heart: " in text)
+            val (task, count) = TemplateTalk.withoutLibrary(text)
+            assertEquals(prompt.templateChangeText(ChatToolReply.generationPrompt(TemplateTalk.HEART_CHANGE, TemplateTalk.CHANGE_BRIEF, "Готово.", emptyList()), ship), task)
+            assertEquals(phases.toString(), listOf(count), TemplateTalk.libraryMarks(phases))
+            assertTrue(phases.toString(), phases.any { it == "library_candidates:$count words" || it == "library_candidates:$count vectors" })
+        }
 
     @Test fun aDeleteLineRemovesThePart() = templateChange(Scripted.Text("delete s3")) { model, talk, before, _ ->
         assertEquals(List(2) { APP_FILE_TEMPLATE }, talk.stages)
@@ -480,7 +494,7 @@ class StageChangeWorkflowTest {
      * answer.
      */
     private fun templateChange(vararg changes: Scripted, plans: AgentScriptProvider = AgentScriptProvider(appFilePlan("calc")),
-        nail: Boolean = true, watch: (ShellViewModel, ToolRecord) -> Unit = { _, _ -> },
+        nail: Boolean = true, request: String = TemplateTalk.CHANGE_REQUEST, watch: (ShellViewModel, ToolRecord) -> Unit = { _, _ -> },
         check: (ShellViewModel, TemplateTalk, ToolRecord, List<String>) -> Unit) {
         val talk = TemplateTalk(AgentScriptProvider(listOf(Scripted.Text(ship)) + changes), plans)
         shell.live(talk) { _, model, phases ->
@@ -492,7 +506,7 @@ class StageChangeWorkflowTest {
             val before = stored(model, app.id)
             val count = messages(model).size
             val start = phases.size
-            socket.say(TemplateTalk.CHANGE_REQUEST, "d2", 2_000)
+            socket.say(request, "d2", 2_000)
             watch(model, before)
             shell.waitForTheAnswer(model, count)
             check(model, talk, before, phases.drop(start))

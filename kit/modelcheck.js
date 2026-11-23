@@ -11,6 +11,9 @@
 //                                                              and a LABEL that starts with tpl-. A template set runs with no set of the free prompt.
 //                                                              SET X (data tuning) or Y (data held-out) is the check of the data family: PROMPT["Template
 //                                                              data"], the excerpts of each searched request in its task, and the host check (checkData).
+//                                                              SET L (library tuning), M (library final, library arm), N (the same requests, free arm), or
+//                                                              O (requests with no entry, library arm) is the check of the library (stage 6, M1): the
+//                                                              library arm sends the candidates of the catalog in the host line, as the app does.
 //   bun kit/modelcheck.js table LABEL...                       the numbers of each label, from its records; one line for a label of the template check
 // The key is OPENAI_API_KEY, else its line in ~/.env. The script sends it only to api.openai.com, and writes it nowhere.
 // Each call is counted in evidence/modelcheck/spend.json before it is sent. The count never passes LIMIT, and the calls of the labels
@@ -23,8 +26,10 @@ import { LINE, compileAppFile, compileStep, linesOf, needsIn, patchAppFile, read
 import { dataOf, runtime } from "./src/emit.js";
 import { MAX_STATE_BYTES, handle } from "./src/run.js";
 import { runtimeText } from "./build.js";
-import { DATA_HASH, PROMPT, PROMPT_HASH, TEMPLATE_HASH, changeText, repairText, taskText, templateChangeText, templateRepairText } from "./prompt.js";
+import { DATA_HASH, PROMPT, PROMPT_HASH, TEMPLATE_HASH, candidatesText, changeText, repairText, taskText, templateChangeText, templateRepairText } from "./prompt.js";
+import { catalogAsset } from "./build.js";
 import { numbersIn } from "./src/form-data.js";
+import { ELEMENTS } from "./src/elements.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const EVIDENCE = ROOT + "evidence/modelcheck/";
@@ -76,7 +81,10 @@ const CHANGE_REPAIRS = 1;
  * pilot, and the data family (block 2 plan, M1): X tuning and Y held-out.
  */
 const TEMPLATE_SETS = { T: "template-tuning.json", U: "template-holdout.json", V: "template-changes.json", W: "template-pilot.json",
-  X: "template-data-tuning.json", Y: "template-data-final.json" };
+  X: "template-data-tuning.json", Y: "template-data-final.json",
+  L: "template-library-tuning.json", M: "template-library-final.json", N: "template-library-final.json", O: "template-library-none.json" };
+/** The arm of each set of the library check (stage 6, M1): "library" sends the candidates of the catalog in the host line, "free" sends none. */
+export const LIBRARY_ARMS = { L: "library", M: "library", N: "free", O: "library" };
 const isChangeSet = (set) => set === "V" || set === "W";
 export const isDataSet = (set) => set === "X" || set === "Y";
 /** The expect of a screen item that names only its type, as the items of set U do (stage templates plan, Task 7). */
@@ -371,11 +379,22 @@ export const checkTemplateData = (item, options) => templateRecord(item, options
   taskText({ request: item.request, brief: item.brief ?? "", reply: item.reply ?? "", sources: item.sources ?? [] }), null, null,
   { system: PROMPT["Template data"], hash: DATA_HASH, data: dataCheckOf(item.sources), family: true });
 
-/** A screen request of the template check: taskText of its request with no brief, as the early plan of a first screen sends it. */
-export const checkTemplate = (item, options) => templateRecord(item, options, taskText({ request: item.request, brief: "" }), null, null);
+/**
+ * A screen request of the template check: taskText of its request with no brief, as the early plan of a first screen sends it. A request of the
+ * library arm has the candidates in its host line: each object of the catalog, as the search of the app gives a catalog of 24 objects or fewer.
+ * A record of the library check holds its arm and the library names of its kept file.
+ */
+export async function checkTemplate(item, options) {
+  const arm = LIBRARY_ARMS[item.set], host = arm === "library" ? candidatesText(JSON.parse(catalogAsset()).objects) : "";
+  const record = await templateRecord(item, options, taskText({ request: item.request, brief: "", host }), null, null);
+  return arm ? { ...record, arm, names: libraryNames(record.kept ?? "") } : record;
+}
+/** The names of the library lines of a template file, in their order. */
+export const libraryNames = (text) => [...text.matchAll(/=\s*use\("([^"]+)"/g)].map((match) => match[1]);
 
 /**
- * A change request of the template check: templateChangeText of the request and the base file. Each reply compiles against the base at its
+ * A change request of the template check: templateChangeText of the request, the candidates of the catalog, and the base file. The app sends
+ * the ready objects of its search with a spoken change of a shown template (fix list 4, K3). Each reply compiles against the base at its
  * start state, as the host sends a stored app, so a faulty changed line keeps its stored version.
  */
 export async function checkTemplateChange(item, options) {
@@ -383,7 +402,7 @@ export async function checkTemplateChange(item, options) {
   const { definition, faults } = await compileAppFile(item.plan);
   if (faults.length) throw new Error(`the base ${item.base} of ${item.id} has a fault: ${faults[0]}`);
   const previous = { appFile: item.plan, stateSchema: JSON.stringify(definition.stateSchema), state: JSON.stringify(definition.initialState) };
-  return templateRecord(item, options, templateChangeText(item), item.plan, previous);
+  return templateRecord(item, options, templateChangeText({ ...item, host: candidatesText(JSON.parse(catalogAsset()).objects) }), item.plan, previous);
 }
 
 // ---- The API call: the only place that sends a request to an outside service.
@@ -560,6 +579,22 @@ function dataRow(label, records) {
     + ` | rejected: ${numbers.rejects.map((reject) => `${reject.id} "${reject.value}" ${reject.kind}`).join(", ") || "none"}`;
 }
 
+/**
+ * The numbers of a label of the library check (stage 6, M1): its arm, the files clean at the first try, the median time of the first call, and the
+ * library names that each file used. A request of set O expects no ready object: a file that uses one is listed.
+ */
+export function libraryNumbers(records) {
+  return { arm: records[0]?.arm, size: records.length, cleanFirst: records.filter((record) => record.outcome === "clean0").length,
+    medianFirstCallMs: median(records.map((record) => record.firstCallMs)), names: records.map((record) => `${record.id}:${(record.names ?? []).join("+") || "-"}`),
+    objectsWithNoEntry: records.filter((record) => record.set === "O" && (record.names ?? []).some((name) => !(name in ELEMENTS))).map((record) => record.id) };
+}
+/** The one line of a label of the library check. */
+function libraryRow(label, records) {
+  const numbers = libraryNumbers(records);
+  return `${label} (${records[0]?.prompt}, ${numbers.arm} arm, ${numbers.size} records): clean at the first try ${share(numbers.cleanFirst, numbers.size)},`
+    + ` median first call ${numbers.medianFirstCallMs} ms | objects with no entry: ${numbers.objectsWithNoEntry.join(", ") || "none"} | names: ${numbers.names.join(" ")}`;
+}
+
 /** The one line of a label of the template check: the five numbers with the size of each group. */
 function templateRow(label, records) {
   const numbers = templateNumbers(records), size = (group) => records.filter(TEMPLATE_GROUPS[group]).length;
@@ -607,7 +642,7 @@ if (import.meta.main) {
     // A template run counts under its own cap only with a label that starts with tpl-, and a run of the free prompt never takes that cap.
     const template = [...set].filter((name) => Object.hasOwn(TEMPLATE_SETS, name));
     if (template.length ? template.length !== set.length || !isTemplateLabel(label) : isTemplateLabel(label)) {
-      console.log("refused: the sets T, U, V, W, X, and Y run alone, with a label that starts with tpl-, and only they take such a label"); process.exit(2);
+      console.log("refused: the sets T, U, V, W, X, Y, L, M, N, and O run alone, with a label that starts with tpl-, and only they take such a label"); process.exit(2);
     }
     const items = (template.length ? template.flatMap(templateSet) : [...(set.includes("C") ? corpus() : []), ...(set.includes("D") ? SET_D : []), ...(set.includes("E") ? SET_E : []), ...(set.includes("F") ? SET_F : [])])
       .filter((item) => !ids.length || ids.includes(item.id))
@@ -631,7 +666,7 @@ if (import.meta.main) {
       writeFileSync(`${EVIDENCE}${label}/${item.id}.json`, JSON.stringify(record, null, 1));
       if (isDataSet(item.set)) console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.firstCallMs} ms`, record.form ?? record.replied.word ?? "",
         record.steps.map((step) => step.rejected).filter((value) => value != null).map((value) => `rejected "${value}"`).join(" "), record.faults.slice(0, 2).join(" | ").slice(0, 200));
-      else if (template.length) console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.firstCallMs} ms`, record.replied.kind === "lines" ? `${record.replied.lines} lines, ${record.repeated} repeated` : record.replied.word ?? "", record.faults.slice(0, 2).join(" | ").slice(0, 200));
+      else if (template.length) console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.firstCallMs} ms`, record.names ? `use ${record.names.join("+") || "-"}` : "", record.replied.kind === "lines" ? `${record.replied.lines} lines, ${record.repeated} repeated` : record.replied.word ?? "", record.faults.slice(0, 2).join(" | ").slice(0, 200));
       else console.log(item.id.padEnd(28), record.outcome.padEnd(8), `first ${record.calls[0].wallS}s`, `path ${record.pathS}s`, record.first.word ?? "", (record.steps.at(-1)?.faults ?? []).slice(0, 2).join(" | ").slice(0, 200));
     });
     console.log(`spent ${spent().calls}`);
@@ -641,6 +676,11 @@ if (import.meta.main) {
       const records = recordsOf(label);
       if (records.some((record) => isDataSet(record.set))) {
         console.log(dataRow(label, withItemExpect(records)));
+        if (detail) for (const [fault, row] of faultTable(records)) console.log(`  ${row.count} ${row.repaired} ${row.kept} ${row.last} | ${fault} | ${row.ids.join(" ")}`);
+        continue;
+      }
+      if (records.some((record) => record.arm)) {
+        console.log(libraryRow(label, records));
         if (detail) for (const [fault, row] of faultTable(records)) console.log(`  ${row.count} ${row.repaired} ${row.kept} ${row.last} | ${fault} | ${row.ids.join(" ")}`);
         continue;
       }

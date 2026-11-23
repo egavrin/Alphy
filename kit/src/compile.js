@@ -10,6 +10,7 @@ import { handle, kitOf, screen } from "./run.js";
 import { dataOf, emit } from "./emit.js";
 import { nextState } from "./change.js";
 import { buildTemplate, checkData, expandTemplate, isTemplateFile, mergeTemplate, readTemplate } from "./template.js";
+import { LIBRARY } from "./library.js";
 
 /** The compile of an app file, and with no fault the expanded file and what the emitter gives. */
 function build(text) {
@@ -55,7 +56,7 @@ export async function compileAppFile(text, previous, preview = false) {
   const storedTemplate = isTemplateFile(previous?.appFile), template = isTemplateFile(text) && buildTemplate(text, storedTemplate ? previous.appFile : null, build, preview);
   const stored = storedTemplate ? { ...previous, appFile: expandTemplate(readTemplate(previous.appFile), new Set()) } : previous;
   const { file, emitted, ...built } = template ? template.built : build(text), result = { ...built, blockedBySavedData: false, savedDataMismatch: false };
-  if (template) Object.assign(result, { template: template.word, kept: template.kept, expanded: template.expanded, leftOut: template.leftOut });
+  if (template) Object.assign(result, { template: template.word, kept: template.kept, expanded: template.expanded, leftOut: template.leftOut, misses: template.misses });
   const framed = (out) => (out.definition ? { ...out, frame: frameOf(out.definition, out.state ?? out.definition.initialState, preview && template ? template.holds : "whole") } : out);
   if (!stored || !result.definition) return framed({ ...result, state: null });
   try {
@@ -119,7 +120,9 @@ export function patchAppFile(plan, reply) {
  * data is {excerpts, site, time} for a new searched data screen, or null: the merged text then gets the host check of template.js checkData
  * before the compile, and result.rejected is the value that no excerpt holds, or null.
  */
-export async function compileStep({ text, plan, read, previous, cap, data = null }) {
+export async function compileStep({ text, plan, read, previous, cap, data = null, missing = [] }) {
+  // An image entry whose image the host cannot open is no entry of this call: its name is a miss (library.js LIBRARY).
+  LIBRARY.missing = new Set(missing);
   const reply = read ? readPlanReply(text) : { kind: "plan", text };
   if (reply.kind !== "plan") return reply;
   const { text: merged, rejected } = data ? checkData(mergedOf(plan, reply.text), data) : { text: mergedOf(plan, reply.text), rejected: null };
@@ -138,7 +141,8 @@ const storedOf = (previous) => previous && { appFile: previous.appFile, stateSch
  * of a template: a line with a fault is left out with no repair (a change keeps its stored version), and the first line alone gives the frame with
  * the picture card at its final size. A free plan gives holds "whole". An outside reply, a text with no usable first line, and each throw give none.
  */
-export async function previewStep({ text, plan = null, previous = null, data = null }) {
+export async function previewStep({ text, plan = null, previous = null, data = null, missing = [] }) {
+  LIBRARY.missing = new Set(missing);
   const gate = settings.gate;
   settings.gate = "off";
   try {

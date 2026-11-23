@@ -1,0 +1,79 @@
+{
+ "id": "body.lungs",
+ "names": {
+  "ru": [
+   "лёгкие"
+  ],
+  "en": [
+   "lungs"
+  ]
+ },
+ "words": {
+  "ru": [
+   "дыхание",
+   "бронхи",
+   "вдох и выдох"
+  ],
+  "en": [
+   "breathing",
+   "bronchi",
+   "inhale and exhale"
+  ]
+ },
+ "line": "the lungs",
+ "image": "lungs.webp",
+ "box": [
+  92.7,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "trachea",
+   "names": {
+    "ru": "трахея",
+    "en": "trachea"
+   },
+   "label": [
+    0.3,
+    -34.4
+   ],
+   "ring": 6.4
+  },
+  {
+   "id": "bronchi",
+   "names": {
+    "ru": "бронхи",
+    "en": "bronchi"
+   },
+   "label": [
+    -8.2,
+    -1.3
+   ],
+   "ring": 6.4
+  },
+  {
+   "id": "right_lung",
+   "names": {
+    "ru": "правое лёгкое",
+    "en": "right lung"
+   },
+   "label": [
+    -31.8,
+    19.0
+   ],
+   "ring": 14.5
+  },
+  {
+   "id": "left_lung",
+   "names": {
+    "ru": "левое лёгкое",
+    "en": "left lung"
+   },
+   "label": [
+    32.4,
+    19.0
+   ],
+   "ring": 13.9
+  }
+ ]
+}

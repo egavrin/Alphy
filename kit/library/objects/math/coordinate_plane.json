@@ -1,0 +1,273 @@
+{
+ "id": "math.coordinate_plane",
+ "names": {
+  "ru": [
+   "координатная плоскость"
+  ],
+  "en": [
+   "coordinate plane"
+  ]
+ },
+ "words": {
+  "ru": [
+   "оси x и y",
+   "точка",
+   "график"
+  ],
+  "en": [
+   "x and y axes",
+   "point",
+   "graph"
+  ]
+ },
+ "line": "a coordinate plane",
+ "box": [
+  100,
+  100
+ ],
+ "layers": [
+  {
+   "part": "grid",
+   "role": "muted",
+   "tone": 0,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    -40,
+    -48,
+    -40,
+    48
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "muted",
+   "tone": 0,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    -20,
+    -48,
+    -20,
+    48
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "muted",
+   "tone": 0,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    20,
+    -48,
+    20,
+    48
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "muted",
+   "tone": 0,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    40,
+    -48,
+    40,
+    48
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "muted",
+   "tone": 0,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    -48,
+    -40,
+    48,
+    -40
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "muted",
+   "tone": 0,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    -48,
+    -20,
+    48,
+    -20
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "muted",
+   "tone": 0,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    -48,
+    20,
+    48,
+    20
+   ]
+  },
+  {
+   "part": "grid",
+   "role": "muted",
+   "tone": 0,
+   "line": true,
+   "open": true,
+   "width": 1,
+   "path": [
+    -48,
+    40,
+    48,
+    40
+   ]
+  },
+  {
+   "part": "x_axis",
+   "role": "ink",
+   "tone": 0,
+   "line": true,
+   "open": true,
+   "width": 2.4,
+   "path": [
+    -48,
+    0,
+    44,
+    0
+   ]
+  },
+  {
+   "part": "x_axis",
+   "role": "ink",
+   "tone": 0,
+   "path": [
+    50,
+    0,
+    42,
+    -4,
+    42,
+    4
+   ]
+  },
+  {
+   "part": "y_axis",
+   "role": "ink",
+   "tone": 0,
+   "line": true,
+   "open": true,
+   "width": 2.4,
+   "path": [
+    0,
+    48,
+    0,
+    -44
+   ]
+  },
+  {
+   "part": "y_axis",
+   "role": "ink",
+   "tone": 0,
+   "path": [
+    0,
+    -50,
+    -4,
+    -42,
+    4,
+    -42
+   ]
+  },
+  {
+   "part": "origin",
+   "role": "ink",
+   "tone": 0,
+   "circle": [
+    0,
+    0,
+    3
+   ]
+  },
+  {
+   "part": "point",
+   "role": "error",
+   "tone": 0,
+   "circle": [
+    20,
+    -20,
+    4
+   ]
+  }
+ ],
+ "parts": [
+  {
+   "id": "x_axis",
+   "names": {
+    "ru": "ось x",
+    "en": "x axis"
+   },
+   "label": [
+    36,
+    0
+   ]
+  },
+  {
+   "id": "y_axis",
+   "names": {
+    "ru": "ось y",
+    "en": "y axis"
+   },
+   "label": [
+    -1,
+    -36
+   ]
+  },
+  {
+   "id": "origin",
+   "names": {
+    "ru": "начало координат",
+    "en": "origin"
+   },
+   "label": [
+    -2,
+    2
+   ]
+  },
+  {
+   "id": "point",
+   "names": {
+    "ru": "точка",
+    "en": "point"
+   },
+   "label": [
+    20,
+    -20
+   ]
+  },
+  {
+   "id": "grid",
+   "names": {
+    "ru": "сетка",
+    "en": "grid"
+   },
+   "label": [
+    -40,
+    30
+   ]
+  }
+ ]
+}

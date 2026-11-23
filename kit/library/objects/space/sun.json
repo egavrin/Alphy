@@ -1,0 +1,55 @@
+{
+ "id": "space.sun",
+ "names": {
+  "ru": [
+   "солнце"
+  ],
+  "en": [
+   "sun"
+  ]
+ },
+ "words": {
+  "ru": [
+   "звезда солнечной системы",
+   "солнечный свет",
+   "жар"
+  ],
+  "en": [
+   "our star",
+   "sunlight",
+   "solar heat"
+  ]
+ },
+ "line": "the Sun, the star of the solar system",
+ "image": "sun.webp",
+ "box": [
+  99.6,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "surface",
+   "names": {
+    "ru": "поверхность",
+    "en": "surface"
+   },
+   "label": [
+    -13.1,
+    9.6
+   ],
+   "ring": 13.4
+  },
+  {
+   "id": "prominence",
+   "names": {
+    "ru": "протуберанец",
+    "en": "prominence"
+   },
+   "label": [
+    40.8,
+    -35.4
+   ],
+   "ring": 8.9
+  }
+ ]
+}

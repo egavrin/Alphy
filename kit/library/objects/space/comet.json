@@ -1,0 +1,53 @@
+{
+ "id": "space.comet",
+ "names": {
+  "ru": [
+   "комета"
+  ],
+  "en": [
+   "comet"
+  ]
+ },
+ "words": {
+  "ru": [
+   "хвост кометы",
+   "ледяное тело"
+  ],
+  "en": [
+   "comet tail",
+   "icy body"
+  ]
+ },
+ "line": "a comet with its tail",
+ "image": "comet.webp",
+ "box": [
+  100.0,
+  82.4
+ ],
+ "parts": [
+  {
+   "id": "nucleus",
+   "names": {
+    "ru": "ядро",
+    "en": "nucleus"
+   },
+   "label": [
+    -34.5,
+    22.4
+   ],
+   "ring": 9.7
+  },
+  {
+   "id": "tail",
+   "names": {
+    "ru": "хвост",
+    "en": "tail"
+   },
+   "label": [
+    24.7,
+    -25.0
+   ],
+   "ring": 10.7
+  }
+ ]
+}

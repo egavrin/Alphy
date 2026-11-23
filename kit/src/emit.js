@@ -42,7 +42,7 @@ const MAX_SURFACES = 4;
 /** The fields of the change of a value that an animate moves: its start and end values, its start and end times in ms of the host's clock, and its value now. */
 const RUN = { type: "object", fields: { from: "number", to: "number", start: "number", end: "number", at: "number" } };
 /** The limits of one reply by their unit in a fault. */
-const UNITS = { commands: "commands", pairs: "coordinate pairs", chars: "text characters", bytes: "bytes" };
+const UNITS = { commands: "commands", pairs: "coordinate pairs", chars: "text characters", bytes: "bytes", segments: "path segments", stops: "gradient stops" };
 
 /**
  * The definition of the app, its language beside it, and the faults of what the emitter cannot build. app is the compiled

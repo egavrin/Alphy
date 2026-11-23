@@ -14,6 +14,7 @@ import { DslError, parseExpression, parseLine, show } from "./dsl.js";
 import { BUDGET, HEIGHT, SENTENCE_END, TEMPLATE_HEAD, WIDTH, colorFault, colored, cut, cutLong, headFault, isText, nodesIn, numberOf } from "./form-base.js";
 import { FORMS_BY_WORD } from "./forms.js";
 import { DATA_WORDS, checkedValues, numbersIn, rejectFile, sourceFault } from "./form-data.js";
+import { missOf } from "./library.js";
 
 export { BUDGET, TEMPLATE_HEAD } from "./form-base.js";
 
@@ -50,10 +51,11 @@ function narrationOf(name, raw) {
  * line as "NAME: message", where NAME is the template word for the first line and for a line with no name. A line of a known name has the tree
  * of its value, with the kit's color for each color name, or null when it has a fault. A second line of a name, a line of a name that the
  * template does not have, and a line with no name are faults and not lines. The kit-written line $/v = VALUE is the line control.
+ * misses names each library name that a line places and the library does not have (library.js missOf): the miss log of spec 12.8.
  */
 export function readTemplate(text) {
   const [first = "", ...rest] = text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#")), word = TEMPLATE_HEAD.exec(first)?.[1], form = FORMS_BY_WORD[word];
-  const faults = [], lines = [], fault = (name, message) => { faults.push(`${name}: ${message}`); return message; };
+  const faults = [], lines = [], misses = [], fault = (name, message) => { faults.push(`${name}: ${message}`); return message; };
   const read = (raw, parse) => { try { return parse(raw.trim()); } catch (failure) { if (failure instanceof DslError) return failure; throw failure; } };
   const head = read(first, parseExpression), headless = head instanceof DslError ? head.message : headFault(head, word, form.head) ?? form.headFault?.(head) ?? null;
   if (headless) fault(word, headless);
@@ -73,13 +75,14 @@ export function readTemplate(text) {
     if (lines.some((line) => line.name === name)) { fault(name, `this is a second line ${name}. Each line has its own name`); continue; }
     const entry = read(raw, parseLine);
     let tree = entry instanceof DslError ? null : entry.tree, message = entry instanceof DslError ? entry.message : null, source = raw.trim();
+    if (missOf(tree)) misses.push(missOf(tree));
     if (tree && name === "control") message = entry.kind === "state" ? (isText(tree) || numberOf(tree) !== undefined ? null : "$/v = VALUE takes a number or a text in quotes") : form.controlFault(tree);
     else if (tree) {
       // The kept line has the cut text, so the stored file and a later change have it too.
       const long = cutLong(tree, name, word), short = form.cut ? form.cut(long, name) : long;
       if (show(short) !== show(tree)) { tree = short; source = `${name} = ${show(tree)}`; }
       const shape = name !== "card" && word === "scene", path = nodesIn(tree, (node) => node.k === "path" && !readsV(node))[0];
-      message = (name === "card" ? form.cardFault(tree) : name === "source" ? sourceFault(tree) : form.partFault(tree))
+      message = (name === "card" ? form.cardFault(tree) : name === "source" ? sourceFault(tree) : form.partFault(tree, head?.named?.lang?.v))
         ?? (path ? `a line reads only $/v, the value of the control, and this line reads ${show(path)}` : null);
       if (shape && !message) message = colorFault(tree = colored(tree));
       // The choice of items shows their labels, so it cannot tell two items of one label apart.
@@ -101,7 +104,7 @@ export function readTemplate(text) {
     if (say) lines.push({ name: "say", raw: say, tree: { k: "lit", v: "say" } });
   }
   lines.sort((a, b) => rank(a.name, word) - rank(b.name, word));
-  return { word, lines, faults };
+  return { word, lines, faults, misses };
 }
 
 /**
@@ -164,7 +167,7 @@ export function expandTemplate(read, leftOut) {
   if (form.file) return form.file(head, parts, control, card, line("source")?.tree);
   const out = [`app(${title}, lang=${show(head.named.lang)}, preset="clean", palette=${show(head.named.palette ?? { k: "lit", v: "blue" })})`];
   // What the form gives in place of the defaults (forms.js TemplateForm expand).
-  const own = FORMS_BY_WORD[read.word].expand?.(parts, control) ?? {}, shapes = own.shapes ?? parts.map((part) => show(part.tree));
+  const own = FORMS_BY_WORD[read.word].expand?.(parts, control, head) ?? {}, shapes = own.shapes ?? parts.map((part) => show(part.tree));
   out.push(...(own.lines ?? []), `need picture = drawing(${title}, ${WIDTH}, ${HEIGHT}, [${shapes.join(", ")}])`);
   const [label, ...args] = control?.args ?? [], start = show(startOf(read, leftOut));
   if (control?.k !== "call") out.push(`$/v = ${control ? show(control) : start}`);
@@ -198,7 +201,7 @@ function ownersOf(read, leftOut, faults, build) {
  * takes it). stored is the template file of the stored app of a change, or null for a new screen.
  * A line with a fault is left out: a change takes the stored version of that line instead. A control that no line reads changes nothing, so
  * it is left out too. When the expansion has kit faults, each owner (ownersOf) is left out and the kit compiles once more.
- * Returns {built, word, kept, expanded, leftOut, holds}. built is the result of build for expanded, the expansion of kept, with each fault of a line that
+ * Returns {built, word, kept, expanded, leftOut, holds, misses}, where misses are the library names that the file placed and the library does not have. built is the result of build for expanded, the expansion of kept, with each fault of a line that
  * was left out. A whole fault gives built with no definition and expanded null: a fault of the first line, no part with no fault, a cells file
  * with no control, or a kit fault of the last compile.
  * preview is true for the lines so far of a stream (compile.js previewStep): a control that no line reads yet stays, and only a fault of the first
@@ -233,6 +236,7 @@ export function buildTemplate(text, stored, build, preview = false) {
     : read.word === "cells" ? (drawn(cells) ? null : "cells: the cells need a line control = slider(LABEL, 0, COUNT, 1, START) with no fault")
       : drawnParts(read, leftOut).length ? null : `${read.word}: the picture needs a ${read.word === "scene" ? "shape" : "item"} with no fault`);
   read = readTemplate(text);
+  const misses = read.misses;
   faults.push(...read.faults);
   read.lines.filter((line) => !line.tree).forEach((line) => out.add(line.name));
   settle();
@@ -250,5 +254,5 @@ export function buildTemplate(text, stored, build, preview = false) {
   const unique = [...new Set(faults)], broken = Boolean(lacking) || built.faults.length > 0;
   const holds = drawn((line) => line.name === "card") ? "card" : drawnParts(read, leftOut).length || (read.word === "cells" && drawn(cells)) ? "parts" : "frame";
   return { built: broken ? { faults: unique, notes: built?.notes ?? [], definition: null, language: null, hole: false } : { ...built, faults: unique },
-    word: read.word, kept, expanded: broken ? null : expanded, leftOut: [...leftOut], holds };
+    word: read.word, kept, expanded: broken ? null : expanded, leftOut: [...leftOut], holds, misses };
 }

@@ -1,0 +1,91 @@
+{
+ "id": "space.earth",
+ "names": {
+  "ru": [
+   "земля",
+   "планета земля"
+  ],
+  "en": [
+   "earth",
+   "planet earth"
+  ]
+ },
+ "words": {
+  "ru": [
+   "наша планета",
+   "земной шар"
+  ],
+  "en": [
+   "our planet",
+   "the globe from space"
+  ]
+ },
+ "line": "the planet Earth from space",
+ "image": "earth.webp",
+ "box": [
+  100.0,
+  99.2
+ ],
+ "parts": [
+  {
+   "id": "ocean",
+   "names": {
+    "ru": "океан",
+    "en": "ocean"
+   },
+   "label": [
+    -8.8,
+    -6.3
+   ],
+   "ring": 7.9
+  },
+  {
+   "id": "south_america",
+   "names": {
+    "ru": "Южная Америка",
+    "en": "South America"
+   },
+   "label": [
+    -13.4,
+    15.4
+   ],
+   "ring": 9.1
+  },
+  {
+   "id": "clouds",
+   "names": {
+    "ru": "облака",
+    "en": "clouds"
+   },
+   "label": [
+    -40.7,
+    1.7
+   ],
+   "ring": 6.8
+  },
+  {
+   "id": "africa",
+   "names": {
+    "ru": "Африка",
+    "en": "Africa"
+   },
+   "label": [
+    29.9,
+    8.6
+   ],
+   "ring": 11.3
+  },
+  {
+   "id": "europe",
+   "names": {
+    "ru": "Европа",
+    "en": "Europe"
+   },
+   "label": [
+    20.8,
+    -25.6
+   ],
+   "ring": 7.9
+  }
+ ]
+}

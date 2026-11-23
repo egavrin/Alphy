@@ -1,9 +1,12 @@
 package com.alpha.assistant.tools.appfile
 
 import android.content.Context
+import android.util.Log
 import com.alpha.assistant.sandbox.SandboxClient
+import com.alpha.assistant.tools.LibraryImages
 import com.alpha.assistant.tools.StagePreviewFrame
 import com.alpha.assistant.tools.ToolSpec
+import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -16,6 +19,8 @@ internal const val APP_FILE_MAX_CHARS=65536
 private const val KIT_ASSET="appfile/kit.js"
 /** The start of the fault of a text past APP_FILE_MAX_CHARS. */
 private const val TOO_LONG="the plan has "
+/** A name of the miss log that goes to the release log as it is: a library name such as "solar_panel". Each other name is "other". */
+private val MISS_NAME=Regex("[a-z0-9_]{1,40}")
 
 /**
  * status: "ok" (a definition and no fault), "faults", or the sandbox status that failed (TIMEOUT, BUSY, and so on). definition is JSON text.
@@ -76,6 +81,9 @@ internal sealed interface AppFileRead {
  */
 internal class AppFileCompiler(private val context: Context,private val sandbox: SandboxClient) {
     private val kit by lazy {context.assets.open(KIT_ASSET).use {it.readBytes().decodeToString()}}
+    /** The image entries of the library whose image the assets do not hold: the kit treats each one as a name it does not have (stage 6, I4). */
+    internal var missingImages: Set<String>?=null
+    private fun missing()=JSONArray((missingImages ?: LibraryImages.missing(context.assets).also {missingImages=it}).sorted())
 
     /** A plan with the stored app of a change. Without read, no result is Outside. */
     suspend fun compile(appFile: String,previous: AppFilePrevious?=null): AppFileCompilation=(evaluate(appFile,null,false,previous) as AppFileRead.Plan).compilation
@@ -92,7 +100,7 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
     suspend fun preview(text: String,plan: String?,previous: AppFilePrevious?,check: DataCheck?=null): StagePreviewFrame? {
         if(listOfNotNull(text,plan,previous?.appFile).any {it.length>APP_FILE_MAX_CHARS}) return null
         val input=JSONObject().put("text",text).put("plan",plan ?: JSONObject.NULL).put("previous",previousJson(previous))
-            .put("data",check?.json() ?: JSONObject.NULL)
+            .put("data",check?.json() ?: JSONObject.NULL).put("missing",missing())
         val hold=previewHoldMs.takeIf {it>0}?.let {"(()=>{const end=Date.now()+$it;while(Date.now()<end){}})();\n"}.orEmpty()
         val result=sandbox.evaluateScript(kit,"${hold}Promise.resolve(previewStep(JSON.parse(${JSONObject.quote(input.toString())}))).then(JSON.stringify)",
             APP_FILE_PREVIEW_MS,APP_FILE_RETURN_BYTES)
@@ -112,7 +120,7 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
             return AppFileRead.Plan(given,failed("INVALID_REQUEST"))
         // All inputs come in as one JSON text, so they stay data.
         val input=JSONObject().put("text",text).put("plan",plan ?: JSONObject.NULL).put("read",read).put("cap",APP_FILE_MAX_CHARS)
-            .put("previous",previousJson(previous)).put("data",check?.json() ?: JSONObject.NULL)
+            .put("previous",previousJson(previous)).put("data",check?.json() ?: JSONObject.NULL).put("missing",missing())
         val result=sandbox.evaluateScript(kit,"compileStep(JSON.parse(${JSONObject.quote(input.toString())})).then(JSON.stringify)",APP_FILE_COMPILE_MS,APP_FILE_RETURN_BYTES)
         if(result.status!="OK") return AppFileRead.Plan(given,failed(result.status))
         // A promise that the engine does not resolve gives an empty text, not JSON. An output without its faults or notes is not a result either.
@@ -137,6 +145,10 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
         fun text(key: String)=if(json.isNull(key)) null else json.getString(key)
         val faults=texts("faults")
         val definition=objectText("definition")
+        // The miss log of the library (spec 12.8): each name of a library line that the catalog does not have, as a plain name or "other".
+        textsOrEmpty("misses").takeIf {it.isNotEmpty()}?.let {misses ->
+            Log.i("AlphyLibrary","miss names=${misses.joinToString(",") {name -> name.takeIf {it.matches(MISS_NAME)} ?: "other"}}")
+        }
         return AppFileCompilation(if(definition!=null && faults.isEmpty()) "ok" else "faults",faults,texts("notes"),definition,
             text("language"),json.getBoolean("hole"),objectText("state"),
             blockedBySavedData=json.getBoolean("blockedBySavedData"),savedDataMismatch=json.getBoolean("savedDataMismatch"),

@@ -106,11 +106,13 @@ internal object AppFileNames {
     const val NARRATION_DROPPED = "narration_dropped"
     // The decision of a follow call (plan "one scene", decision 18), with its kind as the detail.
     const val FOLLOW = "follow"
+    /** The candidates of the library in a template call or a template change call (fix list 4, K4): a count and vectors, words, or none. */
+    const val LIBRARY_CANDIDATES = "library_candidates"
     /** The holds value of a frame (kit previewStep): the first line, parts, the card, or a whole compiled plan. */
     val PREVIEW_HOLDS = setOf("frame", "parts", "card", "whole")
     val PHASES = setOf(PLAN_CALL_START, PLAN_FIRST_TEXT, PLAN_REPLY_END, COMPILE, REPAIR_CALL_START, CHANGE_CALL_START, PLAN_OUTCOME,
         EARLY_PLAN_START, EARLY_PLAN_USED, EARLY_PLAN_CANCELED, TEMPLATE_CALL_START, TEMPLATE_OUTCOME, STAGE_PREVIEW, STAGE_PREVIEW_GONE,
-        CONTROLS_ON, NARRATION_SAVED, NARRATION_DROPPED, FOLLOW, DATA_REJECTED) + HOST_CHECK_RETRIES.map { HOST_CHECK_RETRY + it } + PlanSkip.entries.map { it.phase }
+        CONTROLS_ON, NARRATION_SAVED, NARRATION_DROPPED, FOLLOW, DATA_REJECTED, LIBRARY_CANDIDATES) + HOST_CHECK_RETRIES.map { HOST_CHECK_RETRY + it } + PlanSkip.entries.map { it.phase }
 
     // The reasons of a ScreenFallback that has no plan outcome. They are not on the trace.
     /** The plan step cannot run for this screen run, for example because the switch is off. */
@@ -158,7 +160,9 @@ internal sealed interface AppFileOutcome {
  */
 internal class ScreenRun(val early: Deferred<AppFileOutcome>? = null, val template: String? = null,
     val preview: ((StagePreviewFrame) -> Unit)? = null, val outlive: CoroutineScope? = null,
-    val data: Boolean = false, val check: DataCheck? = null) {
+    val data: Boolean = false, val check: DataCheck? = null,
+    /** The detail of the trace mark library_candidates of its template call or template change call, such as "24 vectors" (fix list 4, K4). */
+    val library: String? = null) {
     @Volatile var narration: Deferred<String?>? = null
 }
 
@@ -217,7 +221,8 @@ internal class AppFileSteps(
      * With [data], the template call has the section Template data, and [check] is the host check of each compile of a searched form.
      */
     suspend fun screen(templateTask: String, planTask: String, limits: AppFileLimits,
-        preview: ((StagePreviewFrame) -> Unit)? = null, data: Boolean = false, check: DataCheck? = null): AppFileOutcome {
+        preview: ((StagePreviewFrame) -> Unit)? = null, data: Boolean = false, check: DataCheck? = null, library: String? = null): AppFileOutcome {
+        library?.let { phase(AppFileNames.LIBRARY_CANDIDATES, it, null) }
         phase(AppFileNames.TEMPLATE_CALL_START, null, null)
         val instructions = if (data) prompt.templateData else prompt.template
         val outcome = templateSteps(templateTask, null, limits, preview, instructions, check) { compiler.compileReply(it, check) }
@@ -230,11 +235,14 @@ internal class AppFileSteps(
      * With [template] (a spoken change of a stored template file), the template change call goes first, and its reply outside goes on with
      * the change call. The change call gets the app file of the expansion of a stored template file, so the app then has a free app file.
      * [preview] gets the frame of the complete changed lines of the template change call over the stored file and state (Task 18).
+     * [templateTask] is the request of the template change call with the ready objects of the library, and [library] the detail of its trace
+     * mark (fix list 4, K3 and K4). The change call outside a template gets [request] alone.
      */
     suspend fun change(request: String, stored: AppFilePrevious, limits: AppFileLimits, template: Boolean,
-        preview: ((StagePreviewFrame) -> Unit)? = null): AppFileOutcome {
+        preview: ((StagePreviewFrame) -> Unit)? = null, templateTask: String? = null, library: String? = null): AppFileOutcome {
+        if (template) library?.let { phase(AppFileNames.LIBRARY_CANDIDATES, it, null) }
         phase(AppFileNames.CHANGE_CALL_START, null, null)
-        if (template) templateSteps(prompt.templateChangeText(request, stored.appFile), stored, limits, preview, prompt.template, null) {
+        if (template) templateSteps(prompt.templateChangeText(templateTask ?: request, stored.appFile), stored, limits, preview, prompt.template, null) {
             compiler.patch(stored.appFile, it, stored)
         }.let { if (it !is AppFileOutcome.Outside) return it }
         val free = if (!prompt.isTemplate(stored.appFile)) stored else {
@@ -492,7 +500,7 @@ internal suspend fun routeAppFile(
         var check: String? = null
         val steps = appFileSteps(checkNotNull(appFileCall))
         val outcome = screen?.early?.let { earlyOutcome(it, checkActive) }
-            ?: screen?.template?.let { steps.screen(it, request.prompt, checkNotNull(planStep), screen.preview, screen.data, screen.check) }
+            ?: screen?.template?.let { steps.screen(it, request.prompt, checkNotNull(planStep), screen.preview, screen.data, screen.check, screen.library) }
             ?: steps.plan(request.prompt, checkNotNull(planStep))
         // Only an accepted screen keeps the call of its narration: each other end cancels it.
         val narration = (outcome as? AppFileOutcome.Clean)?.narration
@@ -533,7 +541,7 @@ internal suspend fun routeAppFile(
         // Only a spoken change sends a template change call. Each other change makes the app a free app file.
         val template = request.screen != null && steps.prompt.isTemplate(previous.appFile)
         val outcome = steps.change(request.prompt, AppFilePrevious(previous.appFile, previous.schema.toString(), base.state),
-            AppFileLimits(), template, request.screen?.preview)
+            AppFileLimits(), template, request.screen?.preview, request.screen?.template, request.screen?.library)
         checkActive()
         // A change by template lines shows its compiled file while the host check runs. A change outside a template has no preview (Task 18).
         if (template && outcome is AppFileOutcome.Clean && steps.prompt.isTemplate(outcome.appFile)) outcome.frame?.let { request.screen.preview?.invoke(it) }

@@ -124,6 +124,9 @@ private val phaseNames = setOf("draft_start", "draft_end", "capability_guidance_
 /** "ok", "faults", or a sandbox status such as TIMEOUT or BUSY (AppFileCompiler). */
 private val compileStatus = Regex("ok|faults|[A-Z_]{1,32}")
 
+/** The detail of library_candidates: a count and its source, such as "24 vectors" (LibraryFound.mark). */
+private val libraryCandidates = Regex("[0-9]{1,2} (vectors|words|none)")
+
 /** The word of outside("word"). The prompt has words such as 3d. */
 private val outsideWord = Regex("[a-z0-9]{1,16}")
 
@@ -138,6 +141,7 @@ internal fun safePhaseDetail(name: String, detail: String?): String? = when {
     name == AppFileNames.TEMPLATE_OUTCOME -> detail.takeIf { it in AppFileNames.TEMPLATE_OUTCOMES } ?: "other"
     name == AppFileNames.STAGE_PREVIEW -> detail.takeIf { it in AppFileNames.PREVIEW_HOLDS } ?: "other"
     name == AppFileNames.FOLLOW -> detail.takeIf { it in com.alpha.assistant.cloud.ChatToolReply.followKinds } ?: "other"
+    name == AppFileNames.LIBRARY_CANDIDATES -> detail.takeIf { it.matches(libraryCandidates) } ?: "other"
     name != AppFileNames.PLAN_OUTCOME -> null
     detail == "accepted" -> detail
     detail.startsWith("outside:") -> "outside:" + (detail.removePrefix("outside:").takeIf { it.matches(outsideWord) } ?: "other")

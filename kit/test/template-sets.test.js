@@ -36,3 +36,17 @@ test("theChangeSetHas2RequestsOnEachOfThe8BasesAndAtLeast13FitInLines", () => {
   for (const base of bases) expect([base, items.filter((item) => item.base === base).length]).toEqual([base, 2]);
   expect(items.filter((item) => item.expect === "lines").length).toBeGreaterThanOrEqual(13);
 });
+
+test("the library check has 10 tuning, 20 final, and 10 no-entry requests, and its library arm sends the candidates", async () => {
+  // Stage 6, M1: the final set runs in two arms over the same requests, free shapes (N) and the library (M).
+  const { LIBRARY_ARMS, libraryNames, templateSet } = await import("../modelcheck.js");
+  const [tuning, final, free, none] = ["L", "M", "N", "O"].map(templateSet);
+  expect([tuning.length, final.length, none.length]).toEqual([10, 20, 10]);
+  expect(free.map(({ id, request }) => [id, request])).toEqual(final.map(({ id, request }) => [id, request]));
+  expect(LIBRARY_ARMS).toEqual({ L: "library", M: "library", N: "free", O: "library" });
+  const all = [...tuning, ...final, ...none];
+  expect(new Set(all.map(({ id }) => id)).size).toBe(40);
+  expect(new Set(all.map(({ request }) => request.trim())).size).toBe(40);
+  for (const { id, expect: wanted, request } of all) expect([id, wanted, words(request) >= 4 && words(request) <= 20]).toEqual([id, "template", true]);
+  expect(libraryNames('s1 = use("heart", 90, 150, 160)\ns2 = circle(1, 2, 3, "ink")\ns3 = use("formula", 150, 270, 160, label="x")')).toEqual(["heart", "formula"]);
+});

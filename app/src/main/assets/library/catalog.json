@@ -1,0 +1,1557 @@
+{
+ "objects": [
+  {
+   "id": "body.brain",
+   "name": "brain",
+   "names": {
+    "ru": [
+     "мозг",
+     "головной мозг"
+    ],
+    "en": [
+     "brain"
+    ]
+   },
+   "words": {
+    "ru": [
+     "полушария",
+     "нейроны",
+     "нервная система"
+    ],
+    "en": [
+     "hemispheres",
+     "neurons",
+     "nervous system"
+    ]
+   },
+   "line": "the brain",
+   "image": "library/body/brain.webp",
+   "parts": [
+    {
+     "id": "cerebrum",
+     "names": {
+      "ru": "большие полушария",
+      "en": "cerebrum"
+     }
+    },
+    {
+     "id": "cerebellum",
+     "names": {
+      "ru": "мозжечок",
+      "en": "cerebellum"
+     }
+    },
+    {
+     "id": "brain_stem",
+     "names": {
+      "ru": "ствол мозга",
+      "en": "brain stem"
+     }
+    }
+   ]
+  },
+  {
+   "id": "body.dna",
+   "name": "dna",
+   "names": {
+    "ru": [
+     "днк"
+    ],
+    "en": [
+     "dna"
+    ]
+   },
+   "words": {
+    "ru": [
+     "двойная спираль",
+     "гены",
+     "наследственность"
+    ],
+    "en": [
+     "double helix",
+     "genes",
+     "heredity"
+    ]
+   },
+   "line": "a DNA double helix",
+   "image": "library/body/dna.webp",
+   "parts": [
+    {
+     "id": "strand",
+     "names": {
+      "ru": "цепочка",
+      "en": "strand"
+     }
+    },
+    {
+     "id": "base_pair",
+     "names": {
+      "ru": "пара оснований",
+      "en": "base pair"
+     }
+    }
+   ]
+  },
+  {
+   "id": "body.ear",
+   "name": "ear",
+   "names": {
+    "ru": [
+     "ухо"
+    ],
+    "en": [
+     "ear"
+    ]
+   },
+   "words": {
+    "ru": [
+     "слух",
+     "барабанная перепонка",
+     "улитка"
+    ],
+    "en": [
+     "hearing",
+     "eardrum",
+     "cochlea"
+    ]
+   },
+   "line": "an ear",
+   "image": "library/body/ear.webp",
+   "parts": [
+    {
+     "id": "outer_ear",
+     "names": {
+      "ru": "ушная раковина",
+      "en": "outer ear"
+     }
+    },
+    {
+     "id": "ear_canal",
+     "names": {
+      "ru": "слуховой проход",
+      "en": "ear canal"
+     }
+    },
+    {
+     "id": "eardrum",
+     "names": {
+      "ru": "барабанная перепонка",
+      "en": "eardrum"
+     }
+    },
+    {
+     "id": "small_bones",
+     "names": {
+      "ru": "слуховые косточки",
+      "en": "small bones"
+     }
+    },
+    {
+     "id": "cochlea",
+     "names": {
+      "ru": "улитка",
+      "en": "cochlea"
+     }
+    }
+   ]
+  },
+  {
+   "id": "body.eye",
+   "name": "eye",
+   "names": {
+    "ru": [
+     "глаз"
+    ],
+    "en": [
+     "eye"
+    ]
+   },
+   "words": {
+    "ru": [
+     "зрачок",
+     "хрусталик",
+     "сетчатка",
+     "зрение"
+    ],
+    "en": [
+     "pupil",
+     "lens",
+     "retina",
+     "vision"
+    ]
+   },
+   "line": "an eye with its parts",
+   "image": "library/body/eye.webp",
+   "parts": [
+    {
+     "id": "cornea",
+     "names": {
+      "ru": "роговица",
+      "en": "cornea"
+     }
+    },
+    {
+     "id": "iris",
+     "names": {
+      "ru": "радужка",
+      "en": "iris"
+     }
+    },
+    {
+     "id": "lens",
+     "names": {
+      "ru": "хрусталик",
+      "en": "lens"
+     }
+    },
+    {
+     "id": "retina",
+     "names": {
+      "ru": "сетчатка",
+      "en": "retina"
+     }
+    },
+    {
+     "id": "optic_nerve",
+     "names": {
+      "ru": "зрительный нерв",
+      "en": "optic nerve"
+     }
+    }
+   ]
+  },
+  {
+   "id": "body.heart",
+   "name": "heart",
+   "names": {
+    "ru": [
+     "сердце"
+    ],
+    "en": [
+     "heart"
+    ]
+   },
+   "words": {
+    "ru": [
+     "сердце человека",
+     "камеры сердца",
+     "предсердие",
+     "желудочек",
+     "кровообращение",
+     "пульс",
+     "сердцебиение",
+     "аорта",
+     "клапан",
+     "кардиология",
+     "орган"
+    ],
+    "en": [
+     "human heart",
+     "heart chambers",
+     "atrium",
+     "ventricle",
+     "blood circulation",
+     "pulse",
+     "heartbeat",
+     "aorta",
+     "valve",
+     "cardiac",
+     "organ"
+    ]
+   },
+   "line": "a human heart in front view: four chambers, the aorta, the pulmonary artery, and the vena cava",
+   "image": "library/body/heart.webp",
+   "parts": [
+    {
+     "id": "vena_cava",
+     "names": {
+      "ru": "полая вена",
+      "en": "vena cava"
+     }
+    },
+    {
+     "id": "aorta",
+     "names": {
+      "ru": "аорта",
+      "en": "aorta"
+     }
+    },
+    {
+     "id": "pulmonary_artery",
+     "names": {
+      "ru": "лёгочная артерия",
+      "en": "pulmonary artery"
+     }
+    },
+    {
+     "id": "right_atrium",
+     "names": {
+      "ru": "правое предсердие",
+      "en": "right atrium"
+     }
+    },
+    {
+     "id": "left_atrium",
+     "names": {
+      "ru": "левое предсердие",
+      "en": "left atrium"
+     }
+    },
+    {
+     "id": "right_ventricle",
+     "names": {
+      "ru": "правый желудочек",
+      "en": "right ventricle"
+     }
+    },
+    {
+     "id": "left_ventricle",
+     "names": {
+      "ru": "левый желудочек",
+      "en": "left ventricle"
+     }
+    }
+   ]
+  },
+  {
+   "id": "body.lungs",
+   "name": "lungs",
+   "names": {
+    "ru": [
+     "лёгкие"
+    ],
+    "en": [
+     "lungs"
+    ]
+   },
+   "words": {
+    "ru": [
+     "дыхание",
+     "бронхи",
+     "вдох и выдох"
+    ],
+    "en": [
+     "breathing",
+     "bronchi",
+     "inhale and exhale"
+    ]
+   },
+   "line": "the lungs",
+   "image": "library/body/lungs.webp",
+   "parts": [
+    {
+     "id": "trachea",
+     "names": {
+      "ru": "трахея",
+      "en": "trachea"
+     }
+    },
+    {
+     "id": "bronchi",
+     "names": {
+      "ru": "бронхи",
+      "en": "bronchi"
+     }
+    },
+    {
+     "id": "right_lung",
+     "names": {
+      "ru": "правое лёгкое",
+      "en": "right lung"
+     }
+    },
+    {
+     "id": "left_lung",
+     "names": {
+      "ru": "левое лёгкое",
+      "en": "left lung"
+     }
+    }
+   ]
+  },
+  {
+   "id": "body.muscle",
+   "name": "muscle",
+   "names": {
+    "ru": [
+     "мышца"
+    ],
+    "en": [
+     "muscle"
+    ]
+   },
+   "words": {
+    "ru": [
+     "мускулы",
+     "сокращение мышцы",
+     "бицепс"
+    ],
+    "en": [
+     "muscles",
+     "contraction",
+     "biceps"
+    ]
+   },
+   "line": "a muscle",
+   "image": "library/body/muscle.webp",
+   "parts": [
+    {
+     "id": "biceps",
+     "names": {
+      "ru": "бицепс",
+      "en": "biceps"
+     }
+    },
+    {
+     "id": "forearm_bones",
+     "names": {
+      "ru": "кости предплечья",
+      "en": "forearm bones"
+     }
+    },
+    {
+     "id": "elbow",
+     "names": {
+      "ru": "локоть",
+      "en": "elbow"
+     }
+    },
+    {
+     "id": "humerus",
+     "names": {
+      "ru": "плечевая кость",
+      "en": "humerus"
+     }
+    },
+    {
+     "id": "shoulder_blade",
+     "names": {
+      "ru": "лопатка",
+      "en": "shoulder blade"
+     }
+    }
+   ]
+  },
+  {
+   "id": "body.skeleton",
+   "name": "skeleton",
+   "names": {
+    "ru": [
+     "скелет"
+    ],
+    "en": [
+     "skeleton"
+    ]
+   },
+   "words": {
+    "ru": [
+     "кости",
+     "позвоночник",
+     "череп"
+    ],
+    "en": [
+     "bones",
+     "spine",
+     "skull"
+    ]
+   },
+   "line": "a skeleton",
+   "image": "library/body/skeleton.webp",
+   "parts": [
+    {
+     "id": "skull",
+     "names": {
+      "ru": "череп",
+      "en": "skull"
+     }
+    },
+    {
+     "id": "rib_cage",
+     "names": {
+      "ru": "грудная клетка",
+      "en": "rib cage"
+     }
+    },
+    {
+     "id": "spine",
+     "names": {
+      "ru": "позвоночник",
+      "en": "spine"
+     }
+    },
+    {
+     "id": "pelvis",
+     "names": {
+      "ru": "таз",
+      "en": "pelvis"
+     }
+    },
+    {
+     "id": "thigh_bone",
+     "names": {
+      "ru": "бедренная кость",
+      "en": "thigh bone"
+     }
+    }
+   ]
+  },
+  {
+   "id": "body.skin",
+   "name": "skin",
+   "names": {
+    "ru": [
+     "кожа"
+    ],
+    "en": [
+     "skin"
+    ]
+   },
+   "words": {
+    "ru": [
+     "слои кожи",
+     "эпидермис",
+     "пот"
+    ],
+    "en": [
+     "skin layers",
+     "epidermis",
+     "sweat"
+    ]
+   },
+   "line": "the layers of the skin",
+   "image": "library/body/skin.webp",
+   "parts": [
+    {
+     "id": "epidermis",
+     "names": {
+      "ru": "эпидермис",
+      "en": "epidermis"
+     }
+    },
+    {
+     "id": "dermis",
+     "names": {
+      "ru": "дерма",
+      "en": "dermis"
+     }
+    },
+    {
+     "id": "hair",
+     "names": {
+      "ru": "волос",
+      "en": "hair"
+     }
+    },
+    {
+     "id": "sweat_gland",
+     "names": {
+      "ru": "потовая железа",
+      "en": "sweat gland"
+     }
+    },
+    {
+     "id": "fat_layer",
+     "names": {
+      "ru": "жировой слой",
+      "en": "fat layer"
+     }
+    }
+   ]
+  },
+  {
+   "id": "body.stomach",
+   "name": "stomach",
+   "names": {
+    "ru": [
+     "желудок",
+     "кишечник"
+    ],
+    "en": [
+     "stomach",
+     "gut"
+    ]
+   },
+   "words": {
+    "ru": [
+     "пищеварение",
+     "кишка",
+     "переваривание пищи"
+    ],
+    "en": [
+     "digestion",
+     "intestine",
+     "digestive system"
+    ]
+   },
+   "line": "the stomach and the gut",
+   "image": "library/body/stomach.webp",
+   "parts": [
+    {
+     "id": "esophagus",
+     "names": {
+      "ru": "пищевод",
+      "en": "esophagus"
+     }
+    },
+    {
+     "id": "stomach",
+     "names": {
+      "ru": "желудок",
+      "en": "stomach"
+     }
+    },
+    {
+     "id": "small_intestine",
+     "names": {
+      "ru": "тонкая кишка",
+      "en": "small intestine"
+     }
+    },
+    {
+     "id": "large_intestine",
+     "names": {
+      "ru": "толстая кишка",
+      "en": "large intestine"
+     }
+    }
+   ]
+  },
+  {
+   "id": "body.tooth",
+   "name": "tooth",
+   "names": {
+    "ru": [
+     "зуб"
+    ],
+    "en": [
+     "tooth"
+    ]
+   },
+   "words": {
+    "ru": [
+     "эмаль",
+     "корень зуба",
+     "кариес"
+    ],
+    "en": [
+     "enamel",
+     "tooth root",
+     "decay"
+    ]
+   },
+   "line": "a tooth",
+   "image": "library/body/tooth.webp",
+   "parts": [
+    {
+     "id": "enamel",
+     "names": {
+      "ru": "эмаль",
+      "en": "enamel"
+     }
+    },
+    {
+     "id": "dentin",
+     "names": {
+      "ru": "дентин",
+      "en": "dentin"
+     }
+    },
+    {
+     "id": "pulp",
+     "names": {
+      "ru": "пульпа",
+      "en": "pulp"
+     }
+    },
+    {
+     "id": "root",
+     "names": {
+      "ru": "корень",
+      "en": "root"
+     }
+    },
+    {
+     "id": "gum",
+     "names": {
+      "ru": "десна",
+      "en": "gum"
+     }
+    }
+   ]
+  },
+  {
+   "id": "chem.water_molecule",
+   "name": "water_molecule",
+   "names": {
+    "ru": [
+     "молекула воды"
+    ],
+    "en": [
+     "water molecule"
+    ]
+   },
+   "words": {
+    "ru": [
+     "вода",
+     "H2O",
+     "молекула",
+     "атом кислорода",
+     "атомы водорода",
+     "химическая связь",
+     "шаростержневая модель"
+    ],
+    "en": [
+     "water",
+     "H2O",
+     "molecule",
+     "oxygen atom",
+     "hydrogen atoms",
+     "chemical bond",
+     "ball and stick model"
+    ]
+   },
+   "line": "a water molecule as balls and sticks: one oxygen atom and two hydrogen atoms",
+   "parts": [
+    {
+     "id": "oxygen",
+     "names": {
+      "ru": "атом кислорода",
+      "en": "oxygen atom"
+     }
+    },
+    {
+     "id": "hydrogen",
+     "names": {
+      "ru": "атом водорода",
+      "en": "hydrogen atom"
+     }
+    },
+    {
+     "id": "bonds",
+     "names": {
+      "ru": "связь",
+      "en": "bond"
+     }
+    }
+   ]
+  },
+  {
+   "id": "math.circle_radius",
+   "name": "circle_radius",
+   "names": {
+    "ru": [
+     "окружность с радиусом",
+     "круг"
+    ],
+    "en": [
+     "circle with radius",
+     "circle"
+    ]
+   },
+   "words": {
+    "ru": [
+     "радиус",
+     "диаметр",
+     "центр"
+    ],
+    "en": [
+     "radius",
+     "diameter",
+     "center"
+    ]
+   },
+   "line": "a circle with a radius",
+   "parts": [
+    {
+     "id": "circle",
+     "names": {
+      "ru": "окружность",
+      "en": "circle"
+     }
+    },
+    {
+     "id": "center",
+     "names": {
+      "ru": "центр",
+      "en": "center"
+     }
+    },
+    {
+     "id": "radius",
+     "names": {
+      "ru": "радиус",
+      "en": "radius"
+     }
+    },
+    {
+     "id": "diameter",
+     "names": {
+      "ru": "диаметр",
+      "en": "diameter"
+     }
+    }
+   ]
+  },
+  {
+   "id": "math.cone",
+   "name": "cone",
+   "names": {
+    "ru": [
+     "конус"
+    ],
+    "en": [
+     "cone"
+    ]
+   },
+   "words": {
+    "ru": [
+     "вершина",
+     "образующая"
+    ],
+    "en": [
+     "apex",
+     "slant height"
+    ]
+   },
+   "line": "a cone",
+   "parts": [
+    {
+     "id": "apex",
+     "names": {
+      "ru": "вершина",
+      "en": "apex"
+     }
+    },
+    {
+     "id": "slant",
+     "names": {
+      "ru": "образующая",
+      "en": "slant height"
+     }
+    },
+    {
+     "id": "height",
+     "names": {
+      "ru": "высота",
+      "en": "height"
+     }
+    },
+    {
+     "id": "base",
+     "names": {
+      "ru": "основание",
+      "en": "base"
+     }
+    }
+   ]
+  },
+  {
+   "id": "math.coordinate_plane",
+   "name": "coordinate_plane",
+   "names": {
+    "ru": [
+     "координатная плоскость"
+    ],
+    "en": [
+     "coordinate plane"
+    ]
+   },
+   "words": {
+    "ru": [
+     "оси x и y",
+     "точка",
+     "график"
+    ],
+    "en": [
+     "x and y axes",
+     "point",
+     "graph"
+    ]
+   },
+   "line": "a coordinate plane",
+   "parts": [
+    {
+     "id": "x_axis",
+     "names": {
+      "ru": "ось x",
+      "en": "x axis"
+     }
+    },
+    {
+     "id": "y_axis",
+     "names": {
+      "ru": "ось y",
+      "en": "y axis"
+     }
+    },
+    {
+     "id": "origin",
+     "names": {
+      "ru": "начало координат",
+      "en": "origin"
+     }
+    },
+    {
+     "id": "point",
+     "names": {
+      "ru": "точка",
+      "en": "point"
+     }
+    },
+    {
+     "id": "grid",
+     "names": {
+      "ru": "сетка",
+      "en": "grid"
+     }
+    }
+   ]
+  },
+  {
+   "id": "math.cube",
+   "name": "cube",
+   "names": {
+    "ru": [
+     "куб"
+    ],
+    "en": [
+     "cube"
+    ]
+   },
+   "words": {
+    "ru": [
+     "грань",
+     "ребро",
+     "объём"
+    ],
+    "en": [
+     "face",
+     "edge",
+     "volume"
+    ]
+   },
+   "line": "a cube",
+   "parts": [
+    {
+     "id": "face",
+     "names": {
+      "ru": "грань",
+      "en": "face"
+     }
+    },
+    {
+     "id": "edge",
+     "names": {
+      "ru": "ребро",
+      "en": "edge"
+     }
+    },
+    {
+     "id": "vertex",
+     "names": {
+      "ru": "вершина",
+      "en": "vertex"
+     }
+    }
+   ]
+  },
+  {
+   "id": "math.cylinder",
+   "name": "cylinder",
+   "names": {
+    "ru": [
+     "цилиндр"
+    ],
+    "en": [
+     "cylinder"
+    ]
+   },
+   "words": {
+    "ru": [
+     "основание",
+     "высота",
+     "объём цилиндра"
+    ],
+    "en": [
+     "base",
+     "height",
+     "volume"
+    ]
+   },
+   "line": "a cylinder",
+   "parts": [
+    {
+     "id": "base",
+     "names": {
+      "ru": "основание",
+      "en": "base"
+     }
+    },
+    {
+     "id": "side",
+     "names": {
+      "ru": "боковая поверхность",
+      "en": "lateral surface"
+     }
+    },
+    {
+     "id": "radius",
+     "names": {
+      "ru": "радиус",
+      "en": "radius"
+     }
+    },
+    {
+     "id": "height",
+     "names": {
+      "ru": "высота",
+      "en": "height"
+     }
+    }
+   ]
+  },
+  {
+   "id": "math.right_triangle",
+   "name": "right_triangle",
+   "names": {
+    "ru": [
+     "прямоугольный треугольник"
+    ],
+    "en": [
+     "right triangle"
+    ]
+   },
+   "words": {
+    "ru": [
+     "треугольник",
+     "катет",
+     "гипотенуза",
+     "прямой угол",
+     "теорема пифагора",
+     "пифагор",
+     "геометрия"
+    ],
+    "en": [
+     "triangle",
+     "leg",
+     "hypotenuse",
+     "right angle",
+     "pythagorean theorem",
+     "pythagoras",
+     "geometry"
+    ]
+   },
+   "line": "a flat right triangle with its two legs, its hypotenuse, and the right angle",
+   "parts": [
+    {
+     "id": "leg_a",
+     "names": {
+      "ru": "катет a",
+      "en": "leg a"
+     }
+    },
+    {
+     "id": "leg_b",
+     "names": {
+      "ru": "катет b",
+      "en": "leg b"
+     }
+    },
+    {
+     "id": "hypotenuse",
+     "names": {
+      "ru": "гипотенуза c",
+      "en": "hypotenuse c"
+     }
+    },
+    {
+     "id": "right_angle",
+     "names": {
+      "ru": "прямой угол",
+      "en": "right angle"
+     }
+    }
+   ]
+  },
+  {
+   "id": "math.square_grid",
+   "name": "square_grid",
+   "names": {
+    "ru": [
+     "квадрат на сетке"
+    ],
+    "en": [
+     "square on a grid"
+    ]
+   },
+   "words": {
+    "ru": [
+     "площадь",
+     "клетки",
+     "квадрат"
+    ],
+    "en": [
+     "area",
+     "cells",
+     "square"
+    ]
+   },
+   "line": "a square on a grid",
+   "parts": [
+    {
+     "id": "side",
+     "names": {
+      "ru": "сторона",
+      "en": "side"
+     }
+    },
+    {
+     "id": "cell",
+     "names": {
+      "ru": "клетка",
+      "en": "unit square"
+     }
+    },
+    {
+     "id": "grid",
+     "names": {
+      "ru": "сетка",
+      "en": "grid"
+     }
+    },
+    {
+     "id": "vertex",
+     "names": {
+      "ru": "вершина",
+      "en": "vertex"
+     }
+    }
+   ]
+  },
+  {
+   "id": "space.comet",
+   "name": "comet",
+   "names": {
+    "ru": [
+     "комета"
+    ],
+    "en": [
+     "comet"
+    ]
+   },
+   "words": {
+    "ru": [
+     "хвост кометы",
+     "ледяное тело"
+    ],
+    "en": [
+     "comet tail",
+     "icy body"
+    ]
+   },
+   "line": "a comet with its tail",
+   "image": "library/space/comet.webp",
+   "parts": [
+    {
+     "id": "nucleus",
+     "names": {
+      "ru": "ядро",
+      "en": "nucleus"
+     }
+    },
+    {
+     "id": "tail",
+     "names": {
+      "ru": "хвост",
+      "en": "tail"
+     }
+    }
+   ]
+  },
+  {
+   "id": "space.earth",
+   "name": "earth",
+   "names": {
+    "ru": [
+     "земля",
+     "планета земля"
+    ],
+    "en": [
+     "earth",
+     "planet earth"
+    ]
+   },
+   "words": {
+    "ru": [
+     "наша планета",
+     "земной шар"
+    ],
+    "en": [
+     "our planet",
+     "the globe from space"
+    ]
+   },
+   "line": "the planet Earth from space",
+   "image": "library/space/earth.webp",
+   "parts": [
+    {
+     "id": "ocean",
+     "names": {
+      "ru": "океан",
+      "en": "ocean"
+     }
+    },
+    {
+     "id": "south_america",
+     "names": {
+      "ru": "Южная Америка",
+      "en": "South America"
+     }
+    },
+    {
+     "id": "clouds",
+     "names": {
+      "ru": "облака",
+      "en": "clouds"
+     }
+    },
+    {
+     "id": "africa",
+     "names": {
+      "ru": "Африка",
+      "en": "Africa"
+     }
+    },
+    {
+     "id": "europe",
+     "names": {
+      "ru": "Европа",
+      "en": "Europe"
+     }
+    }
+   ]
+  },
+  {
+   "id": "space.galaxy",
+   "name": "galaxy",
+   "names": {
+    "ru": [
+     "галактика"
+    ],
+    "en": [
+     "galaxy"
+    ]
+   },
+   "words": {
+    "ru": [
+     "млечный путь",
+     "спиральная галактика",
+     "звёздная система"
+    ],
+    "en": [
+     "milky way",
+     "spiral galaxy"
+    ]
+   },
+   "line": "a spiral galaxy",
+   "image": "library/space/galaxy.webp",
+   "parts": [
+    {
+     "id": "core",
+     "names": {
+      "ru": "ядро",
+      "en": "core"
+     }
+    },
+    {
+     "id": "spiral_arm",
+     "names": {
+      "ru": "спиральный рукав",
+      "en": "spiral arm"
+     }
+    }
+   ]
+  },
+  {
+   "id": "space.moon",
+   "name": "moon",
+   "names": {
+    "ru": [
+     "луна"
+    ],
+    "en": [
+     "moon"
+    ]
+   },
+   "words": {
+    "ru": [
+     "фаза луны",
+     "полнолуние",
+     "месяц",
+     "спутник земли"
+    ],
+    "en": [
+     "lunar phase",
+     "full moon",
+     "crescent"
+    ]
+   },
+   "line": "the Moon with its phase",
+   "image": "library/space/moon.webp",
+   "parts": [
+    {
+     "id": "crater",
+     "names": {
+      "ru": "кратер",
+      "en": "crater"
+     }
+    },
+    {
+     "id": "mare",
+     "names": {
+      "ru": "лунное море",
+      "en": "lunar sea"
+     }
+    }
+   ]
+  },
+  {
+   "id": "space.rocket",
+   "name": "rocket",
+   "names": {
+    "ru": [
+     "ракета"
+    ],
+    "en": [
+     "rocket"
+    ]
+   },
+   "words": {
+    "ru": [
+     "космический корабль",
+     "запуск",
+     "двигатель ракеты"
+    ],
+    "en": [
+     "spaceship",
+     "launch",
+     "rocket engine"
+    ]
+   },
+   "line": "a rocket",
+   "image": "library/space/rocket.webp",
+   "parts": [
+    {
+     "id": "nose_cone",
+     "names": {
+      "ru": "носовой обтекатель",
+      "en": "nose cone"
+     }
+    },
+    {
+     "id": "window",
+     "names": {
+      "ru": "иллюминатор",
+      "en": "window"
+     }
+    },
+    {
+     "id": "body",
+     "names": {
+      "ru": "корпус",
+      "en": "body"
+     }
+    },
+    {
+     "id": "fins",
+     "names": {
+      "ru": "стабилизаторы",
+      "en": "fins"
+     }
+    },
+    {
+     "id": "nozzle",
+     "names": {
+      "ru": "сопло",
+      "en": "nozzle"
+     }
+    }
+   ]
+  },
+  {
+   "id": "space.satellite",
+   "name": "satellite",
+   "names": {
+    "ru": [
+     "спутник",
+     "искусственный спутник"
+    ],
+    "en": [
+     "satellite"
+    ]
+   },
+   "words": {
+    "ru": [
+     "орбита",
+     "связь",
+     "антенна спутника"
+    ],
+    "en": [
+     "orbit",
+     "communication satellite"
+    ]
+   },
+   "line": "an artificial satellite",
+   "image": "library/space/satellite.webp",
+   "parts": [
+    {
+     "id": "solar_panels",
+     "names": {
+      "ru": "солнечные батареи",
+      "en": "solar panels"
+     }
+    },
+    {
+     "id": "body",
+     "names": {
+      "ru": "корпус",
+      "en": "body"
+     }
+    },
+    {
+     "id": "dish",
+     "names": {
+      "ru": "антенна",
+      "en": "dish antenna"
+     }
+    }
+   ]
+  },
+  {
+   "id": "space.saturn",
+   "name": "saturn",
+   "names": {
+    "ru": [
+     "сатурн",
+     "планета"
+    ],
+    "en": [
+     "saturn",
+     "planet"
+    ]
+   },
+   "words": {
+    "ru": [
+     "планета с кольцами",
+     "газовый гигант",
+     "кольца сатурна",
+     "солнечная система",
+     "небесное тело",
+     "космос"
+    ],
+    "en": [
+     "ringed planet",
+     "gas giant",
+     "planet rings",
+     "solar system",
+     "celestial body",
+     "space"
+    ]
+   },
+   "line": "the planet Saturn, a gas giant with its rings; it also serves as a planet in general",
+   "image": "library/space/saturn.webp",
+   "parts": [
+    {
+     "id": "planet",
+     "names": {
+      "ru": "газовый шар",
+      "en": "ball of gas"
+     }
+    },
+    {
+     "id": "bands",
+     "names": {
+      "ru": "полосы облаков",
+      "en": "cloud bands"
+     }
+    },
+    {
+     "id": "rings",
+     "names": {
+      "ru": "кольца",
+      "en": "rings"
+     }
+    }
+   ]
+  },
+  {
+   "id": "space.star",
+   "name": "star",
+   "names": {
+    "ru": [
+     "звезда"
+    ],
+    "en": [
+     "star"
+    ]
+   },
+   "words": {
+    "ru": [
+     "звёзды",
+     "ночное небо",
+     "свечение"
+    ],
+    "en": [
+     "stars",
+     "night sky",
+     "shining star"
+    ]
+   },
+   "line": "a star",
+   "image": "library/space/star.webp",
+   "parts": []
+  },
+  {
+   "id": "space.sun",
+   "name": "sun",
+   "names": {
+    "ru": [
+     "солнце"
+    ],
+    "en": [
+     "sun"
+    ]
+   },
+   "words": {
+    "ru": [
+     "звезда солнечной системы",
+     "солнечный свет",
+     "жар"
+    ],
+    "en": [
+     "our star",
+     "sunlight",
+     "solar heat"
+    ]
+   },
+   "line": "the Sun, the star of the solar system",
+   "image": "library/space/sun.webp",
+   "parts": [
+    {
+     "id": "surface",
+     "names": {
+      "ru": "поверхность",
+      "en": "surface"
+     }
+    },
+    {
+     "id": "prominence",
+     "names": {
+      "ru": "протуберанец",
+      "en": "prominence"
+     }
+    }
+   ]
+  }
+ ]
+}

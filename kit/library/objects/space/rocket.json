@@ -1,0 +1,91 @@
+{
+ "id": "space.rocket",
+ "names": {
+  "ru": [
+   "ракета"
+  ],
+  "en": [
+   "rocket"
+  ]
+ },
+ "words": {
+  "ru": [
+   "космический корабль",
+   "запуск",
+   "двигатель ракеты"
+  ],
+  "en": [
+   "spaceship",
+   "launch",
+   "rocket engine"
+  ]
+ },
+ "line": "a rocket",
+ "image": "rocket.webp",
+ "box": [
+  65.2,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "nose_cone",
+   "names": {
+    "ru": "носовой обтекатель",
+    "en": "nose cone"
+   },
+   "label": [
+    -3.7,
+    -40.1
+   ],
+   "ring": 7.3
+  },
+  {
+   "id": "window",
+   "names": {
+    "ru": "иллюминатор",
+    "en": "window"
+   },
+   "label": [
+    2.7,
+    -7.4
+   ],
+   "ring": 9.4
+  },
+  {
+   "id": "body",
+   "names": {
+    "ru": "корпус",
+    "en": "body"
+   },
+   "label": [
+    16.4,
+    -23.3
+   ],
+   "ring": 7.3
+  },
+  {
+   "id": "fins",
+   "names": {
+    "ru": "стабилизаторы",
+    "en": "fins"
+   },
+   "label": [
+    -24.7,
+    27.4
+   ],
+   "ring": 7.9
+  },
+  {
+   "id": "nozzle",
+   "names": {
+    "ru": "сопло",
+    "en": "nozzle"
+   },
+   "label": [
+    -5.8,
+    44.2
+   ],
+   "ring": 5.7
+  }
+ ]
+}

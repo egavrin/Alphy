@@ -26,6 +26,23 @@ class GraphicsBoundariesTest {
         assertTrue(pixels(documented).distinct().size>2)
         assertArrayEquals(pixels(documented),pixels(alias))
     }
+    /** Stage 6, L2: a role with a tone step and an alpha follows the role colors of the theme, and a bad tone is a fault. */
+    @Test fun aToneOfARoleIsLighterDarkerOrTranslucent() {
+        val roles=mapOf("accent" to android.graphics.Color.rgb(0,86,208))
+        fun pixel(color: String): Int {
+            val bitmap=Bitmap.createBitmap(16,16,Bitmap.Config.ARGB_8888)
+            drawSurfaceFrame(Canvas(bitmap),ToolSurface("main",16,16),frame("""[{"type":"rect","x":0,"y":0,"width":16,"height":16,"color":"$color"}]""")
+                .getJSONArray("commands"),16f,16f,roles)
+            return bitmap.getPixel(8,8)
+        }
+        fun light(color: Int)=android.graphics.Color.red(color)+android.graphics.Color.green(color)+android.graphics.Color.blue(color)
+        val base=pixel("accent")
+        assertTrue(light(pixel("accent+1"))>light(base) && light(pixel("accent+2"))>light(pixel("accent+1")) && light(pixel("accent+3"))>light(pixel("accent+2")))
+        assertTrue(light(pixel("accent-1"))<light(base) && light(pixel("accent-3"))<light(pixel("accent-1")))
+        assertEquals(102,android.graphics.Color.alpha(pixel("accent@40")))
+        assertEquals(102,android.graphics.Color.alpha(pixel("accent+1@40")))
+        for (bad in listOf("accent+4","accent@101","water+1","accent-")) rejects {frame("""[{"type":"rect","x":0,"y":0,"width":1,"height":1,"color":"$bad"}]""")}
+    }
     @Test fun anAliasedGradientCountsAgainstTheStopBudget() {
         val g="""{"type":"linear","x":0,"y":0,"x2":16,"y2":0,"stops":[{"offset":0,"color":"#FF0000"},{"offset":1,"color":"#0000FF"}]}"""
         val commands=List(65) {"""{"type":"rect","x":0,"y":0,"width":1,"height":1,"color":$g}"""}.joinToString(",","[","]")

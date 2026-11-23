@@ -1,0 +1,91 @@
+{
+ "id": "body.tooth",
+ "names": {
+  "ru": [
+   "зуб"
+  ],
+  "en": [
+   "tooth"
+  ]
+ },
+ "words": {
+  "ru": [
+   "эмаль",
+   "корень зуба",
+   "кариес"
+  ],
+  "en": [
+   "enamel",
+   "tooth root",
+   "decay"
+  ]
+ },
+ "line": "a tooth",
+ "image": "tooth.webp",
+ "box": [
+  75.3,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "enamel",
+   "names": {
+    "ru": "эмаль",
+    "en": "enamel"
+   },
+   "label": [
+    -23.4,
+    -39.6
+   ],
+   "ring": 6.5
+  },
+  {
+   "id": "dentin",
+   "names": {
+    "ru": "дентин",
+    "en": "dentin"
+   },
+   "label": [
+    -23.4,
+    -11.1
+   ],
+   "ring": 6.5
+  },
+  {
+   "id": "pulp",
+   "names": {
+    "ru": "пульпа",
+    "en": "pulp"
+   },
+   "label": [
+    9.6,
+    -17.7
+   ],
+   "ring": 7.6
+  },
+  {
+   "id": "root",
+   "names": {
+    "ru": "корень",
+    "en": "root"
+   },
+   "label": [
+    16.2,
+    28.5
+   ],
+   "ring": 6.5
+  },
+  {
+   "id": "gum",
+   "names": {
+    "ru": "десна",
+    "en": "gum"
+   },
+   "label": [
+    -28.9,
+    27.4
+   ],
+   "ring": 8.7
+  }
+ ]
+}

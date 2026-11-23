@@ -51,6 +51,9 @@ import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.TestFixStatus
 import com.alpha.assistant.tools.appfile.AppFilePrompt
+import com.alpha.assistant.semantic.LibraryFound
+import com.alpha.assistant.semantic.LibraryQuery
+import com.alpha.assistant.semantic.LibrarySearch
 import com.alpha.assistant.tools.appfile.DataCheck
 import com.alpha.assistant.tools.agent.AppFileNames
 import com.alpha.assistant.tools.agent.ScreenFallback
@@ -302,6 +305,18 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
         if (voice.running) voice.stop()
         voice.clearGrantedPermission()
         liveBridge = LiveVoiceBridge(this, liveVoice, assistantInvocation, capture, voiceApproval).also { it.start(firstSpeech) }
+        // The search of the library loads the embedding model and the vectors of the catalog now, so a spoken screen does not wait for them (stage 6, S5).
+        LibrarySearch.warm(getApplication())
+    }
+
+    /**
+     * The host line of the template call of a spoken screen or change, and the detail of its trace mark: the ready objects that its search found
+     * within 150 ms, else its word match (stage 6, S3 and S4, and fix list 4, K1 and K4).
+     */
+    private suspend fun candidates(request: Active): Pair<String, String> {
+        val found = LibrarySearch.within(request.library)
+        val line = if (found.entries.isEmpty()) "" else withContext(Dispatchers.IO) { AppFilePrompt.load(getApplication()) }.candidatesText(found.entries)
+        return line to found.mark
     }
 
     internal fun endLiveVoice(status: String = "") = liveVoice.stop(status)
@@ -900,7 +915,9 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
     var activeConversationId by mutableStateOf<String?>(null); private set
     internal val activeRequestMessageId: String? get() = active?.assistantId
     private data class Active(val conversationId: String, val assistantId: String, val originDraft: Draft, val session: CloudSession = CloudSession(), var job: Job? = null, var weatherDraft: Draft? = null, var cancelled: Boolean = false,
-        var earlyPlan: EarlyPlan? = null)
+        var earlyPlan: EarlyPlan? = null,
+        /** The search of the ready objects for a spoken screen (stage 6, S1): it starts with the request, and a template call waits for it at most 150 ms. */
+        var library: LibraryQuery? = null)
     private var active: Active? = null
     /** [voice]: a spoken request of the voice mode. A retry is not spoken. [voiceTarget]: the stage app when the person spoke (plan D, Dc1). */
     private data class QueuedRequest(val conversationId: String, val assistantId: String, val originDraft: Draft,
@@ -1793,6 +1810,7 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 // A spoken request with no image, no screen of the phone, and no chosen app to change can get a screen (plan D, Db1).
                 val voiceScreen = next.voice && user.attachments.isEmpty() && user.screenContext == null &&
                     !assistant.requiresRefinement && tools.planStep() != null
+                if (voiceScreen) request.library = LibrarySearch.start(getApplication(), user.text)
                 // The screen of the stage app goes to the routing call as untrusted data, unless the app was deleted or archived (plan D, Dc1).
                 val stage = next.voiceTarget?.takeIf { voiceScreen }?.let { id -> tools.tools.find { it.id == id && !it.archived } }
                 val continueLabel = getApplication<Application>().getString(R.string.stage_continue_steps)
@@ -1880,9 +1898,14 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                 if (voiceScreen && stageToolId == null && follow == null) {
                     // A request too long for a plan prompt gets no early plan, and its routing decides as before.
                     val prompt = try { ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = dialogue()) } catch (_: CloudFailure) { null }
-                    // Its template call goes first, with no dialogue line: that task is shorter than the plan prompt.
+                    // Its template call goes first, with no dialogue line: that task is shorter than the plan prompt. Its host line holds the ready
+                    // objects that the search found within 150 ms, else nothing (stage 6, S3 and S4).
+                    val (library, mark) = candidates(request)
                     request.earlyPlan = prompt?.let {
-                        tools.startEarlyPlan(ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = ""), it, key, operationId)
+                        val (template, sent) = try { ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = library) to mark } catch (_: CloudFailure) {
+                            ChatToolReply.generationPrompt(user.text, "", "", emptyList(), host = "") to LibraryFound.EMPTY.mark
+                        }
+                        tools.startEarlyPlan(template, it, key, operationId, sent)
                     }
                 }
                 // A follow screen has its decision already, so it makes no routing call.
@@ -2210,8 +2233,17 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                             val input = prompt(if (decoded.isScreen) dialogue() else "")
                             // Only a screen with no search keeps it. It stays on the request, so a stop or the end can still cancel it.
                             val early = request.earlyPlan?.use()
-                            // A new screen sends its template task first: the request with no dialogue line.
-                            generate(input, changed, if (decoded.isScreen) ScreenRun(early, prompt("")) else ScreenRun().takeIf { screenChange })
+                            // A new screen sends its template task first: the request with no dialogue line, and the ready objects of the search (S3).
+                            // A change of a shown template gets them too, so a ready object can replace or join its shapes (fix list 4, K3).
+                            val template = if (!decoded.isScreen && !screenChange) null else candidates(request).let { (library, mark) ->
+                                try { prompt(library) to mark } catch (_: ScreenFallback) { prompt("") to LibraryFound.EMPTY.mark }
+                            }
+                            generate(input, changed, when {
+                                template == null -> null
+                                decoded.isScreen -> ScreenRun(early, template.first, library = template.second)
+                                // A change keeps its request for the change call outside a template: only the template change call gets the objects.
+                                else -> ScreenRun(template = template.first, library = template.second)
+                            })
                         }
                     } catch (_: ScreenFallback) {
                         // A change that the kit cannot make becomes a new screen with the plan prompt of a screen, and the old app stays (ruling OD-5).

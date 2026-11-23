@@ -1,0 +1,81 @@
+{
+ "id": "body.stomach",
+ "names": {
+  "ru": [
+   "желудок",
+   "кишечник"
+  ],
+  "en": [
+   "stomach",
+   "gut"
+  ]
+ },
+ "words": {
+  "ru": [
+   "пищеварение",
+   "кишка",
+   "переваривание пищи"
+  ],
+  "en": [
+   "digestion",
+   "intestine",
+   "digestive system"
+  ]
+ },
+ "line": "the stomach and the gut",
+ "image": "stomach.webp",
+ "box": [
+  63.4,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "esophagus",
+   "names": {
+    "ru": "пищевод",
+    "en": "esophagus"
+   },
+   "label": [
+    -1.2,
+    -43.6
+   ],
+   "ring": 5.1
+  },
+  {
+   "id": "stomach",
+   "names": {
+    "ru": "желудок",
+    "en": "stomach"
+   },
+   "label": [
+    15.3,
+    -31.3
+   ],
+   "ring": 10.2
+  },
+  {
+   "id": "small_intestine",
+   "names": {
+    "ru": "тонкая кишка",
+    "en": "small intestine"
+   },
+   "label": [
+    4.0,
+    16.0
+   ],
+   "ring": 12.3
+  },
+  {
+   "id": "large_intestine",
+   "names": {
+    "ru": "толстая кишка",
+    "en": "large intestine"
+   },
+   "label": [
+    -24.8,
+    7.8
+   ],
+   "ring": 6.8
+  }
+ ]
+}

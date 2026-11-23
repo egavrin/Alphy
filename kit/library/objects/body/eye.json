@@ -1,0 +1,93 @@
+{
+ "id": "body.eye",
+ "names": {
+  "ru": [
+   "глаз"
+  ],
+  "en": [
+   "eye"
+  ]
+ },
+ "words": {
+  "ru": [
+   "зрачок",
+   "хрусталик",
+   "сетчатка",
+   "зрение"
+  ],
+  "en": [
+   "pupil",
+   "lens",
+   "retina",
+   "vision"
+  ]
+ },
+ "line": "an eye with its parts",
+ "image": "eye.webp",
+ "box": [
+  100.0,
+  86.0
+ ],
+ "parts": [
+  {
+   "id": "cornea",
+   "names": {
+    "ru": "роговица",
+    "en": "cornea"
+   },
+   "label": [
+    -44.9,
+    -11.0
+   ],
+   "ring": 5.1
+  },
+  {
+   "id": "iris",
+   "names": {
+    "ru": "радужка",
+    "en": "iris"
+   },
+   "label": [
+    -33.0,
+    -13.2
+   ],
+   "ring": 6.5
+  },
+  {
+   "id": "lens",
+   "names": {
+    "ru": "хрусталик",
+    "en": "lens"
+   },
+   "label": [
+    -18.9,
+    2.0
+   ],
+   "ring": 7.5
+  },
+  {
+   "id": "retina",
+   "names": {
+    "ru": "сетчатка",
+    "en": "retina"
+   },
+   "label": [
+    29.9,
+    -21.8
+   ],
+   "ring": 8.6
+  },
+  {
+   "id": "optic_nerve",
+   "names": {
+    "ru": "зрительный нерв",
+    "en": "optic nerve"
+   },
+   "label": [
+    45.0,
+    6.3
+   ],
+   "ring": 5.0
+  }
+ ]
+}

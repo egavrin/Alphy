@@ -2,7 +2,7 @@
 // that shows the text of the chosen item. The drawing shows the sign and the label of the chosen item.
 
 import { show } from "./dsl.js";
-import { BUDGET, INSIDE, isText, textFault } from "./form-base.js";
+import { BUDGET, INSIDE, isText, optionFault, textFault } from "./form-base.js";
 
 const CONTROL = "choice(LABEL), or steps(LABEL, ANSWER): its options are the labels of the items";
 
@@ -20,7 +20,12 @@ export const ITEMS_FORM = {
   },
   partFault(tree) {
     if (tree.k !== "call" || tree.name !== "item" || tree.args.length !== 3 || Object.keys(tree.named).length) return "an item is item(LABEL, SIGN, TEXT)";
-    return textFault("the label", tree.args[0], BUDGET.option) ?? textFault("the sign", tree.args[1], BUDGET.sign, false, INSIDE) ?? textFault("the text", tree.args[2], BUDGET.cardText);
+    return textFault("the label", tree.args[0], BUDGET.fewOption) ?? textFault("the sign", tree.args[1], BUDGET.sign, false, INSIDE) ?? textFault("the text", tree.args[2], BUDGET.cardText);
+  },
+  /** The labels are the options of the choice, so their cap follows the number of items and the control (optionFault), which only the whole file knows. */
+  context(lines) {
+    const items = lines.filter((line) => line.tree && ITEMS_FORM.part.test(line.name));
+    return items.flatMap((line) => [optionFault("the label", line.tree.args[0], items.length, "item")].filter(Boolean).map((fault) => [line.name, fault]));
   },
   cardFault(tree) {
     if (tree.k !== "call" || tree.name !== "card" || tree.args.length !== 1 || Object.keys(tree.named).length) return "the card of items is card(TITLE): it shows the text of the chosen item";

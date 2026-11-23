@@ -1,0 +1,127 @@
+{
+ "id": "math.circle_radius",
+ "names": {
+  "ru": [
+   "окружность с радиусом",
+   "круг"
+  ],
+  "en": [
+   "circle with radius",
+   "circle"
+  ]
+ },
+ "words": {
+  "ru": [
+   "радиус",
+   "диаметр",
+   "центр"
+  ],
+  "en": [
+   "radius",
+   "diameter",
+   "center"
+  ]
+ },
+ "line": "a circle with a radius",
+ "box": [
+  100,
+  100
+ ],
+ "layers": [
+  {
+   "part": "circle",
+   "role": "water",
+   "tone": 2,
+   "outline": -2,
+   "circle": [
+    0,
+    0,
+    47
+   ]
+  },
+  {
+   "part": "diameter",
+   "role": "water",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 1.6,
+   "path": [
+    -47,
+    0,
+    47,
+    0
+   ]
+  },
+  {
+   "part": "radius",
+   "role": "water",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 2.4,
+   "path": [
+    0,
+    0,
+    33.2,
+    -33.2
+   ]
+  },
+  {
+   "part": "center",
+   "role": "water",
+   "tone": -2,
+   "circle": [
+    0,
+    0,
+    3
+   ]
+  }
+ ],
+ "parts": [
+  {
+   "id": "circle",
+   "names": {
+    "ru": "окружность",
+    "en": "circle"
+   },
+   "label": [
+    -33.2,
+    -33.2
+   ]
+  },
+  {
+   "id": "center",
+   "names": {
+    "ru": "центр",
+    "en": "center"
+   },
+   "label": [
+    -1,
+    1
+   ]
+  },
+  {
+   "id": "radius",
+   "names": {
+    "ru": "радиус",
+    "en": "radius"
+   },
+   "label": [
+    16.6,
+    -16.6
+   ]
+  },
+  {
+   "id": "diameter",
+   "names": {
+    "ru": "диаметр",
+    "en": "diameter"
+   },
+   "label": [
+    -30,
+    0
+   ]
+  }
+ ]
+}

@@ -1,21 +1,34 @@
 // The drawing of a surface: the kit's shapes as Alphy's drawing commands (GraphicsContract.frame), and the limits of one reply.
 
-import { HEX, TONES, explode } from "./core.js";
+import { HEX, TONE, TONES, explode } from "./core.js";
+import { KINDS, boxOf, fixed, inside } from "./kinds.js";
 
 /** The surface of a timer's bar, in Alphy's pixels of a surface: the bar fills it, 16 to 1, as a thick bar of the card's width. Alphy takes 64 pixels high at least. */
 export const BAR_SURFACE = { width: 1024, height: 64 };
 /** A side of a surface: Alphy takes 64 to 2048 pixels each way. */
 export const sideOf = (value) => Math.min(2048, Math.max(64, Math.round(Number(value)) || 0));
-/** What Alphy draws in one reply, for all surfaces together (GraphicsContract.frame, ArtifactProtocol.validateSurfaces). */
-export const LIMITS = { commands: 512, pairs: 2048, chars: 2048, bytes: 32768 };
+/** What Alphy draws in one reply, for all surfaces together (GraphicsContract.frame, ArtifactProtocol.validateSurfaces): also the path segments and the gradient stops. */
+export const LIMITS = { commands: 512, pairs: 2048, chars: 2048, bytes: 32768, segments: 512, stops: 128 };
 /**
  * The kit's color names as Alphy's colors: a tone of the theme for a role, else the hex of the kit. The role surface is the lowest container of the
  * theme (NativeToolUi.drawingRoles): white on a light theme and near black on a dark one (L1 item 6).
  */
-const ROLES = { ink: "default", muted: "muted", accent: "accent", success: "success", warning: "warning", surface: "surface" };
+const ROLES = { ink: "default", muted: "muted", accent: "accent", success: "success", warning: "warning", error: "error", surface: "surface" };
 export const PALETTE = Object.fromEntries(Object.keys(TONES).map((name) => [name, ROLES[name] ?? TONES[name]]));
-/** A color name of the palette, a hex that passes as it is, or the default ink for each other text. */
-const colorOf = (color, palette) => (Object.hasOwn(palette, color) ? palette[color] : HEX.test(color) ? color : "default");
+const clampOf = (value, low, high) => Math.min(high, Math.max(low, value));
+/**
+ * A color name of the palette, a hex that passes as it is, or the default ink for each other text. A tone (core.js TONE) of a role of the theme
+ * stays a tone, which Alphy mixes from the color of the role in the theme (GraphicsContract.toneOf). A tone of a hex color is mixed here the
+ * same way: 30 % toward white for each step up, 25 % toward black for each step down. opacity multiplies the alpha.
+ */
+export function colorOf(color, palette = PALETTE, opacity = 1) {
+  const [, name, step = "", alpha = "100"] = TONE.exec(color) ?? [], share = Math.round(clampOf(Number(alpha) * opacity, 0, 100));
+  const base = name ? palette[name] : HEX.test(color) ? color : "default";
+  if (!HEX.test(base) || (!step && share === 100)) return step || share < 100 ? `${base}${step}${share < 100 ? `@${share}` : ""}` : base;
+  const [a, ...rgb] = argbOf(base), up = Number(step) > 0, mix = up ? 0.3 * Number(step) : -0.25 * Number(step);
+  const channels = rgb.map((value) => hex2(value + ((up ? 255 : 0) - value) * mix)).join("");
+  return a === 255 && share === 100 ? `#${channels}` : `#${hex2((a * share) / 100)}${channels}`;
+}
 
 /** The UTF-8 bytes of a text. The sandbox has no TextEncoder that the kit can count on. */
 export const utf8 = (text) => {
@@ -25,12 +38,7 @@ export const utf8 = (text) => {
 };
 /** The bytes of a value in JSON as the host writes it: org.json writes "/" as "\/". */
 export const hostBytes = (value) => utf8(JSON.stringify(value).replace(/\//g, "\\/"));
-/** A sum such as x - r keeps 2 decimals, as the kit's numbers do, with no float noise. */
-export const fixed = (value) => Math.round(value * 100) / 100;
-const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
-/** True when each value is a coordinate that Alphy takes: a finite number from -8192 to 8192. */
-const inside = (values) => values.every((value) => Number.isFinite(value) && Math.abs(value) <= 8192);
-const closed = (points) => ({ type: "polyline", points: [...points, points[0]], stroke: 2 });
+export { fixed } from "./kinds.js";
 /**
  * True when the point X, Y is inside the [x, y] points by the non-zero rule, the fill rule of an Android Path (SurfaceDrawing.kt): each edge that
  * crosses the ray from the point toward a larger x adds 1 when it goes toward a larger y and -1 when it goes toward a smaller y, and the sum is not 0.
@@ -40,31 +48,47 @@ const wound = (points, X, Y) => points.reduce((turns, [x, y], index) => {
   return turns + (b <= Y ? +(y > Y && side > 0) : -(y <= Y && side < 0));
 }, 0) !== 0;
 
-/** One shape of the kit (App.drawn) as one command of Alphy, or null for a shape that Alphy cannot draw. */
-function commandOf({ shape, x, y, r, w, h, x1, y1, x2, y2, text, points, radius, width, size, stroke }) {
-  if (shape === "circle") {
-    if (!(r >= 0 && r <= 2048) || !inside([x - r, y - r, x + r, y + r])) return null;
-    const side = fixed(2 * r);
-    return stroke ? { type: "arc", x: fixed(x - r), y: fixed(y - r), width: side, height: side, start: 0, sweep: 360, stroke: 2 } : { type: "circle", x, y, radius: r };
+/**
+ * The paint of a command: its color with the opacity of the shape, or a gradient over its box. gradient= fades from the color at the top of the
+ * box to its color at the bottom. With radial=SHARE it fades from a point to the edge: radial=0 from the center, which gives a soft spot, and
+ * radial=1 from a point up and left of the center, which gives a body its volume.
+ */
+function painted(command, shape, palette) {
+  const opacity = clampOf(shape.opacity ?? 1, 0, 1), color = colorOf(shape.color, palette, opacity);
+  if (!shape.gradient || command.type === "text" || command.type === "line" || command.type === "arc" || command.stroke) return { ...command, color };
+  const { x, y, w, h } = boxOf(command), stops = [{ offset: 0, color }, { offset: 1, color: colorOf(shape.gradient, palette, opacity) }];
+  const share = clampOf(shape.radial ?? 0, 0, 1);
+  const gradient = shape.radial !== undefined ? { type: "radial", x: fixed(x + w * (0.5 - 0.12 * share)), y: fixed(y + h * (0.5 - 0.16 * share)), radius: fixed(Math.max(0.1, Math.max(w, h) * (0.5 + 0.3 * share))), stops }
+    : { type: "linear", x: fixed(x + w / 2), y: fixed(y), x2: fixed(x + w / 2), y2: fixed(y + Math.max(h, 0.1)), stops };
+  return { ...command, gradient };
+}
+/** The transform of a turn by degrees counterclockwise and a scale, with the origin moved to x, y (GraphicsContract.frame). */
+const transformOf = (degrees, scale, x, y) => {
+  const angle = (degrees * Math.PI) / 180, cos = Math.cos(angle) * scale, sin = Math.sin(angle) * scale, four = (value) => Math.round(value * 10000) / 10000;
+  return [four(cos), four(-sin), four(sin), four(cos), fixed(x), fixed(y)];
+};
+/** One shape of the kit (App.drawn) as its commands of Alphy: a glow under it, the shape, and a group for a turn or a group shape. None for a shape that Alphy cannot draw. */
+function commandsOfShape(shape, palette) {
+  if (shape.shape === "group") {
+    const scale = Number.isFinite(shape.scale) && shape.scale > 0 ? Math.min(shape.scale, 64) : 1;
+    return inside([shape.x, shape.y]) ? [{ type: "group", transform: transformOf(shape.turn ?? 0, scale, shape.x, shape.y), children: commandsOf(shape.shapes ?? [], palette) }] : [];
   }
-  if (shape === "rect") {
-    // A size below 0 is the same box from its other corner.
-    const box = { x: Math.min(x, fixed(x + w)), y: Math.min(y, fixed(y + h)), width: Math.abs(w), height: Math.abs(h) };
-    const right = fixed(box.x + box.width), bottom = fixed(box.y + box.height);
-    if (!inside([box.x, box.y, right, bottom]) || box.width > 8192 || box.height > 8192) return null;
-    if (stroke) return closed([[box.x, box.y], [right, box.y], [right, bottom], [box.x, bottom]]);
-    return radius ? { type: "roundRect", ...box, radius: clamp(radius, 0, 1024) } : { type: "rect", ...box };
+  const command = KINDS[shape.shape]?.draw(shape);
+  if (!command) return [];
+  // A picture of the library keeps its own colors: no paint, no glow.
+  if (command.type === "image") return [command];
+  const box = boxOf(command), [cx, cy] = [box.x + box.w / 2, box.y + box.h / 2], out = [];
+  if (shape.glow) {
+    // A soft light around the shape: a disk of 1.4 times its size in its color that fades to nothing.
+    const radius = fixed(Math.max(4, Math.max(box.w, box.h) * 0.7)), fade = (share) => colorOf(shape.color, palette, share * clampOf(shape.opacity ?? 1, 0, 1));
+    if (inside([cx - radius, cy - radius, cx + radius, cy + radius]))
+      out.push({ type: "circle", x: fixed(cx), y: fixed(cy), radius, gradient: { type: "radial", x: fixed(cx), y: fixed(cy), radius, stops: [{ offset: 0, color: fade(0.55) }, { offset: 1, color: fade(0) }] } });
   }
-  if (shape === "line") return inside([x1, y1, x2, y2]) ? { type: "line", x: x1, y: y1, x2, y2, stroke: clamp(width ?? 2, 0.1, 128) } : null;
-  if (shape === "text") return inside([x, y]) ? { type: "text", x, y, size: clamp(size ?? 14, 1, 128), text: text.slice(0, LIMITS.chars), align: "center", baseline: "middle" } : null;
-  if (shape === "polygon") {
-    // [x1, y1, x2, y2, ...] as [x, y] points. A polygon has 3 to 2048 points, and its outline 2 or more and its first point again.
-    const pairs = [];
-    for (let index = 0; index + 1 < points.length; index += 2) pairs.push([points[index], points[index + 1]]);
-    if (!inside(pairs.flat()) || pairs.length < (stroke ? 2 : 3) || pairs.length > (stroke ? 2047 : 2048)) return null;
-    return stroke ? closed(pairs) : { type: "polygon", points: pairs };
-  }
-  return null;
+  out.push(painted(command, shape, palette));
+  if (!shape.turn) return out;
+  // A turn around the center of the box: the group moves the center to the origin, turns, and moves it back.
+  const [a, b, c, d] = transformOf(shape.turn, 1, 0, 0);
+  return [{ type: "group", transform: [a, b, c, d, fixed(cx - a * cx - c * cy), fixed(cy - b * cx - d * cy)], children: out }];
 }
 
 /**
@@ -72,14 +96,15 @@ function commandOf({ shape, x, y, r, w, h, x1, y1, x2, y2, text, points, radius,
  * draw is left out, and a size past Alphy's bounds is clamped. A text takes a color that reads on the last filled disk, box, or polygon under its anchor (L1 item 6):
  * - on a shape in a hex color, black or white by the luminance of the shape. With a gamma of 2.2 and a limit of 0.18, the contrast is 4.5 or more.
  * - on a shape in an ink role, the surface role. The host keeps each ink and the surface role at 4.5 or more (NativeToolUi.drawingRoles).
- * - on a shape in muted, the default ink. A muted shape is a light tint of the muted ink, and only the default ink keeps 4.5 on that tint.
+ * - on a shape in muted, or in a tone at 50 % alpha or less, the default ink. Such a shape is a light tint, and only the default ink keeps 4.5 on that tint.
  * - on a shape in surface, or on no shape, its own color, and the default ink for the surface role.
  * A line and an outline cover no text.
  */
 export const commandsOf = (shapes, palette = PALETTE) => shapes.reduce((drawn, shape) => {
-  const command = commandOf(shape);
-  let color = colorOf(shape.color, palette), under;
-  if (command?.type === "text") {
+  const made = commandsOfShape(shape, palette), command = made.length === 1 ? made[0] : null;
+  if (command?.type !== "text") { drawn.push(...made); return drawn; }
+  let color = command.color, under;
+  {
     const { x: X, y: Y } = command;
     // A box is a rect or a roundRect, the only types that start with r. An arc is the outline of a disk.
     for (const { type, x, y, radius, width, height, points, color: fill } of drawn) {
@@ -88,9 +113,9 @@ export const commandsOf = (shapes, palette = PALETTE) => shapes.reduce((drawn, s
     }
     // The relative luminance of the shape, with weights times 10000.
     color = HEX.test(under) ? (argbOf(under).reduce((sum, channel, index) => sum + [0, 2126, 7152, 722][index] * (channel / 255) ** 2.2, 0) > 1800 ? "#000000" : "#ffffff")
-      : under === "muted" ? "default" : under && under !== "surface" ? "surface" : color === "surface" ? "default" : color;
+      : under === "muted" || Number(TONE.exec(under ?? "")?.[3] ?? 100) <= 50 ? "default" : under && under !== "surface" ? "surface" : color === "surface" ? "default" : color;
   }
-  if (command) drawn.push({ ...command, color });
+  drawn.push({ ...command, color });
   return drawn;
 }, []);
 
@@ -190,17 +215,28 @@ export function polygonsOf(bodies, turnDegrees, exploded, selected, width, heigh
   });
 }
 
-/** What one command costs: a box, a circle, and a text 1 pair, a line 2, a polygon or a polyline 1 for each point (GraphicsContract.frame). */
-const pairsOf = (command) => command.points?.length ?? (command.type === "line" ? 2 : 1);
-const charsOf = (command) => command.text?.length ?? 0;
+/**
+ * What one command costs (GraphicsContract.frame): a box, a circle, and a text 1 pair, a line 2, a polygon or a polyline 1 for each point, a
+ * path 1 for each point of its segments, a gradient 1 for its point and 1 more for a linear one, and a group what its commands cost and 1 more.
+ */
+const SEGMENT_PAIRS = { move: 1, line: 1, quad: 2, cubic: 3, close: 0 };
+const pairsOf = (command) => (command.type === "group" ? 1 + command.children.reduce((sum, child) => sum + pairsOf(child), 0)
+  : (command.points?.length ?? (command.segments ? command.segments.reduce((sum, one) => sum + SEGMENT_PAIRS[one.type], 0) : command.type === "line" ? 2 : 1))
+    + (command.gradient ? (command.gradient.type === "linear" ? 2 : 1) : 0));
+const each = (cost) => (command) => (command.type === "group" ? command.children.reduce((sum, child) => sum + each(cost)(child), 0) : cost(command));
+const charsOf = each((command) => command.text?.length ?? 0);
+const countOf = (command) => (command.type === "group" ? 1 + command.children.reduce((sum, child) => sum + countOf(child), 0) : 1);
+const segmentsOf = each((command) => command.segments?.length ?? 0);
+const stopsOf = each((command) => command.gradient?.stops.length ?? 0);
 /**
  * What the surfaces of one reply cost, from [id, commands] in order: the commands, pairs, and text characters of all of them, and
  * the bytes of {id: {commands}, ...} as the host writes it. The emitter checks the first reply with it, and fit starts from the reply with no commands.
  */
 export const budgetOf = (surfaces) => {
   const commands = surfaces.flatMap(([, list]) => list);
-  return { commands: commands.length, pairs: commands.reduce((sum, command) => sum + pairsOf(command), 0),
-    chars: commands.reduce((sum, command) => sum + charsOf(command), 0), bytes: hostBytes(Object.fromEntries(surfaces.map(([id, list]) => [id, { commands: list }]))) };
+  const sum = (cost) => commands.reduce((total, command) => total + cost(command), 0);
+  return { commands: sum(countOf), pairs: sum(pairsOf), chars: sum(charsOf), bytes: hostBytes(Object.fromEntries(surfaces.map(([id, list]) => [id, { commands: list }]))),
+    segments: sum(segmentsOf), stops: sum(stopsOf) };
 };
 
 /**
@@ -212,7 +248,7 @@ export function fit(surfaces) {
   let full = false;
   return Object.fromEntries(surfaces.map(([id, commands]) => [id, { commands: commands.filter((command, index) => {
     // A command costs its bytes, and a comma after the first command of its surface. The commands before it were kept, as none is kept after the first that does not fit.
-    const cost = { commands: 1, pairs: pairsOf(command), chars: charsOf(command), bytes: hostBytes(command) + (index ? 1 : 0) };
+    const cost = { commands: countOf(command), pairs: pairsOf(command), chars: charsOf(command), bytes: hostBytes(command) + (index ? 1 : 0), segments: segmentsOf(command), stops: stopsOf(command) };
     full ||= Object.keys(LIMITS).some((key) => used[key] + cost[key] > LIMITS[key]);
     if (!full) for (const key of Object.keys(cost)) used[key] += cost[key];
     return !full;

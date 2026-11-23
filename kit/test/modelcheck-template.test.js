@@ -7,6 +7,7 @@ import * as check from "../modelcheck.js";
 import * as prompts from "../prompt.js";
 import { compileStep } from "../src/compile.js";
 import { fake } from "./helpers.js";
+import { catalogAsset } from "../build.js";
 
 const ship = readFileSync(new URL("./fixtures/template/ship.plan", import.meta.url), "utf8");
 /** The line of a name of the ship file. */
@@ -83,7 +84,10 @@ test("aChangeThatRepeatsAStoredLineCountsIt", async () => {
   const { ask, bodies } = fake([line("s3"), green].join("\n"));
   const record = await check.checkTemplateChange(change, { ask, model: "m", effort: "low" });
   expect([record.outcome, record.prompt, record.replied, record.repeated, record.kept]).toEqual(["clean0", prompts.TEMPLATE_HASH, { kind: "lines", lines: 2 }, 1, ship.replace(line("s1"), green)]);
-  expect([bodies[0].instructions, bodies[0].input[0].content[0].text]).toEqual([prompts.PROMPT.Template, prompts.templateChangeText({ request: change.request, plan: ship })]);
+  // A change call has the candidates of the catalog under the request, as a spoken change of the app has them (fix list 4, K3).
+  const host = prompts.candidatesText(JSON.parse(catalogAsset()).objects);
+  expect([bodies[0].instructions, bodies[0].input[0].content[0].text]).toEqual([prompts.PROMPT.Template, prompts.templateChangeText({ request: change.request, plan: ship, host })]);
+  expect(bodies[0].input[0].content[0].text).toContain(`${change.request}\nReady objects that may fit this request`);
 });
 
 test("templateNumbersReadTheBars", () => {

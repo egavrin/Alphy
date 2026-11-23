@@ -1,0 +1,91 @@
+{
+ "id": "body.ear",
+ "names": {
+  "ru": [
+   "ухо"
+  ],
+  "en": [
+   "ear"
+  ]
+ },
+ "words": {
+  "ru": [
+   "слух",
+   "барабанная перепонка",
+   "улитка"
+  ],
+  "en": [
+   "hearing",
+   "eardrum",
+   "cochlea"
+  ]
+ },
+ "line": "an ear",
+ "image": "ear.webp",
+ "box": [
+  100.0,
+  79.1
+ ],
+ "parts": [
+  {
+   "id": "outer_ear",
+   "names": {
+    "ru": "ушная раковина",
+    "en": "outer ear"
+   },
+   "label": [
+    -39.1,
+    -12.0
+   ],
+   "ring": 10.2
+  },
+  {
+   "id": "ear_canal",
+   "names": {
+    "ru": "слуховой проход",
+    "en": "ear canal"
+   },
+   "label": [
+    -16.6,
+    4.4
+   ],
+   "ring": 6.1
+  },
+  {
+   "id": "eardrum",
+   "names": {
+    "ru": "барабанная перепонка",
+    "en": "eardrum"
+   },
+   "label": [
+    -3.2,
+    4.4
+   ],
+   "ring": 6.1
+  },
+  {
+   "id": "small_bones",
+   "names": {
+    "ru": "слуховые косточки",
+    "en": "small bones"
+   },
+   "label": [
+    8.1,
+    -3.8
+   ],
+   "ring": 7.1
+  },
+  {
+   "id": "cochlea",
+   "names": {
+    "ru": "улитка",
+    "en": "cochlea"
+   },
+   "label": [
+    33.7,
+    9.5
+   ],
+   "ring": 10.2
+  }
+ ]
+}

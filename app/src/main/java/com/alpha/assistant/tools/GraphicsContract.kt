@@ -20,6 +20,7 @@ object GraphicsContract {
         internal var stops=0
         internal var bytes=0
         internal val bitmapHandles=mutableSetOf<String>()
+        internal val libraryImages=mutableSetOf<String>()
         /** The transformed extent of the drawn points, for the app agent's screen text. */
         internal var left=Double.POSITIVE_INFINITY
         internal var top=Double.POSITIVE_INFINITY
@@ -95,9 +96,16 @@ object GraphicsContract {
      * drawing (NativeToolUi.drawingRoles) passes too. The text of a fault leaves it out, so a prompt does not change (L1 item 6).
      */
     private fun color(value: Any,path: String,orGradient: Boolean) {
-        if(value is String && (value in ToolUiCatalog.tones || value == SURFACE_ROLE || value.matches(hexColor))) return
+        if(value is String && (value in ToolUiCatalog.tones || value == SURFACE_ROLE || value.matches(hexColor) || toneOf(value) != null)) return
         val expected=ToolUiCatalog.tones.joinToString(", ")+", #RRGGBB, "+if(orGradient) "#AARRGGBB, or a gradient object" else "or #AARRGGBB"
         throw ToolValidationFailure(ToolValidationCategory.DRAWING,ToolValidationDetails("drawing.color",path,expected,"\"${value.toString().take(40)}\""))
+    }
+    /** A tone of a role (stage 6, L2): the role, a step of +1 to +3 (lighter) or -1 to -3 (darker), and an alpha in percent. */
+    internal data class Tone(val role: String,val step: Int,val alpha: Int)
+    private val tone=Regex("(${(ToolUiCatalog.tones+SURFACE_ROLE).joinToString("|")})([+-][123])?(?:@(\\d{1,3}))?")
+    /** "accent+1", "accent-2", "accent@40", or "accent+1@40" as its tone. Null for a plain role, for each other text, and for an alpha above 100. */
+    internal fun toneOf(value: String): Tone? = tone.matchEntire(value)?.takeIf { it.groupValues[2].isNotEmpty() || it.groupValues[3].isNotEmpty() }?.let {
+        Tone(it.groupValues[1],it.groupValues[2].toIntOrNull() ?: 0,it.groupValues[3].toIntOrNull() ?: 100).takeIf { tone -> tone.alpha <= 100 }
     }
     /** The gradient of a drawing command: the `gradient` object, or a JSON object under `color`. Null for a solid color. */
     internal fun gradientOf(command: JSONObject): JSONObject? = command.optJSONObject("gradient") ?: command.optJSONObject("color")
@@ -179,6 +187,19 @@ object GraphicsContract {
                     val label=c.get("label")
                     require(label is String && label.isNotBlank()) {"Bitmap drawing needs an accessibility label."}
                     budget.chars+=label.length;require(budget.chars<=2048)
+                    val width=number(c,"width",0.0);val height=number(c,"height",0.0)
+                    require(width.toFloat()>0 && height.toFloat()>0)
+                    bounds(number(c,"x"),number(c,"y"),width,height,m)
+                    return@repeat
+                }
+                // The picture of a ready object of the library (stage 6, I4): the id of its entry, and its box. It has no color: the host
+                // draws the image of its assets (LibraryImages).
+                if(type=="image") {
+                    fields(c,setOf("type","id","x","y","width","height"),commandPath)
+                    val id=c.get("id")
+                    require(id is String && id.matches(LibraryImages.ID)) {"An image of the library needs the id of its entry."}
+                    budget.libraryImages.add(id)
+                    require(budget.libraryImages.size<=LibraryImages.MAX_IN_DRAWING) {"Drawing exceeds its image limit."}
                     val width=number(c,"width",0.0);val height=number(c,"height",0.0)
                     require(width.toFloat()>0 && height.toFloat()>0)
                     bounds(number(c,"x"),number(c,"y"),width,height,m)

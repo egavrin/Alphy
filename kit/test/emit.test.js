@@ -665,7 +665,7 @@ test("emit: model3d.plan stays under the drawing limits", async () => {
   kit.press("rover_part_camera");
   const selected = used();
   kit.press("rover_part_camera");
-  const most = { commands: 0, pairs: 0, chars: 0, bytes: 0 };
+  const most = { commands: 0, pairs: 0, chars: 0, bytes: 0, segments: 0, stops: 0 };
   for (const id of [null, "rover_explode", "rover_part_camera", "rover_explode"]) {
     if (id) kit.press(id);
     for (let turn = 0; turn < 360; turn++) {

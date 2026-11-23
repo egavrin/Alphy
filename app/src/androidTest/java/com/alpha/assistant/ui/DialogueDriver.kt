@@ -566,7 +566,19 @@ internal class DialogueRun(private val dialogue: Dialogue, private val directory
             val answered = commentary == null || marks.any { it.name == "voice_out" && it.atNanos > commentary } ||
                 now - commentary > VOICE_MS * 1_000_000
             val handedOff = end == null || marks.any { it.name == "delegation" && it.atNanos > end } || now - end > HAND_OFF_MS * 1_000_000
-            val quiet = feeder.idle && handedOff && answered && main { !model.liveVoiceWorking && model.liveVoice.phase == LivePhase.LISTENING }
+            // A step ends only after its calls and the narration of its screen ended (stage 6, B2). The voice listened for 0.5 s between the end
+            // of the call of a data form and the start of its narration, and the next line came in that gap (live-5b, uxData, 31.1 s).
+            val open = marks.count { it.name == "call_start" && it.atNanos > start } > marks.count { it.name == "call_end" && it.atNanos > start }
+            val screen = marks.lastOrNull { it.name == "screen_visible" && it.atNanos > start }?.atNanos
+            val thinking = marks.lastOrNull { it.name == THINKING && it.atNanos > start }?.atNanos
+            val narrated = when {
+                thinking != null -> marks.any { it.name == DialogueRecorder.VOICE_PHASE && it.detail == LivePhase.SPEAKING.name && it.atNanos > thinking } ||
+                    now - thinking > VOICE_MS * 1_000_000
+                screen != null -> now - screen > VOICE_MS * 1_000_000
+                else -> true
+            }
+            val quiet = feeder.idle && handedOff && answered && !open && narrated &&
+                main { !model.liveVoiceWorking && model.liveVoice.phase == LivePhase.LISTENING }
             if (!quiet) since = now else if (now - since >= QUIET_MS * 1_000_000) break
             SystemClock.sleep(100)
         }

@@ -337,7 +337,7 @@ test("drawing: one Drawing whose shapes are plain numbers", async () => {
     { shape: "line", x1: 0, y1: 0, x2: 200, y2: 100, color: "ink", width: 3 }, { shape: "text", x: 100, y: 10, text: "N 2", color: "muted", size: 9 }, { shape: "polygon", points: [0, 0, 10, 0, 5, 8], color: "#ff0000", stroke: true },
     { shape: "rect", x: 100, y: 30, w: 6, h: 6, color: "wood" }, { shape: "circle", x: 0, y: 90, r: 2, color: "ink" }, { shape: "circle", x: 2.5, y: 90, r: 2, color: "ink" }, { shape: "circle", x: 5, y: 90, r: 2, color: "ink" }] }, "the shapes of a drawing as plain values");
   same([sk.press("r_plus"), sk.find("sky_view").props.shapes[0].r, sky.made.get("sky"), sky.get("sky_view").tree.name, report(sky).faults], ["", 22, [], "Drawing", []], "a shape follows a value of the app, and a drawing is no control");
-  await partFault('need d = drawing("D", 100, 100, [star(1, 2, 3)])', "star(1, 2, 3) is not one of circle, rect, line, text, polygon, each");
+  await partFault('need d = drawing("D", 100, 100, [star(1, 2, 3)])', "star(1, 2, 3) is not one of circle, rect, line, text, polygon, path, arrow, arc, each");
   await partFault('need d = drawing("D", 100, 100, [circle("a", 2, 3, "ink")])', "x of circle is not a number");
   await partFault('need d = drawing("D", 100, 100, [rect(1, 2, 3, "ink")])', "h of rect is not a number: rect takes x, y, w, h, color");
   await partFault('need d = drawing("D", 100, 100, [rect(1, 2, 3)])', "shapes: rect(1, 2, 3) has 3 values: rect takes x, y, w, h, color, radius");
@@ -346,7 +346,8 @@ test("drawing: one Drawing whose shapes are plain numbers", async () => {
   same(loose.map((shape) => [shape.size, shape.width, shape.radius]), [[12, undefined, undefined], [undefined, 3, undefined], [undefined, undefined, 2], [7, undefined, undefined]], "the extra value of a shape after its color, and a named one wins");
   await partFault('need d = drawing("D", 100, 100, [circle(1, 2, 3, "ink", 5)])', 'circle(1, 2, 3, "ink", 5) has 5 values: circle takes x, y, r, color');
   await partFault('need d = drawing("D", 100, 100, [text(1, 2, "A", "ink", 9, 4)])', "has 6 values: text takes x, y, text, color, size");
-  await partFault('need d = drawing("D", 100, 100, [circle(1, 2, 3, "ink", glow=2)])', "circle has no argument glow");
+  // glow= is a shape property of stage 6 (L2), so a name that no property has is the fault.
+  await partFault('need d = drawing("D", 100, 100, [circle(1, 2, 3, "ink", shine=2)])', "circle has no argument shine");
   await partFault('need d = drawing("D", [circle(1, 2, 3, "ink")])', "drawing needs a width and a height");
   // Shapes with no list around them are still the shapes.
   same(new App(await planned('app("T")\nneed d = drawing("D", 10, 10, circle(1, 2, 3, "ink"), circle(4, 5, 6, "sun"))')).find("d_view").props.shapes.map((shape) => shape.x), [1, 4], "shapes with no list");

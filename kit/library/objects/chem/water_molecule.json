@@ -1,0 +1,161 @@
+{
+ "id": "chem.water_molecule",
+ "names": {
+  "ru": [
+   "молекула воды"
+  ],
+  "en": [
+   "water molecule"
+  ]
+ },
+ "words": {
+  "ru": [
+   "вода",
+   "H2O",
+   "молекула",
+   "атом кислорода",
+   "атомы водорода",
+   "химическая связь",
+   "шаростержневая модель"
+  ],
+  "en": [
+   "water",
+   "H2O",
+   "molecule",
+   "oxygen atom",
+   "hydrogen atoms",
+   "chemical bond",
+   "ball and stick model"
+  ]
+ },
+ "line": "a water molecule as balls and sticks: one oxygen atom and two hydrogen atoms",
+ "box": [
+  100,
+  66
+ ],
+ "layers": [
+  {
+   "part": "bonds",
+   "role": "muted",
+   "tone": 1,
+   "line": true,
+   "open": true,
+   "width": 7,
+   "path": [
+    0,
+    -8,
+    -34,
+    18
+   ]
+  },
+  {
+   "part": "bonds",
+   "role": "muted",
+   "tone": 1,
+   "line": true,
+   "open": true,
+   "width": 7,
+   "path": [
+    0,
+    -8,
+    34,
+    18
+   ]
+  },
+  {
+   "part": "hydrogen",
+   "role": "muted",
+   "tone": 3,
+   "gradient": [
+    3,
+    1,
+    "radial"
+   ],
+   "circle": [
+    -34,
+    18,
+    14
+   ],
+   "highlight": [
+    -39,
+    12,
+    4.5
+   ]
+  },
+  {
+   "part": "hydrogen",
+   "role": "muted",
+   "tone": 3,
+   "gradient": [
+    3,
+    1,
+    "radial"
+   ],
+   "circle": [
+    34,
+    18,
+    14
+   ],
+   "highlight": [
+    29,
+    12,
+    4.5
+   ]
+  },
+  {
+   "part": "oxygen",
+   "role": "error",
+   "tone": 0,
+   "gradient": [
+    1,
+    -1,
+    "radial"
+   ],
+   "circle": [
+    0,
+    -8,
+    24
+   ],
+   "highlight": [
+    -8,
+    -17,
+    7
+   ]
+  }
+ ],
+ "parts": [
+  {
+   "id": "oxygen",
+   "names": {
+    "ru": "атом кислорода",
+    "en": "oxygen atom"
+   },
+   "label": [
+    8,
+    -16
+   ]
+  },
+  {
+   "id": "hydrogen",
+   "names": {
+    "ru": "атом водорода",
+    "en": "hydrogen atom"
+   },
+   "label": [
+    36,
+    20
+   ]
+  },
+  {
+   "id": "bonds",
+   "names": {
+    "ru": "связь",
+    "en": "bond"
+   },
+   "label": [
+    -17,
+    5
+   ]
+  }
+ ]
+}

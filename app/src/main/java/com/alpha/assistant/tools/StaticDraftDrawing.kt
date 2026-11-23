@@ -51,9 +51,11 @@ import org.json.JSONObject
     // As in the accepted app, the canvas takes the color of the card or page around it.
     val canvasBackground = LocalToolBackground.current.takeOrElse { scheme.surface }
     val roleColors = remember(scheme) { scheme.drawingRoles(canvasBackground) }
+    val pictures = rememberLibraryImages(remember(surfacesJson) { JSONObject(surfacesJson) })
 
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.width(minOf(maxWidth, maxHeight * ratio)).aspectRatio(ratio).clip(MaterialTheme.shapes.medium)
+        // A bound of the column also limits the drawing. In a fitted phone column the preview takes the size of the final picture (stage 6, F1).
+        Canvas(Modifier.width(minOf(maxWidth, (fittedPicture(constraints, maxHeight) ?: minOf(maxHeight, this.maxHeight)) * ratio)).aspectRatio(ratio).clip(MaterialTheme.shapes.medium)
             .background(canvasBackground).semantics { contentDescription = description }) {
             val canvas = drawContext.canvas.nativeCanvas
             val stage = canvas.save()
@@ -64,7 +66,7 @@ import org.json.JSONObject
                     val frame = canvas.save()
                     try {
                         canvas.translate(placement.x.toFloat(), placement.y.toFloat())
-                        drawSurfaceFrame(canvas, surface, commands, surface.width.toFloat(), surface.height.toFloat(), roleColors)
+                        drawSurfaceFrame(canvas, surface, commands, surface.width.toFloat(), surface.height.toFloat(), roleColors, pictures)
                     } finally {
                         canvas.restoreToCount(frame)
                     }

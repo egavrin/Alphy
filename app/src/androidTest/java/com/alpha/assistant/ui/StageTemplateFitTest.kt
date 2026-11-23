@@ -2,6 +2,7 @@ package com.alpha.assistant.ui
 
 import android.graphics.Rect
 import android.os.SystemClock
+import android.view.WindowManager
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsConfiguration
 import androidx.compose.ui.semantics.SemanticsNode
@@ -19,7 +20,9 @@ import com.alpha.assistant.voice.FakeLiveTransport
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -102,6 +105,75 @@ class StageTemplateFitTest {
         assertTrue("cap files that do not fit the stage: $misses", misses.isEmpty())
     }
 
+    /**
+     * Stage 6, F1: on a phone the square picture takes the height that the other parts of the stage leave, in one layout pass. With a short
+     * card it has the full width of the column (the width of the title). A shorter window makes it smaller, and the first window gives it its
+     * first size again. A free app file with one square drawing gets the same rule: the lesson app is taller than the stage, so its square
+     * picture stands at the floor, 0.6 of the column width, and the stage scrolls.
+     */
+    @Test fun aSquarePictureTakesTheHeightThatTheStageLeaves() {
+        val fixture = ShellFixture("stage-template-fit")
+        assumeTrue("the phone layout", fixture.context.resources.configuration.smallestScreenWidthDp < DIALOGUE_WIDE_DP)
+        val file = appFilePlan("template/ship")
+        val template = Template(file)
+        val shell = TemplateShell(fixture, robot, FakeLiveTransport())
+        // The bounds of the canvas (by its label) and of the title, once they stay the same for 0.5 s.
+        fun settled(scenario: ActivityScenario<CloudTestActivity>, title: String, label: String = title): Pair<Rect, Rect> {
+            var last: Pair<Rect, Rect>? = null
+            var shown: Pair<Rect, Rect>? = null
+            robot.waitUntil(30_000) {
+                SystemClock.sleep(500)
+                val parts = stageParts(scenario)
+                val canvas = parts.firstOrNull { it.isCanvasOf(label) }?.bounds
+                val heading = parts.firstOrNull { part -> part.config.getOrNull(SemanticsProperties.Text)?.any { it.text == title } == true }?.bounds
+                val next = if (canvas != null && heading != null) canvas to heading else null
+                (next != null && next == last).also { last = next; if (it) shown = next }
+            }
+            return checkNotNull(shown)
+        }
+        try {
+            shell.live(TemplateTalk(AgentScriptProvider(file))) { scenario, model, _ ->
+                shell.finalFile(model, shell.screen(model).id)
+                // The canvas stands in a card with a padding (the device run: a card of 910 px, a canvas of 804 px). With the short card the
+                // drawing card has the full width of the column, and the canvas fills the width of the card: its side inset is its top inset.
+                val (first, title) = settled(scenario, template.title)
+                val card = cardOf(scenario, first, title)
+                println("F1 ship canvas $first card $card title $title")
+                assertTrue("a square picture: $first", abs(first.width() - first.height()) <= 2)
+                assertTrue("the full width of the column: card $card, title $title", card.width() >= title.width() - 2)
+                assertTrue("the picture fills the card: $first, card $card", first.left - card.left <= first.top - card.top + 2)
+                var window = 0
+                scenario.onActivity { window = it.window.decorView.height }
+                scenario.onActivity { it.window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, window * 7 / 10) }
+                val (small, _) = settled(scenario, template.title)
+                assertTrue("a shorter window makes the picture smaller: $small, first $first", small.height() < first.height() - 4)
+                scenario.onActivity { it.window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT) }
+                val (again, _) = settled(scenario, template.title)
+                assertTrue("the first window gives the first size: $again, first $first", abs(again.width() - first.width()) <= 1 && abs(again.height() - first.height()) <= 1)
+            }
+        } finally { shell.remove() }
+        val free = appFilePlan("lesson")
+        val title = checkNotNull(Regex("""^app\("([^"]+)"""").find(free)).groupValues[1]
+        val label = checkNotNull(Regex("""drawing\("([^"]+)"""").find(free)).groupValues[1]
+        val freeShell = TemplateShell(ShellFixture("stage-template-fit"), robot, FakeLiveTransport())
+        try {
+            freeShell.live(TemplateTalk(plans = AgentScriptProvider(free))) { scenario, model, _ ->
+                freeShell.finalFile(model, freeShell.screen(model).id)
+                val (canvas, heading) = settled(scenario, title, label)
+                val card = cardOf(scenario, canvas, heading)
+                println("F1 free ${JSONObject().put("canvas", canvas.toShortString()).put("card", card.toShortString()).put("title", heading.toShortString())}")
+                assertTrue("a square picture: $canvas", abs(canvas.width() - canvas.height()) <= 2)
+                // The other parts of the lesson leave less room than the floor, so the picture itself stands at the floor: 0.6 of the column width
+                // (the title), whatever card and padding stand around it (fix list 2, G1), and the stage scrolls.
+                assertTrue("the floor, 0.6 of the column width: card $card, canvas $canvas, title $heading", abs(canvas.height() - heading.width() * 0.6f) <= 3)
+            }
+        } finally { freeShell.remove() }
+    }
+
+    /** The drawing card of [canvas]: the smallest part under the [title] that holds the canvas, or the canvas when no card holds it. */
+    private fun cardOf(scenario: ActivityScenario<CloudTestActivity>, canvas: Rect, title: Rect): Rect =
+        stageParts(scenario).map { it.bounds }.filter { it != canvas && it.top > title.bottom && it.contains(canvas) }.minByOrNull { it.width() * it.height() } ?: canvas
+
     /** One composed node of the stage: its configuration, and its window bounds, which no scroll container and no strip clips. */
     private class Part(val config: SemanticsConfiguration, val bounds: Rect) {
         fun isCanvasOf(title: String) = config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.startsWith(title) } == true
@@ -145,7 +217,8 @@ class StageTemplateFitTest {
          * a hard cap). The steps files have six steps and six narration lines at their caps (plan "one scene", Task 25).
          */
         val FILES = listOf("scene-caps", "scene-caps125", "items-caps", "items-caps125", "cells-caps", "cells-caps125", "steps-caps", "items-steps-caps",
-            "compare-caps", "table-caps", "chart-caps", "nodata-caps")
+            // A choice of 4 options, 4 items, and 4 steps at the option cap 16 (fix list 3, H3, and fix list 5, L2).
+            "scene-caps4", "items-caps4", "steps-caps4", "compare-caps", "table-caps", "chart-caps", "nodata-caps")
         /** The forms of the data family (block 2 plan, stage 5). */
         val DATA_FORMS = setOf("compare", "table", "chart", "nodata")
     }

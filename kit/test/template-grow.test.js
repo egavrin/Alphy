@@ -42,7 +42,7 @@ test("eachLongerPrefixKeepsTheUiAndTheDrawingOfTheShorter", async () => {
     }
     // The picture card has its size from the first line. A data form has no picture.
     const data = DATA_WORDS.has(/^\s*(\w+)/.exec(lines[0])[1]);
-    expect([name, (frames[0].definition.surfaces ?? []).map(({ width, height }) => [width, height])]).toEqual([name, data ? [] : [[300, 220]]]);
+    expect([name, (frames[0].definition.surfaces ?? []).map(({ width, height }) => [width, height])]).toEqual([name, data ? [] : [[300, 300]]]);
     frames.forEach((frame, k) => expect([name, k + 1, frame.definition.surfaces]).toEqual([name, k + 1, frames[0].definition.surfaces]));
     for (let k = 1; k < frames.length; k++) {
       const [shorter, longer] = [frames[k - 1], frames[k]], at = `${name}, lines ${k} to ${k + 1}`;

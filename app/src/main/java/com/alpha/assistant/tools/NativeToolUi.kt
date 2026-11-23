@@ -76,7 +76,9 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
@@ -145,6 +147,7 @@ import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.round
+import kotlin.math.roundToInt
 
 private val LocalEmbeddedTool = staticCompositionLocalOf { false }
 internal val LocalToolBackground = staticCompositionLocalOf { Color.Unspecified }
@@ -788,8 +791,39 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
 /** The smallest screen width in dp of a wide dialogue stage: the fold and the tablet (plan D, values table). */
 internal const val DIALOGUE_WIDE_DP = 600
 
-/** The parts of an app on the dialogue stage by their role (plan D, Da2): indices of the children of the column under the theme root. */
-internal data class DialogueSplit(val leading: List<Int>, val main: List<Int>, val side: List<Int>)
+/**
+ * The parts of an app on the dialogue stage by their role (plan D, Da2): indices of the children of the column under the theme root.
+ * [drawing] is true when the main visual is a drawing (a canvas, or a card that holds only canvases), which can take the height that the
+ * other parts leave (stage 6, F1).
+ */
+internal data class DialogueSplit(val leading: List<Int>, val main: List<Int>, val side: List<Int>, val drawing: Boolean = false)
+
+/**
+ * The mark of the stage height in a bound (stage 6, F1): the phone stage measures its column with a maximum height of its own height plus
+ * this mark, so each part above the app and each padding takes its part, and DialogueColumns reads what is left. A real bound of a phone
+ * never reaches it, and it stays inside the bound that Constraints can hold for a phone width.
+ */
+internal const val STAGE_FIT_MARK = 1 shl 17
+
+/**
+ * The least side of the square picture in a fitted phone column (fix list 2, G1): 0.6 of the width of the stage column. The canvas holds it,
+ * because only the canvas knows the card and the padding around it; under it the stage scrolls.
+ */
+internal val LocalPictureFloor = staticCompositionLocalOf { 0.dp }
+
+/**
+ * The height that a bound with STAGE_FIT_MARK leaves, at least 0, or null for another bound. The paddings and the parts inside the mark can
+ * take more than is left, so a bound down to half the mark still holds it: a real bound of a phone never reaches that.
+ */
+internal fun fitSpace(maxHeight: Int): Int? =
+    maxHeight.takeIf { it != Constraints.Infinity && it >= STAGE_FIT_MARK / 2 }?.let { (it - STAGE_FIT_MARK).coerceAtLeast(0) }
+
+/** The side of a picture in a fitted phone column: the height that its bound leaves, at most [cap], at least LocalPictureFloor; else null. */
+@Composable internal fun fittedPicture(constraints: Constraints, cap: Dp): Dp? {
+    val floor = LocalPictureFloor.current
+    val density = LocalDensity.current
+    return fitSpace(constraints.maxHeight)?.let { maxOf(floor, minOf(cap, with(density) { it.toDp() })) }
+}
 
 /**
  * The split of a theme over one column, or of a column. The kind label leads. The main visual (a drawing, a 3D model, or a deck) and each
@@ -809,7 +843,8 @@ internal fun dialogueSplit(root: JSONObject): DialogueSplit? {
     val main = (leading.size until items.size).firstOrNull { mainVisual(items[it]) }?.let { start ->
         (start until items.size).takeWhile { it == start || items[it].optString("type") !in setOf("card", "list") }
     }.orEmpty()
-    return DialogueSplit(leading, main, (leading.size until items.size).filter { it !in main })
+    val drawing = main.firstOrNull()?.let { items[it].optString("type") != "section" } == true
+    return DialogueSplit(leading, main, (leading.size until items.size).filter { it !in main }, drawing)
 }
 
 /** A column with a layout, an align or arrangement style, or a part with a layout places its parts itself, so no split moves them. */
@@ -840,7 +875,16 @@ private fun mainVisual(node: JSONObject): Boolean {
     BoxWithConstraints(modifier) {
         val pair = split.main.isNotEmpty() && split.side.isNotEmpty() && maxWidth >= DIALOGUE_WIDE_DP.dp &&
             LocalConfiguration.current.smallestScreenWidthDp >= DIALOGUE_WIDE_DP && LocalDensity.current.fontScale <= 1.3f
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+        // The height that the phone stage leaves for this column (STAGE_FIT_MARK), or null: then the parts stand in an unbounded column.
+        val space = if (split.drawing && !pair) fitSpace(constraints.maxHeight) else null
+        if (space != null) FittedColumn(space, gap) {
+            split.leading.forEach { renderChild(it, Modifier) }
+            title?.let { DialogueTitle(it) }
+            (split.main + split.side).sorted().forEach {
+                if (it == split.main.first()) CompositionLocalProvider(LocalPictureFloor provides maxWidth * 0.6f) { renderChild(it, Modifier.layoutId(DRAWING)) }
+                else renderChild(it, Modifier)
+            }
+        } else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
             split.leading.forEach { renderChild(it, Modifier) }
             title?.let { DialogueTitle(it) }
             if (pair) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
@@ -848,6 +892,28 @@ private fun mainVisual(node: JSONObject): Boolean {
                 Column(Modifier.weight(2f), verticalArrangement = Arrangement.spacedBy(gap)) { split.side.forEach { renderChild(it, Modifier) } }
             } else (split.main + split.side).sorted().forEach { renderChild(it, Modifier) }
         }
+    }
+}
+
+private const val DRAWING = "drawing"
+
+/**
+ * A column of the phone stage whose drawing (the part with the layout id DRAWING) takes the height of [space] that the other parts leave, in
+ * one layout pass: the other parts are measured first. The drawing gets that height plus STAGE_FIT_MARK, so each card and padding around
+ * the canvas takes its part, and the canvas reads what is left. The canvas keeps its square at least LocalPictureFloor; under that floor
+ * the stage scrolls (stage 6, F1; fix list 2, G1).
+ */
+@Composable private fun FittedColumn(space: Int, gap: Dp, content: @Composable () -> Unit) = Layout(content, Modifier.fillMaxWidth()) { parts, constraints ->
+    val loose = Constraints(maxWidth = constraints.maxWidth)
+    val gapPx = gap.roundToPx()
+    val placed = arrayOfNulls<Placeable>(parts.size)
+    parts.forEachIndexed { index, part -> if (part.layoutId != DRAWING) placed[index] = part.measure(loose) }
+    val others = placed.sumOf { it?.height ?: 0 } + gapPx * (parts.size - 1).coerceAtLeast(0)
+    parts.forEachIndexed { index, part -> if (part.layoutId == DRAWING) placed[index] = part.measure(loose.copy(maxHeight = (space - others).coerceAtLeast(0) + STAGE_FIT_MARK)) }
+    val shown = placed.map { checkNotNull(it) }
+    layout(constraints.maxWidth, shown.sumOf { it.height } + gapPx * (shown.size - 1).coerceAtLeast(0)) {
+        var y = 0
+        shown.forEach { it.placeRelative(0, y); y += it.height + gapPx }
     }
 }
 
@@ -1877,12 +1943,15 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
             // A number stays on one line, so its column has the width of its longest number. A text column needs TABLE_TEXT_DP at most,
             // because a text wraps. A head needs its longest word. When the columns do not fit the box, the cells use the small style with
             // less padding. When they still do not fit, the table scrolls sideways (stage 5 look).
+            // The fit measures the shown rows and a reserve, not each of up to 512 rows: shortcut: a wider cell below them wraps or scrolls
+            // sideways, measure more rows when a live check shows one (stage 6, B1).
+            val measured=records.take((if(node.has("visibleRows")) shownRows else 0)+TABLE_FIT_RESERVE)
             val fit=remember(columns.toString(),rows.toString(),markColumn,boxWidth,cellStyle,smallStyle,headStyle,density) {
                 fun wide(text: String,style: TextStyle)=with(density) {measurer.measure(text,style,softWrap=false,maxLines=1).size.width.toDp()}+1.dp
                 // The least width and the full width of each column: the full width holds each cell on one line.
                 fun needs(style: TextStyle,pad: Dp)=(0 until count).map {index ->
                     val head=columns.getJSONObject(index).getString("text").split(' ').maxOf {wide(it,headStyle)}
-                    val cell=(records.maxOfOrNull {wide(ToolUiCatalog.value(it,fields[index]).toString(),style.copy(fontWeight=FontWeight.Medium))} ?: 0.dp)+
+                    val cell=(measured.maxOfOrNull {wide(ToolUiCatalog.value(it,fields[index]).toString(),style.copy(fontWeight=FontWeight.Medium))} ?: 0.dp)+
                         if(fields[index] == markColumn) 16.dp else 0.dp
                     maxOf(head,if(numeric[index]) cell else minOf(cell,TABLE_TEXT_DP.dp))+pad*2 to maxOf(head,cell)+pad*2
                 }
@@ -2033,6 +2102,8 @@ private data class NativeRecordEntry(val key: String,val group: String? = null,v
 /** The row height of a table, and the tag of the box of its rows that scrolls when it has more than visibleRows rows (block 2 plan, D3). */
 internal const val TABLE_ROW_DP=48
 private const val COMPACT_TABLE_ROWS=6
+/** The rows under the shown rows that the column fit of a table measures too (stage 6, B1). */
+private const val TABLE_FIT_RESERVE=24
 internal const val TABLE_ROWS_TAG="tool_table_rows"
 /** The most that a text column of a table needs before spare width: a longer text wraps to a second line. */
 private const val TABLE_TEXT_DP=96

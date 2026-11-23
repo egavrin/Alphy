@@ -45,6 +45,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -68,7 +69,9 @@ import com.alpha.assistant.tools.LocalNodeMark
 import com.alpha.assistant.tools.MiniAppActions
 import com.alpha.assistant.tools.MiniAppContent
 import com.alpha.assistant.tools.StagePreview
+import com.alpha.assistant.tools.STAGE_FIT_MARK
 import com.alpha.assistant.tools.StagePreviewContent
+import com.alpha.assistant.tools.dialogueSplit
 import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.tools.ToolController
 import com.alpha.assistant.tools.ToolRecord
@@ -239,7 +242,19 @@ private fun stageShowsApp(model: ShellViewModel): Boolean =
         val character = minOf(160.dp, maxHeight / 4).takeIf { it >= 48.dp }
         // The canvas height of an open mini-app (FocusedToolPane), less at the fold size so the first control fits above the strip (Da2 ruling 1).
         val canvasHeight = stageCanvasHeight(maxHeight, fold)
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight)
+        // Stage 6, F1: on a phone a square picture (the 300 × 300 picture of a template) takes the height that the other parts of the stage
+        // leave, in one layout pass: the stage gives its column the height of the stage plus STAGE_FIT_MARK, each part above the app and each
+        // padding takes its part of it, and the column of the app (DialogueColumns) gives its drawing what is left. Other apps, also wide
+        // pictures, 3D scenes, and the fold, keep canvasHeight and an unbounded column.
+        val shown = preview?.frame?.spec ?: tool?.let { remember(it.spec, it.ui, it.state) { ToolSpec.availablePersisted(it) } }
+        val drawing = shown?.let { remember(it.ui) { dialogueSplit(it.ui)?.drawing == true } } == true
+        val fit = shown != null && drawing && !fold && !shown.threeScene && shown.surfaces.values.singleOrNull()?.let { it.width == it.height } == true
+        val stageHeight = constraints.maxHeight
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            .layout { measurable, outer ->
+                val placeable = measurable.measure(if (fit) outer.copy(maxHeight = stageHeight + STAGE_FIT_MARK) else outer)
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+            }.heightIn(min = maxHeight)
             .padding(horizontal = gutter, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(15.dp, if (stageShowsApp(model)) Alignment.Top else Alignment.CenterVertically)) {
             if (chat != null) {

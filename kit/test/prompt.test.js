@@ -24,8 +24,10 @@ const optionsIn = (text) => [...new Set([...text.matchAll(/\b([A-Za-z]+)=/g)].ma
 const fill = (template, values) => template.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key]);
 
 test("prompt: the file has the sections System, Repair, Dialogue, Change, Template, Template repair, Template change, Template rest, and Template data", () => {
-  expect(Object.keys(SECTIONS)).toEqual(["System", "Repair", "Dialogue", "Change", "Template", "Template repair", "Template change", "Template rest", "Template data"]);
-  for (const text of Object.values(SECTIONS)) expect(text.length).toBeGreaterThan(100);
+  expect(Object.keys(SECTIONS)).toEqual(["System", "Repair", "Dialogue", "Change", "Template", "Template library", "Template repair", "Template change", "Template rest", "Template data"]);
+  // The section Template library is one line over the candidates that the host puts in (stage 6, S3), so it is short.
+  for (const [name, text] of Object.entries(SECTIONS)) expect([name, text.length > (name === "Template library" ? 40 : 100)]).toEqual([name, true]);
+  expect(SECTIONS["Template library"]).toContain("{{candidates}}");
   expect(KINDS.length).toBe(17);
   expect(EXAMPLES.length).toBe(4);
 });
@@ -55,10 +57,11 @@ test("prompt (task 1): the section Change is one paragraph that names the change
 
 test("prompt.json (task 1): it holds each section of prompt.md and the two templates, and a filled template is the text that the model check sends", () => {
   const asset = promptAsset();
-  expect(Object.keys(asset)).toEqual(["system", "repair", "dialogue", "change", "repairTask", "changeTask", "template", "templateRepairTask", "templateChangeTask", "templateRestTask", "templateHead", "templateData", "dataHead"]);
+  expect(Object.keys(asset)).toEqual(["system", "repair", "dialogue", "change", "repairTask", "changeTask", "template", "templateLibrary", "templateRepairTask", "templateChangeTask", "templateRestTask", "templateHead", "templateData", "dataHead"]);
   expect([asset.system, asset.repair, asset.dialogue, asset.change, asset.template]).toEqual([SECTIONS.System, SECTIONS.Repair, SECTIONS.Dialogue, SECTIONS.Change, SECTIONS.Template]);
   // templateHead is the source of the pattern of a first line, not a text of the prompt, so it is short.
-  const { templateHead, dataHead, ...texts } = asset;
+  const { templateHead, dataHead, templateLibrary, ...texts } = asset;
+  expect(templateLibrary).toBe(SECTIONS["Template library"]);
   expect(templateHead).toBe(TEMPLATE_HEAD.source);
   expect(new RegExp(dataHead).test('chart("T", lang="en")') && !new RegExp(dataHead).test('scene("T", lang="en")')).toBe(true);
   expect(Object.values(texts).filter((text) => typeof text !== "string" || text.length < 100 || text.includes("undefined"))).toEqual([]);
@@ -180,8 +183,11 @@ for (const [index, [request, plan]] of EXAMPLES.entries()) test(`prompt: example
 // ---- The template sections (stage templates plan, Task 2).
 
 const TEMPLATE = SECTIONS.Template ?? "";
-/** The examples of the section Template as [request, reply]: the line "Request:" and the lines between the two fence lines under it. */
-const TEMPLATE_EXAMPLES = [...TEMPLATE.matchAll(/^Request: (.*)\n```\n([\s\S]*?)```$/gm)].map(([, request, reply]) => [request, reply]);
+/**
+ * The examples of the section Template as [request, reply]: the line "Request:" and the lines between the two fence lines under it. Lines between
+ * the request and the fence are the host line of the request, such as the candidates of the library (stage 6, S3).
+ */
+const TEMPLATE_EXAMPLES = [...TEMPLATE.matchAll(/^Request: (.*)\n(?:(?!```|Request: ).*\n)*```\n([\s\S]*?)```$/gm)].map(([, request, reply]) => [request, reply]);
 const ship = readFileSync(new URL("./fixtures/template/ship.plan", import.meta.url), "utf8");
 
 test("theFreeHashStays", () => {
@@ -256,7 +262,7 @@ test("theBundleReadsATemplate", async () => {
 test("theRestSectionChangesNoHash", () => {
   // The hashes of the free records and of the records of gate 2b: the rest section came after them.
   const { PROMPT_HASH, TEMPLATE_HASH, hashOf } = prompts, rest = SECTIONS["Template rest"];
-  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "5e96d3de2523"]);
+  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "3370c2116ec4"]);
   expect(rest?.length).toBeGreaterThan(100);
   const copy = { ...SECTIONS, "Template rest": `${rest} Write it.` };
   expect([hashOf(["System", "Repair", "Dialogue", "Change"], copy), hashOf(["Template", "Template repair", "Template change"], copy)]).toEqual([PROMPT_HASH, TEMPLATE_HASH]);
@@ -273,7 +279,7 @@ const DATA_EXAMPLES = [...DATA.matchAll(/^Request: (.*)\n((?:Source \[\d+\] exce
 
 test("the data family has its own section and hash, and the explain sections and hashes stay (block 2 plan, D1)", () => {
   const { PROMPT_HASH, TEMPLATE_HASH, DATA_HASH, hashOf } = prompts;
-  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "5e96d3de2523"]);
+  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "3370c2116ec4"]);
   expect(DATA_HASH).toBe(hashOf(["Template data", "Template repair", "Template change"]));
   expect([DATA_HASH === TEMPLATE_HASH, DATA_HASH === PROMPT_HASH]).toEqual([false, false]);
   // The explain prompt does not grow: it names no data form.

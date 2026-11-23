@@ -51,7 +51,7 @@ test("draw: a color name of the kit maps to a tone or a hex", () => {
   // surface is the surface role of the theme (L1 item 6).
   const colors = ["ink", "muted", "accent", "success", "warning", "surface", "water", "land", "sun", "sand", "wood", "#336699", "#80FF0000", "purple", "#fff", "error", "toString"];
   expect(commandsOf(colors.map((color) => ({ shape: "circle", x: 1, y: 1, r: 1, color }))).map((command) => command.color)).toEqual([
-    "default", "muted", "accent", "success", "warning", "surface", "#38bdf8", "#65a30d", "#facc15", "#e7d3a8", "#a16207", "#336699", "#80FF0000", "default", "default", "default", "default"]);
+    "default", "muted", "accent", "success", "warning", "surface", "#38bdf8", "#65a30d", "#facc15", "#e7d3a8", "#a16207", "#336699", "#80FF0000", "default", "default", "error", "default"]);
 });
 
 /** The WCAG contrast of two hex colors. */
@@ -130,9 +130,9 @@ test("draw: budgetOf counts commands, pairs, and characters", () => {
     { type: "polygon", points: [[0, 0], [10, 0], [5, 8]], color: "success" }, { type: "polyline", points: [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]], stroke: 2, color: "warning" }];
   // A box, a circle, and a text count one pair, a line two, and a polygon or a polyline one for each point (GraphicsContract.frame).
   // The bytes are those of the whole reply, {id: {commands}, ...}, for all its surfaces together.
-  expect(budgetOf([["a", commands]])).toEqual({ commands: 6, pairs: 13, chars: 9, bytes: hostBytes({ a: { commands } }) });
-  expect(budgetOf([["a", commands.slice(0, 2)], ["b", commands.slice(2)]])).toEqual({ commands: 6, pairs: 13, chars: 9, bytes: hostBytes({ a: { commands: commands.slice(0, 2) }, b: { commands: commands.slice(2) } }) });
-  expect([budgetOf([]), budgetOf([["a", []]])]).toEqual([{ commands: 0, pairs: 0, chars: 0, bytes: 2 }, { commands: 0, pairs: 0, chars: 0, bytes: 21 }]);
+  expect(budgetOf([["a", commands]])).toEqual({ commands: 6, pairs: 13, chars: 9, bytes: hostBytes({ a: { commands } }), segments: 0, stops: 0 });
+  expect(budgetOf([["a", commands.slice(0, 2)], ["b", commands.slice(2)]])).toEqual({ commands: 6, pairs: 13, chars: 9, bytes: hostBytes({ a: { commands: commands.slice(0, 2) }, b: { commands: commands.slice(2) } }), segments: 0, stops: 0 });
+  expect([budgetOf([]), budgetOf([["a", []]])]).toEqual([{ commands: 0, pairs: 0, chars: 0, bytes: 2, segments: 0, stops: 0 }, { commands: 0, pairs: 0, chars: 0, bytes: 21, segments: 0, stops: 0 }]);
 });
 
 test("draw: a shape that Alphy cannot draw is left out, and a size past Alphy's bounds is clamped", () => {

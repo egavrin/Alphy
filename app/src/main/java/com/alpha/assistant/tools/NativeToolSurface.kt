@@ -320,6 +320,9 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
             val current=snapshot
             // Until the open publishes, the canvas keeps the drawing of the revision that this one replaced.
             val drawn=current ?: drawingBefore()
+            // The images of the app's own resources, and the pictures of the library (stage 6, I4).
+            val pictures=rememberLibraryImages(drawn?.surfaces)
+            val images=remember(drawingImages.images,pictures) {drawingImages.images+pictures}
             val resources=LocalResources.current
             val labels=placements.joinToString(" ") {
                 surfaceLabels(drawn?.surfaces?.optJSONObject(it.surface.id)?.optJSONArray("commands") ?: JSONArray(),drawingImages.images.keys) {label ->
@@ -329,10 +332,12 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
             BoxWithConstraints(if(immersive)modifier.fillMaxSize() else modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
                 var measuredSize by remember { mutableStateOf(IntSize.Zero) }
                 val ratio=stageWidth.toFloat()/stageHeight
+                // In a fitted phone column (FittedColumn) the picture takes the height that the stage leaves, at least 0.6 of the column.
+                val room=fittedPicture(constraints,stageAvailableHeight ?: maxCanvasHeight)
                 val canvasModifier=if(viewportSurface!=null) {
-                    val measured=if(immersive)Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(if (stageAvailableHeight != null) maxHeight else maxCanvasHeight)
+                    val measured=if(immersive)Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(room ?: if (stageAvailableHeight != null) maxHeight else minOf(maxCanvasHeight, maxHeight))
                     measured
-                } else Modifier.width(minOf(maxWidth,(if(immersive)maxHeight else minOf(stageAvailableHeight ?: maxCanvasHeight,maxHeight))*ratio)).aspectRatio(ratio)
+                } else Modifier.width(minOf(maxWidth,(if(immersive)maxHeight else room ?: minOf(stageAvailableHeight ?: maxCanvasHeight,maxHeight))*ratio)).aspectRatio(ratio)
                 Canvas(canvasModifier.onSizeChanged {
                     measuredSize = it
                     if (viewportSurface != null && it.width > 0 && it.height > 0) {
@@ -365,7 +370,7 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
                             val surfaceSaved=canvas.save()
                             try {
                                 canvas.translate(placement.x.toFloat(),placement.y.toFloat())
-                                drawSurfaceFrame(canvas,surface,commands,surface.width.toFloat(),surface.height.toFloat(),roleColors,drawingImages.images)
+                                drawSurfaceFrame(canvas,surface,commands,surface.width.toFloat(),surface.height.toFloat(),roleColors,images)
                             } finally {canvas.restoreToCount(surfaceSaved)}
                         }
                     } finally {canvas.restoreToCount(saved)}

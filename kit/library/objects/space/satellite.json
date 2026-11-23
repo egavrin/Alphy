@@ -1,0 +1,67 @@
+{
+ "id": "space.satellite",
+ "names": {
+  "ru": [
+   "спутник",
+   "искусственный спутник"
+  ],
+  "en": [
+   "satellite"
+  ]
+ },
+ "words": {
+  "ru": [
+   "орбита",
+   "связь",
+   "антенна спутника"
+  ],
+  "en": [
+   "orbit",
+   "communication satellite"
+  ]
+ },
+ "line": "an artificial satellite",
+ "image": "satellite.webp",
+ "box": [
+  100.0,
+  66.6
+ ],
+ "parts": [
+  {
+   "id": "solar_panels",
+   "names": {
+    "ru": "солнечные батареи",
+    "en": "solar panels"
+   },
+   "label": [
+    -36.9,
+    3.6
+   ],
+   "ring": 9.2
+  },
+  {
+   "id": "body",
+   "names": {
+    "ru": "корпус",
+    "en": "body"
+   },
+   "label": [
+    -4.0,
+    17.0
+   ],
+   "ring": 8.2
+  },
+  {
+   "id": "dish",
+   "names": {
+    "ru": "антенна",
+    "en": "dish antenna"
+   },
+   "label": [
+    10.4,
+    -21.1
+   ],
+   "ring": 9.2
+  }
+ ]
+}

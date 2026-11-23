@@ -1,0 +1,3321 @@
+{
+ "about": "The whole name list of spec 12.5 for the search accuracy test (block 2 plan, decision 7). An entry here has no drawing: it lives only in this test. A real entry of kit/library/objects with the same id replaces it in the test catalog. Written on 2026-11-22 after the requests of library-search.json, from the subject list of spec 12.5.",
+ "entries": [
+  {
+   "id": "space.sun",
+   "name": "sun",
+   "names": {
+    "ru": [
+     "солнце"
+    ],
+    "en": [
+     "sun"
+    ]
+   },
+   "words": {
+    "ru": [
+     "звезда солнечной системы",
+     "солнечный свет",
+     "жар"
+    ],
+    "en": [
+     "our star",
+     "sunlight",
+     "solar heat"
+    ]
+   },
+   "line": "the Sun, the star of the solar system"
+  },
+  {
+   "id": "space.saturn",
+   "name": "saturn",
+   "names": {
+    "ru": [
+     "сатурн",
+     "планета"
+    ],
+    "en": [
+     "saturn",
+     "planet"
+    ]
+   },
+   "words": {
+    "ru": [
+     "планета с кольцами",
+     "газовый гигант"
+    ],
+    "en": [
+     "ringed planet",
+     "gas giant"
+    ]
+   },
+   "line": "a planet with rings"
+  },
+  {
+   "id": "space.earth",
+   "name": "earth",
+   "names": {
+    "ru": [
+     "земля",
+     "планета земля"
+    ],
+    "en": [
+     "earth",
+     "planet earth"
+    ]
+   },
+   "words": {
+    "ru": [
+     "наша планета",
+     "земной шар"
+    ],
+    "en": [
+     "our planet",
+     "the globe from space"
+    ]
+   },
+   "line": "the planet Earth from space"
+  },
+  {
+   "id": "space.moon",
+   "name": "moon",
+   "names": {
+    "ru": [
+     "луна"
+    ],
+    "en": [
+     "moon"
+    ]
+   },
+   "words": {
+    "ru": [
+     "фаза луны",
+     "полнолуние",
+     "месяц",
+     "спутник земли"
+    ],
+    "en": [
+     "lunar phase",
+     "full moon",
+     "crescent"
+    ]
+   },
+   "line": "the Moon with its phase"
+  },
+  {
+   "id": "space.star",
+   "name": "star",
+   "names": {
+    "ru": [
+     "звезда"
+    ],
+    "en": [
+     "star"
+    ]
+   },
+   "words": {
+    "ru": [
+     "звёзды",
+     "ночное небо",
+     "свечение"
+    ],
+    "en": [
+     "stars",
+     "night sky",
+     "shining star"
+    ]
+   },
+   "line": "a star"
+  },
+  {
+   "id": "space.comet",
+   "name": "comet",
+   "names": {
+    "ru": [
+     "комета"
+    ],
+    "en": [
+     "comet"
+    ]
+   },
+   "words": {
+    "ru": [
+     "хвост кометы",
+     "ледяное тело"
+    ],
+    "en": [
+     "comet tail",
+     "icy body"
+    ]
+   },
+   "line": "a comet with its tail"
+  },
+  {
+   "id": "space.rocket",
+   "name": "rocket",
+   "names": {
+    "ru": [
+     "ракета"
+    ],
+    "en": [
+     "rocket"
+    ]
+   },
+   "words": {
+    "ru": [
+     "космический корабль",
+     "запуск",
+     "двигатель ракеты"
+    ],
+    "en": [
+     "spaceship",
+     "launch",
+     "rocket engine"
+    ]
+   },
+   "line": "a rocket"
+  },
+  {
+   "id": "space.satellite",
+   "name": "satellite",
+   "names": {
+    "ru": [
+     "спутник",
+     "искусственный спутник"
+    ],
+    "en": [
+     "satellite"
+    ]
+   },
+   "words": {
+    "ru": [
+     "орбита",
+     "связь",
+     "антенна спутника"
+    ],
+    "en": [
+     "orbit",
+     "communication satellite"
+    ]
+   },
+   "line": "an artificial satellite"
+  },
+  {
+   "id": "space.galaxy",
+   "name": "galaxy",
+   "names": {
+    "ru": [
+     "галактика"
+    ],
+    "en": [
+     "galaxy"
+    ]
+   },
+   "words": {
+    "ru": [
+     "млечный путь",
+     "спиральная галактика",
+     "звёздная система"
+    ],
+    "en": [
+     "milky way",
+     "spiral galaxy"
+    ]
+   },
+   "line": "a spiral galaxy"
+  },
+  {
+   "id": "nature.mountain",
+   "name": "mountain",
+   "names": {
+    "ru": [
+     "гора"
+    ],
+    "en": [
+     "mountain"
+    ]
+   },
+   "words": {
+    "ru": [
+     "горы",
+     "вершина",
+     "склон"
+    ],
+    "en": [
+     "mountains",
+     "peak",
+     "slope"
+    ]
+   },
+   "line": "a mountain"
+  },
+  {
+   "id": "nature.volcano",
+   "name": "volcano",
+   "names": {
+    "ru": [
+     "вулкан"
+    ],
+    "en": [
+     "volcano"
+    ]
+   },
+   "words": {
+    "ru": [
+     "извержение",
+     "лава",
+     "магма",
+     "кратер"
+    ],
+    "en": [
+     "eruption",
+     "lava",
+     "magma",
+     "crater"
+    ]
+   },
+   "line": "a volcano in section"
+  },
+  {
+   "id": "nature.river",
+   "name": "river",
+   "names": {
+    "ru": [
+     "река"
+    ],
+    "en": [
+     "river"
+    ]
+   },
+   "words": {
+    "ru": [
+     "русло",
+     "течение",
+     "приток"
+    ],
+    "en": [
+     "stream",
+     "current",
+     "river bed"
+    ]
+   },
+   "line": "a river"
+  },
+  {
+   "id": "nature.sea_wave",
+   "name": "sea_wave",
+   "names": {
+    "ru": [
+     "морская волна",
+     "волна"
+    ],
+    "en": [
+     "sea wave",
+     "wave"
+    ]
+   },
+   "words": {
+    "ru": [
+     "море",
+     "прибой",
+     "океан"
+    ],
+    "en": [
+     "sea",
+     "surf",
+     "ocean"
+    ]
+   },
+   "line": "a sea wave"
+  },
+  {
+   "id": "nature.island",
+   "name": "island",
+   "names": {
+    "ru": [
+     "остров"
+    ],
+    "en": [
+     "island"
+    ]
+   },
+   "words": {
+    "ru": [
+     "суша среди моря",
+     "архипелаг"
+    ],
+    "en": [
+     "land in the sea",
+     "archipelago"
+    ]
+   },
+   "line": "an island"
+  },
+  {
+   "id": "nature.rock_layers",
+   "name": "rock_layers",
+   "names": {
+    "ru": [
+     "слои горных пород"
+    ],
+    "en": [
+     "rock layers"
+    ]
+   },
+   "words": {
+    "ru": [
+     "пласты",
+     "осадочные породы",
+     "геология"
+    ],
+    "en": [
+     "strata",
+     "sedimentary rock",
+     "geology"
+    ]
+   },
+   "line": "rock layers in a section"
+  },
+  {
+   "id": "nature.cave",
+   "name": "cave",
+   "names": {
+    "ru": [
+     "пещера"
+    ],
+    "en": [
+     "cave"
+    ]
+   },
+   "words": {
+    "ru": [
+     "грот",
+     "сталактит",
+     "сталагмит"
+    ],
+    "en": [
+     "grotto",
+     "stalactite",
+     "stalagmite"
+    ]
+   },
+   "line": "a cave"
+  },
+  {
+   "id": "nature.glacier",
+   "name": "glacier",
+   "names": {
+    "ru": [
+     "ледник"
+    ],
+    "en": [
+     "glacier"
+    ]
+   },
+   "words": {
+    "ru": [
+     "лёд",
+     "ледниковый язык",
+     "таяние льда"
+    ],
+    "en": [
+     "ice",
+     "ice sheet",
+     "melting ice"
+    ]
+   },
+   "line": "a glacier"
+  },
+  {
+   "id": "nature.dune",
+   "name": "dune",
+   "names": {
+    "ru": [
+     "дюна",
+     "бархан"
+    ],
+    "en": [
+     "dune"
+    ]
+   },
+   "words": {
+    "ru": [
+     "пустыня",
+     "песок",
+     "ветер над песком"
+    ],
+    "en": [
+     "desert",
+     "sand",
+     "sand dune"
+    ]
+   },
+   "line": "a sand dune"
+  },
+  {
+   "id": "nature.fire",
+   "name": "fire",
+   "names": {
+    "ru": [
+     "огонь",
+     "пламя"
+    ],
+    "en": [
+     "fire",
+     "flame"
+    ]
+   },
+   "words": {
+    "ru": [
+     "костёр",
+     "горение",
+     "пожар"
+    ],
+    "en": [
+     "campfire",
+     "burning",
+     "blaze"
+    ]
+   },
+   "line": "a fire"
+  },
+  {
+   "id": "nature.water_drop",
+   "name": "water_drop",
+   "names": {
+    "ru": [
+     "капля воды",
+     "капля"
+    ],
+    "en": [
+     "water drop",
+     "drop"
+    ]
+   },
+   "words": {
+    "ru": [
+     "вода",
+     "капелька",
+     "роса"
+    ],
+    "en": [
+     "water",
+     "droplet",
+     "dew"
+    ]
+   },
+   "line": "a drop of water"
+  },
+  {
+   "id": "weather.cloud",
+   "name": "cloud",
+   "names": {
+    "ru": [
+     "облако",
+     "туча"
+    ],
+    "en": [
+     "cloud"
+    ]
+   },
+   "words": {
+    "ru": [
+     "кучевое облако",
+     "перистое облако",
+     "слоистое облако"
+    ],
+    "en": [
+     "cumulus",
+     "cirrus",
+     "stratus"
+    ]
+   },
+   "line": "clouds of four kinds"
+  },
+  {
+   "id": "weather.rain",
+   "name": "rain",
+   "names": {
+    "ru": [
+     "дождь"
+    ],
+    "en": [
+     "rain"
+    ]
+   },
+   "words": {
+    "ru": [
+     "ливень",
+     "осадки",
+     "капли дождя"
+    ],
+    "en": [
+     "shower",
+     "precipitation",
+     "raindrops"
+    ]
+   },
+   "line": "rain"
+  },
+  {
+   "id": "weather.snow",
+   "name": "snow",
+   "names": {
+    "ru": [
+     "снег"
+    ],
+    "en": [
+     "snow"
+    ]
+   },
+   "words": {
+    "ru": [
+     "снежинка",
+     "снегопад",
+     "метель"
+    ],
+    "en": [
+     "snowflake",
+     "snowfall",
+     "blizzard"
+    ]
+   },
+   "line": "snow"
+  },
+  {
+   "id": "weather.lightning",
+   "name": "lightning",
+   "names": {
+    "ru": [
+     "молния"
+    ],
+    "en": [
+     "lightning"
+    ]
+   },
+   "words": {
+    "ru": [
+     "гроза",
+     "гром",
+     "разряд"
+    ],
+    "en": [
+     "thunderstorm",
+     "thunder",
+     "discharge"
+    ]
+   },
+   "line": "lightning"
+  },
+  {
+   "id": "weather.wind",
+   "name": "wind",
+   "names": {
+    "ru": [
+     "ветер"
+    ],
+    "en": [
+     "wind"
+    ]
+   },
+   "words": {
+    "ru": [
+     "порыв ветра",
+     "ураган",
+     "сквозняк"
+    ],
+    "en": [
+     "gust",
+     "storm wind",
+     "breeze"
+    ]
+   },
+   "line": "wind"
+  },
+  {
+   "id": "weather.fog",
+   "name": "fog",
+   "names": {
+    "ru": [
+     "туман"
+    ],
+    "en": [
+     "fog"
+    ]
+   },
+   "words": {
+    "ru": [
+     "дымка",
+     "мгла",
+     "видимость"
+    ],
+    "en": [
+     "mist",
+     "haze",
+     "visibility"
+    ]
+   },
+   "line": "fog"
+  },
+  {
+   "id": "weather.rainbow",
+   "name": "rainbow",
+   "names": {
+    "ru": [
+     "радуга"
+    ],
+    "en": [
+     "rainbow"
+    ]
+   },
+   "words": {
+    "ru": [
+     "цвета радуги",
+     "спектр",
+     "преломление света"
+    ],
+    "en": [
+     "colors of the rainbow",
+     "spectrum",
+     "light refraction"
+    ]
+   },
+   "line": "a rainbow"
+  },
+  {
+   "id": "plants.tree",
+   "name": "tree",
+   "names": {
+    "ru": [
+     "дерево"
+    ],
+    "en": [
+     "tree"
+    ]
+   },
+   "words": {
+    "ru": [
+     "ствол",
+     "крона",
+     "ветки"
+    ],
+    "en": [
+     "trunk",
+     "crown",
+     "branches"
+    ]
+   },
+   "line": "a tree"
+  },
+  {
+   "id": "plants.leaf",
+   "name": "leaf",
+   "names": {
+    "ru": [
+     "лист",
+     "листок"
+    ],
+    "en": [
+     "leaf"
+    ]
+   },
+   "words": {
+    "ru": [
+     "листья",
+     "жилки листа",
+     "фотосинтез"
+    ],
+    "en": [
+     "leaves",
+     "leaf veins",
+     "photosynthesis"
+    ]
+   },
+   "line": "a leaf"
+  },
+  {
+   "id": "plants.flower",
+   "name": "flower",
+   "names": {
+    "ru": [
+     "цветок"
+    ],
+    "en": [
+     "flower"
+    ]
+   },
+   "words": {
+    "ru": [
+     "лепесток",
+     "тычинка",
+     "пестик",
+     "части цветка"
+    ],
+    "en": [
+     "petal",
+     "stamen",
+     "pistil",
+     "flower parts"
+    ]
+   },
+   "line": "a flower with its parts"
+  },
+  {
+   "id": "plants.seed",
+   "name": "seed",
+   "names": {
+    "ru": [
+     "семя",
+     "семечко"
+    ],
+    "en": [
+     "seed"
+    ]
+   },
+   "words": {
+    "ru": [
+     "прорастание",
+     "зерно",
+     "росток"
+    ],
+    "en": [
+     "germination",
+     "grain",
+     "sprout"
+    ]
+   },
+   "line": "a seed"
+  },
+  {
+   "id": "plants.roots",
+   "name": "roots",
+   "names": {
+    "ru": [
+     "корни",
+     "корень"
+    ],
+    "en": [
+     "roots",
+     "root"
+    ]
+   },
+   "words": {
+    "ru": [
+     "корневая система",
+     "всасывание воды"
+    ],
+    "en": [
+     "root system",
+     "water uptake"
+    ]
+   },
+   "line": "the roots of a plant"
+  },
+  {
+   "id": "plants.plant_cell",
+   "name": "plant_cell",
+   "names": {
+    "ru": [
+     "растительная клетка"
+    ],
+    "en": [
+     "plant cell"
+    ]
+   },
+   "words": {
+    "ru": [
+     "клеточная стенка",
+     "хлоропласт",
+     "вакуоль"
+    ],
+    "en": [
+     "cell wall",
+     "chloroplast",
+     "vacuole"
+    ]
+   },
+   "line": "a plant cell with its parts"
+  },
+  {
+   "id": "plants.mushroom",
+   "name": "mushroom",
+   "names": {
+    "ru": [
+     "гриб"
+    ],
+    "en": [
+     "mushroom"
+    ]
+   },
+   "words": {
+    "ru": [
+     "шляпка",
+     "ножка гриба",
+     "грибница"
+    ],
+    "en": [
+     "cap",
+     "stem",
+     "mycelium"
+    ]
+   },
+   "line": "a mushroom"
+  },
+  {
+   "id": "animals.fish",
+   "name": "fish",
+   "names": {
+    "ru": [
+     "рыба"
+    ],
+    "en": [
+     "fish"
+    ]
+   },
+   "words": {
+    "ru": [
+     "плавник",
+     "жабры",
+     "чешуя"
+    ],
+    "en": [
+     "fin",
+     "gills",
+     "scales"
+    ]
+   },
+   "line": "a fish"
+  },
+  {
+   "id": "animals.bird",
+   "name": "bird",
+   "names": {
+    "ru": [
+     "птица"
+    ],
+    "en": [
+     "bird"
+    ]
+   },
+   "words": {
+    "ru": [
+     "крыло",
+     "перья",
+     "клюв"
+    ],
+    "en": [
+     "wing",
+     "feathers",
+     "beak"
+    ]
+   },
+   "line": "a bird"
+  },
+  {
+   "id": "animals.cat",
+   "name": "cat",
+   "names": {
+    "ru": [
+     "кошка",
+     "кот"
+    ],
+    "en": [
+     "cat"
+    ]
+   },
+   "words": {
+    "ru": [
+     "котёнок",
+     "домашнее животное"
+    ],
+    "en": [
+     "kitten",
+     "pet"
+    ]
+   },
+   "line": "a cat"
+  },
+  {
+   "id": "animals.dog",
+   "name": "dog",
+   "names": {
+    "ru": [
+     "собака",
+     "пёс"
+    ],
+    "en": [
+     "dog"
+    ]
+   },
+   "words": {
+    "ru": [
+     "щенок",
+     "домашнее животное"
+    ],
+    "en": [
+     "puppy",
+     "pet"
+    ]
+   },
+   "line": "a dog"
+  },
+  {
+   "id": "animals.insect",
+   "name": "insect",
+   "names": {
+    "ru": [
+     "насекомое"
+    ],
+    "en": [
+     "insect"
+    ]
+   },
+   "words": {
+    "ru": [
+     "жук",
+     "шесть ног",
+     "муравей"
+    ],
+    "en": [
+     "beetle",
+     "six legs",
+     "ant"
+    ]
+   },
+   "line": "an insect"
+  },
+  {
+   "id": "animals.butterfly",
+   "name": "butterfly",
+   "names": {
+    "ru": [
+     "бабочка"
+    ],
+    "en": [
+     "butterfly"
+    ]
+   },
+   "words": {
+    "ru": [
+     "гусеница",
+     "куколка",
+     "превращение"
+    ],
+    "en": [
+     "caterpillar",
+     "pupa",
+     "metamorphosis"
+    ]
+   },
+   "line": "a butterfly in its stages"
+  },
+  {
+   "id": "animals.frog",
+   "name": "frog",
+   "names": {
+    "ru": [
+     "лягушка"
+    ],
+    "en": [
+     "frog"
+    ]
+   },
+   "words": {
+    "ru": [
+     "головастик",
+     "земноводное"
+    ],
+    "en": [
+     "tadpole",
+     "amphibian"
+    ]
+   },
+   "line": "a frog"
+  },
+  {
+   "id": "animals.animal_cell",
+   "name": "animal_cell",
+   "names": {
+    "ru": [
+     "животная клетка"
+    ],
+    "en": [
+     "animal cell"
+    ]
+   },
+   "words": {
+    "ru": [
+     "ядро клетки",
+     "мембрана",
+     "митохондрия",
+     "цитоплазма"
+    ],
+    "en": [
+     "nucleus",
+     "membrane",
+     "mitochondria",
+     "cytoplasm"
+    ]
+   },
+   "line": "an animal cell with its parts"
+  },
+  {
+   "id": "body.heart",
+   "name": "heart",
+   "names": {
+    "ru": [
+     "сердце"
+    ],
+    "en": [
+     "heart"
+    ]
+   },
+   "words": {
+    "ru": [
+     "камеры сердца",
+     "предсердие",
+     "желудочек",
+     "кровообращение"
+    ],
+    "en": [
+     "heart chambers",
+     "atrium",
+     "ventricle",
+     "blood circulation"
+    ]
+   },
+   "line": "a heart with its chambers"
+  },
+  {
+   "id": "body.lungs",
+   "name": "lungs",
+   "names": {
+    "ru": [
+     "лёгкие"
+    ],
+    "en": [
+     "lungs"
+    ]
+   },
+   "words": {
+    "ru": [
+     "дыхание",
+     "бронхи",
+     "вдох и выдох"
+    ],
+    "en": [
+     "breathing",
+     "bronchi",
+     "inhale and exhale"
+    ]
+   },
+   "line": "the lungs"
+  },
+  {
+   "id": "body.brain",
+   "name": "brain",
+   "names": {
+    "ru": [
+     "мозг",
+     "головной мозг"
+    ],
+    "en": [
+     "brain"
+    ]
+   },
+   "words": {
+    "ru": [
+     "полушария",
+     "нейроны",
+     "нервная система"
+    ],
+    "en": [
+     "hemispheres",
+     "neurons",
+     "nervous system"
+    ]
+   },
+   "line": "the brain"
+  },
+  {
+   "id": "body.eye",
+   "name": "eye",
+   "names": {
+    "ru": [
+     "глаз"
+    ],
+    "en": [
+     "eye"
+    ]
+   },
+   "words": {
+    "ru": [
+     "зрачок",
+     "хрусталик",
+     "сетчатка",
+     "зрение"
+    ],
+    "en": [
+     "pupil",
+     "lens",
+     "retina",
+     "vision"
+    ]
+   },
+   "line": "an eye with its parts"
+  },
+  {
+   "id": "body.ear",
+   "name": "ear",
+   "names": {
+    "ru": [
+     "ухо"
+    ],
+    "en": [
+     "ear"
+    ]
+   },
+   "words": {
+    "ru": [
+     "слух",
+     "барабанная перепонка",
+     "улитка"
+    ],
+    "en": [
+     "hearing",
+     "eardrum",
+     "cochlea"
+    ]
+   },
+   "line": "an ear"
+  },
+  {
+   "id": "body.tooth",
+   "name": "tooth",
+   "names": {
+    "ru": [
+     "зуб"
+    ],
+    "en": [
+     "tooth"
+    ]
+   },
+   "words": {
+    "ru": [
+     "эмаль",
+     "корень зуба",
+     "кариес"
+    ],
+    "en": [
+     "enamel",
+     "tooth root",
+     "decay"
+    ]
+   },
+   "line": "a tooth"
+  },
+  {
+   "id": "body.skeleton",
+   "name": "skeleton",
+   "names": {
+    "ru": [
+     "скелет"
+    ],
+    "en": [
+     "skeleton"
+    ]
+   },
+   "words": {
+    "ru": [
+     "кости",
+     "позвоночник",
+     "череп"
+    ],
+    "en": [
+     "bones",
+     "spine",
+     "skull"
+    ]
+   },
+   "line": "a skeleton"
+  },
+  {
+   "id": "body.stomach",
+   "name": "stomach",
+   "names": {
+    "ru": [
+     "желудок",
+     "кишечник"
+    ],
+    "en": [
+     "stomach",
+     "gut"
+    ]
+   },
+   "words": {
+    "ru": [
+     "пищеварение",
+     "кишка",
+     "переваривание пищи"
+    ],
+    "en": [
+     "digestion",
+     "intestine",
+     "digestive system"
+    ]
+   },
+   "line": "the stomach and the gut"
+  },
+  {
+   "id": "body.muscle",
+   "name": "muscle",
+   "names": {
+    "ru": [
+     "мышца"
+    ],
+    "en": [
+     "muscle"
+    ]
+   },
+   "words": {
+    "ru": [
+     "мускулы",
+     "сокращение мышцы",
+     "бицепс"
+    ],
+    "en": [
+     "muscles",
+     "contraction",
+     "biceps"
+    ]
+   },
+   "line": "a muscle"
+  },
+  {
+   "id": "body.skin",
+   "name": "skin",
+   "names": {
+    "ru": [
+     "кожа"
+    ],
+    "en": [
+     "skin"
+    ]
+   },
+   "words": {
+    "ru": [
+     "слои кожи",
+     "эпидермис",
+     "пот"
+    ],
+    "en": [
+     "skin layers",
+     "epidermis",
+     "sweat"
+    ]
+   },
+   "line": "the layers of the skin"
+  },
+  {
+   "id": "body.dna",
+   "name": "dna",
+   "names": {
+    "ru": [
+     "днк"
+    ],
+    "en": [
+     "dna"
+    ]
+   },
+   "words": {
+    "ru": [
+     "двойная спираль",
+     "гены",
+     "наследственность"
+    ],
+    "en": [
+     "double helix",
+     "genes",
+     "heredity"
+    ]
+   },
+   "line": "a DNA double helix"
+  },
+  {
+   "id": "people.person",
+   "name": "person",
+   "names": {
+    "ru": [
+     "человек"
+    ],
+    "en": [
+     "person"
+    ]
+   },
+   "words": {
+    "ru": [
+     "люди",
+     "фигура человека"
+    ],
+    "en": [
+     "people",
+     "human figure"
+    ]
+   },
+   "line": "a person"
+  },
+  {
+   "id": "people.child",
+   "name": "child",
+   "names": {
+    "ru": [
+     "ребёнок"
+    ],
+    "en": [
+     "child"
+    ]
+   },
+   "words": {
+    "ru": [
+     "дети",
+     "малыш",
+     "школьник"
+    ],
+    "en": [
+     "kids",
+     "toddler",
+     "pupil"
+    ]
+   },
+   "line": "a child"
+  },
+  {
+   "id": "people.face",
+   "name": "face",
+   "names": {
+    "ru": [
+     "лицо"
+    ],
+    "en": [
+     "face"
+    ]
+   },
+   "words": {
+    "ru": [
+     "настроение",
+     "эмоция",
+     "улыбка"
+    ],
+    "en": [
+     "mood",
+     "emotion",
+     "smile"
+    ]
+   },
+   "line": "a face with a mood"
+  },
+  {
+   "id": "people.hand",
+   "name": "hand",
+   "names": {
+    "ru": [
+     "рука",
+     "кисть"
+    ],
+    "en": [
+     "hand"
+    ]
+   },
+   "words": {
+    "ru": [
+     "ладонь",
+     "пальцы"
+    ],
+    "en": [
+     "palm",
+     "fingers"
+    ]
+   },
+   "line": "a hand"
+  },
+  {
+   "id": "people.group",
+   "name": "group",
+   "names": {
+    "ru": [
+     "группа людей"
+    ],
+    "en": [
+     "group of people"
+    ]
+   },
+   "words": {
+    "ru": [
+     "команда",
+     "коллектив",
+     "толпа"
+    ],
+    "en": [
+     "team",
+     "crowd"
+    ]
+   },
+   "line": "a group of people"
+  },
+  {
+   "id": "home.house",
+   "name": "house",
+   "names": {
+    "ru": [
+     "дом"
+    ],
+    "en": [
+     "house"
+    ]
+   },
+   "words": {
+    "ru": [
+     "здание",
+     "жилище",
+     "крыша"
+    ],
+    "en": [
+     "building",
+     "home",
+     "roof"
+    ]
+   },
+   "line": "a house"
+  },
+  {
+   "id": "home.cup",
+   "name": "cup",
+   "names": {
+    "ru": [
+     "чашка",
+     "кружка"
+    ],
+    "en": [
+     "cup"
+    ]
+   },
+   "words": {
+    "ru": [
+     "чай",
+     "кофе"
+    ],
+    "en": [
+     "tea",
+     "coffee",
+     "mug"
+    ]
+   },
+   "line": "a cup"
+  },
+  {
+   "id": "home.pot",
+   "name": "pot",
+   "names": {
+    "ru": [
+     "кастрюля"
+    ],
+    "en": [
+     "pot"
+    ]
+   },
+   "words": {
+    "ru": [
+     "варка",
+     "кипяток",
+     "плита"
+    ],
+    "en": [
+     "cooking",
+     "boiling water",
+     "stove"
+    ]
+   },
+   "line": "a pot"
+  },
+  {
+   "id": "home.bottle",
+   "name": "bottle",
+   "names": {
+    "ru": [
+     "бутылка"
+    ],
+    "en": [
+     "bottle"
+    ]
+   },
+   "words": {
+    "ru": [
+     "сосуд",
+     "напиток"
+    ],
+    "en": [
+     "vessel",
+     "drink"
+    ]
+   },
+   "line": "a bottle"
+  },
+  {
+   "id": "home.egg",
+   "name": "egg",
+   "names": {
+    "ru": [
+     "яйцо"
+    ],
+    "en": [
+     "egg"
+    ]
+   },
+   "words": {
+    "ru": [
+     "желток",
+     "скорлупа"
+    ],
+    "en": [
+     "yolk",
+     "shell"
+    ]
+   },
+   "line": "an egg"
+  },
+  {
+   "id": "home.apple",
+   "name": "apple",
+   "names": {
+    "ru": [
+     "яблоко"
+    ],
+    "en": [
+     "apple"
+    ]
+   },
+   "words": {
+    "ru": [
+     "фрукт",
+     "плод"
+    ],
+    "en": [
+     "fruit"
+    ]
+   },
+   "line": "an apple"
+  },
+  {
+   "id": "home.bread",
+   "name": "bread",
+   "names": {
+    "ru": [
+     "хлеб"
+    ],
+    "en": [
+     "bread"
+    ]
+   },
+   "words": {
+    "ru": [
+     "батон",
+     "выпечка"
+    ],
+    "en": [
+     "loaf",
+     "baking"
+    ]
+   },
+   "line": "bread"
+  },
+  {
+   "id": "home.plate",
+   "name": "plate",
+   "names": {
+    "ru": [
+     "тарелка"
+    ],
+    "en": [
+     "plate"
+    ]
+   },
+   "words": {
+    "ru": [
+     "посуда",
+     "еда"
+    ],
+    "en": [
+     "dish",
+     "meal"
+    ]
+   },
+   "line": "a plate"
+  },
+  {
+   "id": "home.lamp",
+   "name": "lamp",
+   "names": {
+    "ru": [
+     "лампа"
+    ],
+    "en": [
+     "lamp"
+    ]
+   },
+   "words": {
+    "ru": [
+     "светильник",
+     "свет в комнате"
+    ],
+    "en": [
+     "light",
+     "desk lamp"
+    ]
+   },
+   "line": "a lamp"
+  },
+  {
+   "id": "home.key",
+   "name": "key",
+   "names": {
+    "ru": [
+     "ключ"
+    ],
+    "en": [
+     "key"
+    ]
+   },
+   "words": {
+    "ru": [
+     "замок",
+     "дверь"
+    ],
+    "en": [
+     "lock",
+     "door"
+    ]
+   },
+   "line": "a key"
+  },
+  {
+   "id": "machines.lever",
+   "name": "lever",
+   "names": {
+    "ru": [
+     "рычаг"
+    ],
+    "en": [
+     "lever"
+    ]
+   },
+   "words": {
+    "ru": [
+     "точка опоры",
+     "плечо силы"
+    ],
+    "en": [
+     "fulcrum",
+     "lever arm"
+    ]
+   },
+   "line": "a lever"
+  },
+  {
+   "id": "machines.pulley",
+   "name": "pulley",
+   "names": {
+    "ru": [
+     "блок",
+     "шкив"
+    ],
+    "en": [
+     "pulley"
+    ]
+   },
+   "words": {
+    "ru": [
+     "подъём груза",
+     "верёвка"
+    ],
+    "en": [
+     "lifting a load",
+     "rope"
+    ]
+   },
+   "line": "a pulley"
+  },
+  {
+   "id": "machines.inclined_plane",
+   "name": "inclined_plane",
+   "names": {
+    "ru": [
+     "наклонная плоскость"
+    ],
+    "en": [
+     "inclined plane"
+    ]
+   },
+   "words": {
+    "ru": [
+     "склон",
+     "пандус",
+     "скатывание"
+    ],
+    "en": [
+     "slope",
+     "ramp",
+     "sliding down"
+    ]
+   },
+   "line": "an inclined plane"
+  },
+  {
+   "id": "machines.gears",
+   "name": "gears",
+   "names": {
+    "ru": [
+     "шестерёнки",
+     "зубчатая передача"
+    ],
+    "en": [
+     "gears",
+     "pair of gears"
+    ]
+   },
+   "words": {
+    "ru": [
+     "передаточное число",
+     "зубья"
+    ],
+    "en": [
+     "gear ratio",
+     "teeth"
+    ]
+   },
+   "line": "a pair of gears"
+  },
+  {
+   "id": "machines.wheel_axle",
+   "name": "wheel_axle",
+   "names": {
+    "ru": [
+     "колесо и ось"
+    ],
+    "en": [
+     "wheel and axle"
+    ]
+   },
+   "words": {
+    "ru": [
+     "ворот",
+     "вал"
+    ],
+    "en": [
+     "winch",
+     "shaft"
+    ]
+   },
+   "line": "a wheel and axle"
+  },
+  {
+   "id": "machines.piston",
+   "name": "piston",
+   "names": {
+    "ru": [
+     "поршень"
+    ],
+    "en": [
+     "piston"
+    ]
+   },
+   "words": {
+    "ru": [
+     "цилиндр",
+     "двигатель внутреннего сгорания"
+    ],
+    "en": [
+     "cylinder",
+     "combustion engine"
+    ]
+   },
+   "line": "a piston"
+  },
+  {
+   "id": "machines.pump",
+   "name": "pump",
+   "names": {
+    "ru": [
+     "насос"
+    ],
+    "en": [
+     "pump"
+    ]
+   },
+   "words": {
+    "ru": [
+     "накачать",
+     "помпа"
+    ],
+    "en": [
+     "pumping",
+     "water pump"
+    ]
+   },
+   "line": "a pump"
+  },
+  {
+   "id": "machines.magnet",
+   "name": "magnet",
+   "names": {
+    "ru": [
+     "магнит"
+    ],
+    "en": [
+     "magnet"
+    ]
+   },
+   "words": {
+    "ru": [
+     "полюса",
+     "магнитное поле"
+    ],
+    "en": [
+     "poles",
+     "magnetic field"
+    ]
+   },
+   "line": "a magnet"
+  },
+  {
+   "id": "machines.balance",
+   "name": "balance",
+   "names": {
+    "ru": [
+     "весы"
+    ],
+    "en": [
+     "balance",
+     "scales"
+    ]
+   },
+   "words": {
+    "ru": [
+     "равновесие",
+     "взвешивание",
+     "гиря"
+    ],
+    "en": [
+     "equilibrium",
+     "weighing",
+     "weight"
+    ]
+   },
+   "line": "a balance"
+  },
+  {
+   "id": "machines.hammer",
+   "name": "hammer",
+   "names": {
+    "ru": [
+     "молоток"
+    ],
+    "en": [
+     "hammer"
+    ]
+   },
+   "words": {
+    "ru": [
+     "гвоздь",
+     "инструмент"
+    ],
+    "en": [
+     "nail",
+     "tool"
+    ]
+   },
+   "line": "a hammer"
+  },
+  {
+   "id": "devices.battery",
+   "name": "battery",
+   "names": {
+    "ru": [
+     "батарейка",
+     "аккумулятор"
+    ],
+    "en": [
+     "battery"
+    ]
+   },
+   "words": {
+    "ru": [
+     "заряд",
+     "плюс и минус"
+    ],
+    "en": [
+     "charge",
+     "plus and minus"
+    ]
+   },
+   "line": "a battery"
+  },
+  {
+   "id": "devices.bulb",
+   "name": "bulb",
+   "names": {
+    "ru": [
+     "лампочка"
+    ],
+    "en": [
+     "bulb",
+     "light bulb"
+    ]
+   },
+   "words": {
+    "ru": [
+     "нить накаливания",
+     "свет"
+    ],
+    "en": [
+     "filament",
+     "light"
+    ]
+   },
+   "line": "a light bulb"
+  },
+  {
+   "id": "devices.switch",
+   "name": "switch",
+   "names": {
+    "ru": [
+     "выключатель"
+    ],
+    "en": [
+     "switch"
+    ]
+   },
+   "words": {
+    "ru": [
+     "включить",
+     "выключить",
+     "кнопка"
+    ],
+    "en": [
+     "turn on",
+     "turn off",
+     "button"
+    ]
+   },
+   "line": "a switch"
+  },
+  {
+   "id": "devices.wire",
+   "name": "wire",
+   "names": {
+    "ru": [
+     "провод"
+    ],
+    "en": [
+     "wire"
+    ]
+   },
+   "words": {
+    "ru": [
+     "электрическая цепь",
+     "ток"
+    ],
+    "en": [
+     "electric circuit",
+     "current"
+    ]
+   },
+   "line": "a circuit wire"
+  },
+  {
+   "id": "devices.resistor",
+   "name": "resistor",
+   "names": {
+    "ru": [
+     "резистор"
+    ],
+    "en": [
+     "resistor"
+    ]
+   },
+   "words": {
+    "ru": [
+     "сопротивление",
+     "ом"
+    ],
+    "en": [
+     "resistance",
+     "ohm"
+    ]
+   },
+   "line": "a resistor"
+  },
+  {
+   "id": "devices.motor",
+   "name": "motor",
+   "names": {
+    "ru": [
+     "электродвигатель",
+     "мотор"
+    ],
+    "en": [
+     "motor",
+     "electric motor"
+    ]
+   },
+   "words": {
+    "ru": [
+     "вращение",
+     "якорь"
+    ],
+    "en": [
+     "rotation",
+     "rotor"
+    ]
+   },
+   "line": "an electric motor"
+  },
+  {
+   "id": "devices.phone",
+   "name": "phone",
+   "names": {
+    "ru": [
+     "телефон",
+     "смартфон"
+    ],
+    "en": [
+     "phone",
+     "smartphone"
+    ]
+   },
+   "words": {
+    "ru": [
+     "звонок",
+     "мобильный"
+    ],
+    "en": [
+     "call",
+     "mobile"
+    ]
+   },
+   "line": "a phone"
+  },
+  {
+   "id": "devices.computer",
+   "name": "computer",
+   "names": {
+    "ru": [
+     "компьютер"
+    ],
+    "en": [
+     "computer"
+    ]
+   },
+   "words": {
+    "ru": [
+     "ноутбук",
+     "монитор",
+     "процессор"
+    ],
+    "en": [
+     "laptop",
+     "monitor",
+     "processor"
+    ]
+   },
+   "line": "a computer"
+  },
+  {
+   "id": "devices.chip",
+   "name": "chip",
+   "names": {
+    "ru": [
+     "микросхема",
+     "чип"
+    ],
+    "en": [
+     "chip",
+     "microchip"
+    ]
+   },
+   "words": {
+    "ru": [
+     "процессор",
+     "транзистор"
+    ],
+    "en": [
+     "processor",
+     "transistor"
+    ]
+   },
+   "line": "a chip"
+  },
+  {
+   "id": "devices.antenna",
+   "name": "antenna",
+   "names": {
+    "ru": [
+     "антенна"
+    ],
+    "en": [
+     "antenna"
+    ]
+   },
+   "words": {
+    "ru": [
+     "сигнал",
+     "радиоволны"
+    ],
+    "en": [
+     "signal",
+     "radio waves"
+    ]
+   },
+   "line": "an antenna"
+  },
+  {
+   "id": "devices.solar_panel",
+   "name": "solar_panel",
+   "names": {
+    "ru": [
+     "солнечная панель",
+     "солнечная батарея"
+    ],
+    "en": [
+     "solar panel"
+    ]
+   },
+   "words": {
+    "ru": [
+     "солнечная энергия",
+     "фотоэлемент"
+    ],
+    "en": [
+     "solar energy",
+     "photovoltaic cell"
+    ]
+   },
+   "line": "a solar panel"
+  },
+  {
+   "id": "transport.bicycle",
+   "name": "bicycle",
+   "names": {
+    "ru": [
+     "велосипед"
+    ],
+    "en": [
+     "bicycle",
+     "bike"
+    ]
+   },
+   "words": {
+    "ru": [
+     "педали",
+     "руль"
+    ],
+    "en": [
+     "pedals",
+     "handlebar"
+    ]
+   },
+   "line": "a bicycle"
+  },
+  {
+   "id": "transport.car",
+   "name": "car",
+   "names": {
+    "ru": [
+     "машина",
+     "автомобиль"
+    ],
+    "en": [
+     "car"
+    ]
+   },
+   "words": {
+    "ru": [
+     "колёса",
+     "двигатель",
+     "дорога"
+    ],
+    "en": [
+     "wheels",
+     "engine",
+     "road"
+    ]
+   },
+   "line": "a car"
+  },
+  {
+   "id": "transport.train",
+   "name": "train",
+   "names": {
+    "ru": [
+     "поезд"
+    ],
+    "en": [
+     "train"
+    ]
+   },
+   "words": {
+    "ru": [
+     "рельсы",
+     "вагон",
+     "локомотив"
+    ],
+    "en": [
+     "rails",
+     "wagon",
+     "locomotive"
+    ]
+   },
+   "line": "a train"
+  },
+  {
+   "id": "transport.ship",
+   "name": "ship",
+   "names": {
+    "ru": [
+     "корабль",
+     "судно"
+    ],
+    "en": [
+     "ship",
+     "boat"
+    ]
+   },
+   "words": {
+    "ru": [
+     "плавание",
+     "лодка",
+     "пароход"
+    ],
+    "en": [
+     "sailing",
+     "steamship"
+    ]
+   },
+   "line": "a ship"
+  },
+  {
+   "id": "transport.plane",
+   "name": "plane",
+   "names": {
+    "ru": [
+     "самолёт"
+    ],
+    "en": [
+     "plane",
+     "airplane"
+    ]
+   },
+   "words": {
+    "ru": [
+     "крыло самолёта",
+     "полёт",
+     "подъёмная сила"
+    ],
+    "en": [
+     "wing",
+     "flight",
+     "lift"
+    ]
+   },
+   "line": "a plane"
+  },
+  {
+   "id": "transport.balloon",
+   "name": "balloon",
+   "names": {
+    "ru": [
+     "воздушный шар"
+    ],
+    "en": [
+     "balloon",
+     "hot air balloon"
+    ]
+   },
+   "words": {
+    "ru": [
+     "горячий воздух",
+     "полёт на шаре"
+    ],
+    "en": [
+     "hot air",
+     "flight"
+    ]
+   },
+   "line": "a hot air balloon"
+  },
+  {
+   "id": "transport.parachute",
+   "name": "parachute",
+   "names": {
+    "ru": [
+     "парашют"
+    ],
+    "en": [
+     "parachute"
+    ]
+   },
+   "words": {
+    "ru": [
+     "прыжок",
+     "сопротивление воздуха"
+    ],
+    "en": [
+     "jump",
+     "air resistance"
+    ]
+   },
+   "line": "a parachute"
+  },
+  {
+   "id": "buildings.tower",
+   "name": "tower",
+   "names": {
+    "ru": [
+     "башня"
+    ],
+    "en": [
+     "tower"
+    ]
+   },
+   "words": {
+    "ru": [
+     "высотка",
+     "шпиль"
+    ],
+    "en": [
+     "high building",
+     "spire"
+    ]
+   },
+   "line": "a tower"
+  },
+  {
+   "id": "buildings.bridge",
+   "name": "bridge",
+   "names": {
+    "ru": [
+     "мост"
+    ],
+    "en": [
+     "bridge"
+    ]
+   },
+   "words": {
+    "ru": [
+     "пролёт",
+     "опоры моста",
+     "переправа"
+    ],
+    "en": [
+     "span",
+     "piers",
+     "crossing"
+    ]
+   },
+   "line": "a bridge"
+  },
+  {
+   "id": "buildings.factory",
+   "name": "factory",
+   "names": {
+    "ru": [
+     "завод",
+     "фабрика"
+    ],
+    "en": [
+     "factory"
+    ]
+   },
+   "words": {
+    "ru": [
+     "цех",
+     "производство",
+     "труба"
+    ],
+    "en": [
+     "workshop",
+     "production",
+     "chimney"
+    ]
+   },
+   "line": "a factory"
+  },
+  {
+   "id": "buildings.dam",
+   "name": "dam",
+   "names": {
+    "ru": [
+     "плотина"
+    ],
+    "en": [
+     "dam"
+    ]
+   },
+   "words": {
+    "ru": [
+     "водохранилище",
+     "гидроэлектростанция"
+    ],
+    "en": [
+     "reservoir",
+     "hydropower"
+    ]
+   },
+   "line": "a dam"
+  },
+  {
+   "id": "buildings.wind_turbine",
+   "name": "wind_turbine",
+   "names": {
+    "ru": [
+     "ветряк",
+     "ветрогенератор"
+    ],
+    "en": [
+     "wind turbine"
+    ]
+   },
+   "words": {
+    "ru": [
+     "ветроэнергетика",
+     "лопасти"
+    ],
+    "en": [
+     "wind power",
+     "blades"
+    ]
+   },
+   "line": "a wind turbine"
+  },
+  {
+   "id": "buildings.lighthouse",
+   "name": "lighthouse",
+   "names": {
+    "ru": [
+     "маяк"
+    ],
+    "en": [
+     "lighthouse"
+    ]
+   },
+   "words": {
+    "ru": [
+     "берег",
+     "свет маяка"
+    ],
+    "en": [
+     "coast",
+     "beacon"
+    ]
+   },
+   "line": "a lighthouse"
+  },
+  {
+   "id": "chem.atom",
+   "name": "atom",
+   "names": {
+    "ru": [
+     "атом"
+    ],
+    "en": [
+     "atom"
+    ]
+   },
+   "words": {
+    "ru": [
+     "электронные оболочки",
+     "ядро атома",
+     "электрон"
+    ],
+    "en": [
+     "electron shells",
+     "nucleus",
+     "electron"
+    ]
+   },
+   "line": "an atom with its shells"
+  },
+  {
+   "id": "chem.molecule",
+   "name": "molecule",
+   "names": {
+    "ru": [
+     "молекула"
+    ],
+    "en": [
+     "molecule"
+    ]
+   },
+   "words": {
+    "ru": [
+     "шаростержневая модель",
+     "атомы и связи"
+    ],
+    "en": [
+     "ball and stick model",
+     "atoms and bonds"
+    ]
+   },
+   "line": "a molecule of balls and sticks"
+  },
+  {
+   "id": "chem.flask",
+   "name": "flask",
+   "names": {
+    "ru": [
+     "колба"
+    ],
+    "en": [
+     "flask"
+    ]
+   },
+   "words": {
+    "ru": [
+     "лаборатория",
+     "химический сосуд"
+    ],
+    "en": [
+     "laboratory",
+     "glassware"
+    ]
+   },
+   "line": "a flask"
+  },
+  {
+   "id": "chem.test_tube",
+   "name": "test_tube",
+   "names": {
+    "ru": [
+     "пробирка"
+    ],
+    "en": [
+     "test tube"
+    ]
+   },
+   "words": {
+    "ru": [
+     "опыт",
+     "реактив"
+    ],
+    "en": [
+     "experiment",
+     "reagent"
+    ]
+   },
+   "line": "a test tube"
+  },
+  {
+   "id": "chem.burner",
+   "name": "burner",
+   "names": {
+    "ru": [
+     "горелка",
+     "спиртовка"
+    ],
+    "en": [
+     "burner"
+    ]
+   },
+   "words": {
+    "ru": [
+     "нагрев",
+     "пламя горелки"
+    ],
+    "en": [
+     "heating",
+     "burner flame"
+    ]
+   },
+   "line": "a burner"
+  },
+  {
+   "id": "chem.crystal",
+   "name": "crystal",
+   "names": {
+    "ru": [
+     "кристаллическая решётка",
+     "кристалл"
+    ],
+    "en": [
+     "crystal lattice",
+     "crystal"
+    ]
+   },
+   "words": {
+    "ru": [
+     "соль",
+     "узлы решётки"
+    ],
+    "en": [
+     "salt",
+     "lattice sites"
+    ]
+   },
+   "line": "a crystal lattice"
+  },
+  {
+   "id": "math.right_triangle",
+   "name": "right_triangle",
+   "names": {
+    "ru": [
+     "прямоугольный треугольник"
+    ],
+    "en": [
+     "right triangle"
+    ]
+   },
+   "words": {
+    "ru": [
+     "катет",
+     "гипотенуза",
+     "теорема пифагора"
+    ],
+    "en": [
+     "leg",
+     "hypotenuse",
+     "pythagorean theorem"
+    ]
+   },
+   "line": "a right triangle"
+  },
+  {
+   "id": "math.circle_radius",
+   "name": "circle_radius",
+   "names": {
+    "ru": [
+     "окружность с радиусом",
+     "круг"
+    ],
+    "en": [
+     "circle with radius",
+     "circle"
+    ]
+   },
+   "words": {
+    "ru": [
+     "радиус",
+     "диаметр",
+     "центр"
+    ],
+    "en": [
+     "radius",
+     "diameter",
+     "center"
+    ]
+   },
+   "line": "a circle with a radius"
+  },
+  {
+   "id": "math.square_grid",
+   "name": "square_grid",
+   "names": {
+    "ru": [
+     "квадрат на сетке"
+    ],
+    "en": [
+     "square on a grid"
+    ]
+   },
+   "words": {
+    "ru": [
+     "площадь",
+     "клетки",
+     "квадрат"
+    ],
+    "en": [
+     "area",
+     "cells",
+     "square"
+    ]
+   },
+   "line": "a square on a grid"
+  },
+  {
+   "id": "math.cube",
+   "name": "cube",
+   "names": {
+    "ru": [
+     "куб"
+    ],
+    "en": [
+     "cube"
+    ]
+   },
+   "words": {
+    "ru": [
+     "грань",
+     "ребро",
+     "объём"
+    ],
+    "en": [
+     "face",
+     "edge",
+     "volume"
+    ]
+   },
+   "line": "a cube"
+  },
+  {
+   "id": "math.cylinder",
+   "name": "cylinder",
+   "names": {
+    "ru": [
+     "цилиндр"
+    ],
+    "en": [
+     "cylinder"
+    ]
+   },
+   "words": {
+    "ru": [
+     "основание",
+     "высота",
+     "объём цилиндра"
+    ],
+    "en": [
+     "base",
+     "height",
+     "volume"
+    ]
+   },
+   "line": "a cylinder"
+  },
+  {
+   "id": "math.cone",
+   "name": "cone",
+   "names": {
+    "ru": [
+     "конус"
+    ],
+    "en": [
+     "cone"
+    ]
+   },
+   "words": {
+    "ru": [
+     "вершина",
+     "образующая"
+    ],
+    "en": [
+     "apex",
+     "slant height"
+    ]
+   },
+   "line": "a cone"
+  },
+  {
+   "id": "math.coordinate_plane",
+   "name": "coordinate_plane",
+   "names": {
+    "ru": [
+     "координатная плоскость"
+    ],
+    "en": [
+     "coordinate plane"
+    ]
+   },
+   "words": {
+    "ru": [
+     "оси x и y",
+     "точка",
+     "график"
+    ],
+    "en": [
+     "x and y axes",
+     "point",
+     "graph"
+    ]
+   },
+   "line": "a coordinate plane"
+  },
+  {
+   "id": "music.note",
+   "name": "note",
+   "names": {
+    "ru": [
+     "нота"
+    ],
+    "en": [
+     "note",
+     "musical note"
+    ]
+   },
+   "words": {
+    "ru": [
+     "мелодия",
+     "звук"
+    ],
+    "en": [
+     "melody",
+     "tone"
+    ]
+   },
+   "line": "a note"
+  },
+  {
+   "id": "music.staff",
+   "name": "staff",
+   "names": {
+    "ru": [
+     "нотный стан"
+    ],
+    "en": [
+     "staff",
+     "musical staff"
+    ]
+   },
+   "words": {
+    "ru": [
+     "скрипичный ключ",
+     "ноты"
+    ],
+    "en": [
+     "treble clef",
+     "notes"
+    ]
+   },
+   "line": "a staff with a clef"
+  },
+  {
+   "id": "music.piano",
+   "name": "piano",
+   "names": {
+    "ru": [
+     "пианино",
+     "рояль"
+    ],
+    "en": [
+     "piano"
+    ]
+   },
+   "words": {
+    "ru": [
+     "клавиши",
+     "фортепиано"
+    ],
+    "en": [
+     "keys",
+     "keyboard"
+    ]
+   },
+   "line": "piano keys"
+  },
+  {
+   "id": "music.guitar",
+   "name": "guitar",
+   "names": {
+    "ru": [
+     "гитара"
+    ],
+    "en": [
+     "guitar"
+    ]
+   },
+   "words": {
+    "ru": [
+     "струны",
+     "аккорд"
+    ],
+    "en": [
+     "strings",
+     "chord"
+    ]
+   },
+   "line": "a guitar"
+  },
+  {
+   "id": "music.drum",
+   "name": "drum",
+   "names": {
+    "ru": [
+     "барабан"
+    ],
+    "en": [
+     "drum"
+    ]
+   },
+   "words": {
+    "ru": [
+     "ритм",
+     "удар"
+    ],
+    "en": [
+     "rhythm",
+     "beat"
+    ]
+   },
+   "line": "a drum"
+  },
+  {
+   "id": "music.speaker",
+   "name": "speaker",
+   "names": {
+    "ru": [
+     "динамик",
+     "колонка"
+    ],
+    "en": [
+     "speaker",
+     "loudspeaker"
+    ]
+   },
+   "words": {
+    "ru": [
+     "звуковая волна",
+     "громкость"
+    ],
+    "en": [
+     "sound wave",
+     "volume"
+    ]
+   },
+   "line": "a sound wave from a speaker"
+  },
+  {
+   "id": "money.coin",
+   "name": "coin",
+   "names": {
+    "ru": [
+     "монета"
+    ],
+    "en": [
+     "coin"
+    ]
+   },
+   "words": {
+    "ru": [
+     "мелочь",
+     "копейка"
+    ],
+    "en": [
+     "change",
+     "penny"
+    ]
+   },
+   "line": "a coin"
+  },
+  {
+   "id": "money.banknote",
+   "name": "banknote",
+   "names": {
+    "ru": [
+     "банкнота",
+     "купюра"
+    ],
+    "en": [
+     "banknote",
+     "bill"
+    ]
+   },
+   "words": {
+    "ru": [
+     "деньги",
+     "бумажные деньги"
+    ],
+    "en": [
+     "money",
+     "paper money"
+    ]
+   },
+   "line": "a banknote"
+  },
+  {
+   "id": "money.bank",
+   "name": "bank",
+   "names": {
+    "ru": [
+     "банк"
+    ],
+    "en": [
+     "bank"
+    ]
+   },
+   "words": {
+    "ru": [
+     "вклад",
+     "кредит",
+     "процент"
+    ],
+    "en": [
+     "deposit",
+     "loan",
+     "interest"
+    ]
+   },
+   "line": "a bank"
+  },
+  {
+   "id": "money.shop",
+   "name": "shop",
+   "names": {
+    "ru": [
+     "магазин"
+    ],
+    "en": [
+     "shop",
+     "store"
+    ]
+   },
+   "words": {
+    "ru": [
+     "покупка",
+     "продавец",
+     "товар"
+    ],
+    "en": [
+     "purchase",
+     "seller",
+     "goods"
+    ]
+   },
+   "line": "a shop"
+  },
+  {
+   "id": "money.price_tag",
+   "name": "price_tag",
+   "names": {
+    "ru": [
+     "ценник"
+    ],
+    "en": [
+     "price tag"
+    ]
+   },
+   "words": {
+    "ru": [
+     "цена",
+     "скидка"
+    ],
+    "en": [
+     "price",
+     "discount"
+    ]
+   },
+   "line": "a price tag"
+  },
+  {
+   "id": "money.contract",
+   "name": "contract",
+   "names": {
+    "ru": [
+     "договор"
+    ],
+    "en": [
+     "contract"
+    ]
+   },
+   "words": {
+    "ru": [
+     "подпись",
+     "соглашение"
+    ],
+    "en": [
+     "signature",
+     "agreement"
+    ]
+   },
+   "line": "a contract"
+  },
+  {
+   "id": "money.trend",
+   "name": "trend",
+   "names": {
+    "ru": [
+     "график роста"
+    ],
+    "en": [
+     "trend line"
+    ]
+   },
+   "words": {
+    "ru": [
+     "рост",
+     "падение",
+     "прибыль"
+    ],
+    "en": [
+     "growth",
+     "decline",
+     "profit"
+    ]
+   },
+   "line": "a line that goes up or down"
+  },
+  {
+   "id": "money.scales_cost",
+   "name": "scales_cost",
+   "names": {
+    "ru": [
+     "весы затрат и выгоды"
+    ],
+    "en": [
+     "cost and gain scales"
+    ]
+   },
+   "words": {
+    "ru": [
+     "затраты",
+     "выгода",
+     "сравнение"
+    ],
+    "en": [
+     "costs",
+     "benefits",
+     "comparison"
+    ]
+   },
+   "line": "scales of cost and gain"
+  },
+  {
+   "id": "signs.flag",
+   "name": "flag",
+   "names": {
+    "ru": [
+     "флаг"
+    ],
+    "en": [
+     "flag"
+    ]
+   },
+   "words": {
+    "ru": [
+     "полосы флага",
+     "страна"
+    ],
+    "en": [
+     "stripes",
+     "country"
+    ]
+   },
+   "line": "a flag of bands"
+  },
+  {
+   "id": "signs.book",
+   "name": "book",
+   "names": {
+    "ru": [
+     "книга"
+    ],
+    "en": [
+     "book"
+    ]
+   },
+   "words": {
+    "ru": [
+     "страницы",
+     "чтение"
+    ],
+    "en": [
+     "pages",
+     "reading"
+    ]
+   },
+   "line": "a book"
+  },
+  {
+   "id": "signs.letter",
+   "name": "letter",
+   "names": {
+    "ru": [
+     "письмо",
+     "конверт"
+    ],
+    "en": [
+     "letter",
+     "envelope"
+    ]
+   },
+   "words": {
+    "ru": [
+     "почта",
+     "послание"
+    ],
+    "en": [
+     "mail",
+     "message"
+    ]
+   },
+   "line": "a letter"
+  },
+  {
+   "id": "signs.calendar",
+   "name": "calendar",
+   "names": {
+    "ru": [
+     "календарь"
+    ],
+    "en": [
+     "calendar"
+    ]
+   },
+   "words": {
+    "ru": [
+     "дата",
+     "месяц",
+     "день"
+    ],
+    "en": [
+     "date",
+     "month",
+     "day"
+    ]
+   },
+   "line": "a calendar"
+  },
+  {
+   "id": "signs.globe",
+   "name": "globe",
+   "names": {
+    "ru": [
+     "глобус"
+    ],
+    "en": [
+     "globe"
+    ]
+   },
+   "words": {
+    "ru": [
+     "карта мира",
+     "континенты"
+    ],
+    "en": [
+     "world map",
+     "continents"
+    ]
+   },
+   "line": "a globe"
+  },
+  {
+   "id": "signs.map_pin",
+   "name": "map_pin",
+   "names": {
+    "ru": [
+     "метка на карте"
+    ],
+    "en": [
+     "map pin"
+    ]
+   },
+   "words": {
+    "ru": [
+     "место",
+     "точка на карте"
+    ],
+    "en": [
+     "location",
+     "place"
+    ]
+   },
+   "line": "a map pin"
+  }
+ ]
+}

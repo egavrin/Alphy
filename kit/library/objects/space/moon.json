@@ -1,0 +1,56 @@
+{
+ "id": "space.moon",
+ "names": {
+  "ru": [
+   "луна"
+  ],
+  "en": [
+   "moon"
+  ]
+ },
+ "words": {
+  "ru": [
+   "фаза луны",
+   "полнолуние",
+   "месяц",
+   "спутник земли"
+  ],
+  "en": [
+   "lunar phase",
+   "full moon",
+   "crescent"
+  ]
+ },
+ "line": "the Moon with its phase",
+ "image": "moon.webp",
+ "box": [
+  99.6,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "crater",
+   "names": {
+    "ru": "кратер",
+    "en": "crater"
+   },
+   "label": [
+    -29.6,
+    18.1
+   ],
+   "ring": 6.8
+  },
+  {
+   "id": "mare",
+   "names": {
+    "ru": "лунное море",
+    "en": "lunar sea"
+   },
+   "label": [
+    25.0,
+    -4.7
+   ],
+   "ring": 10.2
+  }
+ ]
+}

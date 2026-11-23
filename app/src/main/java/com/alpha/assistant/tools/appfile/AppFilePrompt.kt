@@ -1,6 +1,7 @@
 package com.alpha.assistant.tools.appfile
 
 import android.content.Context
+import com.alpha.assistant.semantic.LibraryEntry
 import org.json.JSONObject
 
 private const val PROMPT_ASSET="appfile/prompt.json"
@@ -15,7 +16,8 @@ internal class AppFilePrompt(val system: String,
     private val repairTask: String,private val changeTask: String,val template: String,
     private val templateRepairTask: String,private val templateChangeTask: String,private val templateRestTask: String,templateHead: String,
     /** The section Template data: the instructions of a template call of the data family (block 2 plan, D1). */ val templateData: String,
-    dataHead: String) {
+    dataHead: String,
+    /** The section Template library with its placeholder {{candidates}} (stage 6, S3). */ private val templateLibrary: String) {
     /** TEMPLATE_HEAD of kit/src/template.js. */
     private val head=Regex(templateHead)
     /** DATA_HEAD of kit/src/form-data.js. */
@@ -27,6 +29,12 @@ internal class AppFilePrompt(val system: String,
     /** The text of a template repair call, as templateRepairText of kit/prompt.js builds it. */
     fun templateRepairText(task: String,plan: String,faults: List<String>)=
         fill(templateRepairTask,mapOf("task" to task,"plan" to plan.trimEnd(),"faults" to faults.joinToString("\n- ")))
+    /**
+     * The host line of a template call with the ready objects that may fit its request, as candidatesText of kit/prompt.js builds it: one line for
+     * each, with its name, its line, and its parts. No candidates give no text, so the call has the elements of its section only (S4).
+     */
+    fun candidatesText(candidates: List<LibraryEntry>)=if(candidates.isEmpty()) "" else
+        fill(templateLibrary,mapOf("candidates" to candidates.joinToString("\n") {"- ${it.name}: ${it.line}. Parts: ${it.parts.joinToString(", ")}"}))
     /** The text of a template change call, as templateChangeText of kit/prompt.js builds it. */
     fun templateChangeText(request: String,plan: String)=fill(templateChangeTask,mapOf("request" to request,"plan" to plan.trimEnd()))
     /** The text of the call for the missing lines of a template call that stopped, as templateRestText of kit/prompt.js builds it. */
@@ -42,7 +50,7 @@ internal class AppFilePrompt(val system: String,
         fun load(context: Context): AppFilePrompt=loaded ?: JSONObject(context.assets.open(PROMPT_ASSET).use {it.readBytes().decodeToString()}).let {
             AppFilePrompt(it.getString("system"),it.getString("dialogue"),it.getString("repairTask"),it.getString("changeTask"),it.getString("template"),
                 it.getString("templateRepairTask"),it.getString("templateChangeTask"),it.getString("templateRestTask"),it.getString("templateHead"),
-                it.getString("templateData"),it.getString("dataHead"))
+                it.getString("templateData"),it.getString("dataHead"),it.getString("templateLibrary"))
         }.also {loaded=it}
         // One pass, so a placeholder text inside a request or a plan is not filled again. The text of the lambda is no replacement pattern, so $/x stays.
         private fun fill(template: String,values: Map<String,String>)=PLACEHOLDER.replace(template) {values[it.groupValues[1]] ?: it.value}

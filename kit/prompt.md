@@ -185,20 +185,25 @@ The control is the line control = ..., and its LABEL has at most 28 characters. 
 
 Template scene: a scheme from plain shapes that one control changes, for a thing to understand, such as a motion, a position, a size, a path, a part, or a step that the person picks.
 control = slider(LABEL, MIN, MAX, STEP, START), or control = choice(LABEL, [OPTION, ...], START), or control = steps(LABEL, [STEP, ...], ANSWER)
-s1 = SHAPE, and so on to s12 = SHAPE
+s1 = SHAPE, and so on to s{{shapes}} = SHAPE
 card = card(TITLE, TEXT)
-A slider is a number that the person drags from MIN to MAX in steps of STEP, and START is its start value. A choice has 2 to 6 options, each at most 12 characters, and START is one of them. With no START the first option is the start.
-Steps are a sequence in their order, such as the stages of a process: 2 to 6 steps, each at most 12 characters. ANSWER is the step that shows the answer best, and the screen starts at it. With no ANSWER the last step is the answer. Use steps for a sequence, and a choice for things with no order.
-s1 to s12 are at most 12 shapes in a box 300 wide and 220 high. Use as few shapes as show the thing: most pictures need 4 to 8. x goes right and y goes down. At least one shape reads $/v, so that the control changes the picture.
-Shapes: circle(x, y, r, color), rect(x, y, w, h, color, radius), line(x1, y1, x2, y2, color, width), text(x, y, value, color, size), polygon([x1, y1, x2, y2, ...], color). A shape takes visible=test and stroke=true for the outline only. The center of a text is at x, y, and a text in quotes in a shape has at most 28 characters.
+A slider is a number that the person drags from MIN to MAX in steps of STEP, and START is its start value. A choice has 2 to 6 options, each at most 16 characters (at most 12 with 5 or 6 options), and START is one of them. With no START the first option is the start.
+Steps are a sequence in their order, such as the stages of a process: 2 to 6 steps, each at most 16 characters (at most 12 with 5 or 6 steps). ANSWER is the step that shows the answer best, and the screen starts at it. With no ANSWER the last step is the answer. Use steps for a sequence, and a choice for things with no order.
+s1 to s{{shapes}} are at most {{shapes}} shapes in a box {{width}} wide and {{height}} high. Use as few shapes as show the thing: most pictures need 4 to 8. x goes right and y goes down. At least one shape reads $/v, so that the control changes the picture.
+Shapes: {{kinds}}. A shape takes {{properties}}. The center of a text is at x, y, and a text in quotes in a shape has at most 28 characters.
 Keep each shape inside the box, and put a text where no shape covers it. The point at angle a on a circle around cx, cy is cx + r * cos(a), cy - r * sin(a). A later shape covers an earlier one.
-color: "ink", "muted", "accent", "surface", "water", "land", "sun", "sand", "wood", "success", "warning", or "#RRGGBB". A line or an outline is never "muted".
+color: {{colors}}, a tone of one of them, or "#RRGGBB". +1 to +3 makes a tone lighter, -1 to -3 darker, and @PERCENT see-through, such as "water+1", "land-1", or "accent@40". A thing of the world gets volume from gradient= of a darker tone with radial=1, and a figure of mathematics stays flat. A line or an outline is never "muted".
+Library: a part line places a ready thing with use(NAME, X, Y, SIZE): X, Y is its center, and SIZE is its longer side, at most 300. It counts as one shape. label="TEXT" writes a short text under it, and visible= and turn= work as for a shape.
+Objects: the list under the request names ready objects that may fit it, with their parts. An object has a SIZE of 24 or more. parts=true names each part beside it, and mark="PART" marks one part and names it. With parts=true or mark=, the names stand at both sides and the object takes the middle of the picture width: put other shapes above or under it. Use an object of the list only for the thing that it shows, and draw the rest with shapes. With no list, use elements and shapes only.
+Elements, for any subject: use(NAME, X, Y, SIZE, [NUMBERS]), and each number can read $/v. color= changes the color of an element. Use an element in place of shapes that draw the same thing.
+{{elements}}
+For a thing with no object in the list and no element, draw it with shapes, or with an emoji in a text shape.
 
 Template items: a choice of 2 to 6 things and a large sign of the chosen one, for things that the person looks at one at a time, such as words of a language, kinds, parts, or stages.
 control = choice(LABEL), or control = steps(LABEL, ANSWER)
 i1 = item(LABEL, SIGN, TEXT), and so on to i6
 card = card(TITLE)
-i1 to i6 are at most 6 items. With a choice, i1 is the start. With steps, the items are the steps in their order, and the screen starts at the item with the label ANSWER, by default the last item. LABEL is the option of the choice, at most 12 characters, and each label is different. SIGN is the large sign, such as an emoji, a character, a number, or a short word, at most 14 characters. TEXT is the text of the card for this item, at most 140 characters.
+i1 to i6 are at most 6 items. With a choice, i1 is the start. With steps, the items are the steps in their order, and the screen starts at the item with the label ANSWER, by default the last item. LABEL is the option of the choice or the step, at most 16 characters with 2 to 4 items, else 12, and each label is different. SIGN is the large sign, such as an emoji, a character, a number, or a short word, at most 14 characters. TEXT is the text of the card for this item, at most 140 characters.
 The control has no options: its options are the labels of the items. The card shows TITLE and the text of the chosen item.
 
 Template cells: a whole of equal cells and a slider that fills some of them, for a part of a whole, a share, or a count out of a total.
@@ -221,12 +226,13 @@ Request: Покажи по шагам, как шлюз поднимает лод
 ```
 scene("Как шлюз поднимает лодку", lang="ru", palette="teal")
 control = steps("Шаг", ["Вход", "Подъём", "Выход"], "Подъём")
-s1 = rect(0, 150, 100, 70, "water", 0)
-s2 = rect(200, 70, 100, 150, "water", 0)
-s3 = rect(100, $/v == "Вход" ? 150 : 70, 100, $/v == "Вход" ? 70 : 150, "water", 0)
-s4 = rect($/v == "Выход" ? 222 : 122, $/v == "Вход" ? 136 : 56, 56, 14, "wood", 4)
-s5 = line(100, 40, 100, 220, "ink", 4, visible=$/v != "Вход")
-s6 = line(200, 40, 200, 220, "ink", 4, visible=$/v != "Выход")
+s1 = rect(0, 230, 100, 70, "water", 0, gradient="water-1")
+s2 = rect(200, 150, 100, 150, "water", 0, gradient="water-1")
+s3 = rect(100, $/v == "Вход" ? 230 : 150, 100, $/v == "Вход" ? 70 : 150, "water", 0, gradient="water-1")
+s4 = rect($/v == "Выход" ? 222 : 122, $/v == "Вход" ? 216 : 136, 56, 14, "wood", 4)
+s5 = line(100, 120, 100, 300, "ink", 4, visible=$/v != "Вход")
+s6 = line(200, 120, 200, 300, "ink", 4, visible=$/v != "Выход")
+s7 = use("curved_arrow", 150, 70, 60, [120], visible=$/v == "Подъём")
 card = card("Шлюз — лифт для лодок", $/v == "Вход" ? "Лодка входит в камеру с нижней реки, и ворота за ней закрываются." : $/v == "Подъём" ? "Вода из верхней реки наполняет камеру и поднимает лодку." : "Вода в камере на уровне верхней реки. Ворота открыты, и лодка плывёт дальше.")
 say1 = "Смотри: лодка входит в камеру с нижней реки, и ворота за ней закрываются."
 say2 = "Вода из верхней реки наполняет камеру, и лодка поднимается вместе с ней."
@@ -234,6 +240,19 @@ say3 = "Верхние ворота открываются, и лодка плы
 ```
 
 Example 2
+Request: What are the sides of a right triangle called?
+Ready objects that may fit this request, for use(NAME, X, Y, SIZE):
+- right_triangle: a flat right triangle with its two legs, its hypotenuse, and the right angle. Parts: leg_a, leg_b, hypotenuse, right_angle
+```
+scene("Sides of a right triangle", lang="en", palette="indigo")
+control = choice("Side", ["Leg a", "Leg b", "Hypotenuse"], "Hypotenuse")
+s1 = use("right_triangle", 150, 140, 200, parts=true, mark=$/v == "Leg a" ? "leg_a" : $/v == "Leg b" ? "leg_b" : "hypotenuse")
+s2 = use("formula", 150, 270, 160, label="a^2 + b^2 = c^2")
+card = card("The longest side", $/v == "Hypotenuse" ? "The hypotenuse lies opposite the right angle. It is the longest side." : "A leg is a side of the right angle. The two legs meet at 90 degrees.")
+say = "Pick a side and see where it lies."
+```
+
+Example 3
 Request: Welche Arten von Gestein gibt es?
 ```
 items("Drei Arten von Gestein", lang="de", palette="brown")
@@ -245,7 +264,7 @@ card = card("So entsteht es")
 say = "Tippe auf eine Art und lies, wie dieses Gestein entsteht."
 ```
 
-Example 3
+Example 4
 Request: ¿Qué parte de la Tierra está cubierta de agua?
 ```
 cells("El agua de la Tierra", lang="es", palette="blue")
@@ -254,11 +273,16 @@ card = card("Unas siete de cada diez", "El agua cubre cerca del 71 % de la super
 say = "Mueve el control y mira cuántas de cada cien partes de la superficie son agua."
 ```
 
-Example 4
+Example 5
 Request: Устрой мне тест по дорожным знакам.
 ```
 outside("learn")
 ```
+
+## Template library
+
+Ready objects that may fit this request, for use(NAME, X, Y, SIZE):
+{{candidates}}
 
 ## Template repair
 
@@ -266,7 +290,7 @@ The kit found faults in some lines of your screen. A fault starts with the name 
 
 ## Template change
 
-The request above asks for a change of your screen. Write each line that changes and each new line, complete and with its name, and nothing more: a line with the name of an earlier line replaces it, a new part takes the next free name, such as s4 after s3, and delete NAME removes a part. Do not write a line that stays as it is. Keep the template and the names of the lines, and keep the caps of the template. When the template cannot hold the change, reply with the one line outside("other"). Reply with lines only.
+The request above asks for a change of your screen. Write each line that changes and each new line, complete and with its name, and nothing more: a line with the name of an earlier line replaces it, a new part takes the next free name, such as s4 after s3, and delete NAME removes a part. A ready object of the list under the request can replace a shape or join the shapes. Do not write a line that stays as it is. Keep the template and the names of the lines, and keep the caps of the template. When the template cannot hold the change, reply with the one line outside("other"). Reply with lines only.
 
 ## Template rest
 

@@ -178,6 +178,13 @@ private fun drawSurface(canvas: Canvas,commands: JSONArray,roleColors: Map<Strin
             drawBitmapCommand(canvas,destination,images[c.getString("resourceId")],roleColors["muted"] ?: Color.GRAY)
             return@repeat
         }
+        // A picture of the library keeps its own colors in both themes. Until it is decoded, it draws nothing (LibraryImages).
+        if(c.getString("type")=="image") {
+            images[LibraryImages.key(c.getString("id"))]?.takeUnless(Bitmap::isRecycled)?.let {
+                canvas.drawBitmap(it,null,RectF(f("x"),f("y"),f("x")+f("width"),f("y")+f("height")),Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            }
+            return@repeat
+        }
         val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style=Paint.Style.FILL
             GraphicsContract.gradientOf(c)?.let {shader=gradient(it,roleColors)} ?: run {color=drawingColor(c.getString("color"),roleColors)}
@@ -245,7 +252,13 @@ private fun gradient(g: JSONObject,roleColors: Map<String,Int>): Shader {
 /** At 64, the default ink on a muted shape fell to 4.36 on some dark cards. At 56 it keeps 4.5 on each canvas (L1 item 6). */
 internal const val MUTED_SHAPE_ALPHA = 56
 
-private fun drawingColor(value: String,roleColors: Map<String,Int>) = roleColors[value] ?: android.graphics.Color.parseColor(value)
+private fun drawingColor(value: String,roleColors: Map<String,Int>) = roleColors[value] ?: GraphicsContract.toneOf(value)?.let { tone ->
+    // A step mixes the color of the role in the theme with white (30 % for each step) or with black (25 % for each step), so it follows the theme.
+    val base=roleColors[tone.role] ?: Color.GRAY
+    val share=if(tone.step>0) 0.3f*tone.step else -0.25f*tone.step
+    fun mix(channel: Int)=Math.round(channel+((if(tone.step>0) 255 else 0)-channel)*share)
+    Color.argb(Math.round(Color.alpha(base)*tone.alpha/100f),mix(Color.red(base)),mix(Color.green(base)),mix(Color.blue(base)))
+} ?: android.graphics.Color.parseColor(value)
 
 /** One shared byte budget covers drawing pixels and in-progress decodes across all hosts. */
 internal class SurfaceBitmapMemory(private val limit: Int = ToolUiCatalog.MAX_IMAGE_BYTES) {

@@ -4,7 +4,7 @@
 // of decision 3 (checkData) compares each number of a searched form with the source excerpts.
 
 import { show } from "./dsl.js";
-import { BUDGET, SENTENCE_END, isText, numberOf, textFault } from "./form-base.js";
+import { BUDGET, SENTENCE_END, isText, labelsFault, numberOf, textFault } from "./form-base.js";
 
 /** The words of the data family. */
 export const DATA_WORDS = new Set(["compare", "table", "chart", "nodata"]);
@@ -37,9 +37,10 @@ export function rowFault(tree, max) {
   if (tree.k !== "call" || tree.name !== "row" || tree.args.length !== 2 || Object.keys(tree.named).length || tree.args[1]?.k !== "list") return "a row is row(LABEL, [VALUE, …])";
   const values = tree.args[1].items;
   if (!values.length || values.length > max) return `a row has 1 to ${max} values, and this one has ${values.length}`;
-  return labelFault("the label", tree.args[0]) ?? values.map((value, index) => (cellText(value) === undefined ? `value ${index + 1} is a text in quotes or a number`
-    : !cellText(value).trim() ? `value ${index + 1} is empty` : [...cellText(value)].length > DATA_BUDGET.value
-      ? `value ${index + 1} has ${[...cellText(value)].length} characters, and its cap is ${DATA_BUDGET.value}. Write it shorter, such as with a unit in the label` : null)).find(Boolean) ?? null;
+  const wrong = values.map((value, index) => (cellText(value) === undefined ? `value ${index + 1} is a text in quotes or a number` : !cellText(value).trim() ? `value ${index + 1} is empty` : null)).find(Boolean);
+  // Each value over the cap in one fault (fix list 5, L1), a number by its text.
+  return labelFault("the label", tree.args[0]) ?? wrong ?? labelsFault("value", values.map((value) => ({ k: "lit", v: cellText(value) })), DATA_BUDGET.value,
+    () => ", such as with a unit in the label");
 }
 
 /** The fault of the control mark(ROW) of a form, or mark(ROW, COLUMN) when column is true. ROW and COLUMN name a row or a column of the form. */

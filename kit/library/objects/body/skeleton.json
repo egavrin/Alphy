@@ -1,0 +1,91 @@
+{
+ "id": "body.skeleton",
+ "names": {
+  "ru": [
+   "скелет"
+  ],
+  "en": [
+   "skeleton"
+  ]
+ },
+ "words": {
+  "ru": [
+   "кости",
+   "позвоночник",
+   "череп"
+  ],
+  "en": [
+   "bones",
+   "spine",
+   "skull"
+  ]
+ },
+ "line": "a skeleton",
+ "image": "skeleton.webp",
+ "box": [
+  43.9,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "skull",
+   "names": {
+    "ru": "череп",
+    "en": "skull"
+   },
+   "label": [
+    -2.0,
+    -40.6
+   ],
+   "ring": 7.1
+  },
+  {
+   "id": "rib_cage",
+   "names": {
+    "ru": "грудная клетка",
+    "en": "rib cage"
+   },
+   "label": [
+    -6.1,
+    -22.2
+   ],
+   "ring": 8.1
+  },
+  {
+   "id": "spine",
+   "names": {
+    "ru": "позвоночник",
+    "en": "spine"
+   },
+   "label": [
+    1.1,
+    -7.8
+   ],
+   "ring": 5.1
+  },
+  {
+   "id": "pelvis",
+   "names": {
+    "ru": "таз",
+    "en": "pelvis"
+   },
+   "label": [
+    6.2,
+    1.4
+   ],
+   "ring": 6.1
+  },
+  {
+   "id": "thigh_bone",
+   "names": {
+    "ru": "бедренная кость",
+    "en": "thigh bone"
+   },
+   "label": [
+    -7.1,
+    22.9
+   ],
+   "ring": 6.1
+  }
+ ]
+}

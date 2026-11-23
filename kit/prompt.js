@@ -2,10 +2,33 @@
 // kit/build.js writes them into app/src/main/assets/appfile/prompt.json for the app. So the app sends the texts that the check measured.
 
 import { readFileSync } from "node:fs";
+import { KINDS, PROPERTIES } from "./src/kinds.js";
+import { ELEMENTS } from "./src/elements.js";
+import { TONES } from "./src/core.js";
+import { BUDGET, HEIGHT, WIDTH } from "./src/form-base.js";
 
-/** The text under each level-2 heading of kit/prompt.md, by the heading. */
-export const PROMPT = Object.fromEntries(readFileSync(new URL("./prompt.md", import.meta.url), "utf8").split(/^## /m).slice(1)
+/** The text under each level-2 heading of kit/prompt.md, by the heading, as it is in the file. */
+const SECTIONS = Object.fromEntries(readFileSync(new URL("./prompt.md", import.meta.url), "utf8").split(/^## /m).slice(1)
   .map((part) => [part.slice(0, part.indexOf("\n")), part.slice(part.indexOf("\n") + 1).trim()]));
+/**
+ * The values of the placeholders of the template prompt, from the registries (stage 6, L1): prompt.md types no list of the shape kinds,
+ * the properties, the colors, or the generic elements, so a new entry of a registry changes the prompt with no other edit.
+ */
+export function registryValues() {
+  const groups = Object.entries(ELEMENTS).reduce((out, [name, entry]) => ({ ...out, [entry.group]: [...(out[entry.group] ?? []), `${name}(${entry.numbers.join(", ")}) ${entry.prompt}`] }), {});
+  return { shapes: String(BUDGET.shapes), width: String(WIDTH), height: String(HEIGHT),
+    kinds: Object.values(KINDS).filter((kind) => kind.prompt).map((kind) => kind.prompt).join("; "),
+    properties: Object.values(PROPERTIES).filter((property) => property.prompt).map((property) => property.prompt).join("; "),
+    colors: Object.keys(TONES).map((name) => JSON.stringify(name)).join(", "),
+    elements: Object.entries(groups).map(([group, list]) => `- ${group}: ${list.join("; ")}`).join("\n") };
+}
+/** A section with each {{name}} of values filled. A placeholder of the host, such as {{candidates}}, stays. */
+export const filled = (text, values = registryValues()) => text.replace(/\{\{(\w+)\}\}/g, (all, name) => values[name] ?? all);
+/** The sections of the prompt, the template section with the values of the registries. */
+export const PROMPT = { ...SECTIONS, Template: filled(SECTIONS.Template) };
+/** The text of the ready objects that fit a request (the section "Template library"): one line for each candidate, with its name, its line, and its parts. */
+export const candidatesText = (objects) => (objects.length ? PROMPT["Template library"].replace("{{candidates}}",
+  objects.map((object) => `- ${object.name}: ${object.line}. Parts: ${object.parts.map((part) => part.id).join(", ")}`).join("\n")) : "");
 /** The first 12 hex digits of the SHA-256 of the named sections of sections, in the order of names. */
 export const hashOf = (names, sections = PROMPT) => new Bun.CryptoHasher("sha256").update(JSON.stringify(Object.fromEntries(names.map((name) => [name, sections[name]])))).digest("hex").slice(0, 12);
 /**
@@ -37,8 +60,11 @@ export const changeText = ({ request, plan }) => `${request}\n\nYour app file:\n
 /** The text of a repair call of a template file: the task, the lines, the faults of the kit, and the repair rule of the template prompt. */
 export const templateRepairText = ({ task, plan, faults }) => `${task}\n\nYour lines:\n${plan.trimEnd()}\n\nFaults of the kit:\n${faults.map((fault) => "- " + fault).join("\n")}\n\n${PROMPT["Template repair"]}`;
 
-/** The text of a change call of a template file: the request of the person, the stored template file, and the change rule of the template prompt. */
-export const templateChangeText = ({ request, plan }) => `${request}\n\nYour lines:\n${plan.trimEnd()}\n\n${PROMPT["Template change"]}`;
+/**
+ * The text of a change call of a template file: the request of the person, the host line of the ready objects as the app puts it under the
+ * request (fix list 4, K3), the stored template file, and the change rule of the template prompt.
+ */
+export const templateChangeText = ({ request, plan, host = "" }) => `${request}${host ? "\n" + host : ""}\n\nYour lines:\n${plan.trimEnd()}\n\n${PROMPT["Template change"]}`;
 
 /** The text of a rest call of a template file: the task, the complete lines so far of a call that stopped early, and the rest rule of the template prompt. */
 export const templateRestText = ({ task, plan }) => `${task}\n\nYour lines so far:\n${plan.trimEnd()}\n\n${PROMPT["Template rest"]}`;

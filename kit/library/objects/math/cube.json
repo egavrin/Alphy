@@ -1,0 +1,135 @@
+{
+ "id": "math.cube",
+ "names": {
+  "ru": [
+   "куб"
+  ],
+  "en": [
+   "cube"
+  ]
+ },
+ "words": {
+  "ru": [
+   "грань",
+   "ребро",
+   "объём"
+  ],
+  "en": [
+   "face",
+   "edge",
+   "volume"
+  ]
+ },
+ "line": "a cube",
+ "box": [
+  100,
+  100
+ ],
+ "layers": [
+  {
+   "part": "face",
+   "role": "water",
+   "tone": 1,
+   "outline": -2,
+   "path": [
+    -50,
+    -20,
+    20,
+    -20,
+    20,
+    50,
+    -50,
+    50
+   ]
+  },
+  {
+   "role": "water",
+   "tone": 2,
+   "outline": -2,
+   "path": [
+    -50,
+    -20,
+    -20,
+    -50,
+    50,
+    -50,
+    20,
+    -20
+   ]
+  },
+  {
+   "role": "water",
+   "tone": 0,
+   "outline": -2,
+   "path": [
+    20,
+    -20,
+    50,
+    -50,
+    50,
+    20,
+    20,
+    50
+   ]
+  },
+  {
+   "part": "edge",
+   "role": "water",
+   "tone": -2,
+   "line": true,
+   "open": true,
+   "width": 3,
+   "path": [
+    20,
+    -20,
+    20,
+    50
+   ]
+  },
+  {
+   "part": "vertex",
+   "role": "water",
+   "tone": -3,
+   "circle": [
+    50,
+    -50,
+    3
+   ]
+  }
+ ],
+ "parts": [
+  {
+   "id": "face",
+   "names": {
+    "ru": "грань",
+    "en": "face"
+   },
+   "label": [
+    -15,
+    15
+   ]
+  },
+  {
+   "id": "edge",
+   "names": {
+    "ru": "ребро",
+    "en": "edge"
+   },
+   "label": [
+    20,
+    30
+   ]
+  },
+  {
+   "id": "vertex",
+   "names": {
+    "ru": "вершина",
+    "en": "vertex"
+   },
+   "label": [
+    50,
+    -50
+   ]
+  }
+ ]
+}

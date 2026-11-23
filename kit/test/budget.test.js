@@ -25,8 +25,11 @@ const ALPHY = {
   // GraphicsContract.frame: the commands, point pairs, and text characters of all surfaces of one reply, and FRAME_BYTES.
   frame: { commands: 512, pairs: 2048, chars: 2048, bytes: 32768 },
 };
-/** The bar of the kit for a source: room for a source that grows, under ALPHY.source. */
-const SOURCE_BAR = 60000;
+/**
+ * The bar of the kit for a source: room for a source that grows, under ALPHY.source. The run-time of the shape kinds of stage 6 (L2) is about
+ * 5500 bytes larger, so the bar moved from 60000 to 64000 with the same room for the largest saved plan.
+ */
+const SOURCE_BAR = 64000;
 /** The saved plans in kit/plans. */
 const SAVED = 9;
 

@@ -1,0 +1,91 @@
+{
+ "id": "body.skin",
+ "names": {
+  "ru": [
+   "кожа"
+  ],
+  "en": [
+   "skin"
+  ]
+ },
+ "words": {
+  "ru": [
+   "слои кожи",
+   "эпидермис",
+   "пот"
+  ],
+  "en": [
+   "skin layers",
+   "epidermis",
+   "sweat"
+  ]
+ },
+ "line": "the layers of the skin",
+ "image": "skin.webp",
+ "box": [
+  95.1,
+  100.0
+ ],
+ "parts": [
+  {
+   "id": "epidermis",
+   "names": {
+    "ru": "эпидермис",
+    "en": "epidermis"
+   },
+   "label": [
+    22.6,
+    -29.7
+   ],
+   "ring": 7.8
+  },
+  {
+   "id": "dermis",
+   "names": {
+    "ru": "дерма",
+    "en": "dermis"
+   },
+   "label": [
+    -40.2,
+    5.0
+   ],
+   "ring": 7.3
+  },
+  {
+   "id": "hair",
+   "names": {
+    "ru": "волос",
+    "en": "hair"
+   },
+   "label": [
+    -5.4,
+    -35.3
+   ],
+   "ring": 6.7
+  },
+  {
+   "id": "sweat_gland",
+   "names": {
+    "ru": "потовая железа",
+    "en": "sweat gland"
+   },
+   "label": [
+    15.8,
+    11.8
+   ],
+   "ring": 8.9
+  },
+  {
+   "id": "fat_layer",
+   "names": {
+    "ru": "жировой слой",
+    "en": "fat layer"
+   },
+   "label": [
+    -22.2,
+    34.2
+   ],
+   "ring": 10.0
+  }
+ ]
+}

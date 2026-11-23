@@ -2,6 +2,7 @@
 // A renderer draws the tree. The checks of the host are in check.js.
 
 import { DslError, show } from "./dsl.js";
+import { KINDS, PROPERTIES } from "./kinds.js";
 
 /** False in the run-time text of an app (dsl.js). */
 const MESSAGES = true;
@@ -34,19 +35,24 @@ export const CATALOG = {
 export const ICON_NAMES = { ArrowUp: "Arrow", ArrowDown: "Sort", ArrowLeft: "Back", ArrowRight: "Chevron", Edit: "Pencil" };
 const NAMED = new Set(["visible", "enabled", "variant", "tone", "emphasis", "weight", "min", "max", "step", "empty", "placeholder", "gap", "selected", "kind", "size", "align", "columns", "icon", "fit"]);
 export const ACTIONS = new Set(["set", "toggle", "inc", "dec", "append", "remove", "clear", "when", "move", "flip", "animate"]);
-/** The data calls of a Drawing and of a Model3d, with the arguments of each one in order. A color follows them. */
-const SHAPES = { circle: ["x", "y", "r"], rect: ["x", "y", "w", "h"], line: ["x1", "y1", "x2", "y2"], text: ["x", "y", "text"], polygon: ["points"] };
-const BODIES = { box: ["part", "x", "y", "z", "w", "h", "d"], cylinder: ["part", "x", "y", "z", "radius", "length", "axis"] };
-const TEXTS = new Set(["text", "part", "axis"]), EXTRAS = ["radius", "width", "size", "stroke"];
-// A shape also takes its own extra value after the color with no name. The dev run of the dialogue check: 5 of 16 plans
+/**
+ * The data calls of a Model3d, with the arguments of each one in order, as the shape kinds of a Drawing (kinds.js KINDS) have them. A color
+ * follows them. The evaluator reads the registry when it draws, so a new kind needs no other edit.
+ */
+const BODIES = { box: { args: ["part", "x", "y", "z", "w", "h", "d"] }, cylinder: { args: ["part", "x", "y", "z", "radius", "length", "axis"] } };
+const TEXTS = new Set(["text", "part", "axis", "image"]);
+// A shape also takes its own extra value after the color with no name (kinds.js last). The dev run of the dialogue check: 5 of 16 plans
 // that think wrote text(x, y, "Земля", "muted", 12) or line(x1, y1, x2, y2, "muted", 2), and no repair step found the cause.
-const LAST = { text: "size", line: "width", rect: "radius" };
 /**
  * The colors of a shape or a body by role. "accent" is the palette of the app. A different color is "#RRGGBB" (HEX). Each other color of a line is a
  * fault of the line, and a renderer draws a computed color that it does not know as ink.
  */
-export const TONES = { ink: "#0f172a", muted: "#94a3b8", accent: null, surface: "#ffffff", water: "#38bdf8", land: "#65a30d", sun: "#facc15", sand: "#e7d3a8", wood: "#a16207", success: "#16a34a", warning: "#ea580c" };
+export const TONES = { ink: "#0f172a", muted: "#94a3b8", accent: null, surface: "#ffffff", water: "#38bdf8", land: "#65a30d", sun: "#facc15", sand: "#e7d3a8", wood: "#a16207", success: "#16a34a", warning: "#ea580c", error: "#dc2626" };
 export const HEX = /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+/** A tone of a color of the kit (stage 6, L2): the color, a step of +1 to +3 (lighter) or -1 to -3 (darker), and an alpha in percent, such as "accent+1@40". */
+export const TONE = new RegExp(`^(${Object.keys(TONES).join("|")})([+-][123])?(?:@(\\d{1,2}|100))?$`);
+/** True for a color of a shape: a color of the kit, a tone of one, or a hex. */
+export const isColor = (color) => typeof color === "string" && (TONE.test(color) || HEX.test(color));
 
 /**
  * The work of one event of the run-time, or of one look of the compile step, in steps: each value, shape, and node, and each item and
@@ -342,28 +348,30 @@ export class App {
       if (!rows) throw new DslError(MESSAGES ? "each needs a list or a count: each($/rows, shape) or each(5, shape)" : "");
       return rows.flatMap((row, index) => this.drawn(kinds, tag, args[1], { ...ctx, it: row, each: index }));
     }
-    const keys = Object.hasOwn(kinds, name) ? kinds[name] : null;
-    if (!keys) throw new DslError(MESSAGES ? `${show(tree).slice(0, 30)} is not one of ${Object.keys(kinds).join(", ")}, each` : "");
-    const last = LAST[name], takes = MESSAGES ? `${name} takes ${keys.join(", ")}, color${last ? `, ${last}` : ""}` : "";
-    if (args.length < keys.length || args.length > keys.length + (last ? 2 : 1)) throw new DslError(MESSAGES ? `${show(tree).slice(0, 60)} has ${args.length} values: ${takes}` : "");
+    const keys = Object.hasOwn(kinds, name) ? kinds[name].args : null;
+    if (!keys) throw new DslError(MESSAGES ? `${show(tree).slice(0, 30)} is not one of ${Object.keys(kinds).filter((kind) => kinds[kind].prompt !== null).join(", ")}, each` : "");
+    // A group has no color: its shapes have their own (kinds.js). A picture of the library has its own colors.
+    const last = kinds[name].last, colored = keys.at(-1) !== "shapes" && kinds[name].color !== false, takes = MESSAGES ? `${name} takes ${keys.join(", ")}${colored ? ", color" : ""}${last ? `, ${last}` : ""}` : "";
+    if (args.length < keys.length || args.length > keys.length + (last ? 2 : colored ? 1 : 0)) throw new DslError(MESSAGES ? `${show(tree).slice(0, 60)} has ${args.length} values: ${takes}` : "");
     if (named.visible && !this.value(named.visible, ctx)) return [];
     const number = (value, key) => { if (value === null || value === "" || typeof value === "boolean" || !Number.isFinite(Number(value))) throw new DslError(MESSAGES ? `${key} of ${name} is not a number: ${takes}` : ""); return round(Number(value), 2); };
+    const color = (value, key) => { const text = String(value ?? "ink"); if (MESSAGES && !isColor(text)) throw new DslError(`the color ${JSON.stringify(text)} of ${key === "color" ? name : `${key}= of ${name}`} is not a color of the kit. Use one of ${Object.keys(TONES).join(", ")}, or a hex such as "#336699"`); return text; };
     const out = { [tag]: name };
     keys.forEach((key, index) => {
+      if (key === "shapes") { out.shapes = this.drawn(kinds, tag, args[index], ctx); return; }
       const value = this.value(args[index], ctx);
       out[key] = TEXTS.has(key) ? String(value ?? "") : key === "points" ? [value].flat().map((item) => number(item, key)) : number(value, key);
     });
     if (out.axis !== undefined && !["x", "y", "z"].includes(out.axis)) throw new DslError(MESSAGES ? `axis of ${name} is "x", "y", or "z"` : "");
-    out.color = String((args[keys.length] ? this.value(args[keys.length], ctx) : null) ?? "ink");
-    if (MESSAGES && !Object.hasOwn(TONES, out.color) && !HEX.test(out.color)) {
-      throw new DslError(`the color ${JSON.stringify(out.color)} of ${name} is not a color of the kit. Use one of ${Object.keys(TONES).join(", ")}, or a hex such as "#336699"`);
-    }
+    if (colored) out.color = color(args[keys.length] ? this.value(args[keys.length], ctx) : null, "color");
     if (args.length === keys.length + 2) out[last] = number(this.value(args[keys.length + 1], ctx), last);
     for (const [key, arg] of Object.entries(named)) {
+      const property = tag === "shape" || ["radius", "width", "size", "stroke"].includes(key) ? PROPERTIES[key] : undefined;
       if (key === "visible") continue;
-      if (!EXTRAS.includes(key)) throw new DslError(MESSAGES ? `${name} has no argument ${key}` : "");
+      if (!property) throw new DslError(MESSAGES ? `${name} has no argument ${key}` : "");
       const value = this.value(arg, ctx);
-      if (key !== "stroke") out[key] = number(value, key); else if (value) out.stroke = true;
+      if (property.kind === "boolean") { if (value) out[key] = true; }
+      else out[key] = property.kind === "color" ? color(value, key) : property.kind === "text" ? String(value ?? "") : number(value, key);
     }
     if (++this.shapes > MAX_SHAPES) this.stop(MESSAGES ? `the drawing has more than ${MAX_SHAPES} shapes, and Alphy stops it. Alphy draws at most 512 commands` : "");
     return [out];
@@ -503,7 +511,7 @@ export class App {
         this.shapes = 0;
         // An item that fails, such as a shape whose x is not a number at run time, is a fault and is left out: the other items still draw.
         node.props[key] = (list.k === "list" ? list.items : [list]).flatMap((item) => {
-          try { return this.drawn(key === "shapes" ? SHAPES : BODIES, key === "shapes" ? "shape" : "body", item, ctx); }
+          try { return this.drawn(key === "shapes" ? KINDS : BODIES, key === "shapes" ? "shape" : "body", item, ctx); }
           catch (failure) { this.fault(name ?? tree.name, MESSAGES ? `${key}: ${failure.message}` : ""); return []; }
         });
         if (key === "bodies" && node.props.exploded) node.props.bodies = explode(node.props.bodies);

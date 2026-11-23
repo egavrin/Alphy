@@ -803,11 +803,14 @@ test("source: the source of list.plan is under 60000 bytes and answers an add as
   expect(run(add).state.prodotti).toHaveLength(4);
 });
 
-test("source: the run-time text is at most 50600 bytes", () => {
+test("source: the run-time text is at most 56300 bytes", () => {
   // kit/build.js leaves out each text that only the compile step reads (dsl.js MESSAGES), so each source has room to grow.
   // The Table and the mark of a Chart of the data forms (block 2 plan, stage 5) took the run-time from 49364 to about 50400 bytes,
-  // and the comparison and the source line of the look round to about 50580 bytes.
-  expect(bytes(runtime.text)).toBeLessThanOrEqual(50600);
+  // and the comparison and the source line of the look round to about 50580 bytes. The shape kinds path, arrow, and arc, and the
+  // gradient, glow, opacity, turn, and group of stage 6 (L2) draw at run time, and took it to about 56070 bytes. The library draws no catalog at run time.
+  // The picture of an image entry (stage 6, I4) is one more kind at run time, about 100 bytes.
+  expect(bytes(runtime.text)).toBeLessThanOrEqual(56300);
+  for (const word of ["thermometer", "right_triangle", "the library has no"]) expect([word, runtime.text.includes(word)]).toEqual([word, false]);
   // The icon names of the host (src/icons.js) and the values of the look options (check.js) are compile-side data.
   for (const word of ["Stethoscope", "headline", "Rocket"]) expect([word, runtime.text.includes(word)]).toEqual([word, false]);
 });
