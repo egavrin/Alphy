@@ -254,6 +254,11 @@ internal val DIALOGUES = listOf(
     // The phrases are of the macOS voice Milena, as ux-steps has them.
     research("ux-data", "Сравни Землю и Марс", "Покажи планеты таблицей", "Покажи это графиком", "А у какой планеты самый длинный год?",
         "Отметь Марс"),
+    // The motion and diagram dialogues of stage 7 (block 2 plan): each line comes after the narration of the screen before it ended. The
+    // phrases are of the macOS voice Milena, as ux-steps has them.
+    research("ux-motion", "Покажи, как Земля вращается вокруг Солнца", "Пусть она движется сама, без остановки", "Быстрее", "Стоп", "Дальше",
+        "Почему на Земле бывает лето и зима?"),
+    research("ux-eye", "Покажи, как устроен глаз", "Дальше", "Покажи четвёртую часть", "А зачем она нужна?", "Покажи, как устроен вулкан"),
 ).associateBy { it.name }
 
 /** The rule of the kit for a template file (`TEMPLATE_HEAD` in kit/src/template.js), applied to its first line that is not empty. */

@@ -2,7 +2,7 @@
 // run-time (run.js and the modules that it needs) and the compiled data of the app. The run-time answers each event.
 
 import { App, foreground, given, own, shownFormulas } from "./core.js";
-import { show } from "./dsl.js";
+import { DslError, show } from "./dsl.js";
 import { FIELD_KINDS, faultName, needsOf } from "./parts.js";
 import { ALPHY, MAX_ROW_FIELDS, MAX_ROWS, namer, stable } from "./rows.js";
 import { LIMITS, budgetOf, utf8 } from "./draw.js";
@@ -40,7 +40,7 @@ const STORED = { number: "number", count: "number", check: "boolean", switch: "b
 /** Alphy declares at most 4 surfaces (ToolSpec). */
 const MAX_SURFACES = 4;
 /** The fields of the change of a value that an animate moves: its start and end values, its start and end times in ms of the host's clock, and its value now. */
-const RUN = { type: "object", fields: { from: "number", to: "number", start: "number", end: "number", at: "number" } };
+const RUN = { type: "object", fields: { from: "number", to: "number", start: "number", end: "number", at: "number", loop: "number" } };
 /** The limits of one reply by their unit in a fault. */
 const UNITS = { commands: "commands", pairs: "coordinate pairs", chars: "text characters", bytes: "bytes", segments: "path segments", stops: "gradient stops" };
 
@@ -165,6 +165,16 @@ export function emit(file) {
     stateSchema[app.anim.field] = { type: "object", fields: Object.fromEntries(app.anim.keys.map(([, inner]) => [inner, RUN])) };
     owners.set(app.anim.field, first);
     if (moved.size > PER_OBJECT) faults.push(`${first}: animate moves ${moved.size} values of the app, and an object of Alphy holds at most ${PER_OBJECT} fields. Animate fewer values`);
+    // A loop of a value whose $/NAME_on starts true runs from the first state (block 2 plan, M1, and spec 9.2): the run-time starts nothing by itself.
+    const loops = [], find = (tree) => {
+      if (!tree || typeof tree !== "object") return;
+      if (tree.k === "call" && tree.name === "animate" && tree.args.length === 4 && kit.state[`${tree.args[0].segs?.[0]}_on`] === true) loops.push(tree);
+      Object.values(tree).forEach(find);
+    };
+    file.of("component").forEach((entry) => find(entry.tree));
+    for (const tree of new Map(loops.map((one) => [show(one.args[0]), one])).values()) {
+      try { kit.act(tree, {}); } catch (failure) { if (!(failure instanceof DslError)) throw failure; faults.push(`${owners.get(app.anim.field)}: ${failure.message}`); }
+    }
   }
   // A model with a turn gets the pointer events of its surface: the drag that runs (drag.js IDLE) is one field of the state.
   const turned = file.of("component").find((entry) => entry.tree.k === "call" && entry.tree.name === "Model3d" && given(entry.tree).bind);

@@ -114,12 +114,12 @@ test("aRightRefusalOfAChangeCountsAsOnlyChangedLines", () => {
 });
 
 test("overLimitHoldsBothCaps", () => {
-  // The owner raised both caps by 2000 on 2026-11-22 (block 2 plan, stage 5).
-  expect([check.LIMIT, check.TEMPLATE_LIMIT]).toEqual([2689, 2150]);
+  // The owner raised both caps by 2000 on 2026-11-22 (block 2 plan, stage 5), and the dispatch of stage 7 raised both by 200.
+  expect([check.LIMIT, check.TEMPLATE_LIMIT]).toEqual([2889, 2350]);
   const entries = (count, label) => Array.from({ length: count }, () => [label, "2026-11-21T00:00:00.000Z"]);
-  const full = entries(2689, "final-terra-low d-moon low");
+  const full = entries(2889, "final-terra-low d-moon low");
   expect([check.overLimit(full, "tpl-tune t-ship low"), check.overLimit(full, "fresh-terra-low e-bmi-en low"), check.overLimit(full.slice(1), "fresh-terra-low e-bmi-en low")]).toEqual([true, true, false]);
-  const templates = [...entries(525, "final-terra-low d-moon low"), ...entries(2150, "tpl-tune t-ship low")];
+  const templates = [...entries(525, "final-terra-low d-moon low"), ...entries(2350, "tpl-tune t-ship low")];
   expect([check.overLimit(templates, "tpl-final u-x low"), check.overLimit(templates, "fresh-terra-low e-bmi-en low"), check.overLimit(templates.slice(0, -1), "tpl-final u-x low")]).toEqual([true, false, false]);
 });
 
@@ -210,4 +210,44 @@ test("theDataNumbersCountCleanFilesInventedValuesAndFalseRejects", () => {
   expect(numbers.notFitting).toEqual(["d nodata", "e nodata", "g nodata"]);
   expect(check.dataNumbers([record("i", "data", "clean0", "nodata", ["1234"])]).falseRejects).toBe(0);
   expect(check.dataNumbers([{ ...record("j", "data", "clean0", "nodata", ["12"]), check: { excerpts: "1,2 км" } }])).toMatchObject({ invented: 0, falseRejects: 1 });
+});
+
+// ---- Motion and diagrams (block 2 plan, stage 7).
+
+test("the motion sets hold 10 and 20 requests, the held-out set has the mix of the dispatch, and a change item gets its base", () => {
+  const tuning = check.templateSet("P"), final = check.templateSet("Q"), count = (items, kind, more = () => true) => items.filter((item) => item.kind === kind && more(item)).length;
+  expect([tuning.length, final.length]).toEqual([10, 20]);
+  // 3 first screens with motion, 3 spoken changes of a still scene to motion, 4 diagrams with an entry, 2 with no entry, and 8 with neither.
+  expect([count(final, "motion"), count(final, "change"), count(final, "diagram", (item) => item.entry), count(final, "diagram", (item) => !item.entry), count(final, "still")]).toEqual([3, 3, 4, 2, 8]);
+  expect(final.find((item) => item.kind === "change" && item.request === "Пусть она движется сама, без остановки.").base).toBe("orbit.plan");
+  const examples = [...prompts.PROMPT.Template.matchAll(/^Request: (.*)$/gm)].map(([, request]) => request);
+  expect(final.filter((item) => [...tuning.map((one) => one.request), ...examples].includes(item.request))).toEqual([]);
+  expect(new Set([...tuning, ...final].map((item) => item.id)).size).toBe(30);
+  for (const item of [...tuning, ...final]) {
+    expect([item.id, item.kind === "change" ? "lines" : ["template", "outside"].includes(item.expect) ? item.expect : null]).toEqual([item.id, item.expect]);
+    expect([item.id, item.kind === "change"]).toEqual([item.id, Boolean(item.plan)]);
+  }
+});
+
+test("a motion record names whether its file is a template file, has play, and is a diagram", async () => {
+  const orbit = readFileSync(new URL("./fixtures/template-bases/orbit.plan", import.meta.url), "utf8");
+  const moving = ['play = play("Движение", 0, 360, 12)', 's3 = use("earth", 150 + 110 * cos($/t), 150 - 110 * sin($/t), 36)'].join("\n");
+  const { ask } = fake(moving);
+  const item = { id: "q-orbit-moves", set: "Q", kind: "change", base: "orbit.plan", request: "Пусть она движется сама, без остановки.", expect: "lines", plan: orbit };
+  const record = check.motionOf(item, await check.checkTemplateChange(item, { ask, model: "m", effort: "low" }));
+  expect([record.outcome, record.kind, record.template, record.play, record.diagram]).toEqual(["clean0", "change", true, true, false]);
+  const heart = 'scene("Сердце", lang="ru")\ncontrol = parts("Часть")\ns1 = use("heart", 150, 150, 220)\n';
+  const diagram = check.motionOf({ ...screen, set: "Q", kind: "diagram", entry: true }, (await screenOf({ ...screen, set: "Q" }, heart)).record);
+  expect([diagram.outcome, diagram.template, diagram.play, diagram.diagram, diagram.entry]).toEqual(["clean0", true, false, true, true]);
+  const refused = check.motionOf({ ...screen, set: "Q", kind: "still", expect: "outside" }, (await screenOf({ ...screen, set: "Q", expect: "outside" }, 'outside("learn")')).record);
+  expect([refused.template, refused.play, refused.diagram]).toEqual([false, false, false]);
+  // A record of an item with no kind stays as it is.
+  expect(check.motionOf(screen, { outcome: "clean0" })).toEqual({ outcome: "clean0" });
+});
+
+test("the numbers of the motion gate count clean files, motion files with play, diagrams with parts, and still files that move", () => {
+  const record = (id, kind, outcome, more = {}) => ({ id, kind, outcome, expect: "template", firstCallMs: 1000, template: outcome !== "outside", play: false, diagram: false, ...more });
+  const numbers = check.motionNumbers([record("a", "motion", "clean0", { play: true }), record("b", "change", "clean1", { play: true }), record("c", "motion", "outside"),
+    record("d", "diagram", "clean0", { diagram: true }), record("e", "diagram", "clean0"), record("f", "still", "clean0", { play: true }), record("g", "still", "outside", { expect: "outside" })]);
+  expect(numbers).toMatchObject({ size: 7, cleanFirst: 5, motion: 3, motionPlay: 2, diagram: 2, diagramParts: 1, stillMoved: ["f"], medianFirstCallMs: 1000 });
 });

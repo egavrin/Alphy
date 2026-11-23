@@ -15,12 +15,15 @@ import { BUDGET, HEIGHT, SENTENCE_END, TEMPLATE_HEAD, WIDTH, colorFault, colored
 import { FORMS_BY_WORD } from "./forms.js";
 import { DATA_WORDS, checkedValues, numbersIn, rejectFile, sourceFault } from "./form-data.js";
 import { missOf } from "./library.js";
+import { diagramOf } from "./form-scene.js";
 
 export { BUDGET, TEMPLATE_HEAD } from "./form-base.js";
 
 export const isTemplateFile = (text) => typeof text === "string" && TEMPLATE_HEAD.test(text.split("\n").find((line) => line.trim()) ?? "");
 
 const readsV = (node) => node.k === "path" && node.abs && node.segs.length === 1 && node.segs[0] === "v";
+/** The value of a play line (block 2 plan, M1): $/t, which a part reads beside $/v. */
+const readsT = (node) => node.k === "path" && node.abs && node.segs.length === 1 && node.segs[0] === "t";
 
 /** A line of a template file or of a reply: {name, raw}, a first line with head, a delete as {gone}, or null for a line with no name. $/v is the line control. */
 function lineOf(raw) {
@@ -33,7 +36,7 @@ const NARRATION = /^say(?:[1-9]\d*)?$/;
  * The place of each kind of line in the fixed order. The narration lines come last. The head of a table and the things of a compare come before
  * the rows, and the source line of a data form, which the host writes, comes after the card.
  */
-const rank = (name, word) => (name === word ? 0 : name === "control" ? 1 : name === "head" || /^t[1-3]$/.test(name) ? 1.5 : name === "card" ? 3 : name === "source" ? 3.5
+const rank = (name, word) => (name === word ? 0 : name === "control" ? 1 : name === "play" ? 1.2 : name === "head" || /^t[1-3]$/.test(name) ? 1.5 : name === "card" ? 3 : name === "source" ? 3.5
   : NARRATION.test(name) ? 4 : 2);
 /**
  * A narration line: its sentence with each run of space as one space, cut to BUDGET.say, as say = "<JSON string>", so the host reads it as JSON.
@@ -56,6 +59,8 @@ function narrationOf(name, raw) {
 export function readTemplate(text) {
   const [first = "", ...rest] = text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#")), word = TEMPLATE_HEAD.exec(first)?.[1], form = FORMS_BY_WORD[word];
   const faults = [], lines = [], misses = [], fault = (name, message) => { faults.push(`${name}: ${message}`); return message; };
+  // A part reads $/t only beside a play line of a scene.
+  const playing = Boolean(form.playFault) && rest.some((raw) => lineOf(raw)?.name === "play"), read$ = (node) => readsV(node) || (playing && readsT(node));
   const read = (raw, parse) => { try { return parse(raw.trim()); } catch (failure) { if (failure instanceof DslError) return failure; throw failure; } };
   const head = read(first, parseExpression), headless = head instanceof DslError ? head.message : headFault(head, word, form.head) ?? form.headFault?.(head) ?? null;
   if (headless) fault(word, headless);
@@ -71,19 +76,20 @@ export function readTemplate(text) {
       lines.push({ name, raw: kept ?? raw.trim(), tree: kept && { k: "lit", v: name } });
       continue;
     }
-    if (name !== "control" && name !== "card" && !form.part.test(name) && !(name === "source" && form.family)) { fault(name, `the template ${word} has no line ${name}. Its lines are ${form.lines}`); continue; }
+    if (name !== "control" && name !== "card" && !form.part.test(name) && !(name === "source" && form.family) && !(name === "play" && form.playFault)) { fault(name, `the template ${word} has no line ${name}. Its lines are ${form.lines}`); continue; }
     if (lines.some((line) => line.name === name)) { fault(name, `this is a second line ${name}. Each line has its own name`); continue; }
     const entry = read(raw, parseLine);
     let tree = entry instanceof DslError ? null : entry.tree, message = entry instanceof DslError ? entry.message : null, source = raw.trim();
     if (missOf(tree)) misses.push(missOf(tree));
     if (tree && name === "control") message = entry.kind === "state" ? (isText(tree) || numberOf(tree) !== undefined ? null : "$/v = VALUE takes a number or a text in quotes") : form.controlFault(tree);
+    else if (tree && name === "play") message = form.playFault(tree);
     else if (tree) {
       // The kept line has the cut text, so the stored file and a later change have it too.
       const long = cutLong(tree, name, word), short = form.cut ? form.cut(long, name) : long;
       if (show(short) !== show(tree)) { tree = short; source = `${name} = ${show(tree)}`; }
-      const shape = name !== "card" && word === "scene", path = nodesIn(tree, (node) => node.k === "path" && !readsV(node))[0];
+      const shape = name !== "card" && word === "scene", path = nodesIn(tree, (node) => node.k === "path" && !read$(node))[0];
       message = (name === "card" ? form.cardFault(tree) : name === "source" ? sourceFault(tree) : form.partFault(tree, head?.named?.lang?.v))
-        ?? (path ? `a line reads only $/v, the value of the control, and this line reads ${show(path)}` : null);
+        ?? (path ? `a line reads only $/v, the value of the control${playing ? ", and $/t, the value of play" : ""}, and this line reads ${show(path)}` : null);
       if (shape && !message) message = colorFault(tree = colored(tree));
       // The choice of items shows their labels, so it cannot tell two items of one label apart.
       const twin = !message && word === "items" && name !== "card" && lines.find((line) => line.tree && FORMS_BY_WORD.items.part.test(line.name) && line.tree.args[0].v === tree.args[0].v);
@@ -120,7 +126,9 @@ export function mergeTemplate(stored, reply) {
     const same = lines.findIndex((one) => (line.head ? one.head : !one.head && one.name === line.name));
     if (same >= 0) { lines[same] = line; continue; }
     const head = last((one) => one.head);
-    lines.splice(line.head ? 0 : part(line) ? Math.max(last(part), last((one) => one.name === "control"), head) + 1 : line.name === "control" ? head + 1 : lines.length, 0, line);
+    const control = last((one) => one.name === "control");
+    lines.splice(line.head ? 0 : part(line) ? Math.max(last(part), control, last((one) => one.name === "play"), head) + 1 : line.name === "control" ? head + 1
+      : line.name === "play" ? Math.max(control, head) + 1 : lines.length, 0, line);
   }
   return lines.map((line) => line.raw).join("\n") + "\n";
 }
@@ -138,6 +146,8 @@ export function checkData(text, { excerpts, site, time }) {
   return { text: mergeTemplate(text, `source = source(${show({ k: "lit", v: site })}, ${show({ k: "lit", v: time })})`), rejected: null };
 }
 
+/** The language of the first line of a template, or "en". */
+const langOf = (read) => read.lines[0].tree?.named?.lang?.v ?? "en";
 /** The parts of a template that are drawn: each part line with no fault that is not left out. */
 const drawnParts = (read, leftOut) => read.lines.filter((line) => line.tree && !leftOut.has(line.name) && FORMS_BY_WORD[read.word].part.test(line.name));
 /**
@@ -151,7 +161,9 @@ function startOf(read, leftOut) {
   try { tree ??= line && parseLine(line.raw)?.tree; } catch { tree = null; }
   // A steps control starts at its answer step, by default the last step (decision 3).
   const start = tree?.k !== "call" ? tree : tree.name === "slider" ? tree.args[4] : tree.name === "choice" ? tree.args[2] ?? tree.args[1]?.items?.[0]
-    : tree.name === "steps" ? tree.args[2] ?? tree.args[1]?.items?.at(-1) : null;
+    : tree.name === "steps" ? tree.args[2] ?? tree.args[1]?.items?.at(-1)
+      // A diagram starts at its first part (C2), or at the start of its line.
+      : tree.name === "parts" ? tree.args[2] ?? { k: "lit", v: diagramOf(drawnParts(read, leftOut), tree, langOf(read)).steps?.[0] ?? "" } : null;
   return isText(start) || numberOf(start) !== undefined ? start : { k: "lit", v: 0 };
 }
 
@@ -161,20 +173,48 @@ function startOf(read, leftOut) {
  * rules as a mismatch (change.js).
  */
 export function expandTemplate(read, leftOut) {
-  const [{ tree: head }] = read.lines, parts = drawnParts(read, leftOut), line = (name) => read.lines.find((one) => one.name === name && one.tree && !leftOut.has(name));
+  const [{ tree: head }] = read.lines, line = (name) => read.lines.find((one) => one.name === name && one.tree && !leftOut.has(name));
+  let parts = drawnParts(read, leftOut);
   if (!head) return null;
-  const control = line("control")?.tree, card = line("card")?.tree, title = show(head.args[0]), form = FORMS_BY_WORD[read.word];
+  const control = line("control")?.tree, title = show(head.args[0]), form = FORMS_BY_WORD[read.word];
+  let card = line("card")?.tree;
   if (form.file) return form.file(head, parts, control, card, line("source")?.tree);
   const out = [`app(${title}, lang=${show(head.named.lang)}, preset="clean", palette=${show(head.named.palette ?? { k: "lit", v: "blue" })})`];
+  // A diagram (G1, C2): the kit names the parts of its object and marks the part of the step, or marks the label of the step of a thing with
+  // no entry. The card shows the name of the part and its sentence. The model writes no label and no condition for it.
+  const diagram = control?.k === "call" && control.name === "parts" ? diagramOf(parts, control, langOf(read)) : null;
+  if (diagram?.steps) {
+    parts = parts.map((part) => (part === diagram.object ? { ...part, tree: { ...part.tree, named: { ...part.tree.named, parts: { k: "lit", v: true }, mark: parseExpression("$/v") } } }
+      : diagram.object ? part : { ...part, tree: markedLabel(part.tree, diagram.steps) }));
+    card = diagramCard(read, diagram.steps, card);
+  }
   // What the form gives in place of the defaults (forms.js TemplateForm expand).
   const own = FORMS_BY_WORD[read.word].expand?.(parts, control, head) ?? {}, shapes = own.shapes ?? parts.map((part) => show(part.tree));
   out.push(...(own.lines ?? []), `need picture = drawing(${title}, ${WIDTH}, ${HEIGHT}, [${shapes.join(", ")}])`);
   const [label, ...args] = control?.args ?? [], start = show(startOf(read, leftOut));
   if (control?.k !== "call") out.push(`$/v = ${control ? show(control) : start}`);
   else if (control.name === "slider") out.push(`need v = input("slider", ${show(label)}, ${start}, min=${show(args[0])}, max=${show(args[1])}, step=${show(args[2])})`);
+  else if (diagram?.steps) out.push(`need v = input("choice", ${show(label)}, ${start}, options=${JSON.stringify(diagram.steps)}, variant="stepper")`);
   else out.push(`need v = input("choice", ${show(label)}, ${start}, options=${show(own.options ?? args[0])})`);
+  const play = line("play")?.tree;
+  if (play) out.push(`need t = ${show(play)}`);
   if (card) out.push(`need card = card(${show(card.args[0])}, ${own.cardText ?? show(card.args[1])})`);
   return out.join("\n") + "\n";
+}
+
+/** A shape of a diagram of a thing with no entry: a text or the label= of a library line that names a step takes the accent while its step shows (G2). */
+function markedLabel(tree, steps) {
+  const step = (node) => isText(node) && steps.includes(node.v) ? node.v : null, when = (name, other) => parseExpression(`$/v == ${JSON.stringify(name)} ? "accent" : ${show(other)}`);
+  if (tree.k === "call" && tree.name === "text" && step(tree.args[2])) return { ...tree, args: tree.args.map((arg, index) => (index === 3 ? when(tree.args[2].v, arg) : arg)) };
+  if (tree.k === "call" && tree.name === "use" && step(tree.named.label)) return { ...tree, named: { ...tree.named, tone: when(tree.named.label.v, tree.named.color ?? { k: "lit", v: "ink" }) } };
+  return tree;
+}
+/** The card of a diagram (C2): the name of the part of the step with a capital first letter, and the sentence of the step, else the card text of the file. */
+function diagramCard(read, steps, card) {
+  const said = (index) => { const raw = read.lines.find((line) => line.name === `say${index + 1}` && line.tree)?.raw; try { return raw && JSON.parse(raw.slice(raw.indexOf("=") + 1)); } catch { return null; } };
+  const pick = (values) => parseExpression(steps.slice(0, -1).reduceRight((rest, step, index) => `($/v == ${JSON.stringify(step)} ? ${JSON.stringify(values[index])} : ${rest})`, JSON.stringify(values.at(-1))));
+  const fallback = card?.args?.[1] && isText(card.args[1]) ? card.args[1].v : null;
+  return { k: "call", name: "card", named: {}, args: [pick(steps.map((step) => step.charAt(0).toUpperCase() + step.slice(1))), pick(steps.map((step, index) => said(index) ?? fallback ?? step))] };
 }
 
 /** The text to store: each line with no fault that is not left out, and $/v = START in the place of a control that is left out or has a fault. */
@@ -188,7 +228,7 @@ const keptOf = (read, leftOut) => read.lines.flatMap((line) => (line.name === "c
  */
 function ownersOf(read, leftOut, faults, build) {
   const owners = new Map(), add = (name, fault) => owners.set(name, [...(owners.get(name) ?? []), `${name}: ${fault.replace(/^need \w+: /, "")}`]), rest = [];
-  for (const fault of faults) /\bneed v\b/.test(fault) ? add("control", fault) : /\bneed card\b/.test(fault) ? add("card", fault) : rest.push(fault);
+  for (const fault of faults) /\bneed v\b/.test(fault) ? add("control", fault) : /\bneed card\b/.test(fault) ? add("card", fault) : /\bneed t\b/.test(fault) ? add("play", fault) : rest.push(fault);
   if (!rest.length) return owners;
   const parts = drawnParts(read, leftOut).map((part) => part.name), alone = (names) => build(expandTemplate(read, new Set([...leftOut, ...owners.keys(), "card", ...names]))).faults;
   FORMS_BY_WORD[read.word].owners?.(owners, alone, parts, add);
@@ -216,13 +256,15 @@ export function buildTemplate(text, stored, build, preview = false) {
     if (back.length) { text = mergeTemplate(text, back.map((line) => line.raw).join("\n")); read = readTemplate(text); faults.push(...read.faults); }
     leftOut = new Set([...read.lines.filter((line) => !line.tree).map((line) => line.name), ...[...out].filter((name) => !back.some((line) => line.name === name))]);
     const control = read.lines.some((line) => line.name === "control" && line.tree?.k === "call") && !leftOut.has("control");
-    if (!preview && control && read.word === "scene" && !read.lines.some((line) => line.tree && line.name !== "control" && !leftOut.has(line.name) && nodesIn(line.tree, readsV).length)) {
+    const walked = read.lines.find((line) => line.name === "control")?.tree?.name === "parts";
+    if (!preview && control && !walked && read.word === "scene" && !read.lines.some((line) => line.tree && line.name !== "control" && !leftOut.has(line.name) && nodesIn(line.tree, readsV).length)) {
       faults.push("control: the control changes nothing on the screen, because no line reads $/v. Make a part read $/v, such as visible=$/v > 2");
       leftOut.add("control");
     }
     // A narration line of the wrong kind is left out with no fault: say beside steps, sayK beside another control, or sayK above the count of steps.
-    const steps = read.lines.find((line) => line.name === "control" && line.tree?.name === "steps" && !leftOut.has("control"))?.tree;
-    const count = !steps ? 0 : read.word === "items" ? drawnParts(read, leftOut).length : steps.args[1].items.length;
+    const steps = read.lines.find((line) => line.name === "control" && ["steps", "parts"].includes(line.tree?.name) && !leftOut.has("control"))?.tree;
+    const count = !steps ? 0 : read.word === "items" ? drawnParts(read, leftOut).length
+      : steps.name === "parts" ? diagramOf(drawnParts(read, leftOut), steps, langOf(read)).steps?.length ?? 0 : steps.args[1].items.length;
     for (const line of read.lines) {
       const index = NARRATION.test(line.name) ? Number(line.name.slice(3)) : NaN;
       if (index === 0 ? steps : index > count) leftOut.add(line.name);

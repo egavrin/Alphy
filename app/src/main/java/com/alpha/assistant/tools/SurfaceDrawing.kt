@@ -70,14 +70,30 @@ internal fun surfaceTextBoxes(commands: JSONArray): List<RectF> = buildList {
     visit(commands)
 }
 
-/** Each surface and group restores the native canvas. Each leaf owns its paint. */
+/** Each surface and group restores the native canvas. Each leaf shape owns its paint, and the images of one pass share one paint. */
 internal fun drawSurfaceFrame(canvas: Canvas,surface: ToolSurface,commands: JSONArray,width: Float,height: Float,roleColors: Map<String,Int>,
-    images: Map<String,Bitmap> = emptyMap()) {
+    images: Map<String,Bitmap> = emptyMap()) = drawSurfaceLayers(canvas,surface,listOf(GlideLayer(commands,1f)),width,height,roleColors,images,Color.TRANSPARENT)
+
+/**
+ * The layers of a glide frame (SurfaceGlide) in their order. A layer below alpha 1 draws in a layer of its alpha, and an opaque layer first
+ * fills the surface with [background], so a cross-fade of a whole picture does not show the old picture through the new one.
+ */
+internal fun drawSurfaceLayers(canvas: Canvas,surface: ToolSurface,layers: List<GlideLayer>,width: Float,height: Float,roleColors: Map<String,Int>,
+    images: Map<String,Bitmap>,background: Int) {
     val saved=canvas.save()
+    // The review of stage 7: one paint for each image draw pass, not one for each image.
+    val imagePaint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     try {
         canvas.scale(width/surface.width,height/surface.height)
         canvas.clipRect(0f,0f,surface.width.toFloat(),surface.height.toFloat())
-        drawSurface(canvas,commands,roleColors,images)
+        for(layer in layers) {
+            if(layer.alpha>=1f) {drawSurface(canvas,layer.commands,roleColors,images,imagePaint);continue}
+            val layerSaved=canvas.saveLayerAlpha(0f,0f,surface.width.toFloat(),surface.height.toFloat(),Math.round(layer.alpha.coerceIn(0f,1f)*255))
+            try {
+                if(layer.opaque) canvas.drawColor(background)
+                drawSurface(canvas,layer.commands,roleColors,images,imagePaint)
+            } finally {canvas.restoreToCount(layerSaved)}
+        }
     } finally {canvas.restoreToCount(saved)}
 }
 /** Compare the selected shapes and their contribution to a bounded reference rendering. */
@@ -159,7 +175,7 @@ internal fun observeSurfaceGeometry(surface: ToolSurface, commands: JSONArray, s
     }
 }
 
-private fun drawSurface(canvas: Canvas,commands: JSONArray,roleColors: Map<String,Int>,images: Map<String,Bitmap>) {
+private fun drawSurface(canvas: Canvas,commands: JSONArray,roleColors: Map<String,Int>,images: Map<String,Bitmap>,imagePaint: Paint) {
     repeat(commands.length()) {index ->
         val c=commands.getJSONObject(index)
         if(c.getString("type")=="group") {
@@ -168,20 +184,20 @@ private fun drawSurface(canvas: Canvas,commands: JSONArray,roleColors: Map<Strin
                 c.optJSONArray("transform")?.let {m ->
                     canvas.concat(Matrix().apply {setValues(floatArrayOf(m.getDouble(0).toFloat(),m.getDouble(2).toFloat(),m.getDouble(4).toFloat(),m.getDouble(1).toFloat(),m.getDouble(3).toFloat(),m.getDouble(5).toFloat(),0f,0f,1f))})
                 }
-                drawSurface(canvas,c.getJSONArray("children"),roleColors,images)
+                drawSurface(canvas,c.getJSONArray("children"),roleColors,images,imagePaint)
             } finally {canvas.restoreToCount(saved)}
             return@repeat
         }
         fun f(key: String)=c.getDouble(key).toFloat()
         if(c.getString("type")=="bitmap") {
             val destination=RectF(f("x"),f("y"),f("x")+f("width"),f("y")+f("height"))
-            drawBitmapCommand(canvas,destination,images[c.getString("resourceId")],roleColors["muted"] ?: Color.GRAY)
+            drawBitmapCommand(canvas,destination,images[c.getString("resourceId")],roleColors["muted"] ?: Color.GRAY,imagePaint)
             return@repeat
         }
         // A picture of the library keeps its own colors in both themes. Until it is decoded, it draws nothing (LibraryImages).
         if(c.getString("type")=="image") {
             images[LibraryImages.key(c.getString("id"))]?.takeUnless(Bitmap::isRecycled)?.let {
-                canvas.drawBitmap(it,null,RectF(f("x"),f("y"),f("x")+f("width"),f("y")+f("height")),Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                canvas.drawBitmap(it,null,RectF(f("x"),f("y"),f("x")+f("width"),f("y")+f("height")),imagePaint)
             }
             return@repeat
         }
@@ -224,11 +240,12 @@ private fun drawSurface(canvas: Canvas,commands: JSONArray,roleColors: Map<Strin
     }
 }
 
-private fun drawBitmapCommand(canvas: Canvas,destination: RectF,image: Bitmap?,ink: Int) {
-    val paint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+private fun drawBitmapCommand(canvas: Canvas,destination: RectF,image: Bitmap?,ink: Int,imagePaint: Paint) {
     if(image!=null && !image.isRecycled) {
-        canvas.drawBitmap(image,null,destination,paint)
+        canvas.drawBitmap(image,null,destination,imagePaint)
     } else {
+        // The mark of a missing image changes the color of its paint, so it keeps a paint of its own.
+        val paint=Paint(Paint.ANTI_ALIAS_FLAG)
         val saved=canvas.save()
         try {
             canvas.clipRect(destination)

@@ -1,0 +1,22 @@
+scene("How a prism splits white light", lang="en", palette="indigo")
+control = steps("Color of the light to follow", ["Violet light", "Indigo light", "Yellow light", "Orange light", "Purple light", "Golden light"], "Violet light")
+play = play("Motion of the light in glass", 0, 360, 8)
+s1 = rect(0, 160, 300, 60, "water", 0)
+s2 = polygon([110, 150, 190, 150, 150, 70], "muted")
+s3 = polygon([110, 150, 190, 150, 150, 70], "ink", stroke=true)
+s4 = line(10, 110, 130, 110, "ink", 3)
+s5 = line(170, 110, 290, 60, "#7c3aed", 3, visible=$/v == "Violet light")
+s6 = line(170, 110, 290, 90, "#4f46e5", 3, visible=$/v == "Indigo light")
+s7 = line(170, 110, 290, 120, "#facc15", 3, visible=$/v == "Yellow light")
+s8 = circle(150 + 20 * cos($/t), 110, 6, "accent")
+s9 = text(150, 14, "White light enters the prism", "ink", 12)
+s10 = text(150, 32, "Each color bends a bit apart", "ink", 12)
+s11 = text(150, 180, "Violet bends the most of all", "surface", 12)
+s12 = text(150, 200, "Red bends least of all hues.", "surface", 12)
+card = card("Refraction splits the colors up.", "White light holds every color. In glass each color slows down by a different amount, so it bends at its own angle and the colors come apart.")
+say1 = "At step 1 the picture shows how the light moves and what it means for the whole of the thing that you seessss."
+say2 = "At step 2 the picture shows how the light moves and what it means for the whole of the thing that you seessss."
+say3 = "At step 3 the picture shows how the light moves and what it means for the whole of the thing that you seessss."
+say4 = "At step 4 the picture shows how the light moves and what it means for the whole of the thing that you seessss."
+say5 = "At step 5 the picture shows how the light moves and what it means for the whole of the thing that you seessss."
+say6 = "At step 6 the picture shows how the light moves and what it means for the whole of the thing that you seessss."

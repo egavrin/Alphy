@@ -53,6 +53,8 @@ data class ToolSpec private constructor(val json: String, val title: String, val
     internal val threeScene: Boolean, internal val sceneAssets: List<ThreeSceneAssetRef>,
     internal val generatedImages: List<GeneratedImage>, internal val lessonImageIntent: ImageIntent?, internal val appFile: String?) {
     internal val canQueueLocalButtons: Boolean get() = !threeScene && capabilities.isEmpty() && collections.length() == 0 && surfaces.isEmpty()
+    /** True for the app file of a kit scene (`scene(`): a template of the dialogue stage (block 2 plan, stage 7). */
+    internal val kitScene: Boolean get() = appFile?.trimStart()?.startsWith("scene(") == true
     /** Typed device results, durable records, navigation, and owned calendar data stay local: the store marks such an app private for good. */
     internal val privateResults: Boolean get() = capabilityResults || collections.length() > 0 ||
         capabilities.any { it in NavigationContract.ids || it in OwnedCalendarContract.ids }

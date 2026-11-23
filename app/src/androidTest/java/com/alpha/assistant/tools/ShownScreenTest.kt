@@ -248,6 +248,79 @@ class ShownScreenTest {
         assertTrue(ShownScreen.of(last, continueLabel = walk.label)!!.controls.none { it.actionId == ShownScreen.CONTINUE_ACTION })
     }
 
+    /** A play scene of the kit (block 2 plan, M1): the Earth goes round the Sun again and again. */
+    private val orbit = """
+        scene("Земля вокруг Солнца", lang="ru", palette="indigo")
+        play = play("Движение", 0, 360, 12)
+        s1 = use("sun", 150, 150, 70)
+        s2 = use("earth", 150 + 110 * cos(${'$'}/t), 150 - 110 * sin(${'$'}/t), 36)
+        card = card("Год — один круг", "Земля обходит Солнце за год.")
+        say = "Смотри, как Земля идёт по кругу."
+    """.trimIndent() + "\n"
+
+    /**
+     * Block 2 plan, M4: the line names the state of the play control, running or stopped, and its speed. Its button and each speed are
+     * controls, so a spoken «быстрее» or «стоп» is one routing press. The speeds are no step. Only a scene with no control line has the play
+     * control (stage 7, fix list 2, H4).
+     */
+    @Test fun theLineHoldsTheStateOfAPlayControl(): Unit = runBlocking {
+        val running = checkNotNull(ShownScreen.of(stored(orbit)))
+        assertEquals(listOf("Пауза", "Движение: Медленно", "Движение: Обычно", "Движение: Быстро"), running.controls.map { it.label })
+        assertEquals(SceneMotion(true, "Обычно"), running.motion)
+        assertNull(running.step)
+        assertEquals("""{"state":"running","speed":"Обычно"}""", data(running).getJSONObject("motion").toString())
+        // After a press of the pause and of the fast speed, the stored UI shows the play button.
+        val stopped = stored(orbit) { state -> state.getJSONObject("t_s").put("on", false).put("sp", "fast") }
+            .let { it.copy(ui = it.ui.replace("\"text\":\"Пауза\"", "\"text\":\"Пуск\"").replace("\"icon\":\"Pause\"", "\"icon\":\"Play\"")) }
+        assertEquals(SceneMotion(false, "Быстро"), ShownScreen.of(stopped)?.motion)
+        assertEquals("Пуск", ShownScreen.of(stopped)?.controls?.first()?.label)
+        assertFalse(data(ShownScreen.of(stored(slider))).has("motion"))
+    }
+
+    /** Stage 7, fix list 2, H4: motion beside steps (the kit fixture m7) has no play row, so the line has only the steps and no motion. */
+    @Test fun motionBesideStepsGivesNoPlayControl(): Unit = runBlocking {
+        val screen = checkNotNull(ShownScreen.of(stored(plan("template/m7"))))
+        assertEquals(listOf("Утро", "День", "Вечер", "Ночь").map { "Время: $it" }, screen.controls.map { it.label })
+        assertNull(screen.motion)
+        assertFalse(data(screen).has("motion"))
+        assertEquals(SceneStep(1, 4, "Утро"), screen.step)
+    }
+
+    /**
+     * Stage 7, fix list 1 (amendment 4): the play part and the stepper add to the line only in a kit scene. The same Pause button and inline
+     * choice in another app, and a course scene choice, give the line of Alpha 22: no motion and no option of a singleChoice.
+     */
+    @Test fun onlyAKitSceneListsItsPlayPartAndItsInlineChoice(): Unit = runBlocking {
+        val scene = stored(orbit)
+        val timer = scene.copy(spec = ToolSpec.parsePersisted(scene.spec).withAppFile("app(\"Секундомер\", lang=\"ru\")\n").json)
+        val other = checkNotNull(ShownScreen.of(timer))
+        assertNull(other.motion)
+        assertFalse(data(other).has("motion"))
+        assertEquals(listOf("Пауза"), other.controls.map { it.label })
+        val course = scene.copy(ui = scene.ui.replace("\"variant\":\"inline\"", "\"variant\":\"scene\""))
+        assertEquals(listOf("Пауза"), checkNotNull(ShownScreen.of(course)).controls.map { it.label })
+    }
+
+    /** Block 2 plan, G3 and C2: the stepper of a diagram is a steps control, so its parts are the steps and each part is a control. */
+    @Test fun aDiagramWalksItsPartsAsSteps(): Unit = runBlocking {
+        val heart = """
+            scene("Как устроено сердце", lang="ru", palette="red")
+            control = parts("Часть", ["полая вена", "правое предсердие", "правый желудочек", "лёгочная артерия"])
+            s1 = use("heart", 150, 150, 220)
+            say1 = "Полая вена приносит кровь от тела."
+            say2 = "Правое предсердие принимает эту кровь."
+            say3 = "Правый желудочек толкает кровь в лёгкие."
+            say4 = "Лёгочная артерия несёт кровь в лёгкие."
+        """.trimIndent() + "\n"
+        val screen = checkNotNull(ShownScreen.of(stored(heart)))
+        assertEquals(SceneStep(1, 4, "полая вена"), screen.step)
+        assertEquals(listOf("полая вена", "правое предсердие", "правый желудочек", "лёгочная артерия"), screen.steps)
+        assertEquals("Часть", screen.stepControl)
+        assertEquals(screen.steps.map { "Часть: $it" }, screen.controls.map { it.label })
+        assertEquals("Лёгочная артерия несёт кровь в лёгкие.", SceneNarration.of(heart).sentence(4))
+        assertTrue(SceneNarration.of(heart).stepped)
+    }
+
     /** Plan "one scene", Task 28 (decision 9): the line keeps the last three actions, oldest first, and a screen with no action has no key. */
     @Test fun theLineKeepsTheLastThreeActions() {
         val actions = listOf(SceneAction("tap", "Фаза", "Вдох"), SceneAction("voice", "Фаза", "Выдох"), SceneAction("narrator", "Фаза", "Пауза"),

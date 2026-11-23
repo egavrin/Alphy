@@ -240,6 +240,25 @@ Diagram (spec 11.2):
 - Model check: at most 80 template calls.
 - Live check: at most 600 s of voice, 60 chat calls, and $0.10 of Decisions calls. Dialogues: `uxOrbit`, `uxTap`, `uxLesson`, `uxHeart`, and one new dialogue of a diagram (the parts of the eye).
 
+## Changes of 2026-11-23, after Alpha 22
+
+Each is a Requirement. The owner saw them with a moving sample of the look and answered «Yes, built it». The sample is not in Git: `evidence/design-target-2026-11-22/stage-7-sample/`. Where a line here differs from the lists above, this line holds.
+
+- **C1. Smooth motion.** Before this stage, the kit moves a value with a timer of 50 ms, which is 20 pictures each second. A `play` scene with image objects shows at least 30 different pictures each second. New gate: the host counts the pictures of a `play` scene with two images for 5 s on the emulator.
+- **C2. The diagram reuses Alpha 22.** Alpha 22 names each part of a ready object and marks one part. Stage 7 adds the walk over the parts and a control for it.
+  - The control is a number stepper: a button for the part before, the count («2 из 7»), and a button for the next part. It shows no part name.
+  - The name of a step is the name of the part in the entry, in the language of the screen. The model writes no label and no condition for the mark of a part of an entry. Basis: a part name can be longer than a label cap («правое предсердие» has 17 characters), and the live check of stage 6 showed a failed repair of such labels.
+  - A diagram has up to 8 steps. Each other stepped scene keeps 6. The classifier and its scene text accept 8 steps for a diagram.
+  - The card shows the name of the marked part as its title and the fact of that part as its text.
+- **C3. Motion as a change.** A spoken request for motion on a still scene that shows gives changed lines of the same scene, not `outside`. Basis: «Пусть она движется сама, без остановки» in the live check of stage 6 built a full app in 43 s and in 54 s. The model check has 3 of its 6 motion requests as such changes.
+- **C4. The size of the run-time.** Each app source holds the kit run-time: 56,297 of 65,536 bytes at Alpha 22. The run-time of this stage has at most 57,800 bytes. The test of six formula lines for one element keeps 24 of 33 elements or more.
+- **C5. Gates with motion.** The stream gate gets a file with an image object. The fit gate gets a `play` scene and a diagram with 8 parts, each with the longest permitted texts.
+- **C6. «дальше».** In a scene with steps, «дальше» moves to the next step, as in Alpha 20. In a `play` scene with no steps, it starts the motion again after «стоп».
+- **C7. A scene that no person sees does not run.** The motion stops when the stage leaves the screen, and it runs again when the stage is back.
+- **G2, as built (fix list 2).** The free diagram is not built in this stage: a diagram walks the parts of a ready object, and a thing with no ready object gets steps, as in Alpha 22. The play row shows only in a scene with no control line, so in a scene with steps «стоп» and «быстрее» get a spoken answer and no press.
+- **Known limit.** A command spoken while the voice narrates can get no reaction from the voice model (a fault carried from Alpha 21). This stage does not correct it. A tap on the control always works.
+- **Working budget**, from the spend of stage 6: at most 160 template calls, 1,200 s of voice, and 120 chat calls.
+
 ---
 
 ## After the block

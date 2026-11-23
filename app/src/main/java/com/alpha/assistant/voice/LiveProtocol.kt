@@ -73,8 +73,11 @@ internal object LiveProtocol {
             .apply { if (triggers != null) put("triggers", triggers) })
         .toString()
 
-    /** The largest step count of a steps control of the kit (BUDGET.options of kit.js), so the step choices are 1 to this and none. */
-    const val MAX_STEPS = 6
+    /**
+     * The largest step count of a stepped control of the kit, so the step choices are 1 to this and none: a diagram walks up to 8 parts
+     * (BUDGET.parts of form-base.js, block 2 plan, C2), and a steps control has up to 6 (BUDGET.options).
+     */
+    const val MAX_STEPS = 8
     const val USER_COMMAND = "user_command"
     const val USER_STEP = "user_step"
     const val SPOKEN_STEP = "spoken_step"

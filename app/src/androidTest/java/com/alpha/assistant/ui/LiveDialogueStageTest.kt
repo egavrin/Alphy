@@ -88,6 +88,11 @@ class LiveDialogueStageTest {
     // The data dialogue of stage 5 (block 2 plan, L1). Paid: the controller runs it in the live check.
     @Test fun uxData() = live("ux-data", "uxData")
 
+    // The motion and diagram dialogues of stage 7 (block 2 plan). Paid: the controller runs them in the live check.
+    @Test fun uxMotion() = live("ux-motion", "uxMotion")
+
+    @Test fun uxEye() = live("ux-eye", "uxEye")
+
     // The speed dialogues of the paired run of each stage (plan 2026-11-22, the speed form): one probe step each.
     @Test fun speedHeart() = live("speed-heart", "speedHeart")
 

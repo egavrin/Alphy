@@ -160,7 +160,10 @@ class StagePreviewCostTest {
     }
 
     private companion object {
-        /** The example files of the plan (Global Constraints): a scene, items, and cells, and a table and a chart at their caps (block 2 plan, stage 5). */
-        val FILES = listOf("ship", "word-parts", "majority", "table-caps", "chart-caps")
+        /**
+         * The example files of the plan (Global Constraints): a scene, items, and cells, a table and a chart at their caps (block 2 plan, stage 5),
+         * and a play scene with image objects (C5).
+         */
+        val FILES = listOf("ship", "word-parts", "majority", "table-caps", "chart-caps", "orbit")
     }
 }

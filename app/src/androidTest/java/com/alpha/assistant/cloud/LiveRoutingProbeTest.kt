@@ -1,10 +1,15 @@
 package com.alpha.assistant.cloud
 
 import com.alpha.assistant.data.MessageProvenance
+import com.alpha.assistant.tools.SceneMotion
+import com.alpha.assistant.tools.SceneStep
 import com.alpha.assistant.tools.ShownControl
 import com.alpha.assistant.tools.ShownScreen
+import com.alpha.assistant.tools.appfile.plan
 import com.alpha.assistant.tools.liveChatModel
 import com.alpha.assistant.tools.liveCheck
+import com.alpha.assistant.ui.STEPS
+import com.alpha.assistant.ui.STEP_CONTROL
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -24,10 +29,18 @@ class LiveRoutingProbeTest {
     @Test fun compareEmpty() = check(CASES.filter { it.name == "compareEmpty" })
     @Test fun heartEmpty() = check(CASES.filter { it.name == "heartEmpty" })
     @Test fun nextStep() = check(CASES.filter { it.name == "nextStep" })
+    /**
+     * The spoken commands of motion (stage 7, fix list 1, F6): on the running and the stopped orbit, each command presses its control of the
+     * play part. «Дальше» on a stepped scene with no motion presses the next step, and «Стоп» and «Быстрее» on a still scene press nothing.
+     */
+    @Test fun motionCommands() = check(MOTION_CASES)
 
-    /** [kinds] are the kinds that pass, and [family] the family that passes, or null when the family does not count. */
+    /**
+     * [kinds] are the kinds that pass, and [family] the family that passes, or null when the family does not count. With [control], only a
+     * press of that control passes.
+     */
     private class Case(val name: String, val user: String, val screen: ShownScreen?, val kinds: Set<String>, val family: String?,
-        val context: List<CloudTurn> = emptyList())
+        val context: List<CloudTurn> = emptyList(), val control: String? = null)
 
     private fun check(cases: List<Case>) = liveCheck("LiveRoutingProbeTest", missing = { null }, model = { it.liveChatModel() }) { account, model ->
         var calls = 0
@@ -35,7 +48,7 @@ class LiveRoutingProbeTest {
         val rows = JSONArray()
         for (case in cases) repeat(RUNS) { run ->
             val row = JSONObject().put("case", case.name).put("run", run + 1)
-                .put("expected", "${case.kinds.joinToString("|")} family=${case.family ?: "any"}")
+                .put("expected", "${case.kinds.joinToString("|")} family=${case.family ?: "any"}" + (case.control?.let { " control=$it" } ?: ""))
             rows.put(row)
             // A run can take a correction call, so the probe stops one call before the cap.
             if (calls >= CAP - 1) { row.put("got", JSONObject.NULL).put("pass", JSONObject.NULL).put("failure", "cap"); return@repeat }
@@ -52,7 +65,8 @@ class LiveRoutingProbeTest {
             }
             row.put("got", decision?.let { "${it.kind} family=${it.family}" } ?: JSONObject.NULL)
                 .put("brief", decision?.brief ?: JSONObject.NULL).put("text", decision?.text ?: JSONObject.NULL)
-                .put("pass", decision != null && decision.kind in case.kinds && (case.family == null || decision.family == case.family))
+                .put("pass", decision != null && decision.kind in case.kinds && (case.family == null || decision.family == case.family) &&
+                    (case.control == null || decision.brief == case.control))
                 .put("failure", (failure as? CloudFailure)?.code ?: failure?.javaClass?.simpleName ?: JSONObject.NULL)
         }
         JSONObject().put("httpCalls", calls).put("rows", rows).toString()
@@ -86,5 +100,29 @@ class LiveRoutingProbeTest {
             Case("heartEmpty", "Объясни, как работает сердце", null, setOf("screen"), "explain"),
             Case("nextStep", "Дальше", STEPS_SCENE, setOf("press"), null, SHIP_TALK),
         )
+        /** The orbit of the kit fixtures, running or stopped at the normal or the slow speed, as `ShownScreen.of` gives it. */
+        fun orbit(running: Boolean, speed: String = "Обычно") = ShownScreen("scene", "Земля вокруг Солнца", plan("template/orbit"),
+            listOf(ShownControl(if (running) "Пауза" else "Пуск", "t_on", null)) + SPEEDS.map { ShownControl("Движение: $it", "t_sp", it) },
+            listOf("Движение" to speed), motion = SceneMotion(running, speed))
+        val SPEEDS = listOf("Медленно", "Обычно", "Быстро")
+        val ORBIT_TALK = listOf(CloudTurn("user", "Покажи, как Земля вращается вокруг Солнца"), CloudTurn("assistant", "Смотри, как Земля идёт по кругу."))
+        val MOTION_CASES get() = listOf(
+            Case("fasterRunning", "Быстрее", orbit(true), setOf("press"), null, ORBIT_TALK, "Движение: Быстро"),
+            Case("slowerRunning", "Медленнее", orbit(true), setOf("press"), null, ORBIT_TALK, "Движение: Медленно"),
+            Case("stopRunning", "Стоп", orbit(true), setOf("press"), null, ORBIT_TALK, "Пауза"),
+            Case("nextStopped", "Дальше", orbit(false), setOf("press"), null, ORBIT_TALK, "Пуск"),
+            Case("continueStopped", "Продолжай", orbit(false), setOf("press"), null, ORBIT_TALK, "Пуск"),
+            Case("slowerAtSlowest", "Медленнее", orbit(true, "Медленно"), setOf("answer"), null, ORBIT_TALK),
+            Case("nextStepNoMotion", "Дальше", STEPS_SCENE, setOf("press"), null, SHIP_TALK, "$STEP_CONTROL: ${STEPS[1]}"),
+            Case("stopStill", "Стоп", SCENE, setOf("answer"), null, PLANETS_TALK),
+            Case("fasterStill", "Быстрее", SCENE, setOf("answer", "refine"), null, PLANETS_TALK),
+            // H4 (stage 7, fix list 2): motion beside steps has no play row, so the line has no motion field, and «стоп» presses nothing.
+            Case("stopBesideSteps", "Стоп", M7_SCENE, setOf("answer"), null, M7_TALK),
+        )
+        val M7_STEPS = listOf("Утро", "День", "Вечер", "Ночь")
+        /** The kit fixture m7 (steps with motion), as `ShownScreen.of` gives it: the steps and no motion. */
+        val M7_SCENE get() = ShownScreen("scene", "Почему день сменяет ночь", plan("template/m7"), M7_STEPS.map { ShownControl("Время: $it", "v_field", it) },
+            listOf("Время" to "Утро"), SceneStep(1, M7_STEPS.size, "Утро"), stepControl = "Время", steps = M7_STEPS)
+        val M7_TALK = listOf(CloudTurn("user", "Почему день сменяет ночь?"), CloudTurn("assistant", "Утром город выходит из тени на свет."))
     }
 }

@@ -164,5 +164,6 @@ test("the host check reads numbers by their digits", () => {
 
 test("V4: the step choices of the classifier cover the option cap of the kit (LiveProtocol.MAX_STEPS)", () => {
   const protocol = readFileSync(new URL("../../app/src/main/java/com/alpha/assistant/voice/LiveProtocol.kt", import.meta.url), "utf8");
-  expect(Number(/val MAX_STEPS = (\d+)/.exec(protocol)?.[1])).toBe(BUDGET.options);
+  // A diagram walks up to BUDGET.parts steps, more than the options of a steps control (block 2 plan, C2).
+  expect(Number(/val MAX_STEPS = (\d+)/.exec(protocol)?.[1])).toBe(Math.max(BUDGET.options, BUDGET.parts));
 });

@@ -172,24 +172,27 @@ The request above asks for a change of your app file. Write each line that chang
 
 You fill a ready screen for a talk between a person and a voice assistant. The voice gives the answer in words, and the screen shows the thing itself, with few words: one picture, one control that changes the picture, and one card.
 Reply with the lines of the screen only: plain lines, one item on each line, no line break inside an item, no markdown, no comments, no explanation. In each example below, the reply is the lines between the two fence lines.
-Each line is complete by itself and starts with its name. The order of the lines is fixed: the first line, the control, the parts of the picture, the card, then the narration lines. Write one line for each part.
+Each line is complete by itself and starts with its name. The order of the lines is fixed: the first line, the control, the play line, the parts of the picture, the card, then the narration lines. Write one line for each part.
 Write every visible text in the language of the request. Write each text in quotes, also an option. A number has no quotes.
 
 When the person asks to explain or to show a thing, fill a template, also when the person asks for it in steps.
 When the person asks to learn or to practice a thing with a check (a test, a quiz, questions, or tasks to solve), a timer, a list, a form, or a game, reply with the one line outside("learn").
-When the request needs a picture, a photo, a map, a device function, a 3D model, a thing that moves by itself, or any other thing that no template below shows, reply with the one line outside("other").
+When the request needs a picture, a photo, a map, a device function, a 3D model, or any other thing that no template below shows, reply with the one line outside("other").
 
 The first line names the template: scene(TITLE, lang=CODE, palette=PALETTE), or items(...) or cells(...) with the same arguments.
 TITLE: the title of the screen, at most 30 characters. CODE: the two-letter code of the language of the request, such as "en", "de", or "ja". palette= is optional: "teal", "green", "blue", "amber", "orange", "red", "pink", "purple", "indigo", "brown", or "graphite". Choose one that fits the topic.
 The control is the line control = ..., and its LABEL has at most 28 characters. The last line is the card: its TITLE has at most 32 characters, and its TEXT is one to three short sentences, at most 140 characters.
 
 Template scene: a scheme from plain shapes that one control changes, for a thing to understand, such as a motion, a position, a size, a path, a part, or a step that the person picks.
-control = slider(LABEL, MIN, MAX, STEP, START), or control = choice(LABEL, [OPTION, ...], START), or control = steps(LABEL, [STEP, ...], ANSWER)
+control = slider(LABEL, MIN, MAX, STEP, START), or control = choice(LABEL, [OPTION, ...], START), or control = steps(LABEL, [STEP, ...], ANSWER), or control = parts(LABEL, [PART, ...])
+play = play(LABEL, FROM, TO, SECONDS)
 s1 = SHAPE, and so on to s{{shapes}} = SHAPE
 card = card(TITLE, TEXT)
 A slider is a number that the person drags from MIN to MAX in steps of STEP, and START is its start value. A choice has 2 to 6 options, each at most 16 characters (at most 12 with 5 or 6 options), and START is one of them. With no START the first option is the start.
 Steps are a sequence in their order, such as the stages of a process: 2 to 6 steps, each at most 16 characters (at most 12 with 5 or 6 steps). ANSWER is the step that shows the answer best, and the screen starts at it. With no ANSWER the last step is the answer. Use steps for a sequence, and a choice for things with no order.
-s1 to s{{shapes}} are at most {{shapes}} shapes in a box {{width}} wide and {{height}} high. Use as few shapes as show the thing: most pictures need 4 to 8. x goes right and y goes down. At least one shape reads $/v, so that the control changes the picture.
+Parts are a diagram: one thing with each of its parts named, and a walk over the parts, one at a time, in the order of the list. With a ready object with parts in the picture, each PART is a part of its list, or leave the list out to walk all its parts: the kit names each part and marks the part of the step, so write no parts= and no mark=. Use parts only with such an object. With no such object, use steps: one step for each part, with its name in the picture. A scene with parts has no card line: the card shows the name of the part and its narration line.
+Play is a thing that moves by itself, such as an orbit, a swing, a wave, or a wheel: $/t runs from FROM to TO in SECONDS, again and again, from the first state, and the person can stop it and change its speed. SECONDS is at most 120. A scene with play needs no control: add one only when the person also picks a value or a step, and then the motion runs inside each step with no stop and no speeds.
+s1 to s{{shapes}} are at most {{shapes}} shapes in a box {{width}} wide and {{height}} high. Use as few shapes as show the thing: most pictures need 4 to 8. x goes right and y goes down. At least one shape reads $/v, so that the control changes the picture, and with play at least one shape reads $/t. Parts need no $/v.
 Shapes: {{kinds}}. A shape takes {{properties}}. The center of a text is at x, y, and a text in quotes in a shape has at most 28 characters.
 Keep each shape inside the box, and put a text where no shape covers it. The point at angle a on a circle around cx, cy is cx + r * cos(a), cy - r * sin(a). A later shape covers an earlier one.
 color: {{colors}}, a tone of one of them, or "#RRGGBB". +1 to +3 makes a tone lighter, -1 to -3 darker, and @PERCENT see-through, such as "water+1", "land-1", or "accent@40". A thing of the world gets volume from gradient= of a darker tone with radial=1, and a figure of mathematics stays flat. A line or an outline is never "muted".
@@ -212,12 +215,12 @@ card = card(TITLE, TEXT)
 COUNT is the number of cells, a whole number from 2 to 100. START is the number of filled cells at the start, from 0 to COUNT. The screen shows the cells and the text "K / N = P%" under them. cells has no part lines.
 
 Narration: the voice says each narration line word for word while the screen shows it. A narration line is one short spoken sentence in the language of the request, at most 110 characters, with no quote marks inside. A Russian sentence addresses the person with «ты».
-With steps, write say1 = TEXT, and so on to sayN, one sentence for each step in the order of the steps: sayK says what the picture shows at step K.
-With a slider or a choice, write one line say = TEXT: what to move and what to watch.
+With steps or parts, write say1 = TEXT, and so on to sayN, one sentence for each step or part in their order: sayK says what the picture shows at step K, or what part K does.
+With a slider, a choice, or only play, write one line say = TEXT: what to move or what to watch.
 The first state shows the point: the answer step of steps, or a START of a slider that shows the answer.
 
 Formulas:
-$/v is the value of the control: the number of the slider, or the text of the chosen option, such as visible=$/v == "Night". Each number of a shape is a formula, so the shapes follow $/v. A text of the card can also be a formula of $/v, such as a text for each step. A line reads no value other than $/v.
+$/v is the value of the control: the number of the slider, or the text of the chosen option, such as visible=$/v == "Night". Each number of a shape is a formula, so the shapes follow $/v. A text of the card can also be a formula of $/v, such as a text for each step. A line reads no value other than $/v, and $/t of play.
 Numbers, "text", true, false, + - * / %, == != < <= > >=, && || !, test ? a : b, and parentheses. + also joins text. Functions: round(x, digits), floor(x), abs(x), min(a, b), max(a, b), sqrt(x), pow(x, y), sin(degrees), cos(degrees), text(x), fixed(x, digits).
 pow(x, y) is x to the power y. There is no ^ and no **. sin and cos take an angle in degrees: sin(90) is 1, and cos(180) is -1. A value must never divide by zero.
 
@@ -274,6 +277,36 @@ say = "Mueve el control y mira cuántas de cada cien partes de la superficie son
 ```
 
 Example 5
+Request: Show me how a Ferris wheel turns.
+```
+scene("A Ferris wheel turns", lang="en", palette="blue")
+play = play("Turn", 0, 360, 20)
+s1 = polygon([150, 140, 100, 280, 200, 280], "graphite")
+s2 = circle(150, 140, 100, "ink", stroke=true)
+s3 = line(150 + 100 * cos($/t), 140 - 100 * sin($/t), 150 - 100 * cos($/t), 140 + 100 * sin($/t), "ink", 2)
+s4 = line(150 - 100 * sin($/t), 140 - 100 * cos($/t), 150 + 100 * sin($/t), 140 + 100 * cos($/t), "ink", 2)
+s5 = rect(136 + 100 * cos($/t), 132 - 100 * sin($/t), 28, 22, "red", 6)
+s6 = rect(136 - 100 * cos($/t), 132 + 100 * sin($/t), 28, 22, "amber", 6)
+s7 = rect(136 - 100 * sin($/t), 132 - 100 * cos($/t), 28, 22, "green", 6)
+s8 = rect(136 + 100 * sin($/t), 132 + 100 * cos($/t), 28, 22, "teal", 6)
+card = card("Always upright", "The wheel turns around its axle, and each cabin hangs from a pin, so it stays upright the whole way round.")
+say = "Watch a cabin: it goes all the way round, but it never turns upside down."
+```
+
+Example 6
+Request: Из чего состоит мозг?
+Ready objects that may fit this request, for use(NAME, X, Y, SIZE):
+- brain: the brain. Parts: cerebrum, cerebellum, brain_stem
+```
+scene("Из чего состоит мозг", lang="ru", palette="pink")
+control = parts("Отдел", ["cerebrum", "cerebellum", "brain_stem"])
+s1 = use("brain", 150, 150, 220)
+say1 = "Большие полушария думают, помнят и говорят за тебя."
+say2 = "Мозжечок держит равновесие и делает движения точными."
+say3 = "Ствол мозга сам ведёт дыхание и стук сердца."
+```
+
+Example 7
 Request: Устрой мне тест по дорожным знакам.
 ```
 outside("learn")
@@ -290,11 +323,11 @@ The kit found faults in some lines of your screen. A fault starts with the name 
 
 ## Template change
 
-The request above asks for a change of your screen. Write each line that changes and each new line, complete and with its name, and nothing more: a line with the name of an earlier line replaces it, a new part takes the next free name, such as s4 after s3, and delete NAME removes a part. A ready object of the list under the request can replace a shape or join the shapes. Do not write a line that stays as it is. Keep the template and the names of the lines, and keep the caps of the template. When the template cannot hold the change, reply with the one line outside("other"). Reply with lines only.
+The request above asks for a change of your screen. Write each line that changes and each new line, complete and with its name, and nothing more: a line with the name of an earlier line replaces it, a new part takes the next free name, such as s4 after s3, and delete NAME removes a part. A ready object of the list under the request can replace a shape or join the shapes. When the screen is a scene and the person asks that the picture moves by itself, add the line play = play(LABEL, FROM, TO, SECONDS) and write again each shape that moves with $/t. Do not write a line that stays as it is. Keep the template and the names of the lines, and keep the caps of the template. When the template cannot hold the change, reply with the one line outside("other"). Reply with lines only.
 
 ## Template rest
 
-Your reply stopped before its end, and the lines above are the complete lines of your screen so far. Write only the lines that the screen does not hold yet, each complete and with its name, and nothing more: keep the fixed order of the first line, the control, the parts, and the card, and give a new part the next free name, such as s4 after s3. Do not write a line of the screen again. Reply with lines only.
+Your reply stopped before its end, and the lines above are the complete lines of your screen so far. Write only the lines that the screen does not hold yet, each complete and with its name, and nothing more: keep the fixed order of the first line, the control, the play line, the parts, and the card, and give a new part the next free name, such as s4 after s3. Do not write a line of the screen again. Reply with lines only.
 
 ## Template data
 

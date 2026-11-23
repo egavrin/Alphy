@@ -32,7 +32,7 @@ export const ALERT_CAPABILITIES = ["audio.tone", "vibration.play"];
  */
 const MIN_TIMER_MS = 1000, MAX_TIMER_MS = 86400000, TICK_MS = 1000, ANIM_MS = 50;
 /** The change of a value that no animate moves now. */
-const STILL = { from: 0, to: 0, start: 0, end: 0, at: 0 };
+const STILL = { from: 0, to: 0, start: 0, end: 0, at: 0, loop: 0 };
 
 /** The values of the app line: app("Title", lang="en", kind="Lesson", preset="clean", palette="teal"). */
 export function header(kit) {
@@ -86,7 +86,9 @@ const choice = (n, at) => {
   const options = optionsOf(n, at, n.props.value), select = options.length > 6;
   if (!options.length) return null;
   at.inside(options);
-  return { type: select ? "select" : "segmented", ...at.field(), ...(select && iconOf(n)), options };
+  // A variant is a choice of the stage (block 2 plan, stage 7): "inline" with no label of its own, or "stepper" for the parts of a diagram.
+  const variant = n.props.variant;
+  return { type: variant ? "singleChoice" : select ? "select" : "segmented", ...at.field(), ...(select && !variant && iconOf(n)), ...(variant && { variant }), options };
 };
 /**
  * A number field or a slider. Alphy wants min below max, the value from min to max, and a step above 0 that fits the range (ToolUiCatalog).
@@ -472,7 +474,7 @@ export function stateOf(kit, app, shown, stored = {}) {
   for (const field of app.keep ?? []) state[field] = stored[field];
   if (app.anim) state[app.anim.field] = Object.fromEntries(app.anim.keys.map(([root, key]) => {
     const run = kit.state._run?.find((each) => each.path === root);
-    return [key, run ? { from: run.from, to: run.to, start: run.start, end: run.end, at: run.at } : STILL];
+    return [key, run ? { from: run.from, to: run.to, start: run.start, end: run.end, at: run.at, loop: run.loop ?? 0 } : STILL];
   }));
   if (app.drag) state[app.drag] = kit.state._drag ?? IDLE;
   return { ...state, ...shown.views, ...shown.values };

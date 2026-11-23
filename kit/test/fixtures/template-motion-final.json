@@ -1,0 +1,22 @@
+[
+  {"id": "q-moon-orbit", "kind": "motion", "expect": "template", "request": "Покажи, как Луна вращается вокруг Земли."},
+  {"id": "q-pendulum", "kind": "motion", "expect": "template", "request": "Show me how a pendulum swings back and forth."},
+  {"id": "q-wave", "kind": "motion", "expect": "template", "request": "Zeig mir, wie eine Welle über das Wasser läuft."},
+  {"id": "q-orbit-moves", "kind": "change", "base": "orbit.plan", "expect": "lines", "request": "Пусть она движется сама, без остановки."},
+  {"id": "q-clock-runs", "kind": "change", "base": "clock.plan", "expect": "lines", "request": "Make the hands go round by themselves."},
+  {"id": "q-windmill-turns", "kind": "change", "base": "windmill.plan", "expect": "lines", "request": "Lass das Windrad sich von selbst drehen."},
+  {"id": "q-heart", "kind": "diagram", "entry": true, "expect": "template", "request": "Как устроено сердце? Покажи все его части."},
+  {"id": "q-tooth", "kind": "diagram", "entry": true, "expect": "template", "request": "What are the parts of a tooth?"},
+  {"id": "q-lungs", "kind": "diagram", "entry": true, "expect": "template", "request": "Wie ist die Lunge aufgebaut?"},
+  {"id": "q-ear", "kind": "diagram", "entry": true, "expect": "template", "request": "¿Qué partes tiene el oído?"},
+  {"id": "q-volcano", "kind": "diagram", "entry": false, "expect": "template", "request": "Из каких частей состоит вулкан?"},
+  {"id": "q-flower", "kind": "diagram", "entry": false, "expect": "template", "request": "Name the parts of a flower and what each one does."},
+  {"id": "q-sky-blue", "kind": "still", "expect": "template", "request": "Почему небо голубое?"},
+  {"id": "q-lever", "kind": "still", "expect": "template", "request": "How does a lever make a heavy load easier to lift?"},
+  {"id": "q-fraction", "kind": "still", "expect": "template", "request": "Что такое три четверти? Покажи на примере."},
+  {"id": "q-planets", "kind": "still", "expect": "template", "request": "Welche Planeten gibt es im Sonnensystem?"},
+  {"id": "q-iron-ship", "kind": "still", "expect": "template", "request": "¿Por qué flota un barco de hierro?"},
+  {"id": "q-forest", "kind": "still", "expect": "template", "request": "What part of the land on Earth is covered by forest?"},
+  {"id": "q-rainbow", "kind": "still", "expect": "template", "request": "How does a rainbow form?"},
+  {"id": "q-times-test", "kind": "still", "expect": "outside", "request": "Устрой мне тест по таблице умножения."}
+]

@@ -198,12 +198,16 @@ class StageTemplateFitTest {
         return parts
     }
 
-    /** The title (the first text of the first line), the control label, and the card texts of a template file. */
+    /**
+     * The title (the first text of the first line), the control label, and the card texts of a template file. The label of a play line is a
+     * control label too. A diagram has no card line: its card is the first part with a capital first letter and the first narration line (G1).
+     */
     private class Template(file: String) {
         private val lines = file.lines()
         val title = texts(lines.first()).first()
-        val control = lines.singleOrNull { it.startsWith("control = ") }?.let { texts(it).first() }
-        val card = texts(lines.single { it.startsWith("card = ") })
+        val control = lines.firstOrNull { it.startsWith("control = ") || it.startsWith("play = ") }?.let { texts(it).first() }
+        val card = lines.singleOrNull { it.startsWith("card = ") }?.let(::texts)
+            ?: listOf(texts(lines.single { it.startsWith("control = parts(") })[1].replaceFirstChar { it.uppercase() }, texts(lines.single { it.startsWith("say1 = ") }).single())
         private fun texts(line: String) = Regex("\"((?:[^\"\\\\]|\\\\.)*)\"").findAll(line).map { it.groupValues[1] }.toList()
     }
 
@@ -218,7 +222,11 @@ class StageTemplateFitTest {
          */
         val FILES = listOf("scene-caps", "scene-caps125", "items-caps", "items-caps125", "cells-caps", "cells-caps125", "steps-caps", "items-steps-caps",
             // A choice of 4 options, 4 items, and 4 steps at the option cap 16 (fix list 3, H3, and fix list 5, L2).
-            "scene-caps4", "items-caps4", "steps-caps4", "compare-caps", "table-caps", "chart-caps", "nodata-caps")
+            "scene-caps4", "items-caps4", "steps-caps4", "compare-caps", "table-caps", "chart-caps", "nodata-caps",
+            // A play scene and a diagram of 8 parts with the longest permitted texts (block 2 plan, C5).
+            "play-caps", "parts-caps",
+            // Steps and a play control together at the caps (stage 7, fix list 1, F4).
+            "steps-play-caps")
         /** The forms of the data family (block 2 plan, stage 5). */
         val DATA_FORMS = setOf("compare", "table", "chart", "nodata")
     }

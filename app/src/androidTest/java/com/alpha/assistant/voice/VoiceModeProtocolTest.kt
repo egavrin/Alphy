@@ -188,7 +188,8 @@ class VoiceModeProtocolTest {
         assertEquals(listOf("user_command", "user_step"), questions(0).map { it.getString("name") })
         // Block 2 plan, V1: the choice continue walks the rest of the steps.
         assertEquals(listOf("next", "continue", "back", "repeat", "go_to", "none"), choices(questions(0)[0]))
-        val steps = listOf("1", "2", "3", "4", "5", "6", "none")
+        // Block 2 plan, C2: a diagram walks up to 8 parts, so the step choices go to 8.
+        val steps = listOf("1", "2", "3", "4", "5", "6", "7", "8", "none")
         assertEquals(steps, choices(questions(0)[1]))
         assertEquals(listOf("spoken_step"), questions(1).map { it.getString("name") })
         assertEquals(steps, choices(questions(1)[0]))

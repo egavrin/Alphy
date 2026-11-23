@@ -3,6 +3,7 @@ package com.alpha.assistant.ui
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.graphics.Bitmap
+import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alpha.assistant.tools.AgentScriptProvider
 import com.alpha.assistant.voice.FakeLiveTransport
@@ -35,6 +36,43 @@ class StageLibraryLookTest {
         } finally { robot.shell("cmd uimode night $night") }
     }
 
+    /**
+     * The motion pictures of stage 7: the stage holds the scene of library-plans/<lookHold>.plan while the job records the screen with adb.
+     * After the log line "look hold ready", the test waits `-e lookTapGapMs` (1500 by default), then taps each label of `-e lookTaps` (split by
+     * ";") with the same gap. Then it saves the picture look/<lookShot>-<theme>-<size>.png when `-e lookShot` is set, and holds the scene
+     * for `-e lookHoldSeconds` (2 by default). With no `-e lookHold` the test is skipped, so the full suite stays green.
+     */
+    @Test fun holdsOneSceneForTheHost() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val name = arguments.getString("lookHold")
+        assumeTrue("no -e lookHold", name != null)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val text = File(File(context.getExternalFilesDir(null), "library-plans"), "$name.plan").readText()
+        val gap = arguments.getString("lookTapGapMs")?.toLong() ?: 1_500L
+        val fixture = ShellFixture("stage-library-look")
+        val shell = TemplateShell(fixture, robot, FakeLiveTransport())
+        try {
+            shell.live(TemplateTalk(AgentScriptProvider(text))) { _, model, _ ->
+                shell.finalFile(model, shell.screen(model).id)
+                robot.awaitFrames(30)
+                println("look hold ready $name")
+                SystemClock.sleep(gap)
+                // A tap by the shell, not robot.click: the click waits for an idle screen, and a running motion is never idle.
+                for (label in arguments.getString("lookTaps").orEmpty().split(";").filter { it.isNotEmpty() }) {
+                    val box = robot.bounds(label)
+                    robot.shell("input tap ${box.centerX()} ${box.centerY()}")
+                    SystemClock.sleep(gap)
+                }
+                arguments.getString("lookShot")?.let { shot ->
+                    val night = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+                    val size = if (context.resources.configuration.smallestScreenWidthDp < 600) "phone" else "fold"
+                    save(File(File(context.getExternalFilesDir(null), "look").apply { mkdirs() }, "$shot-${if (night) "dark" else "light"}-$size.png"))
+                }
+                SystemClock.sleep((arguments.getString("lookHoldSeconds")?.toLong() ?: 2L) * 1_000)
+            }
+        } finally { shell.remove() }
+    }
+
     /** The stage with the scene [text] after its narration call ended, saved as a picture in [target]. */
     private fun picture(text: String, target: File) {
         val fixture = ShellFixture("stage-library-look")
@@ -45,12 +83,17 @@ class StageLibraryLookTest {
             shell.live(talk) { _, model, _ ->
                 shell.finalFile(model, shell.screen(model).id)
                 robot.awaitFrames(30)
-                val picture = checkNotNull(robot.instrumentation.uiAutomation.takeScreenshot())
-                try {
-                    target.outputStream().use { check(picture.compress(Bitmap.CompressFormat.PNG, 100, it)) }
-                } finally { picture.recycle() }
-                println("look ${target.name}")
+                save(target)
             }
         } finally { shell.remove() }
+    }
+
+    /** The screen as a picture in [target]. */
+    private fun save(target: File) {
+        val picture = checkNotNull(robot.instrumentation.uiAutomation.takeScreenshot())
+        try {
+            target.outputStream().use { check(picture.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        } finally { picture.recycle() }
+        println("look ${target.name}")
     }
 }

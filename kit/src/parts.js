@@ -128,8 +128,10 @@ const PARTS = {
     // The options are a list of values or a map of a value to its label. The host draws a choice of six options or fewer as a segmented control, which shows no icon (run.js).
     const count = (extras.options?.items ?? extras.options?.entries)?.length;
     const icon = extras.icon ? `, icon=${show(extras.icon)}` : "", options = show(extras.options ?? { k: "list", items: [] }), few = (count ?? 9) <= 4;
+    // variant= is a choice of the stage (stage 7): "inline" draws no label of its own, and "stepper" steps through the parts of a diagram.
+    const variant = extras.variant ? `, variant=${show(extras.variant)}` : "";
     let widget;
-    if (k === "choice") widget = `${few ? "Segmented" : "Select"}(${show(title)}, $/${name}, ${options}${icon})`;
+    if (k === "choice") widget = `${few ? "Segmented" : "Select"}(${show(title)}, $/${name}, ${options}${icon}${variant})`;
     else if (k === "toggle") widget = `Toggle(${show(title)}, $/${name}${icon})`;
     else if (k === "text") widget = `TextField(${show(title)}, $/${name}${icon})`;
     else if (k === "choices") widget = `Choices(${show(title)}, $/${name}, ${options}${extras.max ? `, max=${show(extras.max)}` : ""}${icon})`;
@@ -142,6 +144,26 @@ const PARTS = {
       widget = `${pick}(${show(title)}, $/${name}${named}${k === "count" && !extras.step ? ", step=1" : ""})`;
     }
     return { lines: [`$/${name} = ${show(value)}`, `${name}_field = ${widget}`], top: [`${name}_field`] };
+  },
+
+  // need t = play("Motion", 0, 360, 14): a value that runs from 0 to 360 in 14 s, again and again, from the first state (block 2 plan, M1 and
+  // M2). Under the label, a tonal button pauses and plays it, and a choice of three speeds sets the time of one round: slow is two times the
+  // time, and fast is half of it. A pause keeps the value, and a play or a new speed goes on from it (core.js animate with a loop).
+  // Beside a control (need v, the control of a scene), the motion runs from the first state with no play row (stage 7, fix list 2, H4): the
+  // row is hidden, and its button keeps the loop that starts the motion.
+  play(name, need, { word, controlled }) {
+    const [title, from, to, seconds] = need.args, v = `$/${name}`;
+    if (need.args.length !== 4) throw new DslError('play needs a label, a start, an end, and the seconds of one round: play("Motion", 0, 360, 10)');
+    const run = `animate(${v}, ${show(to)}, ${show(seconds)} * (${v}_sp == "slow" ? 2000 : ${v}_sp == "fast" ? 500 : 1000), ${show(from)})`;
+    const speeds = `{slow: ${q(word("Slow"))}, normal: ${q(word("Normal"))}, fast: ${q(word("Fast"))}}`;
+    return {
+      lines: [`${v} = ${show(from)}`, `${v}_on = true`, `${v}_sp = "normal"`, `${name}_label = Text(${show(title)}, emphasis="label")`,
+        // Fix list 1, F2: one row, a round button with the icon only (its text is its spoken name), then the speeds in the rest of the row.
+        `${name}_button = Button(${v}_on ? ${q(word("Pause"))} : ${q(word("Play"))}, action=[toggle(${v}_on), when(${v}_on, ${run}), when(!${v}_on, animate(${v}, ${v}, 0))], variant="tonalIcon", icon=${v}_on ? "Pause" : "Play")`,
+        `${name}_speed = Segmented(${show(title)}, ${v}_sp, ${speeds}, action=when(${v}_on, ${run}), variant="inline", weight=1)`,
+        `${name}_view = Column([${name}_label, Row([${name}_button, ${name}_speed], gap="small")], gap="small"${controlled ? ", visible=false" : ""})`],
+      top: [`${name}_view`],
+    };
   },
 
   // need perPerson = figure("money", "Per person", $/bill / $/people, example=[{bill: 100, people: 4}, 25])
@@ -622,7 +644,7 @@ const PARTS = {
  * button gives each option to its Button, whose own check names each one that a Button does not take.
  */
 const OPTIONS = {
-  input: ["options", "min", "max", "step", "icon"], figure: ["decimals", "example", "icon", "note", "goal", "goalText", "unit"],
+  input: ["options", "min", "max", "step", "icon", "variant"], play: [], figure: ["decimals", "example", "icon", "note", "goal", "goalText", "unit"],
   entries: ["fields", "labels", "rows", "hidden", "add", "edit", "remove", "confirm", "yes", "no", "emptyText", "addText", "show", "reorder", "filter", "sort", "order", "group", "sheet", "icon", "countText", "icons", "tones", "total", "max"],
   chart: ["kind"], deck: ["front", "back", "mark", "answer", "picture", "field", "check", "right", "wrong", "next", "again", "done", "points", "prev", "show", "yes", "no"],
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max", "lessText", "moreText", "addText", "icon", "resetText"],
@@ -632,7 +654,7 @@ const OPTIONS = {
 };
 /** The options that each kind of input uses. A number kind is a number field or a slider, and a kind that is not here is a fault of the need. */
 const NUMBER_USES = ["min", "max", "step", "icon"];
-const INPUT_USES = { number: NUMBER_USES, money: NUMBER_USES, percent: NUMBER_USES, count: NUMBER_USES, range: NUMBER_USES, slider: NUMBER_USES, choice: ["options", "icon"], choices: ["options", "max"], toggle: [], text: ["icon"], date: ["icon"], time: ["icon"] };
+const INPUT_USES = { number: NUMBER_USES, money: NUMBER_USES, percent: NUMBER_USES, count: NUMBER_USES, range: NUMBER_USES, slider: NUMBER_USES, choice: ["options", "icon", "variant"], choices: ["options", "max"], toggle: [], text: ["icon"], date: ["icon"], time: ["icon"] };
 /**
  * The type of the value of an option (G.4). A part reads a flag once when it builds the screen, so a flag is true or false in the line.
  * A number can be a formula, which the kit cannot check here.
@@ -718,7 +740,9 @@ export function expand(file) {
         const tree = needs.find((other) => other.tree.name === "entries" && show(list) === `$/${other.key}`)?.tree.named.emptyText;
         return tree && (read = show(tree));
       };
-      built = part(entry.key, entry.tree, { hero, word, caption, emptyOf, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
+      // shortcut: a need app with an input named v also hides its play row, upgrade to a mark of the template when such an app is real.
+      const controlled = needs.some((other) => other.key === "v" && other.tree.name === "input");
+      built = part(entry.key, entry.tree, { hero, word, caption, emptyOf, controlled, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
       // A part line that the host cannot read is a fault of this need, never an exception. The other needs still expand.
       parsed = built.lines.map((line) => parseLine(line));
       if (parsed.includes(null)) throw new DslError("the part made an empty line");

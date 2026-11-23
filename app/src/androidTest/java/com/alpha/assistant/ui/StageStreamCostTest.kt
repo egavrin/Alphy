@@ -85,8 +85,8 @@ class StageStreamCostTest {
     }
 
     private companion object {
-        /** The example files of design section 1 (Global Constraints), and a table at its caps (block 2 plan, stage 5). */
-        val FILES = listOf("ship", "word-parts", "majority", "table-caps")
+        /** The example files of design section 1 (Global Constraints), a table at its caps (block 2 plan, stage 5), and a play scene with image objects (C5). */
+        val FILES = listOf("ship", "word-parts", "majority", "table-caps", "orbit")
         const val FIRST_MS = 1_700L
         const val LAST_MS = 4_500L
         /** The bar of gate 1b: the stream adds at most 0.3 s to controls on. */

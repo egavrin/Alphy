@@ -13,7 +13,7 @@ internal object SurfaceFrameMetrics {
     data class Snapshot(val sessionId: String,val generation: Long,val engineGeneration: Long,val startedAtNs: Long,
         val observedAtNs: Long,val stoppedAtNs: Long?,val status: String,val acceptedFrames: Long,val samples: List<Sample>,
         val frameRequests: Long,val evaluations: Long,val validatedSnapshots: Long,val submissions: Long,val frameCommits: Long,
-        val commits: List<Commit>,val presentationEvidence: String="UNAVAILABLE")
+        val commits: List<Commit>,val presentationEvidence: String="UNAVAILABLE",val pictures: Long=0,val glideEnds: List<Long> = emptyList())
     fun start(sessionId: String,engineGeneration: Long): Trace=synchronized(lock) {
         current?.stop("REPLACED")
         Trace(sessionId,++generation,engineGeneration).also {current=it}
@@ -35,8 +35,15 @@ internal object SurfaceFrameMetrics {
         private val samples=ArrayDeque<Sample>()
         private val commits=ArrayDeque<Commit>()
         private val touchTimes=linkedMapOf<Long,Long>()
+        // The pictures that the stage drew, each different from the one before it, and the end times of the glides of presses (block 2 plan, C1 and M5).
+        private var pictures=0L
+        private val glideEnds=ArrayDeque<Long>()
         private fun active()=current === this && status=="RUNNING"
         fun requested()=synchronized(lock) {if(active())frameRequests++;Unit}
+        fun pictured()=synchronized(lock) {if(current === this && stoppedAtNs==null)pictures++;Unit}
+        fun glideEnded()=synchronized(lock) {
+            if(current === this && stoppedAtNs==null) {if(glideEnds.size==CAPACITY)glideEnds.removeFirst();glideEnds.addLast(SystemClock.elapsedRealtimeNanos())}
+        }
         fun evaluated(latencyNs: Long)=synchronized(lock) {
             if(active()) {evaluations++;evaluationLatency=latencyNs.coerceAtLeast(0)}
         }
@@ -71,6 +78,7 @@ internal object SurfaceFrameMetrics {
             if(stoppedAtNs==null) {stoppedAtNs=SystemClock.elapsedRealtimeNanos();status=reason}
         }
         internal fun snapshot()=Snapshot(sessionId,generation,engineGeneration,startedAtNs,SystemClock.elapsedRealtimeNanos(),
-            stoppedAtNs,status,validatedSnapshots,samples.toList(),frameRequests,evaluations,validatedSnapshots,submissions,frameCommits,commits.toList())
+            stoppedAtNs,status,validatedSnapshots,samples.toList(),frameRequests,evaluations,validatedSnapshots,submissions,frameCommits,commits.toList(),
+            pictures=pictures,glideEnds=glideEnds.toList())
     }
 }

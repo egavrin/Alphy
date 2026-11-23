@@ -23,8 +23,11 @@ test("theHoldoutSetHas16ExplainAnd8LearnSpokenRequestsWithNewTexts", () => {
 });
 
 test("theChangeSetHas2RequestsOnEachOfThe8BasesAndAtLeast13FitInLines", () => {
-  const items = read("template-changes.json"), bases = readdirSync(BASES).filter((name) => name.endsWith(".plan")).sort();
+  const items = read("template-changes.json"), all = readdirSync(BASES).filter((name) => name.endsWith(".plan")).sort();
+  const bases = [...new Set(items.map((item) => item.base))].sort();
   expect(bases.length).toBe(8);
+  // The other bases are the still scenes of the motion changes of sets P and Q (block 2 plan, stage 7).
+  expect(all.filter((name) => !bases.includes(name))).toEqual(["clock.plan", "orbit.plan", "wheel.plan", "windmill.plan"]);
   expect(items.length).toBe(16);
   expect(new Set(items.map(({ id }) => id)).size).toBe(16);
   for (const { id, base, request, expect: kind } of items) {
@@ -43,7 +46,8 @@ test("the library check has 10 tuning, 20 final, and 10 no-entry requests, and i
   const [tuning, final, free, none] = ["L", "M", "N", "O"].map(templateSet);
   expect([tuning.length, final.length, none.length]).toEqual([10, 20, 10]);
   expect(free.map(({ id, request }) => [id, request])).toEqual(final.map(({ id, request }) => [id, request]));
-  expect(LIBRARY_ARMS).toEqual({ L: "library", M: "library", N: "free", O: "library" });
+  // The motion sets P and Q of stage 7 send the candidates too.
+  expect(LIBRARY_ARMS).toEqual({ L: "library", M: "library", N: "free", O: "library", P: "library", Q: "library" });
   const all = [...tuning, ...final, ...none];
   expect(new Set(all.map(({ id }) => id)).size).toBe(40);
   expect(new Set(all.map(({ request }) => request.trim())).size).toBe(40);

@@ -14,6 +14,8 @@
 //                                                              SET L (library tuning), M (library final, library arm), N (the same requests, free arm), or
 //                                                              O (requests with no entry, library arm) is the check of the library (stage 6, M1): the
 //                                                              library arm sends the candidates of the catalog in the host line, as the app does.
+//                                                              SET P (motion tuning) or Q (motion held-out) is the check of motion and diagrams (block 2
+//                                                              plan, stage 7): screens and changes in one set, library arm. An item with a base is a change.
 //   bun kit/modelcheck.js table LABEL...                       the numbers of each label, from its records; one line for a label of the template check
 // The key is OPENAI_API_KEY, else its line in ~/.env. The script sends it only to api.openai.com, and writes it nowhere.
 // Each call is counted in evidence/modelcheck/spend.json before it is sent. The count never passes LIMIT, and the calls of the labels
@@ -36,11 +38,11 @@ const EVIDENCE = ROOT + "evidence/modelcheck/";
 /**
  * The calls that the owner approved for the model checks: 491 before task P4 (A0, H1, P2, task 2b, and P3), P4 adds at most 32 (its decision 4), and task B1b adds at most 28.
  * The approval of the design of 2026-11-21 (docs/superpowers/specs/2026-11-21-stage-templates-stream-design.md, section 7) adds at most 150 calls of the template check.
- * The owner raised both caps by 2000 on 2026-11-22 (block 2 plan, stage 5). The cap of each stage stays in its dispatch.
+ * The owner raised both caps by 2000 on 2026-11-22 (block 2 plan, stage 5), and the dispatch of stage 7 raised both by 200. The cap of each stage stays in its dispatch.
  */
-export const LIMIT = 2689;
-/** The calls of the template check, the labels that start with tpl-: at most 2150, whatever the calls of the other labels are. */
-export const TEMPLATE_LIMIT = 2150;
+export const LIMIT = 2889;
+/** The calls of the template check, the labels that start with tpl-: at most 2350, whatever the calls of the other labels are. */
+export const TEMPLATE_LIMIT = 2350;
 /** The saved reports of today's agent loop: final-30d43aa, and for the 11 cases that it lacks, the first showcase run of 2026-11-16. */
 const REPORTS = ["/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-17/final-30d43aa/", "/Users/egavrin/Documents/alpha/alphy-agent-evidence-2026-11-16/showcase1/"];
 /** The output limit of the agent call of the app (ToolEngine.kt 131072, capped by OpenAiProfile.maxOutputTokens). */
@@ -82,16 +84,18 @@ const CHANGE_REPAIRS = 1;
  */
 const TEMPLATE_SETS = { T: "template-tuning.json", U: "template-holdout.json", V: "template-changes.json", W: "template-pilot.json",
   X: "template-data-tuning.json", Y: "template-data-final.json",
-  L: "template-library-tuning.json", M: "template-library-final.json", N: "template-library-final.json", O: "template-library-none.json" };
+  L: "template-library-tuning.json", M: "template-library-final.json", N: "template-library-final.json", O: "template-library-none.json",
+  P: "template-motion-tuning.json", Q: "template-motion-final.json" };
 /** The arm of each set of the library check (stage 6, M1): "library" sends the candidates of the catalog in the host line, "free" sends none. */
-export const LIBRARY_ARMS = { L: "library", M: "library", N: "free", O: "library" };
+export const LIBRARY_ARMS = { L: "library", M: "library", N: "free", O: "library", P: "library", Q: "library" };
 const isChangeSet = (set) => set === "V" || set === "W";
 export const isDataSet = (set) => set === "X" || set === "Y";
 /** The expect of a screen item that names only its type, as the items of set U do (stage templates plan, Task 7). */
 const EXPECT_OF_TYPE = { explain: "template", learn: "outside" };
 /**
  * The items of a template set. A screen item is {id, request, expect: "template" | "outside" | "any"}, and a change item of V or W is
- * {id, base, request, expect: "lines" | "outside"}, which gets the text of its base file of test/fixtures/template-bases/ as plan.
+ * {id, base, request, expect: "lines" | "outside"}, which gets the text of its base file of test/fixtures/template-bases/ as plan. Each item of
+ * V and W is a change, and an item of P or Q is a change when it has a base.
  * The read is lazy: a set whose file is missing stops only the run that names it.
  * A screen item with type: "explain" | "learn" and no expect gets the expect of its type (EXPECT_OF_TYPE).
  */
@@ -99,7 +103,7 @@ export function templateSet(name) {
   const at = (path) => new URL(`./test/fixtures/${path}`, import.meta.url);
   if (!existsSync(at(TEMPLATE_SETS[name]))) throw new Error(`set ${name}: kit/test/fixtures/${TEMPLATE_SETS[name]} is missing`);
   return JSON.parse(readFileSync(at(TEMPLATE_SETS[name]), "utf8")).map((item) => ({ ...item, set: name, expect: item.expect ?? EXPECT_OF_TYPE[item.type],
-    ...(isChangeSet(name) && { plan: readFileSync(at(`template-bases/${item.base}`), "utf8") }) }));
+    ...(item.base && { plan: readFileSync(at(`template-bases/${item.base}`), "utf8") }) }));
 }
 /**
  * The records with the expect of their item: a record with no expect takes the one of its item in the file of its set, by its id. The records of
@@ -531,8 +535,39 @@ export function changeNumbers(records) {
 }
 
 /** The groups of the template records: screens to explain, screens to refuse, and changes. A screen of expect any is in no group. */
-const TEMPLATE_GROUPS = { explain: (record) => !isChangeSet(record.set) && record.expect === "template", refusal: (record) => !isChangeSet(record.set) && record.expect === "outside",
-  change: (record) => isChangeSet(record.set) };
+const isChange = (record) => isChangeSet(record.set) || record.kind === "change";
+const TEMPLATE_GROUPS = { explain: (record) => !isChange(record) && record.expect === "template", refusal: (record) => !isChange(record) && record.expect === "outside",
+  change: isChange };
+/**
+ * The record of an item of the motion check (sets P and Q) with what its kept file is: kind and entry of its item, template (a template file
+ * with no fault, or with only a left-out line), play (the file has a play line), and diagram (its control is a parts control).
+ * A record of each other item stays as it is.
+ */
+export function motionOf(item, record) {
+  if (!item.kind) return record;
+  const kept = record.kept ?? "";
+  return { ...record, kind: item.kind, ...(item.entry !== undefined && { entry: item.entry }), template: record.outcome !== "outside" && Boolean(record.kept),
+    play: /^play = play\(/m.test(kept), diagram: /^control = parts\(/m.test(kept) };
+}
+/**
+ * The numbers of the gate of the motion check (block 2 plan, stage 7): the files clean at the first try (clean0, or outside for an item that
+ * expects it), the motion items (screens and changes) whose file is a template file with play, the diagram items whose control is a parts control,
+ * and each item with no motion or diagram whose file has play or parts.
+ */
+export function motionNumbers(records) {
+  const of = (...kinds) => records.filter((record) => kinds.includes(record.kind));
+  const clean = (record) => record.outcome === "clean0" || (record.expect === "outside" && record.outcome === "outside");
+  return { size: records.length, cleanFirst: records.filter(clean).length, motion: of("motion", "change").length, motionPlay: of("motion", "change").filter((record) => record.template && record.play).length,
+    diagram: of("diagram").length, diagramParts: of("diagram").filter((record) => record.template && record.diagram).length,
+    stillMoved: of("still").filter((record) => record.play || record.diagram).map((record) => record.id), medianFirstCallMs: median(records.map((record) => record.firstCallMs)) };
+}
+/** The one line of a label of the motion check. */
+function motionRow(label, records) {
+  const numbers = motionNumbers(records);
+  return `${label} (${records[0]?.prompt}, ${numbers.size} records): clean at the first try ${share(numbers.cleanFirst, numbers.size)}, motion files with play ${share(numbers.motionPlay, numbers.motion)},`
+    + ` diagrams with parts ${share(numbers.diagramParts, numbers.diagram)}, median first call ${numbers.medianFirstCallMs} ms | still with play or parts: ${numbers.stillMoved.join(", ") || "none"}`
+    + ` | ${records.map((record) => `${record.id}:${record.outcome}${record.play ? "+play" : ""}${record.diagram ? "+parts" : ""}`).join(" ")}`;
+}
 /**
  * The numbers of the bars of gate 2 (stage templates plan, Global Constraints) as counts: the explain screens clean after at most one repair, the
  * refusals that got outside, the explain screens that got outside, the median first call of the explain screens in ms, and the changes whose
@@ -642,7 +677,7 @@ if (import.meta.main) {
     // A template run counts under its own cap only with a label that starts with tpl-, and a run of the free prompt never takes that cap.
     const template = [...set].filter((name) => Object.hasOwn(TEMPLATE_SETS, name));
     if (template.length ? template.length !== set.length || !isTemplateLabel(label) : isTemplateLabel(label)) {
-      console.log("refused: the sets T, U, V, W, X, Y, L, M, N, and O run alone, with a label that starts with tpl-, and only they take such a label"); process.exit(2);
+      console.log("refused: the sets T, U, V, W, X, Y, L, M, N, O, P, and Q run alone, with a label that starts with tpl-, and only they take such a label"); process.exit(2);
     }
     const items = (template.length ? template.flatMap(templateSet) : [...(set.includes("C") ? corpus() : []), ...(set.includes("D") ? SET_D : []), ...(set.includes("E") ? SET_E : []), ...(set.includes("F") ? SET_F : [])])
       .filter((item) => !ids.length || ids.includes(item.id))
@@ -656,7 +691,7 @@ if (import.meta.main) {
     runtime.text = await runtimeText();
     await pool(items, 4, async (item) => {
       const options = { ask: (body) => openai(body, `${label} ${item.id} ${body.reasoning.effort}`), model, effort, repairs };
-      const record = await (!template.length ? checkOne : isDataSet(item.set) ? checkTemplateData : isChangeSet(item.set) ? checkTemplateChange : checkTemplate)(item, options);
+      const record = motionOf(item, await (!template.length ? checkOne : isDataSet(item.set) ? checkTemplateData : item.base ? checkTemplateChange : checkTemplate)(item, options));
       // A first call that the transport lost leaves no record, so that the next run of the label tries the request again.
       if (/^(http|failed)/.test(record.outcome)) { console.log(item.id, record.outcome, record.calls[0].error); return; }
       record.calls.forEach((call, index) => writeFileSync(`${EVIDENCE}${label}/${item.id}.${index}.txt`, call.text));
@@ -676,6 +711,11 @@ if (import.meta.main) {
       const records = recordsOf(label);
       if (records.some((record) => isDataSet(record.set))) {
         console.log(dataRow(label, withItemExpect(records)));
+        if (detail) for (const [fault, row] of faultTable(records)) console.log(`  ${row.count} ${row.repaired} ${row.kept} ${row.last} | ${fault} | ${row.ids.join(" ")}`);
+        continue;
+      }
+      if (records.some((record) => record.kind)) {
+        console.log(motionRow(label, records));
         if (detail) for (const [fault, row] of faultTable(records)) console.log(`  ${row.count} ${row.repaired} ${row.kept} ${row.last} | ${fault} | ${row.ids.join(" ")}`);
         continue;
       }

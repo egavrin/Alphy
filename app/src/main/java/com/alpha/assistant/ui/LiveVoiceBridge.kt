@@ -190,16 +190,32 @@ internal class LiveVoiceBridge(
     }
 
     /**
-     * Runs [control] of the stage app [toolId] as a tap. False when no stage ran the tap within [PRESS_WAIT_MS]. [who] is "voice" for a
-     * routing press and «Дальше», and "narrator" for a press of a walk: the next change of that control is an action of [who].
+     * Runs [control] of the stage app [toolId] as a tap. [who] is "voice" for a routing press and «Дальше», and "narrator" for a press of a
+     * walk: the next change of that control is an action of [who]. A press of a step of a stepped scene waits for the ready stage and tries
+     * again until the list of tools shows that step, for at most [STEP_PRESS_MS] (stage 7, fix list 2, H2): the set of a step is idempotent,
+     * and a press that did not run changed nothing. Any other press, such as a toggle, runs one time: false when no stage ran it in
+     * [PRESS_WAIT_MS].
      */
     suspend fun press(toolId: String, control: ShownControl, who: String = "voice", cause: String? = null): Boolean {
+        fun screen() = model.tools.tools.find { it.id == toolId }?.let { ShownScreen.of(it) }
+        val stepControl = screen()?.takeIf { s -> s.steps.any { control.label == "${s.stepControl}: $it" } }?.stepControl
+            ?: return tap(toolId, control, who, cause)
+        fun shown() = screen()?.step?.let { "$stepControl: ${it.label}" } == control.label
+        // The stage commits the tap, and the list of tools reloads after the store changes.
+        return (withTimeoutOrNull(STEP_PRESS_MS) {
+            while (!shown()) if (!tap(toolId, control, who, cause) || withTimeoutOrNull(PRESS_WAIT_MS) { while (!shown()) delay(20) } == null) delay(RETRY_MS)
+            true
+        } == true).also { if (!it) android.util.Log.w("AlphyPress", "${control.actionId}: the step did not show in $STEP_PRESS_MS ms") }
+    }
+
+    private suspend fun tap(toolId: String, control: ShownControl, who: String, cause: String?): Boolean {
         val own = SceneAction(who, control.label, control.value, cause) to SystemClock.uptimeMillis()
         expected.addLast(own)
         val press = VoicePress(toolId, control)
         var ran = false
         try {
             if (pressed.subscriptionCount.value > 0 && pressed.tryEmit(press)) ran = withTimeoutOrNull(PRESS_WAIT_MS) { press.ran.await() } == true
+            else android.util.Log.w("AlphyPress", "${control.actionId}: no stage took the press")
         } finally {
             // A stage that takes the press later, or after a cancel of a press of a stopped walk, finds it failed, so no tap runs.
             press.ran.complete(false)
@@ -235,13 +251,11 @@ internal class LiveVoiceBridge(
     /** The press of [step] of the scene of the walk, as a narrator action with [cause]. It returns when the list of tools shows the step. */
     private suspend fun pressStep(step: String, cause: String?): Boolean {
         val toolId = narrator.scene ?: return false
-        fun screen() = model.tools.tools.find { it.id == toolId }?.let { ShownScreen.of(it) }
-        val screen = screen() ?: return false
+        val screen = model.tools.tools.find { it.id == toolId }?.let { ShownScreen.of(it) } ?: return false
         if (screen.step?.label == step) return true
-        val control = screen.controls.find { it.label == "${screen.stepControl}: $step" } ?: return false
-        if (!press(toolId, control, "narrator", cause)) return false
-        // The stage commits the tap, and the list of tools reloads after the store changes.
-        return withTimeoutOrNull(PRESS_WAIT_MS) { while (screen()?.step?.label != step) delay(20); true } == true
+        val control = screen.controls.find { it.label == "${screen.stepControl}: $step" }
+            ?: return false.also { android.util.Log.w("AlphyPress", "${screen.stepControl?.let { "a step" } ?: "no step control"}: no control in the shown screen") }
+        return press(toolId, control, "narrator", cause)
     }
 
     /** The text of the card of the scene of the walk now: the texts in its card after the title (decision 14). */
@@ -841,6 +855,9 @@ internal class LiveVoiceBridge(
         const val PRESS_FAILED = "Нажать не получилось."
         /** The time for the stage to run or refuse a press. A loaded phone can need some frames, and the voice waits only on a failure. */
         const val PRESS_WAIT_MS = 2_000L
+        /** The longest time of a step press that waits for the ready stage, and the time between two tries (stage 7, fix list 2, H2). */
+        const val STEP_PRESS_MS = 4_000L
+        const val RETRY_MS = 100L
         /** An own press names the next change of its control within this time (decision 10). */
         const val EXPECT_MS = 5_000L
         /** Changes of one control by tap less than this apart are one action (decision 10). */

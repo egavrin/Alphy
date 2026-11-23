@@ -15,7 +15,9 @@ export const TEMPLATE_HEAD = /^\s*(scene|items|cells|compare|table|chart|nodata)
  * sentence inside the cap (cut). Each other text past its cap, a long text with no sentence end inside its cap, and a list past its cap are faults.
  * A narration line (say) is cut the same way, and one with no sentence end inside its cap is left out with no fault (template.js).
  */
-export const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, fewOption: 16, sign: 14, text: 28, options: 6, items: 6, shapes: 20, cells: 100, say: 110 };
+export const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, fewOption: 16, sign: 14, text: 28, options: 6, items: 6, shapes: 20, cells: 100, say: 110,
+  // A diagram walks up to 8 parts (block 2 plan, C2), and the name of a part with no entry has at most 16 characters: the stepper shows no name.
+  parts: 8, part: 16 };
 /** The common color names that the kit takes with no call, by their small letters: the template check had one repair for a color name. */
 export const COLOR_NAMES = { red: "#dc2626", orange: "#ea580c", yellow: "#facc15", green: "#16a34a", blue: "#2563eb", purple: "#9333ea", violet: "#7c3aed", pink: "#db2777",
   brown: "#a16207", gray: "#64748b", grey: "#64748b", cyan: "#0891b2", teal: "#0d9488", indigo: "#4f46e5", amber: "#d97706", graphite: "#4b5563", black: "ink", white: "surface" };

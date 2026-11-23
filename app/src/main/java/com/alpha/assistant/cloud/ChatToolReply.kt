@@ -134,6 +134,7 @@ Choose refine when the request changes what that screen shows. The brief says th
 Choose screen for a new topic, which gets a new screen. Choose answer for a plain question.
 Choose answer when the request asks what the screen shows now, or asks about a control or a value on it. Its text describes the screen from SHOWN_SCREEN (its title, its controls, and their values) in one or two short spoken sentences. Never say that you cannot see the screen, and never ask for a screenshot.
 SHOWN_SCREEN also holds values (the present value of each control), step (the present step of a stepped screen), and actions (the last actions on the screen: who, control, value). The next step is the option after the present step, and the previous step is the option before it.
+SHOWN_SCREEN can hold motion: a picture that moves by itself, running or stopped, and its speed. Faster or slower presses the speed after or before the present speed. At the slowest or the fastest speed, there is no such speed: choose answer and say so. Stop presses the pause button. Go on, next, or again on a screen with motion and no step presses the play button.
 """.trimIndent()
 
     /** The text of a spoken request with earlier turns (ruling FX-1). The routing call and the grounded decision get it. */

@@ -210,13 +210,14 @@ export function useShapes(tree, lang, picture = [300, 300], key = "s") {
       lines.push(`${name} := ${show(value)}`);
       return name;
     });
-    const c = color ? show(namedColors(color)) : JSON.stringify(entry.color), u = numberOf(size) !== undefined ? String(fixed(100 / numberOf(size))) : `(100 / ${S})`;
+    // tone is the color of a label of a diagram step, which only the kit writes (template.js markedLabel).
+    const tone = tree.named.tone ? show(tree.named.tone) : null, c = tone ?? (color ? show(namedColors(color)) : JSON.stringify(entry.color)), u = numberOf(size) !== undefined ? String(fixed(100 / numberOf(size))) : `(100 / ${S})`;
     // An element that an angle turns (entry.turn) adds turn= of the line to it.
     const turned = [entry.turn !== undefined ? n[entry.turn] : null, turn ? `(${show(turn)})` : null].filter((one) => one && one !== "0").join(" + ");
     const shapes = [tidy(`group(${X}, ${Y}, ${S} / 100, [${entry.draw({ n, c, u, text: entry.text && label ? show(label) : undefined }).join(", ")}]${turned ? `, turn=${turned}` : ""}${shown})`)];
     if (label && !entry.text) {
       const [lx, ly, align] = entry.label ?? [0, 62, "center"];
-      shapes.push(tidy(`text(${X} + ${S} * ${lx / 100}, ${Y} + ${S} * ${ly / 100}, ${show(label)}, "ink", 13${align === "center" ? "" : `, align=${JSON.stringify(align)}`}${shown})`));
+      shapes.push(tidy(`text(${X} + ${S} * ${lx / 100}, ${Y} + ${S} * ${ly / 100}, ${show(label)}, ${tone ?? '"ink"'}, 13${align === "center" ? "" : `, align=${JSON.stringify(align)}`}${shown})`));
     }
     return { shapes, lines };
   }

@@ -209,7 +209,7 @@ test("look: an unknown value of a look option, and an option that the component 
     'a: the emphasis of a Text is one of body, title, headline, label, number, display, and "huge" is not one',
     "b: Text has no property size",
     'c: the size of an Emoji is one of small, medium, large, and "tiny" is not one',
-    'd: the variant of a Button is one of filled, outlined, text, tonal, and "fab" is not one',
+    'd: the variant of a Button is one of filled, outlined, text, tonal, tonalIcon, and "fab" is not one',
     'e: the align of a Row is one of start, center, end, and "top" is not one',
     'f: the gap of a Column is one of none, small, medium, large, and "wide" is not one',
     "g: the columns of a Grid is one of 1, 2, 3, 4, and 5 is not one",
@@ -268,7 +268,7 @@ test("look: a look value that reads a row field is a fault in each place of a ro
 
 test("look: a fault of a line that a part wrote names the need, and an option that a part does not take is a fault of the need", async () => {
   expect(await faultsOf("$/n = 0", 'need b = button("Go", inc($/n), variant="fab")')).toEqual([
-    'need b: the variant of a Button is one of filled, outlined, text, tonal, and "fab" is not one']);
+    'need b: the variant of a Button is one of filled, outlined, text, tonal, tonalIcon, and "fab" is not one']);
   expect(await faultsOf("$/n = 0", 'need b = button("Go", inc($/n), varient="filled")')).toEqual(["need b: Button has no property varient"]);
   const faults = await faultsOf('need tasks = entries("Tasks", fields={task: "text"}, colour="red")', 'need cups = counter("Cups", 0, stepp=2)');
   expect(faults).toEqual([

@@ -509,9 +509,17 @@ internal class ArtifactCoordinator private constructor() {
         }
         if (!publishAllowed()) throw CancellationException("The native input session ended.")
         publish(old.copy(state=result.state,ui=result.ui),result,event.getString("type"))
-        if(event.getString("type") in setOf("frame", "sensor") || event.getString("type")=="pointer" && event.getString("phase")=="move")scheduleFlush(store) else flush(store)
+        // A step of the motion of a kit scene writes no record (stage 7, fix list 1, F1): the write took 40 to 140 ms of each step.
+        // A press (also the pause) and the close of the stage write the state.
+        val type=event.getString("type")
+        if(type=="timer" && templateScene(old.spec)) Unit
+        else if(type in setOf("frame", "sensor") || type=="pointer" && event.getString("phase")=="move")scheduleFlush(store) else flush(store)
         return snapshot(store)
     }
+    private var sceneSpec: Pair<String,Boolean>?=null
+    /** True for the app file of a kit scene (`scene(`). The spec of one record is one string, so the answer is kept for it. */
+    private fun templateScene(spec: String): Boolean = sceneSpec?.takeIf {it.first===spec}?.second
+        ?: ToolSpec.parsePersisted(spec).kitScene.also {sceneSpec=spec to it}
     private fun scheduleFlush(store: ToolStore) {
         if(!dirty || flushJob!=null)return
         flushJob=scope.launch {

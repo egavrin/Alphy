@@ -149,12 +149,13 @@ class DialogueStageRehearsalTest {
     @Test fun eachResearchStepHasItsRecording() {
         // ux-images-b reuses the recordings of ux-images in another order, so it has no fixtures of its own.
         val research = DIALOGUES.values.filter { it.name.startsWith("ux-") && it.name != "ux-images-b" }
-        // ux-data is the dialogue of block 2 plan, stage 5 (L1).
-        assertEquals(research.map { it.name }.toString(), 14, research.size)
+        // ux-data is the dialogue of block 2 plan, stage 5 (L1). ux-motion and ux-eye are the dialogues of stage 7.
+        assertEquals(research.map { it.name }.toString(), 16, research.size)
         for (dialogue in research) {
             assertEquals(dialogue.name, RESEARCH_CALLS, dialogue.maxCalls)
-            // ux-steps (stage 3 of plan "one scene") has the seven lines of the person that its brief and the fix list give.
-            assertEquals(dialogue.name, List(if (dialogue.name == "ux-steps") 7 else 5) { PROBE }, dialogue.steps.map { it.goal })
+            // ux-steps (stage 3 of plan "one scene") has the seven lines of the person that its brief and the fix list give, and ux-motion
+            // (stage 7) the six lines of its brief.
+            assertEquals(dialogue.name, List(when (dialogue.name) { "ux-steps" -> 7; "ux-motion" -> 6; else -> 5 }) { PROBE }, dialogue.steps.map { it.goal })
             dialogue.steps.forEachIndexed { i, step ->
                 val fixture = checkNotNull(step.speech).fixture
                 assertEquals("${dialogue.name}-${i + 1}", fixture)

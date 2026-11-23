@@ -1071,6 +1071,8 @@ private fun hasLiveControl(node: JSONObject): Boolean {
     }
     // True when the controller accepted the tap. A finger tap ignores it, and a spoken press reports it.
     val tap: (String, Any?) -> Boolean = { id, value ->
+        // The glide of the change of a template scene ends 250 ms after this press (block 2 plan, M5).
+        SurfaceGlide.pressed()
         if (value == null && visibleUi?.let { ToolUiCatalog.action(it, id)?.optString("type") } == "button") {
             controller.queueLocalButton(current, id, buttonHost) { buttonHost.get() && currentVisibility && navigationForeground() }
         } else controller.interact(current,id,value,deviceHost,navigationForeground) {intent ->check(navigationForeground());navigationContext.startActivity(intent)}
@@ -1081,7 +1083,10 @@ private fun hasLiveControl(node: JSONObject): Boolean {
         voicePresses.collect { press ->
             val run = pressTap
             // A press that its request already gave up is complete, so no tap runs. The request and this collector share the main thread.
-            press.ran.complete(run != null && !press.ran.isCompleted && run(press.control.actionId, press.control.value))
+            val ran = run != null && !press.ran.isCompleted && run(press.control.actionId, press.control.value)
+            // The line names the action of the control and not its label: a label is text of the screen, and the log holds none.
+            if (!ran) android.util.Log.w("AlphyPress", "${press.control.actionId}: ${if (run == null) "stage not ready" else if (press.ran.isCompleted) "given up" else "refused by the controller"}")
+            press.ran.complete(ran)
         }
     }
     Box(Modifier.fillMaxWidth().onGloballyPositioned { inWindow = !it.boundsInWindow().isEmpty }) {

@@ -1,0 +1,10 @@
+scene("Das Windrad", lang="de", palette="green")
+control = slider("Winkel", 0, 120, 10, 30)
+s1 = rect(0, 260, 300, 40, "land", 0, gradient="land-1")
+s2 = polygon([144, 270, 156, 270, 152, 120, 148, 120], "surface-1")
+s3 = line(150, 110, 150 + 90 * cos($/v), 110 - 90 * sin($/v), "ink", 6)
+s4 = line(150, 110, 150 + 90 * cos($/v + 120), 110 - 90 * sin($/v + 120), "ink", 6)
+s5 = line(150, 110, 150 + 90 * cos($/v + 240), 110 - 90 * sin($/v + 240), "ink", 6)
+s6 = circle(150, 110, 8, "accent")
+card = card("Wind wird Strom", "Der Wind dreht die drei Flügel. Die Achse treibt oben im Turm einen Generator an.")
+say = "Dreh den Winkel und sieh, wie die drei Flügel um die Achse gehen."

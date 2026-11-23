@@ -80,7 +80,8 @@ class DialogueSplitTest {
             """{"type":"column","children":[$canvas,{"type":"text","text":"x","layout":"x"}]}""")) {
             assertEquals(column, null, dialogueSplit(JSONObject(column)))
         }
-        assertEquals(DialogueSplit(emptyList(), listOf(0), listOf(1)), dialogueSplit(JSONObject("""{"type":"column","children":[$canvas]}""")))
+        // A card that holds a canvas is a drawing, not a section (dialogueSplit).
+        assertEquals(DialogueSplit(emptyList(), listOf(0), listOf(1), drawing = true), dialogueSplit(JSONObject("""{"type":"column","children":[$canvas]}""")))
     }
 
     private fun splitOrNull(text: String): Pair<JSONObject, DialogueSplit>? {

@@ -284,7 +284,7 @@ test("run: the animate button starts a timer and the value is 180 after half of 
   const { kit, send } = await clocked(plan("lesson"));
   const started = send(0, press("lap_button"));
   expect(started.timers).toEqual([{ id: "anim", intervalMs: 50 }]);
-  expect(started.state.anim).toEqual({ angle: { from: 0, to: 360, start: T0, end: T0 + 5000, at: 0 } });
+  expect(started.state.anim).toEqual({ angle: { from: 0, to: 360, start: T0, end: T0 + 5000, at: 0, loop: 0 } });
   expect([started.state.angle, kit.state.angle, moon(started).x, moon(started).y]).toEqual([0, 0, 270, 160]);
   const half = send(2500, timer("anim"));
   expect([half.state.angle, kit.state.angle, moon(half).x, moon(half).y]).toEqual([180, 180, 50, 160]);
@@ -298,7 +298,7 @@ test("run: the last timer event returns timers: []", async () => {
   send(2500, timer("anim"));
   const end = send(5000, timer("anim"));
   expect([end.state.angle, kit.state.angle, end.timers]).toEqual([360, 360, []]);
-  expect(end.state.anim.angle).toEqual({ from: 0, to: 0, start: 0, end: 0, at: 0 });
+  expect(end.state.anim.angle).toEqual({ from: 0, to: 0, start: 0, end: 0, at: 0, loop: 0 });
   // A late timer event after the end, and a timer id that the app does not have, change nothing.
   for (const timerId of ["anim", "nothing", "toString"]) expect(handle(request(end.state, timer(timerId)), app, T0 + 9000)).toEqual({ state: end.state });
 });
@@ -351,7 +351,7 @@ test("run: a clock that goes back during a timed change keeps the value at its s
   // The clock of the host goes back 1 s, to before the start of the change: the angle stays at its start value, and the change runs on.
   const back = send(0, timer("anim"));
   expect([back.state.angle, kit.state.angle, back.timers]).toEqual([0, 0, [{ id: "anim", intervalMs: 50 }]]);
-  expect(back.state.anim.angle).toEqual({ from: 0, to: 360, start: T0 + 1000, end: T0 + 6000, at: 0 });
+  expect(back.state.anim.angle).toEqual({ from: 0, to: 360, start: T0 + 1000, end: T0 + 6000, at: 0, loop: 0 });
   const half = send(3500, timer("anim"));
   expect([half.state.angle, kit.state.angle]).toEqual([180, 180]);
 });
@@ -374,7 +374,7 @@ test("run: a timed change past the bounds of its field stops at the bound and en
   const past = send(500, timer("anim"));
   expect([past.state.angle, kit.state.angle, past.state.anim.angle.at, past.timers]).toEqual([360, 380, 380, [{ id: "anim", intervalMs: 50 }]]);
   const ended = send(600, timer("anim"));
-  expect([ended.state.angle, kit.state.angle, ended.state.anim.angle, ended.timers]).toEqual([360, 448, { from: 0, to: 0, start: 0, end: 0, at: 0 }, []]);
+  expect([ended.state.angle, kit.state.angle, ended.state.anim.angle, ended.timers]).toEqual([360, 448, { from: 0, to: 0, start: 0, end: 0, at: 0, loop: 0 }, []]);
 });
 
 test("run: the timer of a timer with rounds and the timer of animate are one list with distinct ids", async () => {
@@ -803,13 +803,14 @@ test("source: the source of list.plan is under 60000 bytes and answers an add as
   expect(run(add).state.prodotti).toHaveLength(4);
 });
 
-test("source: the run-time text is at most 56300 bytes", () => {
+test("source: the run-time text is at most 57800 bytes", () => {
   // kit/build.js leaves out each text that only the compile step reads (dsl.js MESSAGES), so each source has room to grow.
   // The Table and the mark of a Chart of the data forms (block 2 plan, stage 5) took the run-time from 49364 to about 50400 bytes,
   // and the comparison and the source line of the look round to about 50580 bytes. The shape kinds path, arrow, and arc, and the
   // gradient, glow, opacity, turn, and group of stage 6 (L2) draw at run time, and took it to about 56070 bytes. The library draws no catalog at run time.
   // The picture of an image entry (stage 6, I4) is one more kind at run time, about 100 bytes.
-  expect(bytes(runtime.text)).toBeLessThanOrEqual(56300);
+  // The loop of animate and the choices of the stage (stage 7, M2) took it to about 56600 bytes. The cap of stage 7 is 57800 (C4).
+  expect(bytes(runtime.text)).toBeLessThanOrEqual(57800);
   for (const word of ["thermometer", "right_triangle", "the library has no"]) expect([word, runtime.text.includes(word)]).toEqual([word, false]);
   // The icon names of the host (src/icons.js) and the values of the look options (check.js) are compile-side data.
   for (const word of ["Stethoscope", "headline", "Rocket"]) expect([word, runtime.text.includes(word)]).toEqual([word, false]);

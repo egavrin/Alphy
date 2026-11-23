@@ -35,6 +35,7 @@
     <string name="tool_page_en">Page %1$d of %2$d</string>
     <string name="tool_page_previous_en">Back: %1$s</string>
     <string name="tool_page_next_en">Next: %1$s</string>
+    <string name="tool_part_count_en">%1$d of %2$d</string>
     <string name="tool_reorder_handle_en">Reorder: %1$s</string>
     <string name="tool_reorder_move_up_en">Move up</string>
     <string name="tool_reorder_move_down_en">Move down</string>

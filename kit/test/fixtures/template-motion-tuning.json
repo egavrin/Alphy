@@ -1,0 +1,12 @@
+[
+  {"id": "p-earth-orbit", "kind": "motion", "expect": "template", "request": "Покажи, как Земля вращается вокруг Солнца."},
+  {"id": "p-clock-hands", "kind": "motion", "expect": "template", "request": "Show how the hands of a clock move."},
+  {"id": "p-wind-turbine", "kind": "motion", "expect": "template", "request": "Montre comment tourne une éolienne."},
+  {"id": "p-wheel-rolls", "kind": "change", "base": "wheel.plan", "expect": "lines", "request": "Пусть колесо катится само, без остановки."},
+  {"id": "p-eye", "kind": "diagram", "entry": true, "expect": "template", "request": "Покажи, как устроен глаз."},
+  {"id": "p-stomach", "kind": "diagram", "entry": true, "expect": "template", "request": "Show me the parts of the digestive system."},
+  {"id": "p-plant-cell", "kind": "diagram", "entry": false, "expect": "template", "request": "Какие части есть у клетки растения?"},
+  {"id": "p-moon-phases", "kind": "still", "expect": "template", "request": "Почему Луна меняет форму?"},
+  {"id": "p-mammals", "kind": "still", "expect": "template", "request": "Which animals are mammals?"},
+  {"id": "p-capitals-quiz", "kind": "still", "expect": "outside", "request": "Сделай мне викторину по столицам."}
+]

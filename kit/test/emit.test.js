@@ -865,8 +865,9 @@ test("emit: lesson.plan gives a surface, a canvas, and commands in the open repl
   expect(definition.surfaces).toEqual([{ id: "orbit_view", width: 320, height: 320 }]);
   expect(every(definition.ui).filter((node) => node.type === "canvas")).toEqual([{ type: "canvas", text: "Земля в центре, Луна на орбите и метка её стороны", surfaces: ["orbit_view"] }]);
   // The object anim keeps the change of each value that an animate moves: all 0 while the value stands.
-  const run = { type: "object", fields: { from: "number", to: "number", start: "number", end: "number", at: "number" } };
-  expect([definition.stateSchema.anim, definition.initialState.anim]).toEqual([{ type: "object", fields: { angle: run } }, { angle: { from: 0, to: 0, start: 0, end: 0, at: 0 } }]);
+  // loop is 1 for a change that runs again and again (stage 7, M2).
+  const run = { type: "object", fields: { from: "number", to: "number", start: "number", end: "number", at: "number", loop: "number" } };
+  expect([definition.stateSchema.anim, definition.initialState.anim]).toEqual([{ type: "object", fields: { angle: run } }, { angle: { from: 0, to: 0, start: 0, end: 0, at: 0, loop: 0 } }]);
   // The orbit (the ink role: a muted line is faint), the Earth, its name, the Moon at 40 degrees, and the mark of its side. The guide line shows from step 2 of the lesson.
   expect(open(definition.initialState, app)).toEqual({ state: definition.initialState, timers: [], surfaces: { orbit_view: { commands: [
     { type: "arc", x: 50, y: 50, width: 220, height: 220, start: 0, sweep: 360, stroke: 2, color: "default" },

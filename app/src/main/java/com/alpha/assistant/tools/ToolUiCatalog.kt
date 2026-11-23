@@ -186,6 +186,11 @@ object ToolUiCatalog {
 
     internal fun isSceneChoice(node: JSONObject): Boolean =
         node.optString("type") == "singleChoice" && node.opt("variant") == "scene"
+    /**
+     * The variants of a singleChoice: scene for a course, and two of the stage (block 2 plan, stage 7): inline is a segmented row with no
+     * label of its own, such as the speeds of a play control, and stepper walks the parts of a diagram with a button for each side.
+     */
+    internal val SINGLE_CHOICE_VARIANTS = setOf("scene", "inline", "stepper")
     private fun matches(a: Any, b: Any?) = if(a is Number && b is Number) a.toDouble() == b.toDouble() else a == b
     fun validate(root: JSONObject, fields: JSONObject, state: JSONObject): JSONObject = validate(root,fields,state,null)
     internal fun validate(root: JSONObject,fields: JSONObject,state: JSONObject,trace: ToolUiValidationTrace?, capabilities: Set<String>? = null): JSONObject {
@@ -405,8 +410,9 @@ object ToolUiCatalog {
                 }
                 "actionChip" -> if(node.has("variant"))require(node.get("variant") is String && node.getString("variant") in setOf("assist","suggestion"))
                 "button" -> {
-                    if(node.has("variant"))require(node.get("variant") is String && node.getString("variant") in setOf("filled","outlined","text","tonal","elevated","fab","extendedFab"))
-                    if(node.optString("variant") == "fab")require(node.has("icon")) {"An icon FAB requires an icon and label."}
+                    // tonalIcon is the round play button of a kit scene (block 2 plan, stage 7, F2): its text is its spoken name.
+                    if(node.has("variant"))require(node.get("variant") is String && node.getString("variant") in setOf("filled","outlined","text","tonal","tonalIcon","elevated","fab","extendedFab"))
+                    if(node.optString("variant") in setOf("fab","tonalIcon"))require(node.has("icon")) {"An icon FAB requires an icon and label."}
                 }
                 "input","search" -> {
                     trace.checking("input_length","$location.maxLength","integer_1_2048",node.opt("maxLength")) {
@@ -441,7 +447,7 @@ object ToolUiCatalog {
                 in choiceTypes -> {
                     if (type == "singleChoice" && node.has("variant")) {
                         trace.checking("selection_variant", "$location.variant", "scene_choice_variant", node.opt("variant")) {
-                            require(isSceneChoice(node)) { "singleChoice variant must be scene." }
+                            require(node.opt("variant") in SINGLE_CHOICE_VARIANTS) { "singleChoice variant must be scene, inline, or stepper." }
                         }
                     }
                     val options = trace.checking("selection_options","$location.options","options_1_30",node.opt("options"),node.optJSONArray("options")?.length()) {

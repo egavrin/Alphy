@@ -423,12 +423,15 @@ export class App {
         case "when": if (this.value(first, ctx)) this.act(second, ctx); else this.recompute(); break;
         // animate($/place, to, ms): the number goes to the value in a straight line over ms milliseconds of the host clock. tick() moves it.
         // The change keeps the times of its start and its end, so a kit that starts from a stored state, as each event of the run-time does, knows where the value is.
+        // animate($/place, to, ms, loop) runs from loop to to in ms again and again, from the value of now (block 2 plan, M2). animate($/place, $/place, 0) pauses it.
         case "animate": {
           if (first?.k !== "path" || !first.abs) throw new DslError(MESSAGES ? "animate needs a value of the app as its place, such as $/angle" : "");
           const path = first.segs.join("/"), from = Number(this.value(first, ctx)) || 0, to = second ? Number(this.value(second, ctx)) : NaN, ms = call.args[2] ? Number(this.value(call.args[2], ctx)) : 0;
+          const loop = call.args[3] ? Number(this.value(call.args[3], ctx)) : NaN;
           if (!Number.isFinite(to) || !Number.isFinite(ms)) throw new DslError(MESSAGES ? "animate needs a number to go to and a time in milliseconds: animate($/angle, 360, 5000)" : "");
-          const runs = (this.state._run ?? []).filter((run) => run.path !== path), now = settings.now();
-          if (ms > 0 && to !== from) runs.push({ path, from, to, start: now, end: now + ms, at: from }); else this.write(first, to, ctx);
+          const runs = (this.state._run ?? []).filter((run) => run.path !== path), now = settings.now(), start = now - (ms * (from - loop)) / (to - loop);
+          if (ms > 0 && to !== loop && Number.isFinite(start)) runs.push({ path, from: loop, to, start, end: start + ms, at: from, loop: 1 });
+          else if (ms > 0 && to !== from) runs.push({ path, from, to, start: now, end: now + ms, at: from }); else this.write(first, to, ctx);
           if (runs.length) this.state._run = runs; else delete this.state._run;
           break;
         }
@@ -587,9 +590,11 @@ export class App {
       s._run = s._run.filter((run) => {
         const place = this.pathOf("$/" + run.path);
         if (this.read(place, {}) !== run.at) return false;
-        run.at = now >= run.end ? run.to : run.from + ((run.to - run.from) * Math.max(0, now - run.start)) / (run.end - run.start);
+        // A loop is at the share of its time in the round of now (M2): it never ends.
+        const share = (now - run.start) / (run.end - run.start);
+        run.at = run.loop ? run.from + (run.to - run.from) * (((share % 1) + 1) % 1) : now >= run.end ? run.to : run.from + (run.to - run.from) * Math.max(0, share);
         this.write(place, run.at, {});
-        return now < run.end;
+        return run.loop || now < run.end;
       });
       if (!s._run.length) delete s._run;
       this.recompute();

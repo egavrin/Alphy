@@ -16,6 +16,9 @@ internal data class SceneAction(val who: String, val control: String, val value:
 /** The present step of a stepped scene: [index] from 1 of [count], with the [label] of its option. */
 internal data class SceneStep(val index: Int, val count: Int, val label: String)
 
+/** The play control of a scene that moves by itself (block 2 plan, M4): whether it [running], and the text of its chosen [speed]. */
+internal data class SceneMotion(val running: Boolean, val speed: String?)
+
 /** A spoken press of [control] of the stage app [toolId]. [ran] is true when the stage ran it as a tap, and false when it did not. */
 internal class VoicePress(val toolId: String, val control: ShownControl) {
     val ran = CompletableDeferred<Boolean>()
@@ -28,7 +31,7 @@ internal class VoicePress(val toolId: String, val control: ShownControl) {
  */
 internal data class ShownScreen(val toolId: String, val title: String, val appFile: String?, val controls: List<ShownControl>,
     val values: List<Pair<String, Any?>> = emptyList(), val step: SceneStep? = null, val actions: List<SceneAction> = emptyList(),
-    val stepControl: String? = null, val steps: List<String> = emptyList()) {
+    val stepControl: String? = null, val steps: List<String> = emptyList(), val motion: SceneMotion? = null) {
     /**
      * The routing turn of this screen. When it is longer than [MAX_LINE], it goes without the app file, then with fewer controls. Only the
      * line with no app file and no control that is still too long goes with fewer values. The step and the last three actions always stay.
@@ -38,6 +41,7 @@ internal data class ShownScreen(val toolId: String, val title: String, val appFi
             .put("controls", JSONArray(controls.take(count).map { it.label }))
             .apply { if (kept > 0) put("values", JSONArray(values.take(kept).map { (control, value) -> JSONObject().put("control", control).put("value", value ?: JSONObject.NULL) })) }
             .apply { step?.let { put("step", JSONObject().put("index", it.index).put("count", it.count).put("label", it.label)) } }
+            .apply { motion?.let { put("motion", JSONObject().put("state", if (it.running) "running" else "stopped").put("speed", it.speed ?: JSONObject.NULL)) } }
             .apply { if (actions.isNotEmpty()) put("actions", JSONArray(actions.takeLast(MAX_ACTIONS).map { JSONObject().put("who", it.who).put("control", it.control).put("value", it.value ?: JSONObject.NULL) })) }
             .toString()
         val full = line(appFile, controls.size, values.size)
@@ -76,12 +80,24 @@ internal data class ShownScreen(val toolId: String, val title: String, val appFi
             var step: SceneStep? = null
             var stepControl: String? = null
             var steps = emptyList<String>()
+            // The play control of the kit (block 2 plan, M1): its button shows Pause while the scene runs and Play while it stands.
+            var running: Boolean? = null
+            var speed: String? = null
+            // Only the play part and the stepper of a kit scene add to the line of Alpha 22 (stage 7, fix list 1): a course scene choice and a
+            // Pause button of another app give the line that they gave before.
+            val scene = spec.kitScene
             fun walk(node: JSONObject) {
+                // The hidden play row of a scene with a control (stage 7, fix list 2, H4) gives no motion and no control.
+                if (scene && !node.optBoolean("visible", true)) return
                 val action = node.optString("action")
                 val type = node.optString("type")
                 when (type) {
-                    "button" -> controls += ShownControl(node.optString("text"), action, null)
-                    "segmented", "select" -> node.getJSONArray("options").let { options ->
+                    "button" -> {
+                        controls += ShownControl(node.optString("text"), action, null)
+                        if (scene) when (node.optString("icon")) { "Pause" -> running = true; "Play" -> running = false }
+                    }
+                    // Of the single choices, only the speeds and the stepper of a kit scene are controls of the line.
+                    "segmented", "select", "singleChoice" -> if (type != "singleChoice" || scene && node.opt("variant") in setOf("inline", "stepper")) node.getJSONArray("options").let { options ->
                         repeat(options.length()) { index ->
                             val option = options.getJSONObject(index)
                             controls += ShownControl(node.optString("text") + ": " + option.getString("text"), action, option.get("value"))
@@ -113,8 +129,10 @@ internal data class ShownScreen(val toolId: String, val title: String, val appFi
                         key == value || (key is Number && value is Number && key.toDouble() == value.toDouble())
                     }
                     values += label to (option?.getString("text") ?: value)
-                    // A steps control expands to the first choice of its scene (kit decision 3).
-                    if (stepped && step == null && option != null) {
+                    // The speeds of a play control are an inline choice.
+                    if (scene && node.opt("variant") == "inline" && speed == null) speed = option?.getString("text")
+                    // A steps control expands to the first choice of its scene (kit decision 3). The speeds of a play control are no step.
+                    else if (stepped && step == null && option != null) {
                         step = SceneStep(options.indexOf(option) + 1, options.size, option.getString("text"))
                         stepControl = label
                         steps = options.map { it.getString("text") }
@@ -134,7 +152,7 @@ internal data class ShownScreen(val toolId: String, val title: String, val appFi
                     runCatching { ToolUiCatalog.validateAction(ui, control.actionId, control.value, state) }.isSuccess
             } + listOfNotNull(walk), if (private) emptyList() else values, step.takeUnless { private },
                 // The values of the actions are data of the app too, so a private app gives none.
-                if (private) emptyList() else actions, stepControl, steps)
+                if (private) emptyList() else actions, stepControl, steps, running?.let { SceneMotion(it, speed) }.takeUnless { private })
         }
     }
 }

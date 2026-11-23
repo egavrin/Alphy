@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.Layout
@@ -132,6 +133,22 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
     val latestCoverReady=rememberUpdatedState(onCoverReady)
     val latestHost=rememberUpdatedState(host)
     val latestSnapshot=rememberUpdatedState(onSnapshot)
+    // A template scene glides between two drawings (block 2 plan, M5, M6, C1): a press with an ease-out, a step of the motion timer linearly.
+    val gliding=remember(spec) {spec.kitScene}
+    val glides=remember(tool.id,tool.revision) {mutableMapOf<String,SurfaceGlide>()}
+    val glideSequences=remember(tool.id,tool.revision) {mutableMapOf<String,Long>()}
+    // The sequence of the last snapshot that a timer event gave: a glide to it is a motion step.
+    val motionSequence=remember(tool.id,tool.revision) {java.util.concurrent.atomic.AtomicLong(-1)}
+    var glideVersion by remember(tool.id,tool.revision) {mutableIntStateOf(0)}
+    var glideTick by remember(tool.id,tool.revision) {mutableLongStateOf(0L)}
+    // The sequence of the last drawing that the canvas counted as a picture. A plain holder: the draw writes it.
+    val pictured=remember(tool.id,tool.revision) {java.util.concurrent.atomic.AtomicLong(Long.MIN_VALUE)}
+    LaunchedEffect(glideVersion) {
+        if(glideVersion==0)return@LaunchedEffect
+        // Only the draw of the canvas reads the tick, so the frames go on only while a glide runs, and one more frame draws its end.
+        while(glides.values.any {it.running(System.nanoTime())}) withFrameNanos {glideTick=it}
+        withFrameNanos {glideTick=it}
+    }
     fun enqueue(event: JSONObject) {if(enabled && error==null)try {queue.add(event)}catch(failure: Exception) {logDropped(failure,"input");error=R.string.tool_session_input_limit}}
     LaunchedEffect(tool.id,tool.revision,enabled,attempt) {
         if(!enabled)return@LaunchedEffect
@@ -253,7 +270,7 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
                             val last=timers[id]
                             if(last==null || last.first!=interval)timers[id]=interval to now
                             else if(now-last.second>=interval) {
-                                deliver(JSONObject().put("type","timer").put("timerId",id));timers[id]=interval to now
+                                motionSequence.set(deliver(JSONObject().put("type","timer").put("timerId",id)).sequence);timers[id]=interval to now
                             }
                         }
                     } else {clock.reset();timers.clear()}
@@ -329,6 +346,20 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
                     resources.getString(R.string.tool_image_unavailable,label)
                 }
             }
+            // Each new drawing of a surface is the new target of its glide, from the picture that shows now (M6).
+            if(gliding && current!=null) SideEffect {
+                var changed=false
+                val now=System.nanoTime()
+                for(placement in placements) {
+                    val id=placement.surface.id
+                    if(glideSequences[id]==current.sequence)continue
+                    glideSequences[id]=current.sequence
+                    val commands=current.surfaces.optJSONObject(id)?.optJSONArray("commands") ?: JSONArray()
+                    val glide=glides.getOrPut(id) {SurfaceGlide(maxOf(placement.surface.width,placement.surface.height)/4.0)}
+                    if(glide.retarget(commands,now,current.sequence==motionSequence.get(),SurfaceGlide.pressTime(now)))changed=true
+                }
+                if(changed)glideVersion++
+            }
             BoxWithConstraints(if(immersive)modifier.fillMaxSize() else modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
                 var measuredSize by remember { mutableStateOf(IntSize.Zero) }
                 val ratio=stageWidth.toFloat()/stageHeight
@@ -362,6 +393,11 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
                     }) {
                     val canvas=drawContext.canvas.nativeCanvas
                     val saved=canvas.save()
+                    // The tick of a running glide draws each display frame. One clock serves the glide and its targets.
+                    glideTick
+                    val now=System.nanoTime()
+                    val metrics=trace
+                    var newPicture=false
                     try {
                         canvas.scale(size.width/stageWidth,size.height/stageHeight)
                         for(placement in placements) {
@@ -370,11 +406,19 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
                             val surfaceSaved=canvas.save()
                             try {
                                 canvas.translate(placement.x.toFloat(),placement.y.toFloat())
-                                drawSurfaceFrame(canvas,surface,commands,surface.width.toFloat(),surface.height.toFloat(),roleColors,images)
+                                val glide=glides[surface.id]?.takeIf {gliding && it.target!=null}
+                                if(glide==null) drawSurfaceFrame(canvas,surface,commands,surface.width.toFloat(),surface.height.toFloat(),roleColors,images)
+                                else {
+                                    if(glide.running(now))newPicture=true
+                                    drawSurfaceLayers(canvas,surface,glide.frame(now),surface.width.toFloat(),surface.height.toFloat(),roleColors,images,canvasBackground.toArgb())
+                                    if(glide.pressEnded(now))metrics?.glideEnded()
+                                }
                             } finally {canvas.restoreToCount(surfaceSaved)}
                         }
                     } finally {canvas.restoreToCount(saved)}
-                    val metrics=trace
+                    // C1 counts each picture that differs from the one before it: a frame of a glide, or a new drawing.
+                    if(current!=null && current.sequence!=pictured.get()) {pictured.set(current.sequence);newPicture=true}
+                    if(newPicture)metrics?.pictured()
                     if(current!=null && metrics!=null) {
                         metrics.submitted(current.sequence)
                         if(view.isHardwareAccelerated && view.viewTreeObserver.isAlive)

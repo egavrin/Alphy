@@ -66,6 +66,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
@@ -479,6 +480,7 @@ private val miniAppOtherLanguage = mapOf(
     R.string.tool_page to R.string.tool_page_en,
     R.string.tool_page_previous to R.string.tool_page_previous_en,
     R.string.tool_page_next to R.string.tool_page_next_en,
+    R.string.tool_part_count to R.string.tool_part_count_en,
     R.string.tool_reorder_handle to R.string.tool_reorder_handle_en,
     R.string.tool_reorder_move_up to R.string.tool_reorder_move_up_en,
     R.string.tool_reorder_move_down to R.string.tool_reorder_move_down_en,
@@ -1360,6 +1362,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 "outlined" -> OutlinedButton(click,buttonModifier,enabled=enabled) {label()}
                 "text" -> TextButton(click,buttonModifier,enabled=enabled) {label()}
                 "tonal" -> FilledTonalButton(click,buttonModifier,enabled=enabled) {label()}
+                "tonalIcon" -> FilledTonalIconButton(click,modifier.size(48.dp).semantics {contentDescription=text},enabled=enabled) {ToolGlyph(node.getString("icon"))}
                 "elevated" -> ElevatedButton(click,buttonModifier,enabled=enabled) {label()}
                 "fab","extendedFab" -> if(enabled) {
                     if(node.getString("variant")=="fab") FloatingActionButton(click,modifier.semantics {contentDescription=text}) {ToolGlyph(node.getString("icon"))}
@@ -2422,9 +2425,15 @@ internal fun rootThemeColors(ui: String, shellDark: Boolean): ColorScheme? =
         NativeSceneChoices(node.getString("text"), values, enabled, modifier, ::selected, ::choose)
         return
     }
-    Column(if(namedByTitle) modifier.semantics {contentDescription=node.getString("text")} else modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
-        if(!namedByTitle) Text(node.getString("text"),style=MaterialTheme.typography.labelLarge)
-        when(type) {
+    if (node.opt("variant") == "stepper") {
+        NativeStepper(node.getString("text"), values, enabled, modifier, ::selected, ::choose)
+        return
+    }
+    // An inline choice is a segmented row with no label of its own: the label of its control stands over the row (the speeds of a play control).
+    val inline = node.opt("variant") == "inline"
+    Column(if(namedByTitle || inline) modifier.semantics {contentDescription=node.getString("text")} else modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
+        if(!namedByTitle && !inline) Text(node.getString("text"),style=MaterialTheme.typography.labelLarge)
+        when(if (inline) "segmented" else type) {
             // The options share the width. A scrolling row looked cut off at the screen edge.
             // All options take the height of the tallest one, so a two-line label does not stand out.
             "segmented" -> {
@@ -2561,6 +2570,32 @@ private fun NativeSceneChoices(
                     }
                     repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * The stepper of a diagram (block 2 plan, C2): a label line, then a round button for the part before, the count of the present part, and a
+ * round button for the next part. It shows no part name, because the picture names each part. Each button is a tap of the choice.
+ */
+@Composable
+private fun NativeStepper(label: String, options: List<JSONObject>, enabled: Boolean, modifier: Modifier, selected: (Any) -> Boolean, choose: (Any) -> Unit) {
+    val index = options.indexOfFirst { selected(it.get("value")) }.coerceAtLeast(0)
+    Column(modifier.semantics { contentDescription = label }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        // The stepper spans the row (stage 7, F2): the button before at the start, the count in the middle, the next button at the end.
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            val previous = miniAppString(R.string.tool_page_previous, label)
+            val next = miniAppString(R.string.tool_page_next, label)
+            OutlinedIconButton(onClick = { choose(options[index - 1].get("value")) }, enabled = enabled && index > 0,
+                modifier = Modifier.size(48.dp).semantics { contentDescription = previous }) {
+                AlphaIcon(Glyph.Chevron, Modifier.size(20.dp).graphicsLayer { scaleX = -1f }, color = LocalContentColor.current)
+            }
+            Text(miniAppString(R.string.tool_part_count, index + 1, options.size), style = MaterialTheme.typography.titleMedium)
+            OutlinedIconButton(onClick = { choose(options[index + 1].get("value")) }, enabled = enabled && index < options.lastIndex,
+                modifier = Modifier.size(48.dp).semantics { contentDescription = next }) {
+                AlphaIcon(Glyph.Chevron, Modifier.size(20.dp), color = LocalContentColor.current)
             }
         }
     }

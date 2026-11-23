@@ -34,7 +34,10 @@ function build(text) {
  * that state gives the ui. The frame holds no copy of the definition: the result beside it has it, so a reply of the host holds its source once.
  */
 function frameOf(definition, state, holds) {
-  const app = dataOf(definition), reply = handle({ artifactId: "preview", revision: 0, state, event: { type: "open" } }, app);
+  const app = dataOf(definition);
+  // A moving value (play, animate) shows the state at the start of its run, so each frame of the same lines is the same picture (gate 4).
+  const starts = app.anim ? Object.values(state?.[app.anim.field] ?? {}).map((run) => run?.start).filter(Number.isFinite) : [];
+  const reply = handle({ artifactId: "preview", revision: 0, state, event: { type: "open" } }, app, Math.min(Date.now(), ...starts));
   return { ui: screen(kitOf(app, reply.state), app).ui, state: reply.state, drawing: reply.surfaces ?? {}, holds };
 }
 
