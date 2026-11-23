@@ -1,0 +1,6 @@
+[
+  {"id": "s-orbit-month", "base": "orbit.plan", "request": "Покажи, где Земля в разные месяцы года.", "expect": "same"},
+  {"id": "s-ship-switch", "base": "ship.plan", "request": "Сделай так, чтобы можно было переключать корабль и гвоздь.", "expect": "same"},
+  {"id": "s-clock-drag", "base": "clock.plan", "request": "Let me drag the minutes and see both hands move.", "expect": "same"},
+  {"id": "s-snow-label", "base": "snow.plan", "request": "Подпиши на картинке, что с высотой становится холоднее.", "expect": "same"}
+]

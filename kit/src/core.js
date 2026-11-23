@@ -590,9 +590,11 @@ export class App {
       s._run = s._run.filter((run) => {
         const place = this.pathOf("$/" + run.path);
         if (this.read(place, {}) !== run.at) return false;
-        // A loop is at the share of its time in the round of now (M2): it never ends.
-        const share = (now - run.start) / (run.end - run.start);
-        run.at = run.loop ? run.from + (run.to - run.from) * (((share % 1) + 1) % 1) : now >= run.end ? run.to : run.from + (run.to - run.from) * Math.max(0, share);
+        // A loop is at the time of now in its round (M2): it never ends. The product comes before the division by the time of the run,
+        // so a step gives 88.848 and not 88.84800000000001: the host rejects a shown number with float noise (long_decimal).
+        const span = run.end - run.start, past = now - run.start;
+        run.at = run.loop ? run.from + ((run.to - run.from) * (((past % span) + span) % span)) / span
+          : now >= run.end ? run.to : run.from + ((run.to - run.from) * Math.max(0, past)) / span;
         this.write(place, run.at, {});
         return run.loop || now < run.end;
       });

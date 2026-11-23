@@ -46,8 +46,8 @@ test("the library check has 10 tuning, 20 final, and 10 no-entry requests, and i
   const [tuning, final, free, none] = ["L", "M", "N", "O"].map(templateSet);
   expect([tuning.length, final.length, none.length]).toEqual([10, 20, 10]);
   expect(free.map(({ id, request }) => [id, request])).toEqual(final.map(({ id, request }) => [id, request]));
-  // The motion sets P and Q of stage 7 send the candidates too.
-  expect(LIBRARY_ARMS).toEqual({ L: "library", M: "library", N: "free", O: "library", P: "library", Q: "library" });
+  // The motion sets P and Q of stage 7, and the parts sets G and H of stage 7b, send the candidates too.
+  expect(LIBRARY_ARMS).toEqual({ L: "library", M: "library", N: "free", O: "library", P: "library", Q: "library", G: "library", H: "library" });
   const all = [...tuning, ...final, ...none];
   expect(new Set(all.map(({ id }) => id)).size).toBe(40);
   expect(new Set(all.map(({ request }) => request.trim())).size).toBe(40);

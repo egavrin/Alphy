@@ -318,6 +318,19 @@ class StageChangeWorkflowTest {
         assertEquals(listOf(before.revision, before.state), stored(model, before.id).let { listOf(it.revision, it.state) })
     }
 
+    // Stage 7b (R2): the change call replies same(), so the screen stays, no app call follows, and the voice says the host sentence.
+    // Alpha 23 built the screen again as a full app (live check of stage 7, uxMotion step 2: plan_outcome fallback:empty, then 42 s).
+    @Test fun aChangeThatTheScreenAlreadyShowsKeepsItAndSaysSo() = templateChange(Scripted.Text("same()")) { model, talk, before, phases ->
+        assertEquals(List(2) { APP_FILE_TEMPLATE }, talk.stages)
+        assertTrue(phases.toString(), "plan_outcome:fallback:same" in phases)
+        assertEquals(listOf(before.revision, before.state), stored(model, before.id).let { listOf(it.revision, it.state) })
+        robot.waitUntil { socket.commentary().any { it.first == "d2" } }
+        robot.awaitFrames(5)
+        assertEquals(listOf("d2" to "На экране это уже есть."), socket.commentary().filter { it.first == "d2" })
+        assertEquals(before.id, model.stageToolId)
+        assertEquals(List(2) { APP_FILE_TEMPLATE }, talk.stages)
+    }
+
     // Plan "one scene", decision 22: the stored scene stays dimmed with its control off until the change is stored, and no frame of the change
     // draws over it. Alpha 17 (stage templates, Task 18) drew each changed line over the shown screen, so the study saw new shapes with the
     // old labels and the old card for about 6 s.

@@ -262,7 +262,7 @@ test("theBundleReadsATemplate", async () => {
 test("theRestSectionChangesNoHash", () => {
   // The hashes of the free records and of the records of gate 2b: the rest section came after them.
   const { PROMPT_HASH, TEMPLATE_HASH, hashOf } = prompts, rest = SECTIONS["Template rest"];
-  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "ca59660f5590"]);
+  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "1ba7d44bfba4"]);
   expect(rest?.length).toBeGreaterThan(100);
   const copy = { ...SECTIONS, "Template rest": `${rest} Write it.` };
   expect([hashOf(["System", "Repair", "Dialogue", "Change"], copy), hashOf(["Template", "Template repair", "Template change"], copy)]).toEqual([PROMPT_HASH, TEMPLATE_HASH]);
@@ -279,7 +279,7 @@ const DATA_EXAMPLES = [...DATA.matchAll(/^Request: (.*)\n((?:Source \[\d+\] exce
 
 test("the data family has its own section and hash, and the explain sections and hashes stay (block 2 plan, D1)", () => {
   const { PROMPT_HASH, TEMPLATE_HASH, DATA_HASH, hashOf } = prompts;
-  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "ca59660f5590"]);
+  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "1ba7d44bfba4"]);
   expect(DATA_HASH).toBe(hashOf(["Template data", "Template repair", "Template change"]));
   expect([DATA_HASH === TEMPLATE_HASH, DATA_HASH === PROMPT_HASH]).toEqual([false, false]);
   // The explain prompt does not grow: it names no data form.
@@ -312,9 +312,10 @@ test("motion takes the template: a first screen gets a play line, a change adds 
   expect(["play = play(LABEL, FROM, TO, SECONDS)", "control = parts(LABEL, [PART, ...])"].map((form) => rules.includes(form))).toEqual([true, true]);
   // C3: a change to motion is changed lines with a play line.
   expect(SECTIONS["Template change"]).toContain("When the screen is a scene and the person asks that the picture moves by itself, add the line play = play(LABEL, FROM, TO, SECONDS)");
-  // One example teaches play and one teaches a parts control over a ready object, and each compiles clean.
+  // One example teaches play, one a parts control over a ready object, and one (stage 7b, R3) the parts of a thing with no ready object at their points. Each compiles clean.
   const play = TEMPLATE_EXAMPLES.filter(([, reply]) => /^play = play\(/m.test(reply)), parts = TEMPLATE_EXAMPLES.filter(([, reply]) => /^control = parts\(/m.test(reply));
-  expect([play.length, parts.length]).toEqual([1, 1]);
-  const step = await compileStep({ text: parts[0][1], plan: null, read: true, previous: null, cap: 65536 });
-  expect([step.result.faults, step.result.kept.split("\n").filter((line) => line.startsWith("say")).length]).toEqual([[], 3]);
+  expect([play.length, parts.length]).toEqual([1, 2]);
+  const steps = await Promise.all(parts.map(([, reply]) => compileStep({ text: reply, plan: null, read: true, previous: null, cap: 65536 })));
+  expect(steps.map((step) => [step.result.faults, step.result.kept.split("\n").filter((line) => line.startsWith("say")).length])).toEqual([[[], 3], [[], 4]]);
+  expect(parts[1][1]).toContain('part("flame", 150, 64)');
 });

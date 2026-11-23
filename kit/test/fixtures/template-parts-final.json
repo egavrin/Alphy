@@ -1,0 +1,14 @@
+[
+  {"id": "h-bicycle", "kind": "diagram", "entry": false, "lang": "ru", "expect": "template", "request": "Из чего состоит велосипед?"},
+  {"id": "h-egg", "kind": "diagram", "entry": false, "lang": "ru", "expect": "template", "request": "Покажи, из каких частей состоит куриное яйцо."},
+  {"id": "h-tree", "kind": "diagram", "entry": false, "lang": "ru", "expect": "template", "request": "Какие части есть у дерева?"},
+  {"id": "h-guitar", "kind": "diagram", "entry": false, "lang": "en", "expect": "template", "request": "What are the parts of a guitar?"},
+  {"id": "h-bee", "kind": "diagram", "entry": false, "lang": "en", "expect": "template", "request": "Show me the parts of a bee."},
+  {"id": "h-sailboat", "kind": "diagram", "entry": false, "lang": "en", "expect": "template", "request": "What are the parts of a sailboat called?"},
+  {"id": "h-heart-de", "kind": "diagram", "entry": true, "lang": "de", "expect": "template", "request": "Wie ist das Herz aufgebaut?"},
+  {"id": "h-eye-es", "kind": "diagram", "entry": true, "lang": "es", "expect": "template", "request": "¿Cuáles son las partes del ojo?"},
+  {"id": "h-tooth-fr", "kind": "diagram", "entry": true, "lang": "fr", "expect": "template", "request": "Montre-moi les parties d'une dent."},
+  {"id": "h-brain-it", "kind": "diagram", "entry": true, "lang": "it", "expect": "template", "request": "Quali sono le parti del cervello?"},
+  {"id": "h-skeleton-ru", "kind": "diagram", "entry": true, "lang": "ru", "expect": "template", "request": "Из чего состоит скелет человека?"},
+  {"id": "h-rocket-en", "kind": "diagram", "entry": true, "lang": "en", "expect": "template", "request": "What are the main parts of a rocket?"}
+]

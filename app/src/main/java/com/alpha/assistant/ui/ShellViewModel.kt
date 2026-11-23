@@ -2245,9 +2245,15 @@ class ShellViewModel @JvmOverloads internal constructor(application: Application
                                 else -> ScreenRun(template = template.first, library = template.second)
                             })
                         }
-                    } catch (_: ScreenFallback) {
+                    } catch (fallback: ScreenFallback) {
+                        // Stage 7b (R2): the screen already shows what the person asks. It stays, no other call runs, and the voice says so.
+                        val same = screenChange && fallback.inner == AppFileNames.SAME
+                        if (same) updateMessage(request, assistant.id) {
+                            it.copy(text = LiveVoiceBridge.alreadyShown(ToolSpec.availablePersisted(checkNotNull(changed))?.appLanguage),
+                                status = "complete", provenance = replyProvenance)
+                        }
                         // A change that the kit cannot make becomes a new screen with the plan prompt of a screen, and the old app stays (ruling OD-5).
-                        val built = screenChange && try {
+                        val built = same || screenChange && try {
                             logged("screen") { generate(prompt(dialogue(), decoded.brief + shown), null, ScreenRun()) }; true
                         } catch (_: ScreenFallback) { false }
                         // A screen that the person did not ask to see is complete without it, so the stage stays as it was and no error shows.

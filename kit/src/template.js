@@ -14,7 +14,7 @@ import { DslError, parseExpression, parseLine, show } from "./dsl.js";
 import { BUDGET, HEIGHT, SENTENCE_END, TEMPLATE_HEAD, WIDTH, colorFault, colored, cut, cutLong, headFault, isText, nodesIn, numberOf } from "./form-base.js";
 import { FORMS_BY_WORD } from "./forms.js";
 import { DATA_WORDS, checkedValues, numbersIn, rejectFile, sourceFault } from "./form-data.js";
-import { missOf } from "./library.js";
+import { freeShapes, missOf } from "./library.js";
 import { diagramOf } from "./form-scene.js";
 
 export { BUDGET, TEMPLATE_HEAD } from "./form-base.js";
@@ -170,9 +170,10 @@ function startOf(read, leftOut) {
 /**
  * The app file of a template with each line of leftOut left out: the app line, the drawing of 300 × 220, the control (or $/v = START for a
  * control that is left out or has a fault), and the card. Null when the first line has a fault: a stored file with one then fails the change
- * rules as a mismatch (change.js).
+ * rules as a mismatch (change.js). preview is true for the lines so far of a stream: a diagram of a thing with no entry then names its parts
+ * only after a line that comes after the shapes, so that its drawing only grows.
  */
-export function expandTemplate(read, leftOut) {
+export function expandTemplate(read, leftOut, preview = false) {
   const [{ tree: head }] = read.lines, line = (name) => read.lines.find((one) => one.name === name && one.tree && !leftOut.has(name));
   let parts = drawnParts(read, leftOut);
   if (!head) return null;
@@ -180,17 +181,19 @@ export function expandTemplate(read, leftOut) {
   let card = line("card")?.tree;
   if (form.file) return form.file(head, parts, control, card, line("source")?.tree);
   const out = [`app(${title}, lang=${show(head.named.lang)}, preset="clean", palette=${show(head.named.palette ?? { k: "lit", v: "blue" })})`];
-  // A diagram (G1, C2): the kit names the parts of its object and marks the part of the step, or marks the label of the step of a thing with
-  // no entry. The card shows the name of the part and its sentence. The model writes no label and no condition for it.
+  // A diagram (G1, C2): the kit names the parts of its object, or the parts of a thing with no entry at their points (stage 7b, R3), and marks
+  // the part of the step. The card shows the name of the part and its sentence. The model writes no label and no condition for it.
   const diagram = control?.k === "call" && control.name === "parts" ? diagramOf(parts, control, langOf(read)) : null;
   if (diagram?.steps) {
-    parts = parts.map((part) => (part === diagram.object ? { ...part, tree: { ...part.tree, named: { ...part.tree.named, parts: { k: "lit", v: true }, mark: parseExpression("$/v") } } }
-      : diagram.object ? part : { ...part, tree: markedLabel(part.tree, diagram.steps) }));
+    const names = diagram.names ? { names: { k: "lit", v: diagram.names } } : {};
+    parts = parts.map((part) => (part === diagram.object ? { ...part, tree: { ...part.tree, named: { ...part.tree.named, parts: { k: "lit", v: true }, mark: parseExpression("$/v"), ...names } } } : part));
     card = diagramCard(read, diagram.steps, card);
   }
   // What the form gives in place of the defaults (forms.js TemplateForm expand).
-  const own = FORMS_BY_WORD[read.word].expand?.(parts, control, head) ?? {}, shapes = own.shapes ?? parts.map((part) => show(part.tree));
-  out.push(...(own.lines ?? []), `need picture = drawing(${title}, ${WIDTH}, ${HEIGHT}, [${shapes.join(", ")}])`);
+  const own = FORMS_BY_WORD[read.word].expand?.(parts, control, head) ?? {}, drawn = own.shapes ?? parts.map((part) => show(part.tree));
+  const after = !preview || read.lines.some((one) => one.name === "card" || NARRATION.test(one.name));
+  const { shapes, lines } = diagram?.points ? freeShapes(drawn, diagram.points, [WIDTH, HEIGHT], after) : { shapes: drawn, lines: [] };
+  out.push(...(own.lines ?? []), ...lines, `need picture = drawing(${title}, ${WIDTH}, ${HEIGHT}, [${shapes.join(", ")}])`);
   const [label, ...args] = control?.args ?? [], start = show(startOf(read, leftOut));
   if (control?.k !== "call") out.push(`$/v = ${control ? show(control) : start}`);
   else if (control.name === "slider") out.push(`need v = input("slider", ${show(label)}, ${start}, min=${show(args[0])}, max=${show(args[1])}, step=${show(args[2])})`);
@@ -202,13 +205,6 @@ export function expandTemplate(read, leftOut) {
   return out.join("\n") + "\n";
 }
 
-/** A shape of a diagram of a thing with no entry: a text or the label= of a library line that names a step takes the accent while its step shows (G2). */
-function markedLabel(tree, steps) {
-  const step = (node) => isText(node) && steps.includes(node.v) ? node.v : null, when = (name, other) => parseExpression(`$/v == ${JSON.stringify(name)} ? "accent" : ${show(other)}`);
-  if (tree.k === "call" && tree.name === "text" && step(tree.args[2])) return { ...tree, args: tree.args.map((arg, index) => (index === 3 ? when(tree.args[2].v, arg) : arg)) };
-  if (tree.k === "call" && tree.name === "use" && step(tree.named.label)) return { ...tree, named: { ...tree.named, tone: when(tree.named.label.v, tree.named.color ?? { k: "lit", v: "ink" }) } };
-  return tree;
-}
 /** The card of a diagram (C2): the name of the part of the step with a capital first letter, and the sentence of the step, else the card text of the file. */
 function diagramCard(read, steps, card) {
   const said = (index) => { const raw = read.lines.find((line) => line.name === `say${index + 1}` && line.tree)?.raw; try { return raw && JSON.parse(raw.slice(raw.indexOf("=") + 1)); } catch { return null; } };
@@ -282,7 +278,7 @@ export function buildTemplate(text, stored, build, preview = false) {
   faults.push(...read.faults);
   read.lines.filter((line) => !line.tree).forEach((line) => out.add(line.name));
   settle();
-  const compile = () => build(expanded = expandTemplate(readTemplate(kept), new Set()));
+  const compile = () => build(expanded = expandTemplate(readTemplate(kept), new Set(), preview));
   if (!whole()) {
     built = compile();
     if (built.faults.length) {

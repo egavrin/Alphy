@@ -292,6 +292,16 @@ test("run: the animate button starts a timer and the value is 180 after half of 
   expect(half.timers).toEqual([{ id: "anim", intervalMs: 50 }]);
 });
 
+// Failure case (stage 7b): stage 7 divided before it multiplied, so a step of a lap gave 0.07200000000000001. The host check of a change
+// rejects a shown number with 7 decimals or more (long_decimal), and a spoken change of an app with a running lap then failed one time in five.
+test("run: each step of an animate is the exact product divided by the time, with no float noise", async () => {
+  const { send } = await clocked(plan("lesson"));
+  send(0, press("lap_button"));
+  const values = [1, 8, 1234, 2501, 4999].map((ms) => send(ms, timer("anim")).state.angle);
+  expect(values).toEqual([0.072, 0.576, 88.848, 180.072, 359.928]);
+  expect(values.map(String).filter((text) => /\.\d{7,}/.test(text))).toEqual([]);
+});
+
 test("run: the last timer event returns timers: []", async () => {
   const { kit, send, app } = await clocked(plan("lesson"));
   send(0, press("lap_button"));

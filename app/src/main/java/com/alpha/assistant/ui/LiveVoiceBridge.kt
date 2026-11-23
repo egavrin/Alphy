@@ -737,7 +737,7 @@ internal class LiveVoiceBridge(
                 changes -= id
                 val hadSteps = changedFromSteps.remove(id)
                 if (message.status == "complete") {
-                    session.commentary(delegation, spoken(LiveProtocol.MARK, message.text))
+                    session.commentary(delegation, if (message.text in ALREADY_SHOWN.values) message.text else spoken(LiveProtocol.MARK, message.text))
                     // C4: a change that turns a scene into a stepped scene walks it from step 1, once the list of tools holds its revision.
                     if (hadSteps == false) message.toolId?.let { changeWalk = it to (message.toolRevision ?: 0); changeWalks() }
                     continue
@@ -853,6 +853,10 @@ internal class LiveVoiceBridge(
         const val PRESS_MISSING = "На экране нет такой кнопки."
         /** A spoken press named a control, but no stage ran its tap, so nothing changed. */
         const val PRESS_FAILED = "Нажать не получилось."
+        /** The change call found that the screen already shows the request (stage 7b, R2), by the language of the screen. */
+        val ALREADY_SHOWN = mapOf("ru" to "На экране это уже есть.", "en" to "This is already on the screen.")
+        /** Russian for a Russian screen, else English: the host lines have no other language. */
+        fun alreadyShown(language: String?) = ALREADY_SHOWN.getValue(if (language?.substringBefore('-') == "ru") "ru" else "en")
         /** The time for the stage to run or refuse a press. A loaded phone can need some frames, and the voice waits only on a failure. */
         const val PRESS_WAIT_MS = 2_000L
         /** The longest time of a step press that waits for the ready stage, and the time between two tries (stage 7, fix list 2, H2). */

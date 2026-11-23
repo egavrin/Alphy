@@ -75,14 +75,17 @@ export async function compileAppFile(text, previous, preview = false) {
 /** The lines of a reply: an empty line and a markdown fence line go. Each other text stays, and the kit reports it. */
 export const linesOf = (text) => text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("```"));
 const OUTSIDE = /^\s*outside\(\s*"([a-z0-9]{1,16})"\s*\)\s*$/;
+const SAME = /^\s*same\(\s*\)\s*$/;
 
 /**
- * A reply of a plan call: {kind: "outside", word} for the one line outside("word"), else {kind: "plan", text} with the lines of the reply
- * and a final newline. The word is 1 to 16 small Latin letters or digits, such as 3d, and the reader holds no list of words.
+ * A reply of a plan call: {kind: "outside", word} for the one line outside("word"), {kind: "same"} for the one line same() of a change
+ * that the screen already shows (stage 7b, R2), else {kind: "plan", text} with the lines of the reply and a final newline. The word is
+ * 1 to 16 small Latin letters or digits, such as 3d, and the reader holds no list of words.
  * A reply of prose is a plan too: the compile reports its faults.
  */
 export function readPlanReply(text) {
   const lines = linesOf(text), word = lines.length === 1 ? OUTSIDE.exec(lines[0])?.[1] : undefined;
+  if (lines.length === 1 && SAME.test(lines[0])) return { kind: "same" };
   return word ? { kind: "outside", word } : { kind: "plan", text: lines.join("\n") + "\n" };
 }
 
@@ -119,7 +122,7 @@ export function patchAppFile(plan, reply) {
  * with the stored app previous. A merged text of more than cap characters gives result null and no compile.
  * A template plan (template.js) takes the reply by mergeTemplate in place of patchAppFile.
  * previous is {appFile, stateSchema, state} with stateSchema and state as JSON text, as the host sends them, or null. A text that is no
- * JSON makes the step reject. The result is {kind: "outside", word} or {kind: "plan", text, result}, where text is the merged text.
+ * JSON makes the step reject. The result is {kind: "outside", word}, {kind: "same"}, or {kind: "plan", text, result}, where text is the merged text.
  * data is {excerpts, site, time} for a new searched data screen, or null: the merged text then gets the host check of template.js checkData
  * before the compile, and result.rejected is the value that no excerpt holds, or null.
  */

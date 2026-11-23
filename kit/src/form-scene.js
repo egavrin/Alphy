@@ -5,7 +5,7 @@
 import { show } from "./dsl.js";
 import { KINDS, PROPERTIES } from "./kinds.js";
 import { BUDGET, HEIGHT, INSIDE, WIDTH, isText, labelsFault, numberOf, optionsFault, textCardFault, textFault } from "./form-base.js";
-import { entryOf, partName, useFault, useShapes } from "./library.js";
+import { FREE, UNITS, entryOf, freeLayout, partName, roomFault, useFault, useShapes } from "./library.js";
 
 const CONTROL = "slider(LABEL, MIN, MAX, STEP, START) with numbers, choice(LABEL, [OPTION, …], START), steps(LABEL, [STEP, …], ANSWER), or parts(LABEL, [PART, …])";
 const PLAY = "play(LABEL, FROM, TO, SECONDS) with numbers: $/t runs from FROM to TO in SECONDS, again and again";
@@ -37,15 +37,17 @@ export const SCENE_FORM = {
       if (args.length !== 5 || args.slice(1).some((arg) => numberOf(arg) === undefined)) return form;
     } else if (tree.name === "parts") {
       // A diagram (block 2 plan, G1 and C2): a walk over up to BUDGET.parts parts, each named in the picture. The kit takes the parts of the
-      // ready object of the scene in their order when the line names none.
+      // ready object of the scene in their order when the line names none. A part is a text, or part(...) with the name that the model gives (diagramOf).
       const names = args[1]?.items;
       if (args.length < 1 || args.length > 3 || (args[1] && !names) || (args[2] && !isText(args[2]))) return form;
       if (names && names.length > BUDGET.parts) return `the parts control has ${names.length} parts, and its cap is ${BUDGET.parts}. Keep the ones that matter most`;
       if (names && names.length < 2) return "a parts control needs at least 2 parts";
-      // The cap of a name holds only for a thing with no entry (diagramOf): the name of a part of an entry can be longer (C2).
-      const fault = names && labelsFault("part", names, Infinity);
+      const given = names?.map(nameOfPart);
+      if (given?.some((name) => name === undefined) || new Set(names?.map(partKind)).size > 1) return `each part of a parts control has the same form: ${PART}`;
+      // The cap of a name holds only for a name that the model gives (diagramOf): the name of a part of an entry can be longer (C2).
+      const fault = names && labelsFault("part", given, names.every(isText) ? Infinity : BUDGET.part);
       if (fault) return fault;
-      if (args[2] && names && !names.some((name) => name.v === args[2].v)) return `the start ${JSON.stringify(args[2].v)} is not one of the parts`;
+      if (args[2] && names && !given.some((name) => name.v === args[2].v)) return `the start ${JSON.stringify(args[2].v)} is not one of the parts`;
     } else if (tree.name === "choice" || tree.name === "steps") {
       // A steps control is a choice whose start is its answer step, by default the last step (decision 3).
       const options = args[1]?.items, what = tree.name === "steps" ? "steps" : "options";
@@ -92,20 +94,58 @@ export const SCENE_FORM = {
   },
 };
 
+/** The forms of a part of a parts control (stage 7b, R3). */
+const PART = "the name or the id of a part of the ready object in quotes, part(ID, NAME) with the name in the language of the request, or part(NAME, X, Y) with a point of a thing that you draw";
+/** The kind of a part of a parts control: "id" (a text), "named" (part(ID, NAME)), "point" (part(NAME, X, Y)), or undefined. */
+function partKind(item) {
+  if (isText(item)) return "id";
+  const args = item?.k === "call" && item.name === "part" && !Object.keys(item.named).length ? item.args : [];
+  if (args.length === 2 && args.every(isText)) return "named";
+  if (args.length === 3 && isText(args[0]) && numberOf(args[1]) !== undefined && numberOf(args[2]) !== undefined) return "point";
+  return undefined;
+}
+/** The name of a part of a parts control as a text node: the text, NAME of part(ID, NAME), or NAME of part(NAME, X, Y). */
+const nameOfPart = (item) => ({ id: item, named: item.args?.[1], point: item.args?.[0] })[partKind(item)];
+
 /**
- * The diagram of a parts control (block 2 plan, G1, G2, and C2), as {object, steps, fault}. object is the first part line that places a ready
- * object with parts, and steps are the names of the walk in the language of the scene: the names of the control, else each part of the object
- * in its order, at most BUDGET.parts. A name of the control that is a part of the object (by its name or its id) takes the name of the entry.
- * With no object, the names of the control are free labels (a thing with no entry, G2).
+ * The diagram of a parts control (block 2 plan, G1, G2, and C2), as {object, steps, names, points, fault}. object is the first part line that
+ * places a ready object with parts, and steps are the names of the walk in the language of the scene: the names of the control, else each
+ * part of the object in its order, at most BUDGET.parts. A name of the control that is a part of the object (by its name or its id) takes the
+ * name of the entry. The entries have Russian and English names only, so in another language the model gives each name with part(ID, NAME),
+ * and names maps each id to its name (stage 7b, R3).
+ * With no object, each part is part(NAME, X, Y) of a thing that the model draws (G2, stage 7b), and points are [NAME, X, Y] (library.js freeShapes).
  */
 export function diagramOf(parts, control, lang) {
   const object = parts.find((part) => part.tree.k === "call" && part.tree.name === "use" && isText(part.tree.args[0]) && entryOf(part.tree.args[0].v)?.entry.parts?.length);
-  const list = object && entryOf(object.tree.args[0].v).entry.parts, names = control.args[1]?.items;
-  if (!list && names) return { object: null, steps: names.map((name) => name.v), fault: labelsFault("part", names, BUDGET.part) };
-  if (!list) return { fault: "a parts control with no names needs a ready object with parts in the picture, such as use(\"heart\", 150, 150, 220)" };
-  if (!names) return { object, steps: list.slice(0, BUDGET.parts).map((part) => partName(part, lang)) };
-  const found = names.map((name) => list.find((part) => part.id === name.v || partName(part, lang).toLowerCase() === name.v.toLowerCase() || Object.values(part.names).includes(name.v)));
-  const missing = names.find((_, index) => !found[index]);
-  if (missing) return { fault: `${object.tree.args[0].v} has no part ${JSON.stringify(missing.v)}. Its parts are ${list.map((part) => partName(part, lang)).join(", ")}` };
-  return { object, steps: found.map((part) => partName(part, lang)) };
+  const list = object && entryOf(object.tree.args[0].v).entry.parts, items = control.args[1]?.items, kinds = new Set(items?.map(partKind)), [kind] = kinds;
+  if (kinds.size > 1 || (items && !kind)) return { fault: `each part of a parts control has the same form: ${PART}` };
+  if (!list) return freeDiagram(items, kind);
+  if (kind === "point") return { fault: `with the ready object ${object.tree.args[0].v}, a part is not part(NAME, X, Y): the kit knows where its parts are. Write the id of each part, or part(ID, NAME)` };
+  const known = Object.hasOwn(list[0].names, lang);
+  if (!known && kind !== "named") {
+    return { fault: `the kit has no names in the language "${lang}" for the parts of ${object.tree.args[0].v}: write each part as part(ID, NAME) with the name in "${lang}", such as part(${JSON.stringify(list[0].id)}, NAME)` };
+  }
+  if (!items) return { object, steps: list.slice(0, BUDGET.parts).map((part) => partName(part, lang)) };
+  const keys = items.map((item) => (kind === "named" ? item.args[0] : item));
+  const found = keys.map((key) => list.find((part) => part.id === key.v || partName(part, lang).toLowerCase() === key.v.toLowerCase() || Object.values(part.names).includes(key.v)));
+  const missing = keys.find((_, index) => !found[index]);
+  if (missing) return { fault: `${object.tree.args[0].v} has no part ${JSON.stringify(missing.v)}. Its parts are ${list.map((part) => (known ? partName(part, lang) : part.id)).join(", ")}` };
+  if (kind !== "named") return { object, steps: found.map((part) => partName(part, lang)) };
+  const names = Object.fromEntries(found.map((part, index) => [part.id, items[index].args[1].v]));
+  const tree = object.tree, room = roomFault(tree, { ...tree.named, parts: { k: "lit", v: true }, names: { k: "lit", v: names } }, [WIDTH, HEIGHT], lang);
+  return { object, steps: Object.values(names), names, fault: room };
+}
+
+/** The diagram of a parts control with no ready object in the picture (G2, stage 7b): each part is part(NAME, X, Y) at a point of the drawing zone. */
+function freeDiagram(items, kind) {
+  if (!items) return { fault: "a parts control with no names needs a ready object with parts in the picture, such as use(\"heart\", 150, 150, 220), or part(NAME, X, Y) for each part of a thing that you draw" };
+  if (kind !== "point") return { fault: "with no ready object in the picture, write each part as part(NAME, X, Y): its name and a point of the part in your drawing, and the kit writes the name beside the drawing" };
+  const points = items.map((item) => [item.args[0].v, numberOf(item.args[1]), numberOf(item.args[2])]), [left, right] = FREE.zone;
+  const out = points.findIndex(([, x, y]) => x < left || x > right || y < 0 || y > HEIGHT);
+  if (out >= 0) return { fault: `the point of part ${out + 1} is at ${points[out][1]}, ${points[out][2]}: the drawing and each point stay from x = ${left} to x = ${right} and from y = 0 to y = ${HEIGHT}, so the names have room at the sides` };
+  const placed = freeLayout(points, [WIDTH, HEIGHT]);
+  if (placed.size / UNITS < FREE.fewest || placed.labels.some((one) => one.clipped)) {
+    return { fault: "the names of the parts leave the drawing too little room: write shorter names, or names of two words, or name fewer parts" };
+  }
+  return { object: null, steps: points.map(([name]) => name), points };
 }

@@ -69,9 +69,10 @@ internal data class DataCheck(val excerpts: String,val site: String,val time: St
 /** The stored app of a change, as the host keeps it: its app file, and its state schema and state as JSON text. */
 internal data class AppFilePrevious(val appFile: String,val stateSchema: String,val state: String)
 
-/** A reply of a model: the one line outside("word"), or the plan that the compilation is of. */
+/** A reply of a model: the one line outside("word"), the one line same() of a change that the screen already shows, or the plan that the compilation is of. */
 internal sealed interface AppFileRead {
     data class Outside(val word: String): AppFileRead
+    data object Same: AppFileRead
     data class Plan(val text: String,val compilation: AppFileCompilation): AppFileRead
 }
 
@@ -126,7 +127,8 @@ internal class AppFileCompiler(private val context: Context,private val sandbox:
         // A promise that the engine does not resolve gives an empty text, not JSON. An output without its faults or notes is not a result either.
         return try {
             val json=JSONObject(checkNotNull(result.json))
-            if(json.getString("kind") == "outside") AppFileRead.Outside(json.getString("word")) else {
+            if(json.getString("kind") == "same") AppFileRead.Same
+            else if(json.getString("kind") == "outside") AppFileRead.Outside(json.getString("word")) else {
                 val merged=json.getString("text")
                 AppFileRead.Plan(merged,if(json.isNull("result")) overCap(merged.length) else read(json.getJSONObject("result")))
             }

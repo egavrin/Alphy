@@ -2592,7 +2592,10 @@ private fun NativeStepper(label: String, options: List<JSONObject>, enabled: Boo
                 modifier = Modifier.size(48.dp).semantics { contentDescription = previous }) {
                 AlphaIcon(Glyph.Chevron, Modifier.size(20.dp).graphicsLayer { scaleX = -1f }, color = LocalContentColor.current)
             }
-            Text(miniAppString(R.string.tool_part_count, index + 1, options.size), style = MaterialTheme.typography.titleMedium)
+            // The host has the count words in Russian and English. A screen in another language shows the count with no word.
+            val language = LocalMiniAppControlsLanguage.current?.substringBefore('-')
+            Text(if (language == null || language == "ru" || language == "en") miniAppString(R.string.tool_part_count, index + 1, options.size)
+                else "${index + 1} / ${options.size}", style = MaterialTheme.typography.titleMedium)
             OutlinedIconButton(onClick = { choose(options[index + 1].get("value")) }, enabled = enabled && index < options.lastIndex,
                 modifier = Modifier.size(48.dp).semantics { contentDescription = next }) {
                 AlphaIcon(Glyph.Chevron, Modifier.size(20.dp), color = LocalContentColor.current)

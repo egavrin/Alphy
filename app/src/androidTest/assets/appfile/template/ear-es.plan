@@ -1,0 +1,8 @@
+scene("Partes del oído", lang="es", palette="pink")
+control = parts("Parte", [part("outer_ear", "oído externo"), part("ear_canal", "canal auditivo"), part("eardrum", "tímpano"), part("small_bones", "huesecillos"), part("cochlea", "cóclea")])
+s1 = use("ear", 150, 150, 220)
+say1 = "El oído externo recoge los sonidos y los dirige hacia el canal auditivo."
+say2 = "El canal auditivo lleva las ondas sonoras hasta el tímpano."
+say3 = "El tímpano vibra cuando recibe las ondas sonoras."
+say4 = "Los huesecillos transmiten las vibraciones hacia el oído interno."
+say5 = "La cóclea transforma las vibraciones en señales nerviosas que llegan al cerebro."

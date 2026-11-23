@@ -1,0 +1,8 @@
+[
+  {"id": "g-kettle", "kind": "diagram", "entry": false, "lang": "ru", "expect": "template", "request": "Из чего состоит электрический чайник?"},
+  {"id": "g-mushroom", "kind": "diagram", "entry": false, "lang": "en", "expect": "template", "request": "What are the parts of a mushroom?"},
+  {"id": "g-lighthouse", "kind": "diagram", "entry": false, "lang": "en", "expect": "template", "request": "Show me the parts of a lighthouse."},
+  {"id": "g-eye-de", "kind": "diagram", "entry": true, "lang": "de", "expect": "template", "request": "Zeig mir, wie das Auge aufgebaut ist."},
+  {"id": "g-stomach-es", "kind": "diagram", "entry": true, "lang": "es", "expect": "template", "request": "¿Qué partes tiene el sistema digestivo?"},
+  {"id": "g-skin-en", "kind": "diagram", "entry": true, "lang": "en", "expect": "template", "request": "Show me the layers of the skin."}
+]

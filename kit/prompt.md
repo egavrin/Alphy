@@ -190,7 +190,10 @@ s1 = SHAPE, and so on to s{{shapes}} = SHAPE
 card = card(TITLE, TEXT)
 A slider is a number that the person drags from MIN to MAX in steps of STEP, and START is its start value. A choice has 2 to 6 options, each at most 16 characters (at most 12 with 5 or 6 options), and START is one of them. With no START the first option is the start.
 Steps are a sequence in their order, such as the stages of a process: 2 to 6 steps, each at most 16 characters (at most 12 with 5 or 6 steps). ANSWER is the step that shows the answer best, and the screen starts at it. With no ANSWER the last step is the answer. Use steps for a sequence, and a choice for things with no order.
-Parts are a diagram: one thing with each of its parts named, and a walk over the parts, one at a time, in the order of the list. With a ready object with parts in the picture, each PART is a part of its list, or leave the list out to walk all its parts: the kit names each part and marks the part of the step, so write no parts= and no mark=. Use parts only with such an object. With no such object, use steps: one step for each part, with its name in the picture. A scene with parts has no card line: the card shows the name of the part and its narration line.
+Parts are a diagram: one thing with each of its parts named, and a walk over the parts, one at a time, in the order of the list. The kit writes the name of each part beside the picture with a line to the part, and marks the part of the step: write no text and no label= for a part, and no parts= and no mark=. A scene with parts has no card line: the card shows the name of the part and its narration line.
+With a ready object with parts in the picture, each PART is a part of its list, or leave the list out to walk all its parts. The kit has the names of these parts in Russian and English only: in another language, write each PART as part(ID, NAME), with NAME in the language of the request.
+With no such object, draw the thing with shapes from x = {{zoneLeft}} to x = {{zoneRight}}, and write each PART as part(NAME, X, Y), where X, Y is a point on the part in your drawing. A point with X under {{middle}} gets its name in the left column, and each other point in the right column: put about one half of the points at each side.
+Write each NAME as in the middle of a sentence, with at most {{part}} characters.
 Play is a thing that moves by itself, such as an orbit, a swing, a wave, or a wheel: $/t runs from FROM to TO in SECONDS, again and again, from the first state, and the person can stop it and change its speed. SECONDS is at most 120. A scene with play needs no control: add one only when the person also picks a value or a step, and then the motion runs inside each step with no stop and no speeds.
 s1 to s{{shapes}} are at most {{shapes}} shapes in a box {{width}} wide and {{height}} high. Use as few shapes as show the thing: most pictures need 4 to 8. x goes right and y goes down. At least one shape reads $/v, so that the control changes the picture, and with play at least one shape reads $/t. Parts need no $/v.
 Shapes: {{kinds}}. A shape takes {{properties}}. The center of a text is at x, y, and a text in quotes in a shape has at most 28 characters.
@@ -307,6 +310,21 @@ say3 = "Ствол мозга сам ведёт дыхание и стук се�
 ```
 
 Example 7
+Request: What are the parts of a candle?
+```
+scene("Parts of a candle", lang="en", palette="amber")
+control = parts("Part", [part("flame", 150, 64), part("wick", 146, 108), part("melted wax", 166, 122), part("wax body", 130, 210)])
+s1 = rect(112, 120, 76, 168, "sand+1", 10, gradient="sand-1")
+s2 = path([112, 122, 150, 112, 188, 122, 150, 132], "sand+2", smooth=true, closed=true)
+s3 = line(150, 122, 150, 100, "ink", 3)
+s4 = path([150, 34, 166, 76, 150, 102, 134, 76], "sun", smooth=true, closed=true, gradient="warning", glow=true)
+say1 = "The flame burns wax vapor and gives light and heat."
+say2 = "The wick soaks up the melted wax and feeds the flame."
+say3 = "The heat of the flame melts a small pool of wax at the top."
+say4 = "The solid wax is the fuel that the candle burns."
+```
+
+Example 8
 Request: Устрой мне тест по дорожным знакам.
 ```
 outside("learn")
@@ -323,7 +341,7 @@ The kit found faults in some lines of your screen. A fault starts with the name 
 
 ## Template change
 
-The request above asks for a change of your screen. Write each line that changes and each new line, complete and with its name, and nothing more: a line with the name of an earlier line replaces it, a new part takes the next free name, such as s4 after s3, and delete NAME removes a part. A ready object of the list under the request can replace a shape or join the shapes. When the screen is a scene and the person asks that the picture moves by itself, add the line play = play(LABEL, FROM, TO, SECONDS) and write again each shape that moves with $/t. Do not write a line that stays as it is. Keep the template and the names of the lines, and keep the caps of the template. When the template cannot hold the change, reply with the one line outside("other"). Reply with lines only.
+The request above asks for a change of your screen. Write each line that changes and each new line, complete and with its name, and nothing more: a line with the name of an earlier line replaces it, a new part takes the next free name, such as s4 after s3, and delete NAME removes a part. A ready object of the list under the request can replace a shape or join the shapes. When the screen is a scene and the person asks that the picture moves by itself, add the line play = play(LABEL, FROM, TO, SECONDS) and write again each shape that moves with $/t. Do not write a line that stays as it is. Keep the template and the names of the lines, and keep the caps of the template. When the screen already shows what the person asks, reply with the one line same(). When the template cannot hold the change, reply with the one line outside("other"). Reply with lines only.
 
 ## Template rest
 

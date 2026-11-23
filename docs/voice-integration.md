@@ -144,6 +144,7 @@ A host line is a fixed line of the bridge that holds no text of Alphy. A host li
 - The constants of the companion object of `LiveVoiceBridge` (`ui/LiveVoiceBridge.kt`): `NOT_HEARD`, `BUSY`, `MINI_APP_STARTED`, `PRESS_MISSING`, `PRESS_FAILED`, `FULL_WAIT`, and `FULL_NO_ANSWER`, `FULL_TOO_BIG`, or `FULL_NOT_BUILT` with `FULL_HINT`.
 - The approval lines: `PROPOSE`, `ASK`, `STARTED`, `CANCELLED`, `DONE`, and `NOT_DONE`.
 - `FAILED` and the error text of the message.
+- `ALREADY_SHOWN` (stage 7b, R2): the line of a spoken change whose template change call replies `same()`, by the language of the screen. A Russian screen gets «На экране это уже есть.», and each other screen gets «This is already on the screen.». This line is the only host line in two languages.
 - The line of a card that waits for a tap, from `LiveVoiceBridge.onScreenLine(context, phase, refinement)`. It takes the label of the button from the resources:
 
 | Case | Line |
@@ -195,7 +196,7 @@ The host turns on the controls of a new scene when its narration starts, and sav
 - «Дальше» is a routing press of the next step. The host presses it, and the voice says the sentence of that step, not the routing text.
 - While a steps scene is before its last step, the shown screen lists the host control «Продолжить по шагам» (`stage_continue_steps`). «Продолжай» presses it: the voice says the sentence of the next step, and the walk goes on from there to the last step.
 - Between two sentences of a walk, the strip keeps the status «Alphy говорит», and a reply end opens no approval window.
-- A diagram (`control = parts(…)`, `kit/README.md`) walks the parts of a ready object of the library. A thing with no ready object gets steps, as in Alpha 22 (stage 7, fix list 2, H5). A diagram walks as a steps scene: each part is a step, `say1` to `sayN` are its sentences, and the card shows the part of the step. A diagram has up to 8 parts, so the classifier steps go to 8 (`LiveProtocol.MAX_STEPS`). «Покажи четвёртую часть» is `go_to` 4, or a routing press of that part.
+- A diagram (`control = parts(…)`, `kit/README.md`) walks the parts of a ready object of the library, or the parts of a thing with no ready object at the points that the model gives (stage 7b, R3). The model gives the part names for a thing with no ready object and, in a language other than Russian and English, for a ready object too, so the picture, the stepper, the card, and the routing press use the names in the language of the talk. A diagram walks as a steps scene: each part is a step, `say1` to `sayN` are its sentences, and the card shows the part of the step. A diagram has up to 8 parts, so the classifier steps go to 8 (`LiveProtocol.MAX_STEPS`). «Покажи четвёртую часть» is `go_to` 4, or a routing press of that part.
 - A play scene (`play = play(…)`) moves by itself from its first state. The shown screen holds `motion`: `{"state": "running" or "stopped", "speed": <the text of the chosen speed>}`, read from the icon of the play button and the inline choice of speeds (`ShownScreen.of`). The routing instructions (`ChatToolReply.shownScreenInstructions`) map the spoken commands to presses:
   - «Быстрее» and «Медленнее» press the speed after or before the present speed («Движение: Быстро»).
   - «Стоп» presses the pause button («Пауза»).
@@ -286,6 +287,8 @@ They are the validation and the smoke run of a candidate (`docs/tool-integration
   A reply with faults gets one repair call. `kit/README.md` (section "Faults by line") gives what the kit does with a changed line that still has a fault. A template change call that ends early gets no call for the missing lines.
 - An `outside` reply to a template change call runs the change by lines on the expanded app file. The app then has a free app file. A typed change of a template app runs that change too.
   A template change that gives no app falls back as a change that the kit cannot make (section "Session and hand-offs").
+- A `same()` reply to a template change call (stage 7b, R2) keeps the screen: the revision and the state stay, no change by lines and no full generation run, and the trace marks `plan_outcome` `fallback:same`. The message of the change gets the host line `ALREADY_SHOWN` with no mark. A typed change that gets `same()` fails as an empty change.
+  A spoken change of a data form is a new data screen with no change call (`AppFileSteps`), so it never gets `same()`.
 
 The stage preview:
 

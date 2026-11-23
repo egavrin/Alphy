@@ -100,7 +100,7 @@ test("a library line over a limit is a fault, and an unknown name is a miss that
   expect(fault('use("heart", 150, 150, 120, parts=true)')).toBe(null);
   // The names of the scene language must leave the object its smallest size: the Russian names of the heart are longer than the English ones.
   const wide = parseExpression('use("heart", 150, 150, 160, parts=true)');
-  expect([useFault(wide, [190, 300], "en"), useFault(wide, [190, 300], "ru")]).toEqual([null, "the names of the parts of heart leave it too little room: name fewer parts, or give it more height"]);
+  expect([useFault(wide, [190, 300], "en"), useFault(wide, [190, 300], "ru")]).toEqual([null, "the names of the parts of heart leave it too little room: name fewer parts, write shorter names, or give it more height"]);
   expect([SCENE_FORM.partFault(wide, "ru"), SCENE_FORM.partFault(parseExpression('use("heart", 150, 150, 10, parts=true)'), "ru")?.slice(0, 16)]).toEqual([null, "the SIZE of hear"]);
   const result = await compiled('circle(150, 150, 40, "accent")', 'use("unicorn", 60, 60, 80)');
   expect([result.faults, result.misses, result.leftOut, result.definition === null]).toEqual([['s2: the library has no "unicorn". Draw it with shapes, or with an emoji in a text shape'], ["unicorn"], ["s2"], false]);

@@ -34,6 +34,15 @@ test("readPlanReply (task 1): one outside line gives its word as it is, also in 
   }
 });
 
+test("readPlanReply (stage 7b, R2): the one line same() is its own outcome, and compileStep and previewStep merge and compile nothing", async () => {
+  expect(readPlanReply("same()\n")).toEqual({ kind: "same" });
+  expect(readPlanReply("\n```\n  same( )  \n```\n")).toEqual({ kind: "same" });
+  for (const reply of ['same("x")', "same()\ncard = card(\"A\", \"B.\")", "Same()"]) expect([reply, readPlanReply(reply).kind]).toEqual([reply, "plan"]);
+  const stored = fixture("template/ship");
+  expect(await compileStep({ text: "same()", plan: stored, read: true, previous: null, cap: 20000 })).toEqual({ kind: "same" });
+  expect(await previewStep({ text: "same()", plan: stored })).toEqual({ kind: "none" });
+});
+
 test("readPlanReply (task 1): a plan in a fence with blank lines gives its lines with no blank line and a final newline, and the plan compiles with no fault", async () => {
   const text = plan("calc"), read = readPlanReply("```plan\n\n" + text.trimEnd().split("\n").join("\n\n") + "\n```\n\n");
   expect(read).toEqual({ kind: "plan", text });

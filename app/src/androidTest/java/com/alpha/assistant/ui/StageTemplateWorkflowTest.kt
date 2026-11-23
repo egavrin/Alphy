@@ -19,7 +19,9 @@ import com.alpha.assistant.data.Draft
 import com.alpha.assistant.data.Source
 import com.alpha.assistant.sandbox.SandboxClient
 import com.alpha.assistant.tools.AgentScriptProvider
+import com.alpha.assistant.tools.SceneStep
 import com.alpha.assistant.tools.Scripted
+import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.ToolGenerationTraceEvent
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
@@ -75,6 +77,23 @@ class StageTemplateWorkflowTest {
             assertEquals(shell.messages(model).last().toolId, model.stageToolId)
             robot.waitUntil { robot.composedTextIn(scenario, STAGE, SHIP_CARD) }
             assertTrue(phases.toString(), "template_outcome:clean0" in phases)
+        }
+    }
+
+    /**
+     * Stage 7b (R3): a diagram of a ready object in Spanish names its parts with the names that the model gives, so the host check of the
+     * language passes and the screen is the template file. Alpha 23 fell back with host_check:language, because it showed the English names.
+     */
+    @Test fun aSpanishDiagramOfAReadyObjectPassesTheHostCheck() {
+        val ear = appFilePlan("template/ear-es")
+        val talk = TemplateTalk(AgentScriptProvider(ear))
+        shell.live(talk) { scenario, model, phases ->
+            val app = shell.screen(model)
+            assertEquals(ear, shell.finalFile(model, app.id))
+            assertEquals(listOf(APP_FILE_TEMPLATE), talk.stages)
+            assertTrue(phases.toString(), "template_outcome:clean0" in phases && phases.none { "fallback" in it })
+            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, "Oído externo") && robot.composedTextIn(scenario, STAGE, EAR_SAY1) }
+            assertEquals(SceneStep(1, 5, "oído externo"), checkNotNull(ShownScreen.of(shell.stored(model, app.id))).step)
         }
     }
 
@@ -232,6 +251,8 @@ class StageTemplateWorkflowTest {
         /** A first line with a palette that the kit does not have: a whole fault. */
         const val SKY_HEAD = "scene(\"Почему корабль не тонет?\", lang=\"ru\", palette=\"sky\")"
         const val FULL_WAIT = LiveVoiceBridge.FULL_WAIT
+        /** say1 of the Spanish ear template (kit/test/fixtures/template/ear-es.plan). */
+        const val EAR_SAY1 = "El oído externo recoge los sonidos y los dirige hacia el canal auditivo."
     }
 }
 

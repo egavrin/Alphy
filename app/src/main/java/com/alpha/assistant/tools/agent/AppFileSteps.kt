@@ -40,6 +40,8 @@ internal object AppFileNames {
     const val DATA_BLOCKS = "data_blocks"
     const val HOLE = "hole"
     const val EMPTY = "empty"
+    /** The change call replied same(): the screen already shows what the person asks (stage 7b, R2). The screen stays, and no other call runs. */
+    const val SAME = "same"
     const val FAULTS = "faults"
     const val OUTSIDE = "outside"
     const val HOST_CHECK = "host_check"
@@ -69,7 +71,7 @@ internal object AppFileNames {
     val HOST_CHECKS = SANDBOX_STATUSES + Finding.entries.map { it.reason } + LONG_DECIMAL + HOST_ERROR
 
     /** Each reason other than [COMPILE_STATUS] with its status. */
-    val FALLBACKS = CALL_FAILURES + setOf(DATA_BLOCKS, HOLE, EMPTY, FAULTS, OUTSIDE, TEMPLATE_WHOLE, TEMPLATE_CHECK) + HOST_CHECKS.map { "$HOST_CHECK:$it" }
+    val FALLBACKS = CALL_FAILURES + setOf(DATA_BLOCKS, HOLE, EMPTY, SAME, FAULTS, OUTSIDE, TEMPLATE_WHOLE, TEMPLATE_CHECK) + HOST_CHECKS.map { "$HOST_CHECK:$it" }
 
     // The trace phases of the plan step and the change step.
     const val PLAN_CALL_START = "plan_call_start"
@@ -283,6 +285,9 @@ internal class AppFileSteps(
         // A rest reply outside cannot finish a screen that the stage already shows.
         if (first is AppFileRead.Outside) return if (calls == 1) end("outside", AppFileOutcome.Outside(first.word))
             else end("whole", AppFileOutcome.Fallback(AppFileNames.TEMPLATE_WHOLE))
+        // same() is a reply of a change only: a new screen has nothing that it can keep.
+        if (first is AppFileRead.Same) return if (stored != null) AppFileOutcome.Fallback(AppFileNames.SAME)
+            else end("whole", AppFileOutcome.Fallback(AppFileNames.TEMPLATE_WHOLE))
         first as AppFileRead.Plan
         if (first.compilation.rejected != null) phase(AppFileNames.DATA_REJECTED, null, null)
         templateOutcome(first, false, stored, calls)?.let { return end(templateDetail(it, first, false), it) }
@@ -292,8 +297,7 @@ internal class AppFileSteps(
             is AppFileReply.Failed -> return end("failed", AppFileOutcome.Fallback(repair.reason))
             is AppFileReply.Text -> compiled { compiler.patch(first.text, repair.text, stored, check) }
         }
-        if (repaired is AppFileRead.Outside) return end("whole", AppFileOutcome.Fallback(AppFileNames.TEMPLATE_WHOLE))
-        repaired as AppFileRead.Plan
+        if (repaired !is AppFileRead.Plan) return end("whole", AppFileOutcome.Fallback(AppFileNames.TEMPLATE_WHOLE))
         if (repaired.compilation.rejected != null) phase(AppFileNames.DATA_REJECTED, null, null)
         val outcome = checkNotNull(templateOutcome(repaired, true, stored, calls + 1))
         return end(templateDetail(outcome, repaired, true), outcome)
@@ -410,6 +414,7 @@ internal class AppFileSteps(
             is AppFileReply.Text -> compiled { read(reply.text) }
         }
         if (first is AppFileRead.Outside) return AppFileOutcome.Outside(first.word)
+        if (first is AppFileRead.Same) return AppFileOutcome.Fallback(if (stored != null) AppFileNames.SAME else AppFileNames.FAULTS)
         first as AppFileRead.Plan
         outcome(first, 1, stored)?.let { return it }
         phase(AppFileNames.REPAIR_CALL_START, null, null)
@@ -417,7 +422,7 @@ internal class AppFileSteps(
             is AppFileReply.Failed -> return AppFileOutcome.Fallback(reply.reason)
             is AppFileReply.Text -> compiled { compiler.patch(first.text, reply.text, stored) }
         }
-        if (repaired is AppFileRead.Outside) return AppFileOutcome.Fallback(AppFileNames.OUTSIDE)
+        if (repaired !is AppFileRead.Plan) return AppFileOutcome.Fallback(AppFileNames.OUTSIDE)
         return outcome(repaired as AppFileRead.Plan, 2, stored) ?: AppFileOutcome.Fallback(AppFileNames.FAULTS)
     }
 
@@ -558,7 +563,7 @@ internal suspend fun routeAppFile(
         logFallback(request.artifactId, "change", AppFileNames.CHANGE, reason)
         val context = sandbox.context
         // A change that changes no line is not finished. Test and fix then found no line to repair.
-        if (reason == AppFileNames.EMPTY) throw CloudFailure("widget_agent_incomplete",
+        if (reason == AppFileNames.EMPTY || reason == AppFileNames.SAME) throw CloudFailure("widget_agent_incomplete",
             context.getString(if (request.testFix) R.string.tool_test_fix_no_line else R.string.tool_generation_unchanged))
         // A failed call or compile made no change, so a retry can work. Each other reason is a change that the kit cannot apply.
         val failure = if (reason in AppFileNames.CALL_FAILURES || reason.startsWith(AppFileNames.COMPILE_STATUS))

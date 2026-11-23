@@ -16,6 +16,10 @@
 //                                                              library arm sends the candidates of the catalog in the host line, as the app does.
 //                                                              SET P (motion tuning) or Q (motion held-out) is the check of motion and diagrams (block 2
 //                                                              plan, stage 7): screens and changes in one set, library arm. An item with a base is a change.
+//                                                              SET S (stage 7b, R2) holds 4 held-out changes that the base already shows: expect same().
+//                                                              SET G (parts tuning) or H (parts held-out) is the check of the part names that the model
+//                                                              gives (stage 7b, R3): diagrams of things with no ready object and of ready objects in
+//                                                              languages with no names in the entry, library arm.
 //   bun kit/modelcheck.js table LABEL...                       the numbers of each label, from its records; one line for a label of the template check
 // The key is OPENAI_API_KEY, else its line in ~/.env. The script sends it only to api.openai.com, and writes it nowhere.
 // Each call is counted in evidence/modelcheck/spend.json before it is sent. The count never passes LIMIT, and the calls of the labels
@@ -85,17 +89,18 @@ const CHANGE_REPAIRS = 1;
 const TEMPLATE_SETS = { T: "template-tuning.json", U: "template-holdout.json", V: "template-changes.json", W: "template-pilot.json",
   X: "template-data-tuning.json", Y: "template-data-final.json",
   L: "template-library-tuning.json", M: "template-library-final.json", N: "template-library-final.json", O: "template-library-none.json",
-  P: "template-motion-tuning.json", Q: "template-motion-final.json" };
+  P: "template-motion-tuning.json", Q: "template-motion-final.json", S: "template-same.json",
+  G: "template-parts-tuning.json", H: "template-parts-final.json" };
 /** The arm of each set of the library check (stage 6, M1): "library" sends the candidates of the catalog in the host line, "free" sends none. */
-export const LIBRARY_ARMS = { L: "library", M: "library", N: "free", O: "library", P: "library", Q: "library" };
-const isChangeSet = (set) => set === "V" || set === "W";
+export const LIBRARY_ARMS = { L: "library", M: "library", N: "free", O: "library", P: "library", Q: "library", G: "library", H: "library" };
+const isChangeSet = (set) => set === "V" || set === "W" || set === "S";
 export const isDataSet = (set) => set === "X" || set === "Y";
 /** The expect of a screen item that names only its type, as the items of set U do (stage templates plan, Task 7). */
 const EXPECT_OF_TYPE = { explain: "template", learn: "outside" };
 /**
  * The items of a template set. A screen item is {id, request, expect: "template" | "outside" | "any"}, and a change item of V or W is
- * {id, base, request, expect: "lines" | "outside"}, which gets the text of its base file of test/fixtures/template-bases/ as plan. Each item of
- * V and W is a change, and an item of P or Q is a change when it has a base.
+ * {id, base, request, expect: "lines" | "outside"}, which gets the text of its base file of test/fixtures/template-bases/ as plan. An item of S
+ * (stage 7b, R2) is a change that its base already shows, with expect "same". Each item of V, W, and S is a change, and an item of P or Q is a change when it has a base.
  * The read is lazy: a set whose file is missing stops only the run that names it.
  * A screen item with type: "explain" | "learn" and no expect gets the expect of its type (EXPECT_OF_TYPE).
  */
@@ -139,13 +144,13 @@ const senderOf = ({ ask, model, system, calls }) => async (step, level, input) =
 /** The kind of a reply for the numbers: readPlanReply of the kit, and "other" for a plan with no header and no need line. */
 export function kindOf(text) {
   const reply = readPlanReply(text);
-  if (reply.kind === "outside") return reply;
+  if (reply.kind !== "plan") return reply;
   return { kind: /^\s*(app\s*\(|need\s)/m.test(reply.text) ? "plan" : "other" };
 }
-/** The kind of a change reply: outside(...), or lines that change the app file, as the change call of the app reads it with readPlanReply. */
+/** The kind of a change reply: outside(...), same(), or lines that change the app file, as the change call of the app reads it with readPlanReply. */
 export function changeKindOf(text) {
   const reply = readPlanReply(text);
-  return reply.kind === "outside" ? reply : { kind: "lines" };
+  return reply.kind === "plan" ? { kind: "lines" } : reply;
 }
 /** The count of the prose lines of a repair reply: patchAppFile of the kit drops each line that is no line of an app file (LINE). */
 export const droppedOf = (reply) => linesOf(reply).filter((line) => !LINE.test(line)).length;
@@ -237,13 +242,14 @@ export const overCap = (length) => ({ faults: [`the plan has ${length} character
   definition: null, tooLong: true });
 
 /**
- * One step of the app (compileStep of the kit with the cap of the app): {outside} for an outside reply, else the merged plan, and the result with its
+ * One step of the app (compileStep of the kit with the cap of the app): {outside} for an outside reply, {same: true} for same(), else the merged plan, and the result with its
  * time and the bytes of the start state of a clean plan. A reply or a plan past the cap gets the fault of the app with no compile, as in AppFileCompiler.kt.
  */
 async function compile(input) {
   const started = performance.now(), long = [input.plan, input.text].find((text) => text?.length > APP_CAP);
   const step = long === undefined ? await compileStep({ ...input, cap: APP_CAP }) : { kind: "plan", text: input.plan ?? input.text, result: null };
   if (step.kind === "outside") return { outside: step.word };
+  if (step.kind === "same") return { same: true };
   const result = step.result ?? overCap((long ?? step.text).length), compileMs = Math.round((performance.now() - started) * 10) / 10;
   const stateBytes = result.definition ? Buffer.byteLength(JSON.stringify(result.definition.initialState)) : null;
   return { plan: step.text, result: { ...result, compileMs, stateBytes } };
@@ -296,7 +302,7 @@ export async function checkOne(item, { ask, model, effort, repairs = 2 }) {
     calls.at(-1).dropped = droppedOf(call.text);
     next = await stepOf(call.text, plan);
     // As in the app (AppFileSteps.steps): an outside repair reply ends the request with fallback:outside, and the plan stays as it was.
-    if (next.outside) { calls.at(-1).outside = next.outside; break; }
+    if (next.outside || next.same) { calls.at(-1).outside = next.outside ?? "same"; break; }
   }
   return done();
 }
@@ -352,13 +358,15 @@ async function templateRecord(item, { ask, model, effort }, input, plan, previou
   };
   let next = await stepOf(first.text, plan);
   if (next.outside) return Object.assign(record, { outcome: "outside", replied: { kind: "outside", word: next.outside } });
+  // A change that the screen already shows (stage 7b, R2): the stored file stays.
+  if (next.same) return Object.assign(record, { outcome: "same", replied: { kind: "same" } });
   const lines = linesOf(first.text), stored = plan === null ? [] : linesOf(plan).map((one) => one.trim());
   Object.assign(record, { replied: { kind: "lines", lines: lines.length }, repeated: lines.filter((one) => stored.includes(one.trim())).length });
   const clean = ({ result }) => Boolean(result.template) && !result.faults.length;
   if (!clean(next)) {
     const call = await send(1, "low", templateRepairText({ task: input, plan: next.plan, faults: next.result.faults }));
     const repaired = call.status === "completed" ? await stepOf(call.text, next.plan) : null;
-    if (repaired?.outside) calls.at(-1).outside = repaired.outside;
+    if (repaired?.outside || repaired?.same) calls.at(-1).outside = repaired.outside ?? "same";
     else if (repaired) next = repaired;
   }
   const { result } = next;
@@ -540,14 +548,15 @@ const TEMPLATE_GROUPS = { explain: (record) => !isChange(record) && record.expec
   change: isChange };
 /**
  * The record of an item of the motion check (sets P and Q) with what its kept file is: kind and entry of its item, template (a template file
- * with no fault, or with only a left-out line), play (the file has a play line), and diagram (its control is a parts control).
+ * with no fault, or with only a left-out line), play (the file has a play line), diagram (its control is a parts control), and named (the
+ * control gives its part names with part(...), stage 7b).
  * A record of each other item stays as it is.
  */
 export function motionOf(item, record) {
   if (!item.kind) return record;
   const kept = record.kept ?? "";
   return { ...record, kind: item.kind, ...(item.entry !== undefined && { entry: item.entry }), template: record.outcome !== "outside" && Boolean(record.kept),
-    play: /^play = play\(/m.test(kept), diagram: /^control = parts\(/m.test(kept) };
+    play: /^play = play\(/m.test(kept), diagram: /^control = parts\(/m.test(kept), named: /^control = parts\(.*\bpart\(/m.test(kept) };
 }
 /**
  * The numbers of the gate of the motion check (block 2 plan, stage 7): the files clean at the first try (clean0, or outside for an item that
@@ -566,7 +575,7 @@ function motionRow(label, records) {
   const numbers = motionNumbers(records);
   return `${label} (${records[0]?.prompt}, ${numbers.size} records): clean at the first try ${share(numbers.cleanFirst, numbers.size)}, motion files with play ${share(numbers.motionPlay, numbers.motion)},`
     + ` diagrams with parts ${share(numbers.diagramParts, numbers.diagram)}, median first call ${numbers.medianFirstCallMs} ms | still with play or parts: ${numbers.stillMoved.join(", ") || "none"}`
-    + ` | ${records.map((record) => `${record.id}:${record.outcome}${record.play ? "+play" : ""}${record.diagram ? "+parts" : ""}`).join(" ")}`;
+    + ` | ${records.map((record) => `${record.id}:${record.outcome}${record.play ? "+play" : ""}${record.diagram ? "+parts" : ""}${record.named ? "+names" : ""}`).join(" ")}`;
 }
 /**
  * The numbers of the bars of gate 2 (stage templates plan, Global Constraints) as counts: the explain screens clean after at most one repair, the
@@ -576,7 +585,8 @@ function motionRow(label, records) {
  */
 export function templateNumbers(records) {
   const explain = records.filter(TEMPLATE_GROUPS.explain), outcome = (list, test) => list.filter((record) => test.test(record.outcome)).length;
-  const onlyChanged = (record) => (record.replied.kind === "lines" && !record.repeated) || (record.expect === "outside" && record.outcome === "outside");
+  const onlyChanged = (record) => record.expect === "same" ? record.outcome === "same"
+    : (record.replied.kind === "lines" && !record.repeated) || (record.expect === "outside" && record.outcome === "outside");
   return { explainClean: outcome(explain, /^clean[01]$/), refusalsRight: outcome(records.filter(TEMPLATE_GROUPS.refusal), /^outside$/), explainRefused: outcome(explain, /^outside$/),
     medianFirstCallMs: median(explain.map((record) => record.firstCallMs)), changesOnlyChanged: records.filter((record) => TEMPLATE_GROUPS.change(record) && onlyChanged(record)).length };
 }
@@ -677,7 +687,7 @@ if (import.meta.main) {
     // A template run counts under its own cap only with a label that starts with tpl-, and a run of the free prompt never takes that cap.
     const template = [...set].filter((name) => Object.hasOwn(TEMPLATE_SETS, name));
     if (template.length ? template.length !== set.length || !isTemplateLabel(label) : isTemplateLabel(label)) {
-      console.log("refused: the sets T, U, V, W, X, Y, L, M, N, O, P, and Q run alone, with a label that starts with tpl-, and only they take such a label"); process.exit(2);
+      console.log("refused: the sets T, U, V, W, X, Y, L, M, N, O, P, Q, S, G, and H run alone, with a label that starts with tpl-, and only they take such a label"); process.exit(2);
     }
     const items = (template.length ? template.flatMap(templateSet) : [...(set.includes("C") ? corpus() : []), ...(set.includes("D") ? SET_D : []), ...(set.includes("E") ? SET_E : []), ...(set.includes("F") ? SET_F : [])])
       .filter((item) => !ids.length || ids.includes(item.id))

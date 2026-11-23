@@ -256,7 +256,41 @@ Each is a Requirement. The owner saw them with a moving sample of the look and a
 - **C6. «дальше».** In a scene with steps, «дальше» moves to the next step, as in Alpha 20. In a `play` scene with no steps, it starts the motion again after «стоп».
 - **C7. A scene that no person sees does not run.** The motion stops when the stage leaves the screen, and it runs again when the stage is back.
 - **G2, as built (fix list 2).** The free diagram is not built in this stage: a diagram walks the parts of a ready object, and a thing with no ready object gets steps, as in Alpha 22. The play row shows only in a scene with no control line, so in a scene with steps «стоп» and «быстрее» get a spoken answer and no press.
-- **Known limit.** A command spoken while the voice narrates can get no reaction from the voice model (a fault carried from Alpha 21). This stage does not correct it. A tap on the control always works.
+- **Known limit.** A command spoken while the voice narrates can get no reaction from the voice model (a fault carried from Alpha 21). This stage does not correct it. A tap on the play row works. A scene with one more control has no play row (fix list 2), so there the motion has no stop.
+
+## Stage 7b: the faults that stage 7 left (Alpha 24)
+
+Requirement, the owner's words of 2026-11-23 after Alpha 23: «релизные прогоны можешь остановить, лучше исправить ошибки в 7-й стадии и сделать еще один релиз». The four faults are those of the option that he chose. The push and the release have his word when every gate below holds.
+
+Requirements:
+
+- **R1. The lock of the app store.** A tap must not wait for a lock cycle. In Alpha 23, `ToolNetworkAuthority.refreshAccess` opens a second `ToolStore`. The open holds the library gate (`ToolLibraryStorage.open`) while it waits for the database. A press holds a transaction and waits for the same gate in the `writableDatabase` getter (`requireCurrent`). The cycle ends after the busy wait of the platform (about 2.5 s).
+  - The invariant: no thread waits for the library gate inside a database transaction, or no thread waits for the database while it holds the gate.
+  - Three guards stay, each with a test: no commit goes to a library file that is no longer current, no open creates a file for a replaced selection, and a revoked network grant shows at the next read.
+  - The schema, the file names, and the open flags of the store do not change.
+- **R2. A request that the screen already meets.** The change call can reply that the screen already shows what the person asks. Then the stage keeps its screen, the app makes no further call, and the voice says so in one sentence. In Alpha 23 such a reply changed nothing, and the app built the screen again as a full app (42 s in the live check). A reply that changes nothing and does not say so keeps the behavior of Alpha 23.
+- **R3. A part name that the model gives.** One mechanism serves two faults.
+  - A diagram of a thing with no ready object: the model gives each part its name and one point of the picture. The kit draws the names in the side columns with leader lines, the ring on the marked point, and the accent on the marked name, with the label layout of a ready object. The model writes no text shape for a part.
+  - A diagram of a ready object in a language that the entry has no names for: the model gives the name of each part in the language of the request, and the picture, the stepper, and the card show these names. The language check of the host does not change.
+- **R4.** The documents say what ships.
+
+Gates:
+
+| Gate | Bar |
+| --- | --- |
+| R1: a test with two threads (one holds a transaction and reads through the getter, one opens a second store) | both end within 0.5 s after the hold, and no locked database error comes out |
+| R1: 20 taps on a moving scene, 5 runs | no tap waits more than 1 s |
+| R1: the full device suite before the publish | no new failure in a store, library, or grant test |
+| R2: a device test and the model check of changes | the screen stays, no app call follows, the voice gets its sentence; the change set keeps 16 of 16; requests that the screen meets give the new reply in at least 3 of 4 |
+| R3: model check on 12 new held-out requests (6 things with no ready object, 4 ready objects in German, Spanish, French, and Italian, 2 in Russian and English) | at least 10 of 12 clean at the first try, each one a diagram with parts |
+| R3: the model's own files on a device | each of the 12 shows, with no fall back |
+| R3: the fit gate with 8 part names of the longest permitted length, on the phone and on the fold | no scroll, and no label over a shape |
+| R3: the look | phone pictures in both themes that the owner sees before the release |
+| Carried | the picture rate alone (30), the heart walk 5 of 5, the kit tests, the fit and stream gates of stage 7 |
+
+Paid budget: at most 120 template calls, 600 s of voice, and 80 chat calls.
+
+Not in this stage: a pause beside another control, the icon-only pause button, the fast small part, the fold at density 520.
 - **Working budget**, from the spend of stage 6: at most 160 template calls, 1,200 s of voice, and 120 chat calls.
 
 ---

@@ -90,6 +90,16 @@ test("aChangeThatRepeatsAStoredLineCountsIt", async () => {
   expect(bodies[0].input[0].content[0].text).toContain(`${change.request}\nReady objects that may fit this request`);
 });
 
+test("aSameReplyOfAChangeIsItsOwnOutcomeAndCountsOnlyForExpectSame (stage 7b, R2)", async () => {
+  const items = check.templateSet("S");
+  expect([items.length, items.every((item) => item.expect === "same" && item.plan)]).toEqual([4, true]);
+  const { ask } = fake("same()");
+  const record = await check.checkTemplateChange({ ...items[0] }, { ask, model: "m", effort: "low" });
+  expect([record.outcome, record.replied, record.calls.length]).toEqual(["same", { kind: "same" }, 1]);
+  expect([check.templateNumbers([record]).changesOnlyChanged, check.templateNumbers([{ ...record, expect: "lines" }]).changesOnlyChanged]).toEqual([1, 0]);
+  expect(check.changeKindOf("same()")).toEqual({ kind: "same" });
+});
+
 test("templateNumbersReadTheBars", () => {
   const record = (set, expect, outcome, firstCallMs, more = {}) => ({ id: `${set}-${expect}`, set, expect, outcome, firstCallMs, repeated: 0, replied: { kind: outcome === "outside" ? "outside" : "lines" }, ...more });
   const explain = [...Array(13).fill("clean0"), "clean1", "clean1", "outside"].map((outcome, index) => record("U", "template", outcome, (index + 1) * 1000));
@@ -250,4 +260,27 @@ test("the numbers of the motion gate count clean files, motion files with play, 
   const numbers = check.motionNumbers([record("a", "motion", "clean0", { play: true }), record("b", "change", "clean1", { play: true }), record("c", "motion", "outside"),
     record("d", "diagram", "clean0", { diagram: true }), record("e", "diagram", "clean0"), record("f", "still", "clean0", { play: true }), record("g", "still", "outside", { expect: "outside" })]);
   expect(numbers).toMatchObject({ size: 7, cleanFirst: 5, motion: 3, motionPlay: 2, diagram: 2, diagramParts: 1, stillMoved: ["f"], medianFirstCallMs: 1000 });
+});
+
+// ---- The part names that the model gives (stage 7b, R3).
+
+test("the parts sets hold 6 and 12 requests with the mix of the dispatch, and none is a request of the tuning set, the prompt, or the controller", () => {
+  const tuning = check.templateSet("G"), final = check.templateSet("H");
+  const mix = (items) => ["ru", "en", "other"].map((lang) => [false, true].map((entry) => items.filter((item) => item.entry === entry && (lang === "other" ? !["ru", "en"].includes(item.lang) : item.lang === lang)).length));
+  // Final: 6 things with no ready object in Russian and English, 4 ready objects in four other languages, and 2 ready objects in Russian and English.
+  expect(mix(final)).toEqual([[3, 1], [3, 1], [0, 4]]);
+  expect(new Set(final.filter((item) => item.entry && !["ru", "en"].includes(item.lang)).map((item) => item.lang))).toEqual(new Set(["de", "es", "fr", "it"]));
+  expect(mix(tuning)).toEqual([[1, 0], [2, 1], [0, 2]]);
+  const examples = [...prompts.PROMPT.Template.matchAll(/^Request: (.*)$/gm)].map(([, request]) => request);
+  expect(final.filter((item) => [...tuning.map((one) => one.request), ...examples].includes(item.request))).toEqual([]);
+  // The controller saw a volcano and a flower, and Alpha 23 failed on the ear and the lungs.
+  expect(final.filter((item) => /вулкан|цвет|volcano|flower|\bear\b|lung|oído|Lunge/i.test(item.request + " " + item.id))).toEqual([]);
+  expect(new Set([...tuning, ...final].map((item) => item.id)).size).toBe(18);
+  expect([...tuning, ...final].every((item) => item.kind === "diagram" && item.expect === "template" && check.LIBRARY_ARMS[item.set] === "library")).toBe(true);
+});
+
+test("a motion record of a diagram says whether its control gives the part names (stage 7b, R3)", () => {
+  const item = { kind: "diagram", entry: false }, record = (kept) => check.motionOf(item, { outcome: "clean0", kept });
+  expect(record('scene("A", lang="en")\ncontrol = parts("Part", [part("cap", 150, 60), part("stem", 146, 200)])\n').named).toBe(true);
+  expect(record('scene("A", lang="en")\ncontrol = parts("Part", ["cornea", "iris"])\n').named).toBe(false);
 });
