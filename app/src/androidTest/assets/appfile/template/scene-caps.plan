@@ -12,4 +12,4 @@ s9 = text(150, 14, "White light enters the prism", "ink", 12)
 s10 = text(150, 32, "Each color bends a bit apart", "ink", 12)
 s11 = text(150, 180, "Violet bends the most of all", "surface", 12)
 s12 = text(150, 200, "Red bends least of all hues.", "surface", 12)
-card = card("Refraction splits the colors up.", "White light holds every color. In glass each color slows down by a different amount, so it bends at its own angle and the colors come apart.")
+caption = "White light holds every color. In glass each color slows down by its own amount, so the colors come apartssss."

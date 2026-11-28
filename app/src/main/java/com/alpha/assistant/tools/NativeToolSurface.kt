@@ -15,6 +15,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.nativeCanvas
@@ -363,18 +365,25 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
             BoxWithConstraints(if(immersive)modifier.fillMaxSize() else modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
                 var measuredSize by remember { mutableStateOf(IntSize.Zero) }
                 val ratio=stageWidth.toFloat()/stageHeight
-                // In a fitted phone column (FittedColumn) the picture takes the height that the stage leaves, at least 0.6 of the column.
-                val room=fittedPicture(constraints,stageAvailableHeight ?: maxCanvasHeight)
+                // In a fitted stage column (FittedColumn) the picture takes the height that the stage leaves, at least 0.6 of the column.
+                // The large stage picture (Stage A, AH3) takes all of it with no cap: its card is that high, and its box keeps the ratio in the center.
+                val largePicture=LocalStagePicture.current && viewportSurface==null && !immersive
+                val room=fittedPicture(constraints,if(largePicture) Dp.Infinity else stageAvailableHeight ?: maxCanvasHeight)
+                val large=largePicture && room!=null
+                // A shape past the box shows up to the edges of the card. With more than one surface, each surface keeps its own box.
+                val clipBox=!large || placements.size>1
                 val canvasModifier=if(viewportSurface!=null) {
                     val measured=if(immersive)Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(room ?: if (stageAvailableHeight != null) maxHeight else minOf(maxCanvasHeight, maxHeight))
                     measured
                 } else Modifier.width(minOf(maxWidth,(if(immersive)maxHeight else room ?: minOf(stageAvailableHeight ?: maxCanvasHeight,maxHeight))*ratio)).aspectRatio(ratio)
+                Box(if(large) Modifier.fillMaxWidth().height(checkNotNull(room)).clipToBounds().background(canvasBackground).testTag(STAGE_PICTURE_TAG) else Modifier,
+                    contentAlignment=Alignment.Center) {
                 Canvas(canvasModifier.onSizeChanged {
                     measuredSize = it
                     if (viewportSurface != null && it.width > 0 && it.height > 0) {
                         requestedViewport = surfaceViewport(viewportSurface,it.width,it.height,density)
                     }
-                }.then(if (immersive) Modifier.onGloballyPositioned {stageBounds=it.boundsInRoot()} else Modifier.clip(MaterialTheme.shapes.medium))
+                }.then(if (immersive) Modifier.onGloballyPositioned {stageBounds=it.boundsInRoot()} else if (large) Modifier else Modifier.clip(MaterialTheme.shapes.medium))
                     .background(canvasBackground)
                     .semantics {contentDescription="$description. $labels"}
                     .pointerInput(ids,measuredSize,interactive,enabled,input,snapshot?.playback in setOf("ready","playing"),error==null,attempt,acceptedViewport,requestedViewport,covered) {
@@ -407,10 +416,10 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
                             try {
                                 canvas.translate(placement.x.toFloat(),placement.y.toFloat())
                                 val glide=glides[surface.id]?.takeIf {gliding && it.target!=null}
-                                if(glide==null) drawSurfaceFrame(canvas,surface,commands,surface.width.toFloat(),surface.height.toFloat(),roleColors,images)
+                                if(glide==null) drawSurfaceFrame(canvas,surface,commands,surface.width.toFloat(),surface.height.toFloat(),roleColors,images,clipBox)
                                 else {
                                     if(glide.running(now))newPicture=true
-                                    drawSurfaceLayers(canvas,surface,glide.frame(now),surface.width.toFloat(),surface.height.toFloat(),roleColors,images,canvasBackground.toArgb())
+                                    drawSurfaceLayers(canvas,surface,glide.frame(now),surface.width.toFloat(),surface.height.toFloat(),roleColors,images,canvasBackground.toArgb(),clipBox)
                                     if(glide.pressEnded(now))metrics?.glideEnded()
                                 }
                             } finally {canvas.restoreToCount(surfaceSaved)}
@@ -424,6 +433,7 @@ private fun drawnTextBounds(snapshot: ArtifactSnapshot?,surfaces: List<ToolSurfa
                         if(view.isHardwareAccelerated && view.viewTreeObserver.isAlive)
                             view.viewTreeObserver.registerFrameCommitCallback {metrics.committed(current.sequence)}
                     }
+                }
                 }
             }
         }

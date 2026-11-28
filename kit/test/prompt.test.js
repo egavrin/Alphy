@@ -201,7 +201,7 @@ test("theTemplateHashIsItsOwn", () => {
   expect(TEMPLATE_HASH).not.toBe(PROMPT_HASH);
   expect(hashOf(names)).toBe(TEMPLATE_HASH);
   // One changed word of a template section gives another template hash, and the free hash stays.
-  const copy = { ...SECTIONS, Template: SECTIONS.Template.replace(/\bcard\b/, "kard") };
+  const copy = { ...SECTIONS, Template: SECTIONS.Template.replace(/\bcaption\b/, "kaption") };
   expect(copy.Template).not.toBe(SECTIONS.Template);
   expect([hashOf(names, copy) === TEMPLATE_HASH, hashOf(["System", "Repair", "Dialogue", "Change"], copy)]).toEqual([false, PROMPT_HASH]);
 });
@@ -262,7 +262,7 @@ test("theBundleReadsATemplate", async () => {
 test("theRestSectionChangesNoHash", () => {
   // The hashes of the free records and of the records of gate 2b: the rest section came after them.
   const { PROMPT_HASH, TEMPLATE_HASH, hashOf } = prompts, rest = SECTIONS["Template rest"];
-  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "1ba7d44bfba4"]);
+  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "cd75d4520822"]);
   expect(rest?.length).toBeGreaterThan(100);
   const copy = { ...SECTIONS, "Template rest": `${rest} Write it.` };
   expect([hashOf(["System", "Repair", "Dialogue", "Change"], copy), hashOf(["Template", "Template repair", "Template change"], copy)]).toEqual([PROMPT_HASH, TEMPLATE_HASH]);
@@ -279,7 +279,7 @@ const DATA_EXAMPLES = [...DATA.matchAll(/^Request: (.*)\n((?:Source \[\d+\] exce
 
 test("the data family has its own section and hash, and the explain sections and hashes stay (block 2 plan, D1)", () => {
   const { PROMPT_HASH, TEMPLATE_HASH, DATA_HASH, hashOf } = prompts;
-  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "1ba7d44bfba4"]);
+  expect([PROMPT_HASH, TEMPLATE_HASH]).toEqual(["69759b168bc3", "cd75d4520822"]);
   expect(DATA_HASH).toBe(hashOf(["Template data", "Template repair", "Template change"]));
   expect([DATA_HASH === TEMPLATE_HASH, DATA_HASH === PROMPT_HASH]).toEqual([false, false]);
   // The explain prompt does not grow: it names no data form.

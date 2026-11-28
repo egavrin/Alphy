@@ -1,3 +1,3 @@
 cells("How a prism splits white light", lang="en", palette="teal")
 control = slider("Color of the light to follow", 0, 100, 1, 37)
-card = card("Refraction splits the colors up.", "White light holds every color. In glass each color slows down by a different amount, so it bends at its own angle and the colors come apart.")
+caption = "White light holds every color. In glass each color slows down by its own amount, so the colors come apartssss."

@@ -14,5 +14,5 @@
   {"id": "v-ship-nail", "base": "ship.plan", "request": "Гвоздь совсем маленький, нарисуй его покрупнее.", "expect": "lines"},
   {"id": "v-ship-cargo", "base": "ship.plan", "request": "Кроме выбора предмета, добавь ещё ползунок, чтобы менять вес груза на корабле.", "expect": "outside"},
   {"id": "v-snow-line", "base": "snow.plan", "request": "Проведи на горе черту, выше которой снег не тает даже летом.", "expect": "lines"},
-  {"id": "v-snow-simple", "base": "snow.plan", "request": "Перепиши текст в карточке попроще, чтобы понял первоклассник.", "expect": "lines"}
+  {"id": "v-snow-simple", "base": "snow.plan", "request": "Перепиши текст под картинкой попроще, чтобы понял первоклассник.", "expect": "lines"}
 ]

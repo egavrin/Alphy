@@ -24,10 +24,10 @@ import com.alpha.assistant.tools.appfile.plan
 import com.alpha.assistant.tools.appfile.row
 import com.alpha.assistant.ui.FIXTURE_APP
 import com.alpha.assistant.ui.NAIL
-import com.alpha.assistant.ui.SHIP_CARD_CHANGE
+import com.alpha.assistant.ui.SHIP_CAPTION_CHANGE
 import com.alpha.assistant.ui.SHIP_CONTROL
 import com.alpha.assistant.ui.SHIP_S4
-import com.alpha.assistant.ui.shipCardChanged
+import com.alpha.assistant.ui.shipCaptionChanged
 import com.alpha.assistant.ui.shipExpansion
 import com.alpha.assistant.ui.shipSubject
 import com.alpha.assistant.ui.shipTemplate
@@ -905,11 +905,11 @@ class AppFileChangeWorkflowTest {
     @Test fun aTypedChangeOfAVoiceTemplateAppBecomesAFreePlan() {
         val before = voiceShip()
         val expanded = shipExpansion(context)
-        val changed = change(before, listOf(Scripted.Text(SHIP_CARD_CHANGE)) + LOOP)
+        val changed = change(before, listOf(Scripted.Text(SHIP_CAPTION_CHANGE)) + LOOP)
         assertEquals(listOf(APP_FILE_CHANGE), changed.stages)
         assertEquals(listOf(prompt.changeText(CHANGE, expanded)), changed.calls.single().turns.map { it.text })
         val saved = changed.saved
-        assertEquals(listOf(2, shipCardChanged(expanded), NAIL), listOf(saved.revision, appFile(saved), shipSubject(saved)))
+        assertEquals(listOf(2, shipCaptionChanged(expanded), NAIL), listOf(saved.revision, appFile(saved), shipSubject(saved)))
         assertFalse(prompt.isTemplate(checkNotNull(appFile(saved))))
         assertEquals(saved, store.tool(before.id))
     }

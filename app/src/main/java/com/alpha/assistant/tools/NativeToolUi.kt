@@ -21,6 +21,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -606,6 +607,8 @@ private fun heroEmojiSide(children: JSONArray): Int {
     "label" -> MaterialTheme.typography.labelLarge
     // The source line of a data form (stage 5 look): one small line with a link icon before it.
     "source" -> MaterialTheme.typography.labelSmall
+    // The caption of a stage scene (Stage A, AH6): one muted text in the body size, at most captionLines() + 1 lines (NativeReadableText).
+    "caption" -> MaterialTheme.typography.bodyLarge
     "number" -> MaterialTheme.typography.displaySmall.copy(fontFamily = MaterialTheme.typography.bodyLarge.fontFamily)
     "display" -> MaterialTheme.typography.displayMedium.copy(fontFamily = MaterialTheme.typography.bodyLarge.fontFamily)
     // A plain metric is a secondary value, so the number and display emphases stand out above it.
@@ -773,7 +776,10 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
         }
     }
     val selectable=enabled && node.optBoolean("selectable")
-    val textModifier=if(selectable) Modifier else modifier
+    val caption=style?.optString("emphasis") == "caption"
+    // A caption on a wide stage stands in the center (Stage A, AH6).
+    val centered=caption && LocalLiveUi.current?.stage == true && LocalConfiguration.current.smallestScreenWidthDp >= DIALOGUE_WIDE_DP
+    val textModifier=(if(selectable) Modifier else modifier).then(if(centered) Modifier.fillMaxWidth() else Modifier)
     // A short text in a row, such as a name beside a stepper, shrinks so that no word breaks. Other text keeps its size and wraps.
     val short=LocalFixedRow.current && label.length <= COMPACT_METRIC_LENGTH
     // A short display value, such as a time in a ring, shrinks to fit one line.
@@ -782,9 +788,12 @@ private fun verticalArrangement(style: JSONObject?,gap: Dp): Arrangement.Vertica
     val shortStyle=if((short || display) && base.lineHeight.isSp && base.fontSize.isSp) base.copy(lineHeight=(base.lineHeight.value / base.fontSize.value).em) else base
     val content: @Composable () -> Unit = {
         Text(annotated.toAnnotatedString(),if(!enabled && spans != null) textModifier.semantics {disabled()} else textModifier,style=shortStyle,color=toolInk(style?.optString("tone")),
-            textAlign=textAlignOf(style),
-            maxLines=node.optInt("maxLines",Int.MAX_VALUE),softWrap=node.optBoolean("softWrap",true),
-            overflow=if(node.optString("overflow") == "ellipsis") TextOverflow.Ellipsis else TextOverflow.Clip,
+            textAlign=if(centered) TextAlign.Center else textAlignOf(style),
+            maxLines=if(caption) captionLines() + 1 else node.optInt("maxLines",Int.MAX_VALUE),softWrap=node.optBoolean("softWrap",true),
+            // Under the large picture, a caption keeps its room of captionLines() lines, as the stream keeps it (AH9): the picture does not change its
+            // height when the caption comes or when a choice gives a caption of other length (stage A, join).
+            minLines=if(caption && LocalLargeStage.current) captionLines() else 1,
+            overflow=if(caption || node.optString("overflow") == "ellipsis") TextOverflow.Ellipsis else TextOverflow.Clip,
             lineHeight=if(node.has("lineHeight")) node.getDouble("lineHeight").sp else androidx.compose.ui.unit.TextUnit.Unspecified,
             autoSize=if(display) WholeWordAutoSize(12.sp,base.fontSize,oneLineFirst=true) else if(short) WholeWordAutoSize(10.sp,base.fontSize) else null)
     }
@@ -796,9 +805,10 @@ internal const val DIALOGUE_WIDE_DP = 600
 /**
  * The parts of an app on the dialogue stage by their role (plan D, Da2): indices of the children of the column under the theme root.
  * [drawing] is true when the main visual is a drawing (a canvas, or a card that holds only canvases), which can take the height that the
- * other parts leave (stage 6, F1).
+ * other parts leave (stage 6, F1). [play] is the index of the play row of a moving scene in [main] (playRow), or null.
  */
-internal data class DialogueSplit(val leading: List<Int>, val main: List<Int>, val side: List<Int>, val drawing: Boolean = false)
+internal data class DialogueSplit(val leading: List<Int>, val main: List<Int>, val side: List<Int>, val drawing: Boolean = false,
+    val play: Int? = null)
 
 /**
  * The mark of the stage height in a bound (stage 6, F1): the phone stage measures its column with a maximum height of its own height plus
@@ -808,10 +818,35 @@ internal data class DialogueSplit(val leading: List<Int>, val main: List<Int>, v
 internal const val STAGE_FIT_MARK = 1 shl 17
 
 /**
- * The least side of the square picture in a fitted phone column (fix list 2, G1): 0.6 of the width of the stage column. The canvas holds it,
- * because only the canvas knows the card and the padding around it; under it the stage scrolls.
+ * The least side of the picture in a fitted stage column (fix list 2, G1): 0.6 of the smaller of the column width and the height that the stage
+ * leaves for the column (Stage A, F4), so a landscape stage does not scroll by rule. The canvas holds it, because only the canvas knows the
+ * card and the padding around it; under it the stage scrolls.
  */
 internal val LocalPictureFloor = staticCompositionLocalOf { 0.dp }
+
+/** True inside the column of the large stage picture (Stage A): an inline choice there is at most 440 dp wide, in the center (F3). */
+private val LocalLargeStage = staticCompositionLocalOf { false }
+
+/**
+ * The lines of room of a caption (Stage A, F2): 3 on a compact width, 2 on a wide stage. A caption at the kit cap of 110 characters with wide
+ * letters or a long word needs one line more on a phone, so the text takes at most one line above its room before it is cut.
+ */
+@Composable private fun captionLines() = if (LocalConfiguration.current.smallestScreenWidthDp >= DIALOGUE_WIDE_DP) 2 else 3
+
+/**
+ * True inside the drawing of the large stage picture (Stage A, AH2 and AH3): a stage drawing with no side part. Its picture card has no
+ * padding, and its canvas takes the whole height that the stage leaves, with the box in the center and no clip at the box.
+ */
+internal val LocalStagePicture = staticCompositionLocalOf { false }
+
+/** True while a stage preview streams its lines (Stage A, AH9): the large picture keeps room for one control row and a whole caption. */
+internal val LocalStageStream = staticCompositionLocalOf { false }
+
+/** True inside the play row that lies over the large stage picture (Stage A, AH5): no label line, and one speed chip in place of the speeds. */
+private val LocalOverPicture = staticCompositionLocalOf { false }
+
+/** The test tag of the large stage picture card. */
+internal const val STAGE_PICTURE_TAG = "stage_picture"
 
 /**
  * The height that a bound with STAGE_FIT_MARK leaves, at least 0, or null for another bound. The paddings and the parts inside the mark can
@@ -846,8 +881,23 @@ internal fun dialogueSplit(root: JSONObject): DialogueSplit? {
         (start until items.size).takeWhile { it == start || items[it].optString("type") !in setOf("card", "list") }
     }.orEmpty()
     val drawing = main.firstOrNull()?.let { items[it].optString("type") != "section" } == true
-    return DialogueSplit(leading, main, (leading.size until items.size).filter { it !in main }, drawing)
+    return DialogueSplit(leading, main, (leading.size until items.size).filter { it !in main }, drawing, main.drop(1).firstOrNull { playRow(items[it]) })
 }
+
+/**
+ * The play row of a moving scene (stage 7, M2): a row of a round icon button (a button with the variant tonalIcon) and an inline choice of the
+ * speeds, alone or in a column under text lines (its label line).
+ */
+private fun playRow(node: JSONObject): Boolean {
+    val inner = node.optJSONArray("children")?.let { List(it.length(), it::getJSONObject) }.orEmpty()
+    return isPlayRow(node) || node.optString("type") == "column" && inner.lastOrNull()?.let(::isPlayRow) == true && inner.dropLast(1).all { it.optString("type") == "text" }
+}
+
+/** The row of a round icon button (a button with the variant tonalIcon) and the inline choice of the speeds of a play control (stage 7, M2). */
+internal fun isPlayRow(node: JSONObject): Boolean = node.optString("type") == "row" && node.optJSONArray("children")?.let {
+    it.length() == 2 && it.getJSONObject(0).let { button -> button.optString("type") == "button" && button.optString("variant") == "tonalIcon" } &&
+        it.getJSONObject(1).optString("variant") == "inline"
+} == true
 
 /** A column with a layout, an align or arrangement style, or a part with a layout places its parts itself, so no split moves them. */
 private fun placesItsOwnParts(column: JSONObject, items: List<JSONObject>) =
@@ -864,29 +914,42 @@ private fun mainVisual(node: JSONObject): Boolean {
     }
 }
 
-/** The title of an app on the dialogue stage. The stage draws no title of its own. */
-@Composable private fun DialogueTitle(text: String, modifier: Modifier = Modifier) =
-    Text(text, modifier.fillMaxWidth().semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
+/** The title of an app on the dialogue stage, on one line (Stage A, AH7). The stage draws no title of its own. */
+@Composable internal fun DialogueTitle(text: String, modifier: Modifier = Modifier) =
+    Text(text, modifier.fillMaxWidth().semantics { heading() }, style = MaterialTheme.typography.titleLarge, maxLines = 1,
+        overflow = TextOverflow.Ellipsis)
 
 /**
  * The column of an app on the dialogue stage: the kind label, the title, then the main visual with its controls at the left (3/5) and the
  * other parts at the right (2/5) at the fold and the tablet size (plan D, values table), or each part in its order in one column.
+ * A drawing with no side part is the large picture at each width (Stage A, AH1 to AH5): its card reaches past the column [padding] to the
+ * gutter of the stage, and its play row lies over its bottom left corner. The column padding stays around the other parts.
  */
-@Composable private fun DialogueColumns(modifier: Modifier, split: DialogueSplit, title: String?, gap: Dp,
+@Composable private fun DialogueColumns(modifier: Modifier, split: DialogueSplit, title: String?, gap: Dp, padding: Dp,
     renderChild: @Composable (Int, Modifier) -> Unit) {
     BoxWithConstraints(modifier) {
         val pair = split.main.isNotEmpty() && split.side.isNotEmpty() && maxWidth >= DIALOGUE_WIDE_DP.dp &&
             LocalConfiguration.current.smallestScreenWidthDp >= DIALOGUE_WIDE_DP && LocalDensity.current.fontScale <= 1.3f
-        // The height that the phone stage leaves for this column (STAGE_FIT_MARK), or null: then the parts stand in an unbounded column.
+        val large = split.drawing && split.side.isEmpty()
+        // The height that the stage leaves for this column (STAGE_FIT_MARK), or null: then the parts stand in an unbounded column.
         val space = if (split.drawing && !pair) fitSpace(constraints.maxHeight) else null
-        if (space != null) FittedColumn(space, gap) {
+        // While a preview streams, the room of one control row and a whole caption under the picture (AH9, F2).
+        val reserve = if (large && LocalStageStream.current) 48.dp + gap * 2 + with(LocalDensity.current) { MaterialTheme.typography.bodyLarge.lineHeight.toDp() } * captionLines()
+            else 0.dp
+        val floor = minOf(maxWidth, with(LocalDensity.current) { (space ?: 0).toDp() }) * 0.6f
+        if (space != null) FittedColumn(space, gap, if (large) padding else 0.dp, reserve) { CompositionLocalProvider(LocalLargeStage provides large) {
             split.leading.forEach { renderChild(it, Modifier) }
             title?.let { DialogueTitle(it) }
             (split.main + split.side).sorted().forEach {
-                if (it == split.main.first()) CompositionLocalProvider(LocalPictureFloor provides maxWidth * 0.6f) { renderChild(it, Modifier.layoutId(DRAWING)) }
-                else renderChild(it, Modifier)
+                when {
+                    it == split.main.first() -> CompositionLocalProvider(LocalPictureFloor provides floor, LocalStagePicture provides large) {
+                        renderChild(it, Modifier.layoutId(DRAWING))
+                    }
+                    large && it == split.play -> CompositionLocalProvider(LocalOverPicture provides true) { renderChild(it, Modifier.layoutId(PLAY)) }
+                    else -> renderChild(it, Modifier)
+                }
             }
-        } else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+        } } else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
             split.leading.forEach { renderChild(it, Modifier) }
             title?.let { DialogueTitle(it) }
             if (pair) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
@@ -898,24 +961,46 @@ private fun mainVisual(node: JSONObject): Boolean {
 }
 
 private const val DRAWING = "drawing"
+private const val PLAY = "play"
 
 /**
- * A column of the phone stage whose drawing (the part with the layout id DRAWING) takes the height of [space] that the other parts leave, in
+ * A column of the stage whose drawing (the part with the layout id DRAWING) takes the height of [space] that the other parts leave, in
  * one layout pass: the other parts are measured first. The drawing gets that height plus STAGE_FIT_MARK, so each card and padding around
  * the canvas takes its part, and the canvas reads what is left. The canvas keeps its square at least LocalPictureFloor; under that floor
  * the stage scrolls (stage 6, F1; fix list 2, G1).
+ * The large picture (Stage A) reaches [bleed] past the column at each side. The parts under it take at least [reserve] (AH9), and the
+ * play row (the layout id PLAY) takes no height: it lies over the bottom left corner of the picture (AH5).
  */
-@Composable private fun FittedColumn(space: Int, gap: Dp, content: @Composable () -> Unit) = Layout(content, Modifier.fillMaxWidth()) { parts, constraints ->
-    val loose = Constraints(maxWidth = constraints.maxWidth)
+@Composable private fun FittedColumn(space: Int, gap: Dp, bleed: Dp, reserve: Dp, content: @Composable () -> Unit) =
+    Layout(content, Modifier.fillMaxWidth()) { parts, constraints ->
+    val width = constraints.maxWidth
+    val loose = Constraints(maxWidth = width)
     val gapPx = gap.roundToPx()
+    val bleedPx = bleed.roundToPx()
     val placed = arrayOfNulls<Placeable>(parts.size)
     parts.forEachIndexed { index, part -> if (part.layoutId != DRAWING) placed[index] = part.measure(loose) }
-    val others = placed.sumOf { it?.height ?: 0 } + gapPx * (parts.size - 1).coerceAtLeast(0)
-    parts.forEachIndexed { index, part -> if (part.layoutId == DRAWING) placed[index] = part.measure(loose.copy(maxHeight = (space - others).coerceAtLeast(0) + STAGE_FIT_MARK)) }
-    val shown = placed.map { checkNotNull(it) }
-    layout(constraints.maxWidth, shown.sumOf { it.height } + gapPx * (shown.size - 1).coerceAtLeast(0)) {
+    val column = parts.indices.filter { parts[it].layoutId != PLAY }
+    val drawing = parts.indexOfFirst { it.layoutId == DRAWING }
+    val under = column.filter { it > drawing }.sumOf { checkNotNull(placed[it]).height + gapPx }
+    val others = column.filter { it != drawing }.sumOf { checkNotNull(placed[it]).height } + gapPx * (column.size - 1).coerceAtLeast(0) +
+        (reserve.roundToPx() - under).coerceAtLeast(0)
+    if (drawing >= 0) placed[drawing] = parts[drawing].measure(loose.copy(maxWidth = width + 2 * bleedPx,
+        maxHeight = (space - others).coerceAtLeast(0) + STAGE_FIT_MARK))
+    val shown = column.map { checkNotNull(placed[it]) }
+    layout(width, shown.sumOf { it.height } + gapPx * (shown.size - 1).coerceAtLeast(0)) {
         var y = 0
-        shown.forEach { it.placeRelative(0, y); y += it.height + gapPx }
+        var bottom = 0
+        column.forEach { index ->
+            val part = checkNotNull(placed[index])
+            part.placeRelative(if (index == drawing) -bleedPx else 0, y)
+            if (index == drawing) bottom = y + part.height
+            y += part.height + gapPx
+        }
+        val inset = 12.dp.roundToPx()
+        parts.indices.filter { parts[it].layoutId == PLAY }.forEach { index ->
+            val row = checkNotNull(placed[index])
+            row.placeRelative(inset - bleedPx, bottom - row.height - inset, zIndex = 1f)
+        }
     }
 }
 
@@ -980,6 +1065,8 @@ private fun courseSceneSlot(root: JSONObject): Int? {
     val enabled=parentEnabled && ToolUiCatalog.enabled(node,state)
     val text=node.optString("text")
     val style=node.optJSONObject("style")
+    // The play row over the large stage picture has no label line (Stage A, AH5).
+    if(LocalOverPicture.current && type == "text" && style?.optString("emphasis") == "label") return
     val tone=style?.optString("tone").orEmpty()
     val binding=node.optString("bind")
     // A card draws a background, so its padding is inside it. For other nodes, padding is outside.
@@ -1083,7 +1170,7 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 else body(position, false)
             }
             when {
-                dialogueSplit != null -> DialogueColumns(containerModifier, dialogueSplit, dialogueTitle, gap, renderChild)
+                dialogueSplit != null -> DialogueColumns(containerModifier, dialogueSplit, dialogueTitle, gap, outerPadding, renderChild)
                 courseSceneSlot == null -> column(containerModifier)
                 else -> CourseSceneSlots(containerModifier, courseSceneSlot, items.length(), gap, renderChild)
             }
@@ -1107,8 +1194,10 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                     val thickness = DividerDefaults.Thickness.toPx()
                     dividerX.values.forEach { x -> drawLine(dividerColor, Offset(x + thickness / 2, 0f), Offset(x + thickness / 2, size.height), thickness) }
                 },horizontalArrangement=horizontalArrangement(style,gap),verticalAlignment=verticalAlignment(style?.optString("crossAlign"))) {
+                    // Over the stage picture the row takes the width of its parts, so the speed chip takes no weight.
+                    val overPicture = LocalOverPicture.current
                     CompositionLocalProvider(LocalFixedRow provides true) { repeat(items.length()) {index ->
-                        val child=items.getJSONObject(index); val layout=child.optJSONObject("layout")
+                        val child=items.getJSONObject(index); val layout=child.optJSONObject("layout")?.takeUnless { overPicture }
                         if (child.optString("type") == "divider") {
                             Spacer(Modifier.width(DividerDefaults.Thickness).onPlaced { dividerX[index] = it.positionInParent().x })
                             return@repeat
@@ -1234,7 +1323,9 @@ private fun courseSceneSlot(root: JSONObject): Int? {
           ToolRoleSurface(modifier, if (hero) ToolRole(scheme.secondary, scheme.secondaryContainer, scheme.onSecondaryContainer) else scheme.toolRole(tone)) {
            // Text in a centered card is centered too, so it lines up with a centered emoji or icon.
            CompositionLocalProvider(LocalCenteredContent provides (centered || LocalCenteredContent.current)) {
-            Column(Modifier.padding(space(style?.optString("padding"), if (hero) 20 else 16)), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
+            // The card of the large stage picture has no padding, so the tint of the drawing reaches its edges (Stage A, AH3).
+            val padding = if (hero && LocalStagePicture.current) 0.dp else space(style?.optString("padding"), if (hero) 20 else 16)
+            Column(Modifier.padding(padding), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = alignment(style)) {
                 val icon = node.optString("icon")
                 val title = showsToolHeading(text, heading)
                 val badge = if (tone in setOf("", "default", "muted")) MaterialTheme.colorScheme.primary else LocalContentColor.current
@@ -1362,7 +1453,10 @@ private fun courseSceneSlot(root: JSONObject): Int? {
                 "outlined" -> OutlinedButton(click,buttonModifier,enabled=enabled) {label()}
                 "text" -> TextButton(click,buttonModifier,enabled=enabled) {label()}
                 "tonal" -> FilledTonalButton(click,buttonModifier,enabled=enabled) {label()}
-                "tonalIcon" -> FilledTonalIconButton(click,modifier.size(48.dp).semantics {contentDescription=text},enabled=enabled) {ToolGlyph(node.getString("icon"))}
+                // Over the stage picture the tonal container has the tint of the picture card, so the button takes the surface color (AH5).
+                "tonalIcon" -> FilledTonalIconButton(click,modifier.size(48.dp).semantics {contentDescription=text},enabled=enabled,
+                    colors=if(LocalOverPicture.current) IconButtonDefaults.filledTonalIconButtonColors(MaterialTheme.colorScheme.surface,MaterialTheme.colorScheme.onSurface)
+                        else IconButtonDefaults.filledTonalIconButtonColors()) {ToolGlyph(node.getString("icon"))}
                 "elevated" -> ElevatedButton(click,buttonModifier,enabled=enabled) {label()}
                 "fab","extendedFab" -> if(enabled) {
                     if(node.getString("variant")=="fab") FloatingActionButton(click,modifier.semantics {contentDescription=text}) {ToolGlyph(node.getString("icon"))}
@@ -2431,6 +2525,17 @@ internal fun rootThemeColors(ui: String, shellDark: Boolean): ColorScheme? =
     }
     // An inline choice is a segmented row with no label of its own: the label of its control stands over the row (the speeds of a play control).
     val inline = node.opt("variant") == "inline"
+    if (inline && LocalOverPicture.current) {
+        NativeSpeedChip(node.getString("text"), values, enabled, modifier, ::selected, ::choose)
+        return
+    }
+    // In the large picture layout an inline choice is at most 440 dp wide, in the center, as the stepper (Stage A, F3).
+    if (inline && LocalLargeStage.current) {
+        Box(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+            CompositionLocalProvider(LocalLargeStage provides false) { NativeChoices(node, state, enabled, Modifier.widthIn(max = 440.dp), namedByTitle, event) }
+        }
+        return
+    }
     Column(if(namedByTitle || inline) modifier.semantics {contentDescription=node.getString("text")} else modifier,verticalArrangement=Arrangement.spacedBy(6.dp)) {
         if(!namedByTitle && !inline) Text(node.getString("text"),style=MaterialTheme.typography.labelLarge)
         when(if (inline) "segmented" else type) {
@@ -2582,26 +2687,70 @@ private fun NativeSceneChoices(
 @Composable
 private fun NativeStepper(label: String, options: List<JSONObject>, enabled: Boolean, modifier: Modifier, selected: (Any) -> Boolean, choose: (Any) -> Unit) {
     val index = options.indexOfFirst { selected(it.get("value")) }.coerceAtLeast(0)
+    // The host has the count words in Russian and English. A screen in another language shows the count with no word.
+    val language = LocalMiniAppControlsLanguage.current?.substringBefore('-')
+    val count = if (language == null || language == "ru" || language == "en") miniAppString(R.string.tool_part_count, index + 1, options.size)
+        else "${index + 1} / ${options.size}"
+    val previous = miniAppString(R.string.tool_page_previous, label)
+    val next = miniAppString(R.string.tool_page_next, label)
+    val before: @Composable () -> Unit = {
+        OutlinedIconButton(onClick = { choose(options[index - 1].get("value")) }, enabled = enabled && index > 0,
+            modifier = Modifier.size(48.dp).semantics { contentDescription = previous }) {
+            AlphaIcon(Glyph.Chevron, Modifier.size(20.dp).graphicsLayer { scaleX = -1f }, color = LocalContentColor.current)
+        }
+    }
+    val after: @Composable () -> Unit = {
+        OutlinedIconButton(onClick = { choose(options[index + 1].get("value")) }, enabled = enabled && index < options.lastIndex,
+            modifier = Modifier.size(48.dp).semantics { contentDescription = next }) {
+            AlphaIcon(Glyph.Chevron, Modifier.size(20.dp), color = LocalContentColor.current)
+        }
+    }
+    // On the stage: no label line and no count text, but one dot for each step between the buttons, at most 440 dp wide in the center
+    // (Stage A, AH4). The label and the count stay as the accessible text.
+    if (LocalLiveUi.current?.stage == true) {
+        Box(modifier.fillMaxWidth().semantics { contentDescription = label; stateDescription = count }, contentAlignment = Alignment.Center) {
+            Row(Modifier.widthIn(max = 440.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                before()
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    options.indices.forEach { step ->
+                        val present = step == index
+                        Box(Modifier.size(if (present) 10.dp else 6.dp).background(if (present) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.outline, CircleShape).testTag(STEP_DOT_TAG).semantics { this.selected = present; hideFromAccessibility() })
+                    }
+                }
+                after()
+            }
+        }
+        return
+    }
     Column(modifier.semantics { contentDescription = label }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, style = MaterialTheme.typography.labelLarge)
         // The stepper spans the row (stage 7, F2): the button before at the start, the count in the middle, the next button at the end.
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            val previous = miniAppString(R.string.tool_page_previous, label)
-            val next = miniAppString(R.string.tool_page_next, label)
-            OutlinedIconButton(onClick = { choose(options[index - 1].get("value")) }, enabled = enabled && index > 0,
-                modifier = Modifier.size(48.dp).semantics { contentDescription = previous }) {
-                AlphaIcon(Glyph.Chevron, Modifier.size(20.dp).graphicsLayer { scaleX = -1f }, color = LocalContentColor.current)
-            }
-            // The host has the count words in Russian and English. A screen in another language shows the count with no word.
-            val language = LocalMiniAppControlsLanguage.current?.substringBefore('-')
-            Text(if (language == null || language == "ru" || language == "en") miniAppString(R.string.tool_part_count, index + 1, options.size)
-                else "${index + 1} / ${options.size}", style = MaterialTheme.typography.titleMedium)
-            OutlinedIconButton(onClick = { choose(options[index + 1].get("value")) }, enabled = enabled && index < options.lastIndex,
-                modifier = Modifier.size(48.dp).semantics { contentDescription = next }) {
-                AlphaIcon(Glyph.Chevron, Modifier.size(20.dp), color = LocalContentColor.current)
-            }
+            before()
+            Text(count, style = MaterialTheme.typography.titleMedium)
+            after()
         }
     }
+}
+
+/** The test tag of each dot of a stepper on the stage. */
+internal const val STEP_DOT_TAG = "stage_step_dot"
+
+/**
+ * The speed chip of the play row over the large stage picture (Stage A, AH5): the present speed, and a tap selects the next speed in the
+ * order of the options, after the last the first (slow, normal, fast, slow). Its accessible name is the label of the speeds.
+ */
+@Composable
+private fun NativeSpeedChip(label: String, options: List<JSONObject>, enabled: Boolean, modifier: Modifier, selected: (Any) -> Boolean, choose: (Any) -> Unit) {
+    val index = options.indexOfFirst { selected(it.get("value")) }.coerceAtLeast(0)
+    val present = options.getOrNull(index)?.getString("text").orEmpty()
+    FilledTonalButton(onClick = { choose(options[(index + 1) % options.size].get("value")) }, enabled = enabled && options.isNotEmpty(),
+        modifier = modifier.heightIn(min = 48.dp).semantics { contentDescription = label; stateDescription = present },
+        // The tonal container has the tint of the picture card, so the chip takes the surface color.
+        colors = ButtonDefaults.filledTonalButtonColors(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface),
+        contentPadding = PaddingValues(horizontal = 16.dp)) { Text(present, maxLines = 1) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

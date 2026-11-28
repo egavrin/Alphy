@@ -2,7 +2,7 @@
   {"id": "w-ship-label", "base": "ship.plan", "request": "Добавь на воде подпись «Вода».", "expect": "lines"},
   {"id": "w-ship-remove", "base": "ship.plan", "request": "Убери надпись сверху.", "expect": "lines"},
   {"id": "w-guitar-red", "base": "guitar.plan", "request": "Сделай звучащую часть струны красной.", "expect": "lines"},
-  {"id": "w-guitar-short", "base": "guitar.plan", "request": "Сократи текст в карточке до одного предложения.", "expect": "lines"},
+  {"id": "w-guitar-short", "base": "guitar.plan", "request": "Сократи текст под картинкой до одного предложения.", "expect": "lines"},
   {"id": "w-roots-ending", "base": "roots.plan", "request": "Добавь ещё окончание.", "expect": "lines"},
   {"id": "w-roots-timer", "base": "roots.plan", "request": "Добавь таймер на одну минуту.", "expect": "outside"}
 ]

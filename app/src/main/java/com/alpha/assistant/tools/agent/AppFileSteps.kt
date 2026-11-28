@@ -314,7 +314,8 @@ internal class AppFileSteps(
      * keeps its complete lines. With [preview], a loop shows the frame of the newest complete lines when it is free, over [stored] for a
      * change. The loop closes when the call ends, and the join waits only for the update in flight, so the compile after it meets no busy
      * slot. Gives the reply and the complete lines that arrived.
-     * With [outlive], a new screen compiles the complete lines before its first narration line when that line starts and they hold the card.
+     * With [outlive], a new screen compiles the complete lines before its first narration line when that line starts and they hold its head end
+     * ([HEAD_END_LINE]): the caption of an explain scene, or the card of a data form (stage A, J1). A scene with steps or parts has no caption line.
      * A clean compile is the app at once, and the call goes on in [outlive] for the narration. Each other case waits for the end of the call.
      */
     private suspend fun streamed(input: String, limits: AppFileLimits, stored: AppFilePrevious?,
@@ -331,7 +332,7 @@ internal class AppFileSteps(
         var handed = false
         try {
             val head = stream.narration.await()
-            if (head != null && CARD_LINE.containsMatchIn(head)) {
+            if (head != null && HEAD_END_LINE.containsMatchIn(head)) {
                 // The preview stops first, so the compile of the head meets no busy slot.
                 stream.stopCollect()
                 loop?.join()
@@ -370,7 +371,8 @@ internal class AppFileSteps(
     }
 
     private companion object {
-        val CARD_LINE = Regex("""(?m)^[ \t]*card[ \t]*=""")
+        /** The last line of the head of a new screen: the caption of an explain scene, or the card of a data form. */
+        val HEAD_END_LINE = Regex("""(?m)^[ \t]*(?:caption|card)[ \t]*=""")
         /** A narration line as the kit keeps it (template.js). */
         val NARRATION_LINE = Regex("""say(?:[1-9]\d*)? = .*""")
     }

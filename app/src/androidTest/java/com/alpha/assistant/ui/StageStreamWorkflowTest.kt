@@ -156,7 +156,7 @@ class StageStreamWorkflowTest {
 
     @Test fun theFinalFrameShowsDuringTheHostCheck() = heldAtTheAccept(StreamTalk(listOf(Streamed(halves(TALKING))))) { phases ->
         assertTrue(phases.toString(), phases.indexOf("$PREVIEW:whole") in 0 until phases.indexOf("plan_outcome:accepted"))
-        assertTrue(stageHasText(robot, SHIP_CARD))
+        assertTrue(stageHasText(robot, SHIP_CAPTION))
         assertFalse("the control of the preview is off", controlOn())
     }
 
@@ -250,7 +250,7 @@ class StageStreamWorkflowTest {
     @Test fun aStoppedCallAsksOnceForTheMissingLines() {
         val full = CompletableDeferred<Unit>()
         val stopped = { Streamed(halves(TALKING), gapMs = 150, stopAfter = 8) }
-        val rest = Streamed(listOf("$S3\n", "$CARD\n"), gapMs = 0)
+        val rest = Streamed(listOf("$S3\n", "$CAPTION\n"), gapMs = 0)
         val talk = StreamTalk(listOf(stopped(), rest, stopped(), Streamed(emptyList(), stopAfter = 0)), fullGeneration(), full)
         shell.live(talk) { _, model, phases ->
             // The call stops after s2. The rest call sends the four complete lines, and its reply completes the screen.
@@ -299,8 +299,8 @@ class StageStreamWorkflowTest {
 
     /**
      * Plan "one scene", decision 6: the controls of a new scene come on when its narration starts, and its narration is saved later at the
-     * same revision. The first half of say1 starts the narration, and the call then waits, so the scene is stored with its narration still
-     * to come. After the save, a tap still runs on the open stage.
+     * same revision. The head ends at the caption of the explain scene (stage A, J1). The first half of say starts the narration, and the call
+     * then waits, so the scene is stored with its narration still to come. After the save, a tap still runs on the open stage.
      */
     @Test fun controlsComeOnBeforeTheNarration() {
         val gate = CompletableDeferred<Unit>()
@@ -310,18 +310,18 @@ class StageStreamWorkflowTest {
             val scene = try {
                 robot.waitUntil(60_000) { CONTROLS_ON in phases }
                 val scene = shell.shown(model)
-                assertEquals("the stored file at controls_on", STEPPED, appFileOf(scene))
+                assertEquals("the stored file at controls_on", TALKING, appFileOf(scene))
                 assertTrue(phases.toString(), phases.none { it.startsWith(NARRATION) })
                 scene
             } finally { gate.complete(Unit) }
             robot.waitUntil(30_000) { phases.any { it.startsWith(NARRATION) } }
             assertTrue(phases.toString(), SAVED in phases && phases.indexOf(CONTROLS_ON) < phases.indexOf(SAVED))
             // The change of the store reloads the list of tools a little later.
-            robot.waitUntil { appFileOf(shell.stored(model, scene.id)) != STEPPED }
+            robot.waitUntil { appFileOf(shell.stored(model, scene.id)) != TALKING }
             val saved = shell.stored(model, scene.id)
-            assertEquals(STEPPED + NARRATION_LINES.joinToString("\n", postfix = "\n"), appFileOf(saved))
+            assertEquals("$TALKING$SAY_LINE\n", appFileOf(saved))
             assertEquals(listOf(scene.revision, scene.stateVersion, scene.state), listOf(saved.revision, saved.stateVersion, saved.state))
-            assertEquals(SAYS.withIndex().associate { (index, say) -> index + 1 to say }, SceneNarration.of(appFileOf(saved)).sentences)
+            assertEquals(SAY_TEXT, SceneNarration.of(appFileOf(saved)).say)
             robot.click(NAIL)
             robot.waitUntil { shipSubject(shell.stored(model, scene.id)) == NAIL }
             assertEquals(saved.revision, shell.stored(model, scene.id).revision)
@@ -362,7 +362,7 @@ class StageStreamWorkflowTest {
 
     /** The call fails after the scene came on: the scene stays with its controls on, and the narration is dropped. */
     @Test fun aFailedNarrationKeepsTheScene() {
-        val talk = StreamTalk(listOf(Streamed(halves(STEPPED) + halves(NARRATION_LINES.joinToString("\n")), stopAfter = halves(STEPPED).size + 1)))
+        val talk = StreamTalk(listOf(Streamed(halves(TALKING) + halves(SAY_LINE), stopAfter = halves(TALKING).size + 1)))
         shell.live(talk) { _, model, phases ->
             socket.say(SCREEN_REQUEST, "d1", 100)
             val scene = shell.shown(model)
@@ -370,7 +370,7 @@ class StageStreamWorkflowTest {
             assertTrue(phases.toString(), DROPPED in phases && SAVED !in phases && phases.indexOf(CONTROLS_ON) < phases.indexOf(DROPPED))
             robot.awaitFrames(5)
             assertEquals(scene, shell.stored(model, scene.id))
-            assertEquals(STEPPED, appFileOf(scene))
+            assertEquals(TALKING, appFileOf(scene))
             assertEquals("complete", shell.messages(model).last().status)
             assertTrue("the controls of the scene are off", controlOn())
         }
@@ -393,7 +393,7 @@ class StageStreamWorkflowTest {
                 socket.say(ANSWER_REQUEST, "d2", 2_000)
                 robot.waitUntil(30_000) { "d2" to ANSWER_SPOKEN in socket.commentary() }
                 assertFalse("the gate opened before the next request", gate.isCompleted)
-                assertEquals(STEPPED, appFileOf(shell.stored(model, scene.id)))
+                assertEquals(TALKING, appFileOf(shell.stored(model, scene.id)))
             } finally { gate.complete(Unit) }
             // The call stopped at its gate, so it sends no part after it.
             val sent = first.sent.size
@@ -402,12 +402,14 @@ class StageStreamWorkflowTest {
         }
     }
 
-    /** A narration line before the card: the head has no card, so the host waits for the end of the call and stores the whole file once. */
-    @Test fun aNarrationLineBeforeTheCardWaitsForTheEndOfTheCall() {
+    /**
+     * A narration line before the caption: the head has no caption, so the host waits for the end of the call and stores the whole file once.
+     */
+    @Test fun aNarrationLineBeforeTheCaptionWaitsForTheEndOfTheCall() {
         val gate = CompletableDeferred<Unit>()
-        val lines = STEPPED.lines().filter { it.isNotEmpty() }
-        val parts = (lines.dropLast(1) + NARRATION_LINES[0] + lines.last() + NARRATION_LINES.drop(1)).map { "$it\n" }
-        // The call waits before the card, after say1.
+        val lines = TALKING.lines().filter { it.isNotEmpty() }
+        val parts = (lines.dropLast(1) + SAY_LINE + lines.last()).map { "$it\n" }
+        // The call waits before the caption, after say.
         val reply = Streamed(parts, gapMs = 100, gateAt = lines.size, gate = gate)
         shell.live(StreamTalk(listOf(reply))) { _, model, phases ->
             socket.say(SCREEN_REQUEST, "d1", 100)
@@ -417,8 +419,30 @@ class StageStreamWorkflowTest {
                 assertTrue(phases.toString(), CONTROLS_ON !in phases)
             } finally { gate.complete(Unit) }
             val scene = shell.shown(model)
+            assertEquals("$TALKING$SAY_LINE\n", appFileOf(scene))
+            assertEquals(SAY_TEXT, SceneNarration.of(appFileOf(scene)).say)
+            robot.awaitFrames(5)
+            assertTrue(phases.toString(), phases.none { it.startsWith(NARRATION) })
+        }
+    }
+
+    /**
+     * Stage A, J1: a walk has no caption line, so its head has no line that ends it. The host stores no scene when the first narration line
+     * starts, and it stores the whole file once at the end of the call.
+     */
+    @Test fun aWalkWaitsForTheEndOfTheCall() {
+        val gate = CompletableDeferred<Unit>()
+        val reply = narrated(gate, STEPPED, NARRATION_LINES.joinToString("\n"))
+        shell.live(StreamTalk(listOf(reply))) { _, model, phases ->
+            socket.say(SCREEN_REQUEST, "d1", 100)
+            try {
+                robot.waitUntil(30_000) { reply.sent.size == halves(STEPPED).size + 1 }
+                during(1_500) { assertNull("a scene before the end of the call", model.stageToolId) }
+                assertTrue(phases.toString(), CONTROLS_ON !in phases)
+            } finally { gate.complete(Unit) }
+            val scene = shell.shown(model)
             assertEquals(STEPPED + NARRATION_LINES.joinToString("\n", postfix = "\n"), appFileOf(scene))
-            assertNotNull(SceneNarration.of(appFileOf(scene)).sentence(3))
+            assertEquals(SAYS.withIndex().associate { (index, say) -> index + 1 to say }, SceneNarration.of(appFileOf(scene)).sentences)
             robot.awaitFrames(5)
             assertTrue(phases.toString(), phases.none { it.startsWith(NARRATION) })
         }
@@ -428,7 +452,7 @@ class StageStreamWorkflowTest {
     @Test fun aFallbackAfterACleanHeadStopsTheNarration() {
         val gate = CompletableDeferred<Unit>()
         // The texts are not in the language of the first line, so the head compiles clean and its host check fails.
-        val first = narrated(gate, STEPPED.replace("lang=\"ru\"", "lang=\"en\"").also { check(it != STEPPED) })
+        val first = narrated(gate, TALKING.replace("lang=\"ru\"", "lang=\"en\"").also { check(it != TALKING) })
         shell.live(StreamTalk(listOf(first))) { _, _, phases ->
             socket.say(SCREEN_REQUEST, "d1", 100)
             try {
@@ -477,12 +501,12 @@ class StageStreamWorkflowTest {
     }
 
     /**
-     * The reply of a new steps scene: [scene] and then [NARRATION_LINES], each line as two deltas. The call waits for [gate] after the
-     * first half of say1, which starts the narration.
+     * The reply of a new scene: [scene] and then its [narration] lines, each line as two deltas. The call waits for [gate] after the first
+     * half of the first narration line, which starts the narration.
      */
-    private fun narrated(gate: CompletableDeferred<Unit>, scene: String = STEPPED): Streamed {
+    private fun narrated(gate: CompletableDeferred<Unit>, scene: String = TALKING, narration: String = SAY_LINE): Streamed {
         val head = halves(scene)
-        return Streamed(head + halves(NARRATION_LINES.joinToString("\n")), gapMs = 100, gateAt = head.size + 1, gate = gate)
+        return Streamed(head + halves(narration), gapMs = 100, gateAt = head.size + 1, gate = gate)
     }
 
     /**
@@ -496,7 +520,7 @@ class StageStreamWorkflowTest {
             socket.say(SCREEN_REQUEST, "d1", 100)
             try {
                 assertTrue("the run did not reach its accept", held.await(60, TimeUnit.SECONDS))
-                robot.waitUntil { stageHasText(robot, SHIP_CARD) || stageHasText(robot, CALC_LABEL) }
+                robot.waitUntil { stageHasText(robot, SHIP_CAPTION) || stageHasText(robot, CALC_LABEL) }
                 check(phases.toList())
                 assertNull("the run stored its app while it was held", model.stageToolId)
             } finally { release.countDown() }
@@ -539,7 +563,6 @@ class StageStreamWorkflowTest {
         const val APP_REQUEST = "Сделай калькулятор чаевых"
         const val ANSWER_REQUEST = "Какая погода"
         const val ANSWER_SPOKEN = "${LiveProtocol.MARK}Fixture response."
-        const val SHIP_CARD = "Вытеснение воды"
         /** A figure label of the calc app. */
         const val CALC_LABEL = "Per person"
         /** A first line with a palette that the kit does not have: a whole fault. */
@@ -560,12 +583,20 @@ internal const val HULL = "Корпус полый"
 internal const val AIR = "Воздух внутри"
 internal const val S1 = "s1 = text(150, 30, \"$WATER\", \"ink\", 14)"
 internal const val S2 = "s2 = text(150, 90, \"$HULL\", \"ink\", 14, visible=\$/v == \"Корабль\")"
-/** The ship template with texts in s1 and s2, so the labels of the canvas name each part. Its s3 and card are those of the ship. */
+/** The ship template with texts in s1 and s2, so the labels of the canvas name each part. Its s3 and caption are those of the ship. */
 internal val TALKING: String get() = shipWith(shipWith(shipTemplate(), S1), S2)
 internal val S3: String get() = lineOf(TALKING, "s3")
-internal val CARD: String get() = TALKING.lines().single { it.startsWith("card = ") }
-/** [TALKING] with a steps control of three steps, so that its narration has one sentence for each step (plan "one scene", Task 27). */
-internal val STEPPED: String get() = TALKING.lines().joinToString("\n") {
+internal val CAPTION: String get() = TALKING.lines().single { it.startsWith("caption = ") }
+/** The caption text of the ship template and of [TALKING] (stage A, K1). */
+internal const val SHIP_CAPTION = "Полый корабль вытесняет достаточно воды, чтобы удержаться на плаву."
+/** The narration line of [TALKING], which a new scene says after its caption. */
+internal const val SAY_TEXT = "Корабль полый, и вода держит его."
+internal const val SAY_LINE = "say = \"$SAY_TEXT\""
+/**
+ * [TALKING] with a steps control of three steps, so that its narration has one sentence for each step (plan "one scene", Task 27). A walk
+ * has no caption line: its caption is the sentence of the step (stage A, K1).
+ */
+internal val STEPPED: String get() = TALKING.lines().filterNot { it.startsWith("caption = ") }.joinToString("\n") {
     if (it.startsWith("control = ")) "control = steps(\"Предмет\", [\"Корабль\", \"$NAIL\", \"Лодка\"], \"Корабль\")" else it
 }
 /** The label of the steps control of [STEPPED], its steps, and the host control that walks the rest of them (plan "one scene", decision 16). */

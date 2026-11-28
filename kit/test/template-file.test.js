@@ -21,9 +21,9 @@ const step = (input) => compileStep({ read: true, previous: null, cap: 65536, ..
 const chars = (n) => "Ш".repeat(n);
 /** A text of n characters that ends a sentence. */
 const sentence = (n) => chars(n - 1) + ".";
-/** A card text of 200 characters with a sentence end at character 120, and the 120 characters that the kit keeps of it. */
-const LONG = `${sentence(120)} ${chars(79)}`, CUT = sentence(120);
-const shipCard = (text) => put(ship, "card", `card = card("Вытеснение воды", "${text}")`);
+/** A caption of 200 characters with a sentence end at character 100, and the 100 characters that the kit keeps of it (cap 110). */
+const LONG = `${sentence(100)} ${chars(99)}`, CUT = sentence(100);
+const shipCaption = (text) => put(ship, "caption", `caption = "${text}"`);
 /** The lines of a merged text by their names: the template word for the first line. */
 const order = (text) => text.trim().split("\n").map((line) => /^([\w$/]+)\s*[=(]/.exec(line)[1]);
 /** The value of a stored app as the host sends it to compileStep. */
@@ -50,7 +50,7 @@ test("aShapeWithAFaultIsLeftOutAndTheOtherLinesStay", async () => {
   expect([result.kept, result.leftOut]).toEqual([drop(ship, "s2"), ["s2"]]);
 });
 
-const STILL = ['scene("Круг", lang="ru")', 'control = slider("Размер", 0, 10, 1, 4)', 's1 = circle(150, 110, 40, "accent")', 'card = card("Круг", "Круг всегда один и тот же.")'].join("\n") + "\n";
+const STILL = ['scene("Круг", lang="ru")', 'control = slider("Размер", 0, 10, 1, 4)', 's1 = circle(150, 110, 40, "accent")', 'caption = "Круг всегда один и тот же."'].join("\n") + "\n";
 
 test("aControlThatChangesNothingIsLeftOut", async () => {
   const result = await compileAppFile(STILL);
@@ -65,7 +65,7 @@ test("aControlThatChangesNothingIsLeftOut", async () => {
 
 test("keptCompilesCleanAgain", async () => {
   // A cut text has no fault: the kept text is the cut one.
-  const cases = { shape: [put(ship, "s2", "s2 = polygon(45, 75, 255)"), true], card: [shipCard(chars(176)), true], control: [STILL, true], cut: [shipCard(LONG), false] };
+  const cases = { shape: [put(ship, "s2", "s2 = polygon(45, 75, 255)"), true], caption: [shipCaption(chars(176)), true], control: [STILL, true], cut: [shipCaption(LONG), false] };
   for (const [name, [text, faulty]] of Object.entries(cases)) {
     const first = await compileAppFile(text), again = await compileAppFile(first.kept);
     expect([name, first.faults.length > 0, first.definition !== null, again.faults]).toEqual([name, faulty, true, []]);
@@ -127,7 +127,8 @@ test("hardCapsOutsideThePictureAndOneAndAQuarterInside", async () => {
     // A choice of 2 to 4 options, and the 4 items of word-parts, have the option cap 16 (fix list 3, H3).
     ["control", 16, (n) => put(ship, "control", `control = choice("Предмет", ["Корабль", "${chars(n)}"])`), 16],
     ["i1", 16, (n) => put(items, "i1", `i1 = item("${chars(n)}", "пере-", "Стоит перед корнем.")`), 16],
-    ["card", 32, (n) => put(ship, "card", `card = card("${chars(n)}", "Вода держит корабль.")`), 32],
+    // A caption with no sentence end inside its cap cannot be cut, so one character past the cap is a fault.
+    ["caption", 110, (n) => put(ship, "caption", `caption = "${chars(n)}"`), 110],
     ["i1", 14, (n) => put(items, "i1", `i1 = item("Приставка", "${chars(n)}", "Стоит перед корнем.")`), 17],
     ["s3", 28, (n) => put(ship, "s3", `s3 = text(150, 50, "${chars(n)}", "ink", 12, visible=$/v == "Корабль")`), 35],
   ];
@@ -150,16 +151,16 @@ test("hardCapsOutsideThePictureAndOneAndAQuarterInside", async () => {
   expect(named((await compileAppFile(put(cells, "control", 'control = slider("Votes for", 0, 101, 1, 11)'))).faults, "control")).toHaveLength(1);
 });
 
-test("aLongCardTextIsCutAfterItsLastWholeSentence", async () => {
+test("aLongCaptionIsCutAfterItsLastWholeSentence", async () => {
   expect([...LONG].length).toBe(200);
-  const result = await compileAppFile(shipCard(LONG));
-  expect([result.faults, result.leftOut, result.kept]).toEqual([[], [], shipCard(CUT)]);
+  const result = await compileAppFile(shipCaption(LONG));
+  expect([result.faults, result.leftOut, result.kept]).toEqual([[], [], shipCaption(CUT)]);
   // The screen shows the cut text.
   expect(every(result.definition.ui).some((node) => Object.values(node).includes(CUT))).toBe(true);
   expect(JSON.stringify(result.definition)).not.toContain(LONG);
   // A closing quote mark stays with its sentence, and a full stop that no space follows (3.5) ends no sentence.
-  const quoted = `«${chars(117)}!»`, odd = await compileAppFile(shipCard(`${quoted} ${chars(10)}3.5${chars(66)}`));
-  expect([odd.faults, odd.kept]).toEqual([[], shipCard(quoted)]);
+  const quoted = `«${chars(107)}!»`, odd = await compileAppFile(shipCaption(`${quoted} ${chars(10)}3.5${chars(66)}`));
+  expect([odd.faults, odd.kept]).toEqual([[], shipCaption(quoted)]);
 });
 
 test("aLongItemTextIsCutAfterItsLastWholeSentence", async () => {
@@ -169,29 +170,29 @@ test("aLongItemTextIsCutAfterItsLastWholeSentence", async () => {
   expect(result.expanded).not.toContain(LONG);
 });
 
-test("eachTextOfACardFormulaIsCutByItself", async () => {
-  const other = `${sentence(100)} ${chars(79)}`, result = await compileAppFile(put(ship, "card", `card = card("Вытеснение воды", $/v == "Корабль" ? "${LONG}" : "${other}")`));
+test("eachTextOfACaptionFormulaIsCutByItself", async () => {
+  const other = `${sentence(90)} ${chars(79)}`, result = await compileAppFile(put(ship, "caption", `caption = $/v == "Корабль" ? "${LONG}" : "${other}"`));
   expect(result.faults).toEqual([]);
-  const text = parseLine(result.kept.split("\n").find((line) => line.startsWith("card = "))).tree.args[1];
-  expect([text.test.right.v, text.yes.v, text.no.v]).toEqual(["Корабль", CUT, sentence(100)]);
+  const text = parseLine(result.kept.split("\n").find((line) => line.startsWith("caption = "))).tree;
+  expect([text.test.right.v, text.yes.v, text.no.v]).toEqual(["Корабль", CUT, sentence(90)]);
 });
 
-test("aLongCardTextOrItemTextWithNoSentenceEndInsideItsCapIsAFaultOfItsLine", async () => {
+test("aLongCaptionOrItemTextWithNoSentenceEndInsideItsCapIsAFaultOfItsLine", async () => {
   // A sentence end past the cap does not count.
   for (const text of [chars(200), `${sentence(150)} ${chars(49)}`]) {
-    const card = await compileAppFile(shipCard(text)), item = await compileAppFile(put(template("word-parts"), "i1", `i1 = item("Приставка", "пере-", "${text}")`));
-    for (const [name, result] of [["card", card], ["i1", item]]) {
+    const caption = await compileAppFile(shipCaption(text)), item = await compileAppFile(put(template("word-parts"), "i1", `i1 = item("Приставка", "пере-", "${text}")`));
+    for (const [name, result] of [["caption", caption], ["i1", item]]) {
       expect([name, result.faults.length, result.leftOut]).toEqual([name, 1, [name]]);
       expect(result.faults[0]).toStartWith(`${name}: `);
-      expect(result.faults[0]).toMatch(/\b140\b/);
+      expect(result.faults[0]).toMatch(/\b110\b/);
     }
   }
 });
 
-test("aCardTextAtItsCapIsNotCut", async () => {
-  const text = `${sentence(100)} ${chars(39)}`, result = await compileAppFile(shipCard(text));
-  expect([...text].length).toBe(140);
-  expect([result.faults, result.kept]).toEqual([[], shipCard(text)]);
+test("aCaptionAtItsCapIsNotCut", async () => {
+  const text = `${sentence(80)} ${chars(29)}`, result = await compileAppFile(shipCaption(text));
+  expect([...text].length).toBe(110);
+  expect([result.faults, result.kept]).toEqual([[], shipCaption(text)]);
 });
 
 test("twoOptionsOrItemsWithTheSameTextAreAFaultOfTheirLine", async () => {
@@ -203,7 +204,7 @@ test("twoOptionsOrItemsWithTheSameTextAreAFaultOfTheirLine", async () => {
   expect(items.faults).toHaveLength(1);
   expect(items.faults[0]).toStartWith("i3: ");
   expect(items.leftOut).toEqual(["i3"]);
-  expect(every(items.definition.ui).find((node) => node.type === "segmented").options.map((option) => option.text)).toEqual(["Приставка", "Корень", "Окончание"]);
+  expect(every(items.definition.ui).find((node) => node.action === "v_field").options.map((option) => option.text)).toEqual(["Приставка", "Корень", "Окончание"]);
 });
 
 test("aPolygonWithFewerThanThreePointsOrAnOddListIsAFaultOfItsLine", async () => {
@@ -228,8 +229,8 @@ test("namesAndOrder", async () => {
   expect(named(twice.faults, "s1")).toHaveLength(1);
   // The first line s1 stays.
   expect(twice.definition).toEqual(clean.definition);
-  const lines = ship.trim().split("\n"), cardFirst = [lines[0], lines[1], lines[5], lines[2], lines[3], lines[4]].join("\n") + "\n";
-  const turned = await compileAppFile(cardFirst);
+  const lines = ship.trim().split("\n"), captionFirst = [lines[0], lines[1], lines[5], lines[2], lines[3], lines[4]].join("\n") + "\n";
+  const turned = await compileAppFile(captionFirst);
   expect(turned.faults).toEqual([]);
   expect(turned.definition).toEqual(clean.definition);
 });
@@ -241,9 +242,9 @@ test("aRepairReplyMergesByName", async () => {
 });
 
 test("aChangeReplyMergesAndDeletes", async () => {
-  const reply = ['s4 = circle(150, 160, 20, "sun", visible=$/v == "Гвоздь")', "delete s3", 'card = card("Почему", "Вода держит полый корабль.")'].join("\n");
+  const reply = ['s4 = circle(150, 160, 20, "sun", visible=$/v == "Гвоздь")', "delete s3", 'caption = "Вода держит полый корабль."'].join("\n");
   const changed = await step({ text: reply, plan: ship });
-  expect(order(changed.text)).toEqual(["scene", "control", "s1", "s2", "s4", "card"]);
+  expect(order(changed.text)).toEqual(["scene", "control", "s1", "s2", "s4", "caption"]);
   expect(changed.result.faults).toEqual([]);
   const head = 'scene("Корабль и гвоздь", lang="ru", palette="teal")', titled = await step({ text: head, plan: ship });
   expect(titled.text).toBe(ship.replace(/^scene\(.*$/m, head));
@@ -280,20 +281,21 @@ test("theCapFixturesCompileClean", async () => {
     const text = template(name), inside = (n) => Math.floor(n * factor), result = await compileAppFile(text);
     expect([name, result.faults, result.kept]).toEqual([name, [], text]);
     const [first, ...rest] = text.trim().split("\n"), head = parseExpression(first), lines = Object.fromEntries(rest.map((line) => [parseLine(line).key, parseLine(line).tree]));
-    const parts = Object.keys(lines).filter((key) => /^[si]\d+$/.test(key)).map((key) => lines[key]), control = lines.control, card = lines.card;
-    const seen = { title: len(head.args[0]), control: len(control.args[0]), cardTitle: len(card.args[0]) }, want = { title: 30, control: 28, cardTitle: 32 };
+    const parts = Object.keys(lines).filter((key) => /^[si]\d+$/.test(key)).map((key) => lines[key]), control = lines.control, caption = lines.caption;
+    const seen = { title: len(head.args[0]), control: len(control.args[0]) }, want = { title: 30, control: 28 };
     if (head.name === "scene") {
-      Object.assign(seen, { options: control.args[1].items.map(len), shapes: parts.length, texts: parts.filter((part) => part.name === "text").map((part) => len(part.args[2])), cardText: len(card.args[1]) });
+      // A steps scene has no caption line: its caption is the narration sentence of the present step (stage A, K1).
+      Object.assign(seen, { options: control.args[1].items.map(len), shapes: parts.length, texts: parts.filter((part) => part.name === "text").map((part) => len(part.args[2])), caption: caption ? len(caption) : null });
       // A choice of 2 to 4 options has options of 16 characters, and one of 5 or 6 options has 12 (fix list 3, H3).
       const few = name.endsWith("caps4");
-      Object.assign(want, { options: few ? Array(4).fill(16) : Array(6).fill(12), shapes: 12, texts: Array(seen.texts.length).fill(inside(28)), cardText: 140 });
+      Object.assign(want, { options: few ? Array(4).fill(16) : Array(6).fill(12), shapes: 12, texts: Array(seen.texts.length).fill(inside(28)), caption: name.includes("steps") ? null : 110 });
       expect(seen.texts.length).toBeGreaterThan(0);
     } else if (head.name === "items") {
       Object.assign(seen, { items: parts.map((part) => part.args.map(len)) });
-      Object.assign(want, { items: name.endsWith("caps4") ? Array(4).fill([16, 14, 140]) : Array(6).fill([12, inside(14), 140]) });
+      Object.assign(want, { items: name.endsWith("caps4") ? Array(4).fill([16, 14, 110]) : Array(6).fill([12, inside(14), 110]) });
     } else {
-      Object.assign(seen, { count: control.args[2].v, cardText: len(card.args[1]) });
-      Object.assign(want, { count: 100, cardText: 140 });
+      Object.assign(seen, { count: control.args[2].v, caption: len(caption) });
+      Object.assign(want, { count: 100, caption: 110 });
     }
     // A steps file has six narration lines at their cap (plan "one scene", Task 25).
     const says = Object.keys(lines).filter((key) => /^say\d+$/.test(key)).map((key) => len(lines[key]));

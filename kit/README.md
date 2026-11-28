@@ -18,8 +18,8 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/run.js` | The run-time of a compiled app: `handle` answers each event, and `screen` maps each component to its Alphy node. A timer with rounds, a rest, or no alert draws its bar on a surface and asks for a timer event each second while it runs. A timer with an alert and one phase is Alphy's foreground timer. A Drawing is a canvas with one surface that each reply draws again. A value that an `animate` moves keeps its change in the state field `anim` and asks for a timer event each 50 ms while it moves. `stateOf` copies each field of `app.keep` from the stored state, so a field that a change kept stays after each event. |
 | `src/emit.js` | The emitter: an expanded app file as Alphy's app definition, whose `source` is the run-time and the compiled data of the app (`sourceOf`). `dataOf` reads the compiled data back from a `source`. It gives a fault for each limit of Alphy that the kit's own mapping can pass: state fields, the fields of a need's object, source bytes, and the nodes and depth of the screen. It also keeps the lower limits: a container with no child is a fault of its line, and a plan with no state value keeps one hidden boolean field `d0`, because Alphy keeps 1 to 40 state fields. No line of a plan gets the name `d0`. Each need object has a namer of its own, so the names in it do not depend on the other needs. |
 | `src/change.js` | The next state of a change: `nextState` gives the definition and the state of a changed app from the stored app of the person (section "Changes of an app"), and `BLOCKS` and `MISMATCH` are the texts of its faults. Only the compile step uses it. |
-| `src/form-base.js` | What each line table uses (section "Ready plans"): `BUDGET`, `COLOR_NAMES`, the drawing size `WIDTH` and `HEIGHT`, `INSIDE`, `SENTENCE_END`, `cut` and `cutLong` (the cut of a long text), `textFault`, `optionFault` (the cap of an option by the number of options), `namedColor` and `toneColor` (a color name with a tone), `headFault` (the first line), `formFault` and `cutOf` (the check and the cut of a value by the forms of its entry), the entries and arguments that most line tables share (such as `CONTROL_LINE`, `cardLine`, and `NARRATION`), `colored` and `colorFault` (the colors of a shape), and the tree helpers `isText`, `numberOf`, and `nodesIn`. |
-| `src/form-data.js` | What the line tables of the data family use (section "The data family"): `DATA_BUDGET`, the faults of a row and a mark, the context faults, the fill of a data form (`dataFill`), `tableLine`, and the host check (`checkSource`). |
+| `src/form-base.js` | What each line table uses (section "Ready plans"): `BUDGET`, `COLOR_NAMES`, the drawing size `WIDTH` and `HEIGHT`, `INSIDE`, `SENTENCE_END`, `cut` and `cutLong` (the cut of a long text), `textFault`, `optionFault` (the cap of an option by the number of options), `namedColor` and `toneColor` (a color name with a tone), `headFault` (the first line), `formFault` and `cutOf` (the check and the cut of a value by the forms of its entry), `cutTexts` (the cut of each text of a value), the entries and arguments that most line tables share (such as `CONTROL_LINE`, `CAPTION`, and `NARRATION`), `colored` and `colorFault` (the colors of a shape), and the tree helpers `isText`, `numberOf`, and `nodesIn`. |
+| `src/form-data.js` | What the line tables of the data family use (section "The data family"): `DATA_BUDGET`, the faults of a row and a mark, the context faults, the fill of a data form (`dataFill`), the card line of a data form (`cardLine`), `tableLine`, and the host check (`checkSource`). |
 | `templates/` | The ready plans and their line tables (section "Ready plans"). `WORD.plan` holds the app file lines of the screen of the template `WORD` with `{{name}}` slots, and `WORD.js` holds its line table (`SCENE`, `ITEMS`, `CELLS`, `COMPARE`, `TABLE`, `CHART`, and `NODATA`). `scene.js` also exports `SHAPES` (the shape lines), `partFault`, `diagramOf`, and `controlStart`. |
 | `src/ready.js` | The registry of the ready plans: `READY` holds the line table and the ready plan of each template by its word, and `register` adds one. It gives `TEMPLATE_HEAD`, `DATA_WORDS`, and `DATA_HEAD` from the templates that the app ships. `build.js` writes `src/plans.js` (`PLANS`, the text of each ready plan) from `templates/`. |
 | `src/template.js` | The engine of the template files of a screen of the voice mode (section "Template files"): `isTemplateFile`, `readTemplate` (the lines in the order of the line table and the fault of each line), `mergeTemplate` (the merge of a reply by line name), `expandTemplate` (the app file: the ready plan with its slots filled), `buildTemplate` (the compile of a template file with the compile of `compile.js`), and `checkData`. It names no template and no line of one: it reads the entry of `src/ready.js`. It exports `BUDGET` of `form-base.js` and `TEMPLATE_HEAD` of `ready.js` again. |
@@ -82,7 +82,7 @@ Each other result is `{kind: "plan", text, result}`, where `text` is the merged 
 ## Template files
 
 A template file is the text that a model writes for a screen of the voice mode (`src/template.js`).
-Its lines have names and a fixed order: the first line, the control, the parts of the picture, and the card.
+Its lines have names and a fixed order: the first line, the control, the play line, the parts of the picture, the caption (the card of a data form), and the narration lines.
 Each line is complete by itself, so the stage can draw each line when it arrives (section "The preview step").
 The kit checks each line, expands the file into an app file, and compiles that app file.
 This is `test/fixtures/template/ship.plan`:
@@ -93,7 +93,7 @@ control = choice("Предмет", ["Корабль", "Гвоздь"])
 s1 = rect(0, 110, 300, 110, "water", 0)
 s2 = polygon([45, 75, 255, 75, 225, 140, 75, 140], "ink", visible=$/v == "Корабль")
 s3 = text(150, 50, "Воздух внутри", "ink", 14, visible=$/v == "Корабль")
-card = card("Вытеснение воды", "Полый корабль вытесняет достаточно воды, чтобы удержаться на плаву.")
+caption = "Полый корабль вытесняет достаточно воды, чтобы удержаться на плаву."
 ```
 
 The lines of a template file (the narration lines are optional):
@@ -103,7 +103,9 @@ The lines of a template file (the narration lines are optional):
   `lang=` is a code of two small letters. `palette=` is optional: `teal`, `green`, `blue` (the default), `amber`, `orange`, `red`, `pink`, `purple`, `indigo`, `brown`, or `graphite`.
 - The control line `control = …`:
   - `scene`: `slider(LABEL, MIN, MAX, STEP, START)` with numbers, or `choice(LABEL, [OPTION, …], START)` with 2 to 6 options. With no START, the first option is the start.
+    The control is optional (stage A, K2): a still picture with a caption is a valid scene. The prompt asks for a control only when the person picks a value or a step.
   - `items`: `choice(LABEL)`. The labels of the items are its options.
+  - The choice of a `scene` and of `items`, and the choice of a steps control, is an inline choice (`variant="inline"`), with no label line (stage A, J3). The host tells the steps from the speeds of the play row: the speeds stand in the row of the round play button.
   - `cells`: `slider(LABEL, 0, COUNT, 1, START)`, where COUNT is a whole number from 2 to 100. The control draws the cells.
 - The parts: `s1` to `s20` of `scene`, and `i1` to `i6` of `items`. `cells` has no part line.
   - A shape is one kind of the kind registry (`src/kinds.js` `KINDS`): `circle`, `rect`, `line`, `text`, `polygon`, `path`, `arrow`, or `arc`.
@@ -111,36 +113,40 @@ The lines of a template file (the narration lines are optional):
     The points of a polygon are an even count of at least 6 numbers, and of a path at least 4.
   - A library line `use(NAME, X, Y, SIZE, …)` places a ready object or an element of the library (section "The library"). It counts as one shape.
   - An item is `item(LABEL, SIGN, TEXT)`. Each item has a label of its own, because the choice shows the labels.
-- The card: `card = card(TITLE, TEXT)` of `scene` and `cells`, and `card = card(TITLE)` of `items`, whose card shows the text of the chosen item.
+- The caption `caption = TEXT` of `scene` and `cells` (stage A, K1): one or two short sentences, at most 110 characters (`BUDGET.caption`), a text or a formula of texts that reads `$/v`.
+  The screen shows it under the controls as the node `{"type": "text", "style": {"emphasis": "caption", "tone": "muted"}}`: the ready plan writes `content(TEXT, variant="caption")`, and the `content` part writes `Text(TEXT, emphasis="caption", tone="muted")`, so the run-time has no style of its own for it.
+  With a steps or a parts control, the file has no caption line: the caption is the narration line of the present step (`sayK`), and with no narration line the screen has no caption.
+  The caption of `items` is the text of the chosen item, and it comes with the first item. An explain screen has no card: a `card` line is a line of a name that the template does not have.
 - The steps control `control = steps(LABEL, [STEP, …], ANSWER)` of `scene`, or `steps(LABEL, ANSWER)` of `items`, is a choice of 2 to 6 steps in their order. Its start is ANSWER, by default the last step. The host walks its steps with the voice (`docs/voice-integration.md`, section "The narration of a scene").
 - The parts control `control = parts(LABEL, [PART, …], START)` of `scene` is a diagram (block 2 plan, stage 7). It walks 2 to 8 parts (`BUDGET.parts`) in their order, and its start is the first part.
   - With a ready object of the library (`use(NAME, …)` of an entry with parts), each PART is a name or the id of a part of that entry, and `parts(LABEL)` walks each part of the entry in the order of the entry. A name that the entry does not have is a fault.
-  - The entries have names in Russian and English only. In another language, each PART is `part(ID, NAME)` (stage 7b, R3): the picture, the stepper, and the card show NAME. A PART with no name, or no PART list, in such a language is a fault that asks for the names, so the host check of the language passes. The kit gives the names to the object as `names=`, which only the kit writes.
-  - With no ready object, each PART is `part(NAME, X, Y)`: a name and a point on the part in the drawing (stage 7b, R3). The model draws the thing from x = 80 to x = 220 (`FREE.zone` of `library.js`), and each point stays in that zone. `freeShapes` places the names with `layoutOf`, as the parts of an object whose box is the zone: a point left of x = 150 gets its name in the left column, each other point in the right one. When the names need more room, the drawing moves and shrinks with that object (each shape in a group of its own), and a drawing under 0.6 of its size (`FREE.fewest`) or a clipped name is a fault that asks for shorter names. The part of the step has the accent name and an accent ring at its point. A wider ring in the surface color (`FREE.halo`) lies under the accent ring, so the ring stays visible on a part that the model paints in the accent color.
-  - A name that the model gives has at most 20 characters (`BUDGET.part`): 8 names of 20 characters of two or three words fit at both sizes (`test/fixtures/template/parts-caps.plan`). Each PART has the same form. The model writes no text shape and no `label=` for a part.
-  - In a stream, a diagram of a thing with no ready object shows its names after the first line that comes after the shapes, so its drawing only grows (`expandTemplate` with `preview`).
+  - The entries have names in Russian and English only. In another language, each PART is `part(ID, NAME)` (stage 7b, R3): the name chip and the stepper show NAME. A PART with no name, or no PART list, in such a language is a fault that asks for the names, so the host check of the language passes. The kit gives the names to the object as `names=`, which only the kit writes.
+  - With no ready object, each PART is `part(NAME, X, Y)`: a name and a point on the part in the drawing (stage 7b, R3). The model draws the thing over the whole box, and each point stays from 10 to 290 in x and in y (`FREE.margin` of `library.js`), so that its ring and its chip fit (stage A, K3). A point outside that square is a fault of the control.
+    The shapes of the model keep their place and size. `freeMarks` draws a dot at each other part and, at the point of the step, an accent ring and the name chip (section "The library"). A wider ring in the surface color (`FREE.halo`) lies under the accent ring, so the ring stays visible on a part that the model paints in the accent color.
+  - A name that the model gives has at most 20 characters (`BUDGET.part`): the chip of a name of 20 characters fits inside the picture at each point (`test/fixtures/template/parts-caps.plan`). Each PART has the same form. The model writes no text shape and no `label=` for a part.
+  - In a stream, a diagram shows its ring, its chip, and its dots after the first line that comes after the shapes (a caption or a narration line), so its drawing only grows (`expandTemplate` with `preview`).
   - Sets G (6 tuning requests) and H (12 held-out requests) of `modelcheck.js` check the part names that the model gives. The row of a record shows `+names` when its control gives them.
-  - The kit adds `parts=true` and `mark=$/v` to the ready object, so its accent ring stands at the part of the step. The kept file holds neither.
-  - A diagram has no card line. Its card title is the part of the step with a capital first letter, and its card text is the narration line of that step.
+  - The kit adds `parts=` with the ids of the walked parts and `mark=$/v` to the ready object, so its ring and its name chip stand at the part of the step and a dot stands at each other walked part. The kept file holds neither.
+  - Only the part of the step has its name in the picture, in its chip. A diagram has no caption line: its caption is the narration line of the present step.
   - The stage draws the control as a stepper (`singleChoice` with `variant: "stepper"`): the label, then one row across the width with a round previous button at the start, the count «2 из 7» in the middle, and a round next button at the end.
 - The play line `play = play(LABEL, FROM, TO, SECONDS)` of `scene` moves the value `$/t` from FROM to TO in SECONDS (at most 120) and starts again, from the first state, with no press.
   The kit writes it as `animate($/t, TO, MS, FROM)` with a loop. The state keeps `t_s.on` (true while it runs) and `t_s.sp` (`slow`, `normal`, or `fast`).
   The control is a label line, then one row with a round tonal button that shows only its Pause or Play icon (variant `tonalIcon`: its text «Пауза» or «Пуск» is its accessible name and its label in the shown-screen line) and an inline choice of three speeds («Медленно», «Обычно», «Быстро») that fills the rest of the row. Slow takes 2 × SECONDS, and fast SECONDS / 2. A change of speed keeps the value.
   At least one shape reads `$/t` when a play line is present, and a shape that reads `$/t` with no play line is a fault. A play line can stand beside a steps control (M7).
-  The play row shows only in a scene with no control line (stage 7, fix list 2, H4). Beside a `steps`, `parts`, `slider`, or `choice` control, the motion runs from the first state and the kit hides the play row (`visible=false`): its button keeps the loop, the smoke run does not ask that the two controls of a play need come to the screen (each other control must, also one with `animate`), and the shown-screen line has no `motion` field.
+  The play row shows beside each control (stage A, K4): after a `steps`, `parts`, `slider`, or `choice` control, the person can stop the motion and change its speed in each step. The smoke run asks that each control of the screen comes to the screen, also the two controls of the play row.
   The loop is part of the run-time, which each app source holds: the run-time text has at most 57,800 bytes (C4, `test/motion.test.js` and `test/run.test.js`), 56,599 bytes at stage 7. The library test of six formula lines for one element keeps 24 of its 33 elements clean.
   The frame of a compile and of a preview shows each moving value at the start of its run (`compile.js` `frameOf`), so each preview of the same lines is the same picture. The stage moves it from the first state of the app.
-- The narration lines come after the card: `say = TEXT` with a slider, a choice, a play line alone, or no control, and `say1 = TEXT` to `sayN = TEXT`, one sentence for each step of a steps control or each part of a parts control.
+- The narration lines come after the caption: `say = TEXT` with a slider, a choice, a play line alone, or no control, and `say1 = TEXT` to `sayN = TEXT`, one sentence for each step of a steps control or each part of a parts control.
   A narration line draws nothing, so it has no fault. The kit cuts its text to `BUDGET.say` (110 characters) after the last whole sentence, and keeps it as `sayK = "<JSON string>"`.
   The kit leaves out with no fault a narration line with no sentence end inside the cap, `say` beside a steps control, `sayK` beside another control, and `sayK` past the count of steps. A second line of one name goes.
 - A line reads no value other than `$/v`, the value of the control, and `$/t` of the play line.
 - The line `$/v = VALUE` in the place of the control holds the start value of a control that the kit left out (`kept` below).
 
-`readTemplate` puts the lines in the fixed order, so a reply with the card before the shapes gives the same app.
+`readTemplate` puts the lines in the fixed order, so a reply with the caption before the shapes gives the same app.
 A second line of one name, a line of a name that the template does not have, a line with no name, and a `delete` line are faults.
 
-`expandTemplate` fills the ready plan of the template (section "Ready plans"). The ready plan of `scene` has the app line `app(TITLE, lang=…, preset="clean", palette=…)`, the drawing `need picture` of 300 × 300 with the parts, the control, and the card.
-The control is `need v = input("slider", …)` or `need v = input("choice", …)`, and the card is `need card = card(…)`.
+`expandTemplate` fills the ready plan of the template (section "Ready plans"). The ready plan of `scene` has the app line `app(TITLE, lang=…, preset="clean", palette=…)`, the drawing `need picture` of 300 × 300 with the parts, the control, the play row, and the caption.
+The control is `need v = input("slider", …)` or `need v = input("choice", …)`, and the caption is `need caption = content(TEXT, variant="caption")`.
 The drawing has its final size from the first line. An `items` drawing shows the sign and the label of the chosen item.
 A `cells` drawing shows rows of at most ten cells and the caption "K / N = P%".
 
@@ -150,9 +156,9 @@ Each template is a ready plan and a line table (`templates/`, `src/ready.js`). T
 
 - The ready plan `templates/WORD.plan` holds the app file lines of the screen of the template. A slot `{{name}}` stands for a value of the template file.
 - `expandTemplate` fills each slot. A plan line with a slot that has no value goes, and so does a line that is empty after the fill.
-  So the plan line of a control form that the file does not use goes, and so does the card line of a file with no card.
+  So the plan line of a control form that the file does not use goes, and so does the caption line of a file with no caption.
 - The line table `templates/WORD.js` is plain data: one entry for each line of the template file, in the fixed order of `readTemplate`.
-  A function of a template gives what a list of arguments cannot state: the layout of a diagram, the rows and the mark of a data form, the cells of `cells`, the play line (FROM and TO differ), and the two cuts of a data label and of a nodata card. The engine holds no function of one template.
+  A function of a template gives what a list of arguments cannot state: the marks of a diagram, the caption of a walk, the rows and the mark of a data form, the cells of `cells`, the play line (FROM and TO differ), and the two cuts of a data label and of a nodata card. The engine holds no function of one template.
 - `build.js` writes `src/plans.js` from the ready plans, as it writes `src/catalog.js`, so the bundle stays one plain script.
 - `test/ready.test.js` adds the task screens `predict` and `collect` of `test/fixtures/ready/` to the registry with `register`. Each one is a ready plan and a line table with no line of engine code. The app does not ship them.
 
@@ -161,7 +167,7 @@ The fields of a line table:
 | Field | Meaning |
 | --- | --- |
 | `word`, `family` | The template word, and `"data"` for a form of the data family. |
-| `text` | The lines of the template in a fault, such as "control, i1 to i6 (at most 6 items), and card". |
+| `text` | The lines of the template in a fault, such as "control and i1 to i6 (at most 6 items)". |
 | `head` | A named argument of the first line other than `lang=` and `palette=`, with its values, such as `kind=` of `chart`. |
 | `values` | The values that a line can read, such as `$/v`, the value of the control. A value with `line` is readable only beside that line, such as `$/t` beside `play`. |
 | `lines` | The entries of the lines. |
@@ -179,7 +185,7 @@ The fields of an entry:
 | `fault`, `check` | A function that gives the fault of a value in place of `forms`, and a function that gives a second fault after the read check. |
 | `cut`, `draw` | The cut of a long text, and the tree that the kit draws, such as a shape with the kit's color for each color name. |
 | `fill`, `slot`, `absent` | The slots of a list entry, the slot that holds the whole value, and the slots of an absent line. |
-| `part`, `holds` | A part of the picture, and what a line of the entry holds in a frame: `"card"` or `"parts"`. |
+| `part`, `holds` | A part of the picture, and what a line of the entry holds in a frame: `"card"` (a caption, or the card of a data form) or `"parts"`. |
 | `held`, `sets`, `merge` | The line `$/NAME = VALUE` stands for the entry, the value that the line sets, and the place of a new line in the merge (1 after the first line, 2 after the control). A line that sets a value reads no value. |
 | `owner` | The needs whose faults belong to the line, such as `v` of the control. |
 | `unread`, `walk` | The forms of a control that changes nothing when no line reads its value, with the fault, and the count of steps of a walk for the narration lines. |
@@ -193,8 +199,7 @@ The fields of an entry:
 | --- | --- |
 | The title | 30 |
 | The label of the control | 28 |
-| The card title | 32 |
-| The card text, and the text of an item | 140 |
+| The caption, and the text of an item | 110 |
 | An option, a step, and the label of an item | 16 with 2 to 4 of them, else 12 (`optionCap`) |
 | The sign of an item | 14 |
 | A text in quotes of a shape | 28 |
@@ -204,7 +209,7 @@ The fields of an entry:
 
 - A text inside the picture (the sign of an item, and a text in quotes of a shape) has no fault up to floor(1.25 × cap) (`INSIDE`). Such a text cannot change the height of the screen.
 - A text outside the picture has a hard cap.
-- The kit cuts a card text or an item text past its cap after the last whole sentence inside the cap (`cut`). This gives no fault and needs no model call.
+- The kit cuts a caption or an item text past its cap after the last whole sentence inside the cap (`cut`). This gives no fault and needs no model call.
   The kept line holds the cut text. In a formula, the kit cuts each text by itself.
 - A sentence ends at `.`, `!`, `?`, or `…` before a space, or at `。`, `！`, or `？`, with the quote marks and brackets after it (`SENTENCE_END`). So 3.5 ends no sentence. With no sentence end inside the cap, the text is a fault of its line.
 - Each other text past its cap, and each list past its cap, is a fault of its line. The fault names the cap.
@@ -249,17 +254,18 @@ s2 = use("thermometer", 150, 262, 60, [$/v / 100], label="Тепло")
 
 - X, Y is the center, and SIZE is the longer side, from 24 (an object, `LEAST`) or 12 (an element) to 300. `SMALLEST` (56) stays a rule of the catalog review: each object reads at that size.
 - `label=` writes a text under it, at most 28 characters. `visible=` and `turn=` work as for a shape. `color=` changes the color of an element.
-- `parts=true` names each part of an object with a leader line: a part in the left half of the object at the left, each other part at the right.
-  A name of more than 8 characters breaks into two lines at a space (`labelLines`). With named parts the kit puts the object in the middle of
-  the space that the two name columns leave in the picture width, as large as that space permits and at most SIZE, at the height Y (`layoutOf`).
-  `mark=` names one part in the accent role and draws an accent rim around it (on an image, an accent ring of the `ring` of the part around its
-  point). The part keeps its colors, and the other parts keep theirs. An image takes no `color=`: that is a fault.
+- `parts=true` puts a small dot at each part of an object (`dotOf`): an accent point on a disc in the surface color. A list of part ids, which
+  only the kit writes for a diagram, puts a dot at each part of the list. The object keeps X, Y, and SIZE (stage A, K3).
+  `mark=` marks one part: an accent rim around it (on an image, an accent ring of the `ring` of the part around its point), and its name in a
+  chip (`chipOf`, `LABEL`): a rounded box in the surface color with the name in the accent color. The chip stands above the ring when it has
+  room, else under it, and always inside the picture. A marked part has no dot. The part keeps its colors, and the other parts keep theirs.
+  An image takes no `color=`: that is a fault.
   A mark is a part id or a part name, or a formula of `$/v`. A formula becomes the values `$/KEYn` (its text in lower case) and `$/KEYm` (the id
-  of its part) once, so each layer compares one value with one id. With a formula mark and no `parts=true`, only the label of the marked part shows.
+  of its part) once, so each layer compares one value with one id.
 - A number of an element that is a formula (not a plain number and not a plain `$/name`) becomes the value `$/KEYa`, `$/KEYb`, or `$/KEYc`
   once, so the draw rule writes a short name into each of its shapes. An element with `caps` draws at most the cap of a number, such as 12
   parts of a `fraction_bar`: a plain number above the cap is a fault that names the cap, and a formula above it draws the cap.
-- The names of the parts must leave the object at least `SMALLEST` (or its SIZE when it is smaller) and fit in the height of the picture, else the line has a fault.
+- An object whose X, Y, or SIZE is a formula, or that turns, shows no chip and no dot.
 - A name that the library does not have is a fault that names it, and the screen compiles without that line. `compileAppFile` gives
   `misses`, the names of the miss log, and the host writes them to its release log (`AppFileCompiler.kt`, tag `AlphyLibrary`).
 
@@ -276,7 +282,7 @@ label point inside the box for each part, and for each image entry its file insi
 Each fault has the form `NAME: message`. NAME is the name of its line, or the template word for the first line and for a line with no name.
 When the compile of the expansion has faults of the kit, the kit finds the line that owns each one (`ownersOf`):
 
-- A fault of a need belongs to the line whose entry owns that need (`owner`): `need v` to `control`, `need t` to `play`, and `need card` to `card`.
+- A fault of a need belongs to the line whose entry owns that need (`owner`): `need v` to `control`, `need t` to `play`, and `need caption` to `caption`.
 - Each other fault belongs to each part whose compile with the first line and the control alone has faults. The fault then names the part, not the need.
 - In a `scene`, the faults of the first line and the control alone belong to `control` (the `owner` of its line table).
 
@@ -308,7 +314,7 @@ The kit leaves out each owner and compiles once more. These rules give the resul
 ### The template prompt
 
 The sections "Template", "Template repair", "Template change", and "Template rest" of `prompt.md` are the template prompt.
-"Template" is the instructions of each template call: the lines, the order, the caps, the colors, the formulas of `$/v`, and four examples.
+"Template" is the instructions of each template call: the lines, the order, the caps, the caption, the diagram, the box and its background, the colors, the formulas of `$/v`, and eight examples.
 A template call replies `outside("learn")` to a request to learn or practice with a check, a timer, a list, a form, or a game.
 It replies `outside("other")` to each other request that no template shows. `readPlanReply` reads these replies.
 "Template repair" asks again for each line with a fault. "Template change" asks for each changed line, and `delete NAME` for a part that goes.
@@ -353,11 +359,11 @@ A form whose numbers all are in the excerpts gets the line `source = source(SITE
 - `plan` is the stored template file of a change, or `null`. `previous` is the stored app of a change as `compileStep` takes it, so a value that the person moved stays.
 - `frame` is `{definition, ui, state, drawing, holds}`. The kit runs an open event of the run-time on the compiled data (`compile.js` `frameOf`).
   `state` is the state of the reply, `drawing` is its `surfaces` (`{}` with no surface), and `ui` is the screen of that state.
-- `holds` tells what the frame shows: `frame` (the first line, with or without the control), `parts` (a shape, an item, or the cells of a control), `card`, or `whole` (an app file that is not a template file).
+- `holds` tells what the frame shows: `frame` (the first line, with or without the control), `parts` (a shape, an item, or the cells of a control), `card` (the caption of an explain screen, or the card of a data form), or `whole` (an app file that is not a template file).
 - The step runs no smoke run: it sets `settings.gate` to `"off"` for its compile, and then sets it back. It also keeps a control that no line reads yet.
 - The step takes each line with a fault as the compile takes it (section "Faults by line"), with no repair.
   In a preview, only a fault of the first line and a fault of the kit after the second compile are whole. So the first line alone gives a frame, with the picture at its final size.
-  An `items` frame draws nothing before its first item.
+  An `items` frame draws nothing before its first item, and its caption comes with that item.
 - An `outside` reply, a text with no usable first line, and each throw give `{kind: "none"}`.
 
 The result of `compileStep` with a definition also has `frame`: `{ui, state, drawing, holds}` with `holds` `"whole"`, for a template file and for an app file.
@@ -448,9 +454,9 @@ In a row of a list, a look value must not read a field of the row, such as `$don
 | --- | --- | --- |
 | `icon` | `Button`, `IconButton` (first argument), `Metric`, `Badge`, `Notice`, `Card`, `TextField`, `NumberField`, `Select`, `DateField`, `TimeField` | Each icon of Alphy (`src/icons.js`), and the kit names `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, and `Edit`. A `Select` of six options or fewer is a segmented control, which shows no icon. |
 | `variant` | `Button` | `filled`, `outlined`, `text`, `tonal`, `tonalIcon`. With no variant, the host decides. `selected=` gives `filled` or `tonal`. `tonalIcon` is a round button that shows only its icon, so it needs `icon=` (the play part). |
-| `variant` | `Text`, `Card`, `CheckBox`, `Progress` | `muted` and `eyebrow`, `hero`, `circle`, `bar` and `dots`. |
+| `variant` | `Text`, `Card`, `CheckBox`, `Progress` | `muted`, `eyebrow`, and `source`, `hero`, `circle`, `bar` and `dots`. |
 | `size` | `Emoji` | `small`, `medium`, `large`. |
-| `emphasis` | `Text` | `body`, `title`, `headline`, `label`, `number`, `display`. |
+| `emphasis` | `Text` | `body`, `title`, `headline`, `label`, `number`, `display`, `caption` (the caption of an explain screen, with `tone="muted"`). |
 | `emphasis` | `Metric` | `display`, `number`. |
 | `align` | `Text`, `Row` | `start`, `center`, `end`. A `Row` of no wrap is centered across its height by default. |
 | `tone` | `Text`, `Metric`, `Badge`, `Notice` | `muted`, `accent`, `success`, `warning`, `error`. |

@@ -86,8 +86,10 @@ internal data class ShownScreen(val toolId: String, val title: String, val appFi
             // Only the play part and the stepper of a kit scene add to the line of Alpha 22 (stage 7, fix list 1): a course scene choice and a
             // Pause button of another app give the line that they gave before.
             val scene = spec.kitScene
-            fun walk(node: JSONObject) {
-                // The hidden play row of a scene with a control (stage 7, fix list 2, H4) gives no motion and no control.
+            // [play] is true inside the play row of a scene: its inline choice is the speeds, and each other inline choice is a choice or the
+            // steps of the scene (stage A, J2 and J3).
+            fun walk(node: JSONObject, play: Boolean = false) {
+                // A hidden part of a scene gives no motion and no control.
                 if (scene && !node.optBoolean("visible", true)) return
                 val action = node.optString("action")
                 val type = node.optString("type")
@@ -129,9 +131,9 @@ internal data class ShownScreen(val toolId: String, val title: String, val appFi
                         key == value || (key is Number && value is Number && key.toDouble() == value.toDouble())
                     }
                     values += label to (option?.getString("text") ?: value)
-                    // The speeds of a play control are an inline choice.
-                    if (scene && node.opt("variant") == "inline" && speed == null) speed = option?.getString("text")
-                    // A steps control expands to the first choice of its scene (kit decision 3). The speeds of a play control are no step.
+                    // The speeds of a play control are the inline choice of its play row.
+                    if (play) { if (speed == null) speed = option?.getString("text") }
+                    // A steps control expands to the first choice of its scene outside the play row (kit decision 3).
                     else if (stepped && step == null && option != null) {
                         step = SceneStep(options.indexOf(option) + 1, options.size, option.getString("text"))
                         stepControl = label
@@ -139,7 +141,8 @@ internal data class ShownScreen(val toolId: String, val title: String, val appFi
                     }
                 }
                 // A row template has no row of its own, so its buttons are no controls of the screen, and its inputs give no value.
-                node.optJSONArray("children")?.let { children -> repeat(children.length()) { walk(children.getJSONObject(it)) } }
+                val inPlay = play || scene && isPlayRow(node)
+                node.optJSONArray("children")?.let { children -> repeat(children.length()) { walk(children.getJSONObject(it), inPlay) } }
             }
             walk(ui)
             // Only an app that declares no capability proves that a press can request no device action (review focus 2).

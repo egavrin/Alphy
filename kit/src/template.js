@@ -5,7 +5,7 @@
 //   scene("Почему корабль не тонет?", lang="ru", palette="blue")      the first line: the template, the title, the language, the palette
 //   control = choice("Предмет", ["Корабль", "Гвоздь"])                 the one control. A part reads its value as $/v
 //   s1 = rect(0, 110, 300, 110, "water", 0)                            the parts: s1 to s20 are shapes (scene), i1 to i6 items (items)
-//   card = card("Вытеснение воды", "Полый корабль ...")                 the card
+//   caption = "Полый корабль вытесняет много воды."                    the caption under the controls
 //   say = "Выбери предмет и смотри на воду."                           the narration: say for one sentence, say1 to sayN for steps
 //
 // This module is the engine: it names no template and no line of one. Each template is a ready plan with its line table (ready.js,
@@ -235,7 +235,7 @@ function keptOf(read, leftOut) {
 
 /**
  * The owner of each fault of the compile of an expansion, as a map of a line name to its faults. A fault of a need belongs to the line whose entry
- * owns that need, such as need v to the control and need card to the card. Each other fault belongs to each part whose compile with the first
+ * owns that need, such as need v to the control and need caption to the caption. Each other fault belongs to each part whose compile with the first
  * line and the control alone has faults, and the faults of that compile name the part in the place of the need. A line table with owner gives
  * the faults of the first line and the control alone to that line.
  */
@@ -262,8 +262,9 @@ function ownersOf(read, leftOut, faults, build) {
  * with no definition and expanded null: a fault of the first line, fewer lines of an entry than the whole rule of its line table, or a kit fault
  * of the last compile.
  * preview is true for the lines so far of a stream (compile.js previewStep): an unread control stays, and only a fault of the first line or a
- * kit fault of the last compile is whole, so the first line alone gives the frame. holds is what kept draws: "card", "parts" (a part, or a line
- * of an entry that holds parts, such as the control of cells), or "frame" (the first line, maybe the control).
+ * kit fault of the last compile is whole, so the first line alone gives the frame. holds is what kept draws: "card" (the text of the screen,
+ * such as a caption or a card), "parts" (a part, or a line of an entry that holds parts, such as the control of cells), or "frame" (the first
+ * line, maybe the control).
  */
 export function buildTemplate(text, stored, build, preview = false) {
   const old = stored === null ? null : readTemplate(stored), faults = [], out = new Set();
@@ -312,7 +313,8 @@ export function buildTemplate(text, stored, build, preview = false) {
   const lacking = whole();
   faults.push(...(lacking ? [lacking] : built.faults.map((fault) => `${read.word}: ${fault}`)));
   const unique = [...new Set(faults)], broken = Boolean(lacking) || built.faults.length > 0;
-  const holding = (kind) => drawn((line, entry) => entry?.holds === kind && line.tree.k === "call");
+  // A held line holds its kind only as a call: $/v = VALUE in its place draws no control. A text line, such as a caption, holds it as a text.
+  const holding = (kind) => drawn((line, entry) => entry?.holds === kind && (line.tree.k === "call" || !entry.held));
   const holds = holding("card") ? "card" : drawnParts(read, leftOut).length || holding("parts") ? "parts" : "frame";
   return { built: broken ? { faults: unique, notes: built?.notes ?? [], definition: null, language: null, hole: false } : { ...built, faults: unique },
     word: read.word, kept, expanded: broken ? null : expanded, leftOut: [...leftOut], holds, misses };

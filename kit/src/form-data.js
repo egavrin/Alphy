@@ -7,9 +7,16 @@ import { show } from "./dsl.js";
 import { CONTROL_LINE, SENTENCE_END, isText, labelsFault, numberOf } from "./form-base.js";
 /**
  * The caps of the data forms, in characters and items. A label (a row label, a thing name, a column head, a point label) past its cap is cut
- * with "…", because a cut label keeps its meaning. A value past its cap is a fault, because a cut number is a wrong number.
+ * with "…", because a cut label keeps its meaning. A value past its cap is a fault, because a cut number is a wrong number. A card text past
+ * its cap is cut after its last whole sentence inside the cap (form-base.js cut).
  */
-export const DATA_BUDGET = { things: 3, compareRows: 6, columns: 4, tableRows: 12, visibleRows: 8, points: 8, label: 16, value: 12, sign: 4, nodataSentences: 2 };
+export const DATA_BUDGET = { things: 3, compareRows: 6, columns: 4, tableRows: 12, visibleRows: 8, points: 8, label: 16, value: 12, sign: 4, nodataSentences: 2,
+  cardTitle: 32, cardText: 140 };
+const CARD_TITLE = { slot: "cardTitle", type: "text", what: "the card title", cap: DATA_BUDGET.cardTitle, formula: true };
+/** The card text: the kit cuts a long one after its last whole sentence inside the cap. */
+const CARD_TEXT = { slot: "cardText", type: "text", what: "the card text", cap: DATA_BUDGET.cardText, formula: true, long: true };
+/** The card line card(TITLE, TEXT) of the data form word: it holds the card of a frame, and it owns the faults of need card. */
+export const cardLine = (word) => ({ name: "card", holds: "card", owner: "card", form: `the card of ${word} is card(TITLE, TEXT)`, forms: { card: [CARD_TITLE, CARD_TEXT] } });
 
 /** A label past cap: its first cap - 1 characters and "…". */
 export const cutLabel = (text, cap = DATA_BUDGET.label) => ([...text].length > cap ? [...text].slice(0, cap - 1).join("") + "…" : text);

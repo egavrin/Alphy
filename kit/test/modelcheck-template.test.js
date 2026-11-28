@@ -31,7 +31,7 @@ test("aCleanFirstReplyIsClean0", async () => {
 test("a record counts its narration lines", async () => {
   // Plan "one scene", Task 34: the record field say is the count of the kept narration lines, so the table shows whether each step got its sentence.
   const steps = ['scene("Дыхание", lang="ru")', 'control = steps("Фаза", ["Вдох", "Выдох", "Пауза"])', 's1 = circle(150, 110, $/v == "Вдох" ? 60 : 30, "accent")',
-    'card = card("Дыхание", "Вдох наполняет лёгкие.")', 'say1 = "Сначала вдох."', 'say2 = "Потом выдох."', 'say3 = "Потом пауза."'].join("\n") + "\n";
+'say1 = "Сначала вдох."', 'say2 = "Потом выдох."', 'say3 = "Потом пауза."'].join("\n") + "\n";
   const { record } = await screenOf(screen, steps);
   expect([record.outcome, record.say]).toEqual(["clean0", 3]);
   expect((await screenOf(screen, ship)).record.say).toBe(0);

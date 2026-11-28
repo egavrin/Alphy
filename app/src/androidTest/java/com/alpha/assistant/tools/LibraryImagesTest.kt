@@ -52,7 +52,7 @@ class LibraryImagesTest {
             scene("Eye", lang="en", palette="blue")
             control = slider("Size", 1, 10, 1, 5)
             s1 = use("eye", 150, 150, 160, parts=true, visible=${'$'}/v > 0)
-            card = card("The eye", "The lens bends the light.")
+            caption = "The lens bends the light."
             say = "Look."
         """.trimIndent() + "\n"
         val compiler = AppFileCompiler(context, SandboxClient(context))

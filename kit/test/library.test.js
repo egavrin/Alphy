@@ -10,7 +10,7 @@ import { TONES } from "../src/core.js";
 import { ELEMENTS } from "../src/elements.js";
 import { OBJECTS } from "../src/catalog.js";
 import * as SCENE_FORM from "../templates/scene.js";
-import { LABEL, LEAST, SEGMENTS, SMALLEST, entryOf, labelLines, layoutOf, lineWidth, segmentsOfEntry, useFault } from "../src/library.js";
+import { LABEL, LEAST, SEGMENTS, entryOf, lineWidth, partName, segmentsOfEntry, useFault, useShapes } from "../src/library.js";
 import { parseExpression } from "../src/dsl.js";
 import { COLOR_NAMES, toneColor } from "../src/form-base.js";
 import { runtime } from "../src/emit.js";
@@ -18,9 +18,9 @@ import { expandTemplate, mergeTemplate, readTemplate } from "../src/template.js"
 import { PROMPT, candidatesText, filled, registryValues } from "../prompt.js";
 import { IMAGE, catalogAsset, imageAsset, imageFault, libraryEntries, libraryImages } from "../build.js";
 
-/** A scene template with the shape lines, a slider that each shape reads, a card, and a say line. */
+/** A scene template with the shape lines, a slider that each shape reads, a caption, and a say line. */
 const scene = (...shapes) => [`scene("Probe", lang="en", palette="blue")`, `control = slider("Size", 1, 10, 1, 5)`,
-  ...shapes.map((shape, index) => `s${index + 1} = ${shape.replace(/\)$/, ", visible=$/v > 0)")}`), `card = card("Probe", "Shapes of the library.")`, `say = "Look."`].join("\n") + "\n";
+  ...shapes.map((shape, index) => `s${index + 1} = ${shape.replace(/\)$/, ", visible=$/v > 0)")}`), `caption = "Shapes of the library."`, `say = "Look."`].join("\n") + "\n";
 const compiled = async (...shapes) => {
   const result = await compileAppFile(scene(...shapes), null);
   return { ...result, commands: Object.values(result.frame?.drawing ?? {})[0]?.commands ?? [] };
@@ -68,19 +68,21 @@ test("each element draws from one library line, inside the drawing budget", asyn
   }
 });
 
-test("each ready object draws with its named parts and a mark that a control moves", async () => {
+test("each ready object draws with the name chip of its marked part, a dot at each other part, and a mark that a control moves", async () => {
+  const accent = (await compiled('circle(150, 150, 4, "accent")')).commands[0].color;
   for (const name of Object.keys(OBJECTS)) {
     // An entry with no part (the star) takes no mark.
     const first = OBJECTS[name].parts[0]?.id;
     const { faults, leftOut, commands } = await compiled(`use("${name}", 90, 150, 120, parts=true${first ? `, mark="${first}"` : ""})`);
     expect([name, faults, leftOut]).toEqual([name, [], []]);
-    // One group for the object, and a leader line, a point, and the lines of a text for each part.
+    // One group for the object, the name of the marked part in its chip, and a dot at each other part (stage A, K3).
     const texts = commands.filter((command) => command.type === "text").map((command) => command.text);
-    expect([name, commands[0].type, texts.sort()]).toEqual([name, "group", OBJECTS[name].parts.flatMap((part) => labelLines(part.names.en)).sort()]);
+    const dots = commands.filter((command) => command.type === "circle" && command.color === accent && command.radius < 4);
+    expect([name, commands[0].type, texts, dots.length]).toEqual([name, "group", first ? [OBJECTS[name].parts[0].names.en] : [], Math.max(0, OBJECTS[name].parts.length - 1)]);
   }
   // A mark that is a formula of $/v becomes the id of its part once, by its id or by its name in the language of the scene.
   const choose = (value) => [`scene("Heart", lang="ru", palette="red")`, `control = choice("Часть", ["Аорта", "Желудочек"], "${value}")`,
-    `s1 = use("heart", 90, 150, 160, mark=$/v == "Аорта" ? "аорта" : "left_ventricle")`, `card = card("Сердце", "Сердце качает кровь.")`, `say = "Смотри."`].join("\n") + "\n";
+    `s1 = use("heart", 90, 150, 160, mark=$/v == "Аорта" ? "аорта" : "left_ventricle")`, `caption = "Сердце качает кровь."`, `say = "Смотри."`].join("\n") + "\n";
   for (const [value, marked] of [["Аорта", "аорта"], ["Желудочек", "левый желудочек"]]) {
     const result = await compileAppFile(choose(value), null), commands = Object.values(result.frame.drawing)[0].commands;
     expect(result.faults).toEqual([]);
@@ -98,10 +100,9 @@ test("a library line over a limit is a fault, and an unknown name is a miss that
   expect(fault('use("heart", 150, 150, 120, mark="tail")')).toContain('heart has no part "tail"');
   expect(fault('use("thermometer", 150, 150, 120, mark="glass")')).toBe("thermometer is an element: it has no parts to mark");
   expect(fault('use("heart", 150, 150, 120, parts=true)')).toBe(null);
-  // The names of the scene language must leave the object its smallest size: the Russian names of the heart are longer than the English ones.
-  const wide = parseExpression('use("heart", 150, 150, 160, parts=true)');
-  expect([useFault(wide, [190, 300], "en"), useFault(wide, [190, 300], "ru")]).toEqual([null, "the names of the parts of heart leave it too little room: name fewer parts, write shorter names, or give it more height"]);
-  expect([SCENE_FORM.partFault(wide, "ru"), SCENE_FORM.partFault(parseExpression('use("heart", 150, 150, 10, parts=true)'), "ru")?.slice(0, 16)]).toEqual([null, "the SIZE of hear"]);
+  // The name of a marked part stands in a chip inside the picture, so the long Russian names of the heart need no room at its sides (stage A, K3).
+  const wide = parseExpression('use("heart", 150, 150, 300, parts=true, mark="left_ventricle")');
+  expect([useFault(wide), SCENE_FORM.partFault(wide), SCENE_FORM.partFault(parseExpression('use("heart", 150, 150, 10, parts=true)'))?.slice(0, 16)]).toEqual([null, null, "the SIZE of hear"]);
   const result = await compiled('circle(150, 150, 40, "accent")', 'use("unicorn", 60, 60, 80)');
   expect([result.faults, result.misses, result.leftOut, result.definition === null]).toEqual([['s2: the library has no "unicorn". Draw it with shapes, or with an emoji in a text shape'], ["unicorn"], ["s2"], false]);
 });
@@ -140,40 +141,25 @@ test("K3: a change reply that adds a ready object to a scene of shapes merges by
   expect([result.faults, merged.includes('s4 = use("heart"'), merged.includes("s1 ="), JSON.stringify(result.definition).includes("body.heart")]).toEqual([[], true, false, true]);
 });
 
-test("F2: the labels of the parts stand at the side of their part, and the object stands large between them", () => {
-  const wide = lineWidth;
+test("K3: the name chip of a marked part stands above its point when it has room, else under it, inside the picture, and the object keeps its place and size", () => {
   // A wide letter takes more room: the Russian name of the porthole of the rocket was cut at the edge of the phone stage with 0.56 for each letter.
   expect([lineWidth("корпус"), lineWidth("иллюминатор"), lineWidth("Южная")].map(Math.round)).toEqual([40, 81, 41]);
+  const numbers = (shape) => /^\w+\(([-\d.]+), ([-\d.]+), ([-\d.]+), ([-\d.]+)/.exec(shape).slice(1).map(Number);
   for (const name of Object.keys(OBJECTS)) {
     for (const lang of ["en", "ru"]) {
-      const found = entryOf(name), [w, h] = found.entry.box, at = `${name} ${lang}`;
-      const { x, y, size, labels } = layoutOf(found, { parts: { k: "lit", v: true } }, [150, 150, 300], [300, 300], lang);
-      const k = size / 100, box = { left: x - (w * k) / 2, right: x + (w * k) / 2, top: y - (h * k) / 2, bottom: y + (h * k) / 2 };
-      expect([at, labels.length, labels.some((one) => one.clipped), size >= SMALLEST]).toEqual([at, found.entry.parts.length, false, true]);
-      for (const one of labels) {
-        // A leader line goes from the point of its part out of the box at the side of the part: in the box it runs at most the way from
-        // the nearer side of the box to the point.
-        const inside = one.align === "end" ? one.px - box.left : box.right - one.px;
-        expect([at, one.part.id, inside <= Math.min(one.px - box.left, box.right - one.px) + 1]).toEqual([at, one.part.id, true]);
+      for (const part of OBJECTS[name].parts) {
+        const at = `${name} ${lang} ${part.id}`, { shapes, marks } = useShapes(parseExpression(`use("${name}", 150, 150, 300, parts=true, mark="${part.id}")`), lang);
+        // The object keeps X, Y, and SIZE: no name column takes room from it.
+        expect([at, shapes[0].startsWith("group(150, 150, 3, [")]).toEqual([at, true]);
+        // Two shapes of a dot at each other part, then the box and the text of the chip.
+        expect([at, marks.length, marks.at(-1).includes(JSON.stringify(partName(part, lang)))]).toEqual([at, 2 * (OBJECTS[name].parts.length - 1) + 2, true]);
+        const [x, y, w, h] = numbers(marks.at(-2)), py = 150 + part.label[1] * 3, ring = (part.ring ?? 8) * 3, room = py - ring - LABEL.gap - LABEL.height >= LABEL.margin;
+        expect([at, x >= 0 && y >= 0 && x + w <= 300 && y + h <= 300, room ? y + h <= py - ring + 0.01 : y >= Math.min(py + ring + LABEL.gap, 300 - LABEL.margin - LABEL.height) - 0.01]).toEqual([at, true, true]);
       }
-      // No two labels overlap, and each one stays in the picture.
-      const rects = labels.map((one) => {
-        const long = Math.max(...one.lines.map(wide)), tall = one.lines.length * LABEL.line;
-        return { left: one.align === "end" ? one.x - long : one.x, right: one.align === "end" ? one.x : one.x + long, top: one.y - tall / 2, bottom: one.y + tall / 2 };
-      });
-      rects.forEach((a, i) => rects.slice(i + 1).forEach((b) => {
-        expect([at, a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom]).toEqual([at, false]);
-      }));
-      expect([at, rects.every((one) => one.left >= 0 && one.right <= 300 && one.top >= 0 && one.bottom <= 300)]).toEqual([at, true]);
-      // The object stands in the middle of the space that the two label columns leave, and fills its width or the height of the picture.
-      const column = (end) => Math.max(0, ...labels.filter((one) => (one.align === "end") === end).flatMap((one) => one.lines.map(wide)));
-      const [xl, xr] = [LABEL.margin + (column(true) ? column(true) + LABEL.gap : 0), 300 - LABEL.margin - (column(false) ? column(false) + LABEL.gap : 0)];
-      expect([at, Math.abs(x - (xl + xr) / 2) < 0.01, box.right - box.left >= xr - xl - 0.5 || box.bottom - box.top >= 300 - 2 * LABEL.margin - 0.5]).toEqual([at, true, true]);
     }
   }
-  // With no label, an object keeps its place and its size.
-  expect(layoutOf(entryOf("heart"), {}, [90, 120, 100], [300, 300], "en")).toEqual({ x: 90, y: 120, size: 100, labels: [] });
-  expect([labelLines("левый желудочек"), labelLines("аорта"), labelLines("гипотенуза c"), labelLines("ball of gas")]).toEqual([["левый", "желудочек"], ["аорта"], ["гипотенуза c"], ["ball", "of gas"]]);
+  // With no mark and no parts=, an object has no marks.
+  expect(useShapes(parseExpression('use("heart", 90, 120, 100)'), "en").marks).toEqual([]);
 });
 
 test("F3: a marked part keeps its own colors, and an accent rim stands around it", async () => {
@@ -211,7 +197,7 @@ test("G2: a number of an element that is a formula is written one time, and a pl
     `s1 = text(150, 40, "2/3 больше 3/5", "ink", 20)`, `s2 = text(150, 85, $/v == "Дроби" ? "2/3" : "10/15", "ink", 18)`,
     `s3 = use("fraction_bar", 150, 120, 240, [$/v == "Дроби" ? 3 : 15, $/v == "Дроби" ? 2 : 10])`, `s4 = text(150, 180, $/v == "Дроби" ? "3/5" : "9/15", "ink", 18)`,
     `s5 = use("fraction_bar", 150, 215, 240, [$/v == "Дроби" ? 5 : 15, $/v == "Дроби" ? 3 : 9])`,
-    `card = card("Две трети больше", "При общем знаменателе получаем 10/15 и 9/15. Разница равна 1/15.")`, `say = "Выбери представление и сравни закрашенные части равных полос."`].join("\n") + "\n";
+    `caption = "При общем знаменателе получаем 10/15 и 9/15. Разница равна 1/15."`, `say = "Выбери представление и сравни закрашенные части равных полос."`].join("\n") + "\n";
   const result = await compileAppFile(half, null), app = (one) => one.definition.source.slice(runtime.text.length);
   console.log(`G2 m-half source: ${bytes(result)} bytes, of them the app after the run-time ${Buffer.byteLength(app(result))} (before the change: 67322)`);
   // Each formula of a number stands one time in the app, and the source keeps under the limit.
@@ -225,7 +211,7 @@ test("G2: a number of an element that is a formula is written one time, and a pl
     const label = entry.text ? ', label="a^2"' : "";
     const plan = [`scene("Six", lang="en", palette="blue")`, `control = choice("Kind", ["A", "B"], "A")`,
       ...[0, 1, 2, 3, 4, 5].map((i) => `s${i + 1} = use("${name}", ${50 + 100 * (i % 3)}, ${60 + 100 * Math.floor(i / 3)}, 80, [${numbers}]${label})`),
-      `card = card("Six", "Six of one element.")`, `say = "Look."`].join("\n") + "\n";
+      `caption = "Six of one element."`, `say = "Look."`].join("\n") + "\n";
     const six = await compileAppFile(plan, null), lines = readTemplate(plan);
     const once = expandTemplate(lines, new Set()), counts = entry.numbers.map((_, index) => once.split(`"A${index}"`).length - 1);
     expect([name, counts]).toEqual([name, entry.numbers.map(() => 6)]);
@@ -291,11 +277,13 @@ test("I1, I4, I5: an image entry compiles to a node with its image, its box, its
   const { faults, commands } = await compiled('use("eye", 150, 150, 200, parts=true, mark="lens")');
   const group = commands[0], image = group.children[0];
   expect([faults, group.type, image]).toEqual([[], "group", { type: "image", id: "body.eye", x: -50, y: -50, width: 100, height: 100 }]);
-  // The picture fills the box of the line: the group scales the 100 units of the entry to the size that the labels leave.
+  // The picture fills the box of the line: the group scales the 100 units of the entry to SIZE.
   const lens = OBJECTS.eye.parts.find((part) => part.id === "lens"), ring = group.children[1], accent = (await compiled('circle(150, 150, 4, "accent")')).commands[0].color;
   expect([group.children.length, ring.type, ring.color, ring.width, ring.x + ring.width / 2, ring.y + ring.height / 2]).toEqual([2, "arc", accent, 2 * lens.ring, lens.label[0], lens.label[1]]);
+  expect(group.transform.map((one) => one + 0)).toEqual([2, 0, 0, 2, 150, 150]);
+  // Only the marked part has its name in the picture, in the accent color.
   const texts = commands.filter((command) => command.type === "text");
-  expect([texts.map((one) => one.text).sort(), texts.filter((one) => one.color === accent).map((one) => one.text)]).toEqual([OBJECTS.eye.parts.flatMap((part) => labelLines(part.names.en)).sort(), ["lens"]]);
+  expect([texts.map((one) => one.text), texts.filter((one) => one.color === accent).map((one) => one.text)]).toEqual([["lens"], ["lens"]]);
   // A color or a tone on a picture is a fault that names the option, and turn= turns it.
   expect(useFault(parseExpression('use("eye", 150, 150, 120, color="red")'))).toBe("eye is a ready picture with its own colors, so it takes no color=");
   expect(useFault(parseExpression('use("eye", 150, 150, 120, tone=1)'))).toContain("tone= is not one");

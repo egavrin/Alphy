@@ -6,22 +6,21 @@ import { compileAppFile, compileStep } from "../src/compile.js";
 import { every } from "./helpers.js";
 
 const FAZA = ['scene("Дыхание", lang="ru", palette="teal")', 'control = steps("Фаза", ["Вдох", "Выдох", "Пауза"], "Выдох")',
-  's1 = circle(150, 110, $/v == "Вдох" ? 60 : 30, "accent")', 's2 = text(150, 30, $/v, "ink", 14)', 's3 = rect(0, 200, 300, 20, "muted", 0)',
-  'card = card("Дыхание", "Вдох наполняет лёгкие, выдох их опустошает.")'];
+  's1 = circle(150, 110, $/v == "Вдох" ? 60 : 30, "accent")', 's2 = text(150, 30, $/v, "ink", 14)', 's3 = rect(0, 200, 300, 20, "muted", 0)'];
 const SAY = ['say1 = "Сначала вдох: лёгкие растут."', 'say2 = "Потом выдох: они сжимаются."', 'say3 = "В паузе всё замирает."'];
 const file = (lines) => lines.join("\n") + "\n";
 /** The text with the line NAME in place of the line of that name. */
 const put = (lines, name, line) => lines.map((one) => (one.startsWith(`${name} = `) ? line : one));
 /** The choice of the expanded app: its start value and its options. */
 const choiceOf = (result) => {
-  const node = every(result.definition.ui).find((one) => one.type === "segmented" || one.type === "select");
+  const node = every(result.definition.ui).find((one) => one.action === "v_field");
   return { start: result.definition.initialState[node.bind.replace(/^\$\//, "")], options: node.options.map((option) => option.text) };
 };
-const SLIDER = ['scene("Рычаг", lang="ru")', 'control = slider("Плечо", 1, 10, 1, 5)', 's1 = rect(20, 100, $/v * 20, 10, "ink")', 'card = card("Рычаг", "Длиннее плечо, меньше сила.")'];
+const SLIDER = ['scene("Рычаг", lang="ru")', 'control = slider("Плечо", 1, 10, 1, 5)', 's1 = rect(20, 100, $/v * 20, 10, "ink")', 'caption = "Длиннее плечо, меньше сила."'];
 const CHOICE = ['scene("Корабль", lang="ru")', 'control = choice("Предмет", ["Корабль", "Гвоздь"])', 's1 = rect(0, 110, 300, 110, "water", 0, visible=$/v == "Корабль")',
-  'card = card("Плавучесть", "Полый корабль плавает.")'];
+  'caption = "Полый корабль плавает."'];
 const PLANETS = ['items("Планеты", lang="ru")', 'control = steps("Планета", "Марс")', 'i1 = item("Земля", "З", "Наш дом.")', 'i2 = item("Марс", "М", "Красная планета.")',
-  'i3 = item("Венера", "В", "Самая горячая.")', 'card = card("Планета")'];
+  'i3 = item("Венера", "В", "Самая горячая.")'];
 
 test("a steps scene starts at its answer step", async () => {
   const result = await compileAppFile(file([...FAZA, ...SAY]));
@@ -36,12 +35,12 @@ test("the answer step is the last step by default", async () => {
 });
 
 test("the narration lines come last in kept", async () => {
-  // The model wrote the narration before the card: the kept text puts it last.
-  const result = await compileAppFile(file([...FAZA.slice(0, 5), ...SAY, FAZA[5]]));
+  // The model wrote the narration before the last shape: the kept text puts it last.
+  const result = await compileAppFile(file([...FAZA.slice(0, 4), ...SAY, FAZA[4]]));
   expect(result.faults).toEqual([]);
   const kept = result.kept.trim().split("\n");
   expect(kept.slice(-3)).toEqual(["Сначала вдох: лёгкие растут.", "Потом выдох: они сжимаются.", "В паузе всё замирает."].map((text, index) => `say${index + 1} = ${JSON.stringify(text)}`));
-  expect(kept.at(-4)).toBe(FAZA[5]);
+  expect(kept.at(-4)).toBe(FAZA[4]);
   // A sentence with a quote mark and a backslash comes back as a JSON string that the kit reads again.
   const quoted = await compileAppFile(file([...FAZA, 'say1 = "Скажи \\"вдох\\" и «выдох»."']));
   expect(quoted.kept.trim().split("\n").at(-1)).toBe(`say1 = ${JSON.stringify('Скажи "вдох" и «выдох».')}`);

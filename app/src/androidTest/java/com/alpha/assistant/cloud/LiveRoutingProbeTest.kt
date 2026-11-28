@@ -86,7 +86,7 @@ class LiveRoutingProbeTest {
             s5 = text(75, 158, ${'$'}/v == "Размер" ? "12 742 км" : ${'$'}/v == "Атмосфера" ? "Плотная" : "Океаны и суша", "ink", 13)
             s6 = text(225, 158, ${'$'}/v == "Размер" ? "6 779 км" : ${'$'}/v == "Атмосфера" ? "Разреженная" : "Сухая и каменистая", "ink", 13)
             s7 = text(150, 195, ${'$'}/v == "Размер" ? "Диаметр планет" : ${'$'}/v == "Атмосфера" ? "Атмосфера" : "Поверхность", "ink", 14)
-            card = card("Два разных мира", ${'$'}/v == "Размер" ? "Земля почти вдвое шире Марса." : ${'$'}/v == "Атмосфера" ? "На Земле много азота и кислорода. На Марсе атмосфера тонкая и состоит в основном из углекислого газа." : "На Земле есть жидкая вода на поверхности. Марс сегодня холодный и сухой.")
+            caption = ${'$'}/v == "Размер" ? "Земля почти вдвое шире Марса." : ${'$'}/v == "Атмосфера" ? "На Земле плотный воздух, а на Марсе атмосфера тонкая." : "На Земле есть жидкая вода на поверхности. Марс сегодня холодный и сухой."
             say = "Выбери характеристику и сравни Землю с Марсом."
         """.trimIndent()
         val SCENE get() = ShownScreen("scene", "Земля и Марс", PLANETS_SCENE,
@@ -116,13 +116,16 @@ class LiveRoutingProbeTest {
             Case("nextStepNoMotion", "Дальше", STEPS_SCENE, setOf("press"), null, SHIP_TALK, "$STEP_CONTROL: ${STEPS[1]}"),
             Case("stopStill", "Стоп", SCENE, setOf("answer"), null, PLANETS_TALK),
             Case("fasterStill", "Быстрее", SCENE, setOf("answer", "refine"), null, PLANETS_TALK),
-            // H4 (stage 7, fix list 2): motion beside steps has no play row, so the line has no motion field, and «стоп» presses nothing.
-            Case("stopBesideSteps", "Стоп", M7_SCENE, setOf("answer"), null, M7_TALK),
+            // Stage A, K4: the play row shows beside steps too, so the line has the motion field, and «стоп» presses the pause.
+            Case("stopBesideSteps", "Стоп", M7_SCENE, setOf("press"), null, M7_TALK, "Пауза"),
         )
         val M7_STEPS = listOf("Утро", "День", "Вечер", "Ночь")
-        /** The kit fixture m7 (steps with motion), as `ShownScreen.of` gives it: the steps and no motion. */
-        val M7_SCENE get() = ShownScreen("scene", "Почему день сменяет ночь", plan("template/m7"), M7_STEPS.map { ShownControl("Время: $it", "v_field", it) },
-            listOf("Время" to "Утро"), SceneStep(1, M7_STEPS.size, "Утро"), stepControl = "Время", steps = M7_STEPS)
+        /** The kit fixture m7 (steps with motion), as `ShownScreen.of` gives it: the steps, then the play row with its motion (stage A, K4). */
+        val M7_SCENE get() = ShownScreen("scene", "Почему день сменяет ночь", plan("template/m7"),
+            M7_STEPS.map { ShownControl("Время: $it", "v_field", it) } + ShownControl("Пауза", "t_button", null) +
+                SPEEDS.zip(listOf("slow", "normal", "fast")).map { (speed, value) -> ShownControl("Вращение Земли: $speed", "t_speed", value) },
+            listOf("Время" to "Утро", "Вращение Земли" to "Обычно"), SceneStep(1, M7_STEPS.size, "Утро"), stepControl = "Время", steps = M7_STEPS,
+            motion = SceneMotion(true, "Обычно"))
         val M7_TALK = listOf(CloudTurn("user", "Почему день сменяет ночь?"), CloudTurn("assistant", "Утром город выходит из тени на свет."))
     }
 }

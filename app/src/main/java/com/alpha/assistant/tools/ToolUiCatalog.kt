@@ -263,7 +263,7 @@ object ToolUiCatalog {
                             val style=node.getJSONObject("style"); require(ToolValueSchema.keys(style).all {it in definition.styles})
                             style.keys().forEach { key -> require(style.get(key) is String && style.getString(key) in when(key) {
                                 "tone" -> tones
-                                "emphasis" -> setOf("body","title","headline","label","number","display","source")
+                                "emphasis" -> setOf("body","title","headline","label","number","display","source","caption")
                                 "align","crossAlign" -> setOf("start","center","end")
                                 "arrangement" -> setOf("start","center","end","between","around","evenly")
                                 "padding","gap" -> setOf("none","small","medium","large")

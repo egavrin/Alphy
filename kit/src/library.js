@@ -26,7 +26,7 @@ export const LEAST = 24;
 /** The largest number of path segments of one entry (L5). A gradient, a highlight, and the ground shadow cost no segment. */
 export const SEGMENTS = 40;
 /** The named arguments of a library line. */
-export const USE_NAMED = { label: "a text under it", mark: "the name of a part to mark", parts: "true to name each part", turn: "degrees", color: "a color of an element" };
+export const USE_NAMED = { label: "a text under it", mark: "the name of a part to mark", parts: "true to put a dot at each part", turn: "degrees", color: "a color of an element" };
 
 /** The state of the library in one call of the host: the ids of the image entries whose image the host cannot open (compile.js sets it). */
 export const LIBRARY = { missing: new Set() };
@@ -52,10 +52,10 @@ export const missOf = (tree) => (tree?.k === "call" && tree.name === "use" && is
 
 /**
  * The fault of a library line use(NAME, X, Y, SIZE, [NUMBERS], ...), or null. A mark, a label, and the numbers are literals or formulas of
- * $/v. An unknown name is a fault that names it (missOf), so the repair draws the thing with shapes or an emoji. lang is the language of the
- * scene, whose part names must fit at the sides of the object.
+ * $/v. An unknown name is a fault that names it (missOf), so the repair draws the thing with shapes or an emoji. The name of a marked part
+ * stands in a chip inside the picture (chipOf), so no name needs room at the sides of the object (stage A, K3).
  */
-export function useFault(tree, picture = [300, 300], lang = "en") {
+export function useFault(tree) {
   const [name, ...rest] = tree.args ?? [], form = "a library line is use(NAME, X, Y, SIZE), with [NUMBERS] of an element after SIZE";
   if (!isText(name)) return `${form}, and NAME is a name in quotes`;
   const found = entryOf(name.v);
@@ -79,19 +79,6 @@ export function useFault(tree, picture = [300, 300], lang = "en") {
   // A SIZE under LEAST or past the picture is a fault (H2).
   const size = numberOf(rest[2]), least = found.kind === "object" ? LEAST : 12;
   if (size !== undefined && (size < least || size > 300)) return `the SIZE of ${name.v} is from ${least} to 300, and this line has ${size}`;
-  return roomFault(tree, tree.named, picture, lang);
-}
-
-/**
- * The fault of the part names of a library line of an object whose X, Y, and SIZE are numbers, or null. The names stand at the sides of the
- * object, inside the picture, and leave the object its SIZE, or SMALLEST for a larger SIZE. named holds parts=, mark=, and the names that the model gives.
- */
-export function roomFault(tree, named, picture, lang) {
-  const found = entryOf(tree.args[0].v), at = tree.args.slice(1, 4).map(numberOf);
-  const placed = found.kind === "object" && at.every((value) => value !== undefined) ? layoutOf(found, named, at, picture, lang) : null;
-  if (placed && (placed.size < Math.min(SMALLEST, at[2]) - 0.01 || placed.labels.some((one) => one.clipped))) {
-    return `the names of the parts of ${tree.args[0].v} leave it too little room: name fewer parts, write shorter names, or give it more height`;
-  }
   return null;
 }
 
@@ -146,65 +133,38 @@ function layerShapes(layer, paint, opacity) {
   return out;
 }
 
-/**
- * The parts that a line names: each part with parts=true or with a mark that is a formula (only the marked one shows), else the marked part when
- * the mark is a name. A turned object names no part.
- */
-function namedParts(found, { mark, parts, turn }) {
-  const list = found.kind === "object" ? found.entry.parts ?? [] : [];
-  return turn ? [] : parts?.v === true || (mark && !isText(mark)) ? list : isText(mark) ? list.filter((part) => part.id === mark.v || Object.values(part.names).includes(mark.v)) : [];
-}
-/** The size, the line height, the gap to the object, and the margin of the part labels, in the units of the picture. */
-export const LABEL = { size: 12, line: 14, gap: 8, margin: 4 };
-/** The width of a text line of the part labels: a wide letter (м, ю, m, w, a capital) takes 0.85 of the size, each other character 0.56. */
+/** The size of the text of a name chip, its side padding, its height, its gap to the ring of its part, and its margin to the edge of the picture. */
+export const LABEL = { size: 12, pad: 6, height: 20, gap: 4, margin: 4 };
+/** The width of a text line of a name chip: a wide letter (м, ю, m, w, a capital) takes 0.85 of the size, each other character 0.56. */
 export const lineWidth = (text) => [...text].reduce((sum, char) => sum + (/[мшщжюыфmw]/.test(char) || char !== char.toLowerCase() ? 0.85 : 0.56), 0) * LABEL.size;
-/** The lines of a part label: a name of more than 8 characters breaks at the space that gives the shortest longer line, if each line keeps 3 characters. */
-export function labelLines(text) {
-  const chars = [...text];
-  if (chars.length <= 8) return [text];
-  const breaks = chars.map((char, index) => (char === " " && index >= 3 && chars.length - index - 1 >= 3 ? index : -1)).filter((index) => index > 0);
-  if (!breaks.length) return [text];
-  const best = breaks.reduce((a, b) => (Math.max(a, chars.length - a - 1) <= Math.max(b, chars.length - b - 1) ? a : b));
-  return [chars.slice(0, best).join(""), chars.slice(best + 1).join("")];
-}
-
 /**
- * The place of an object with the labels of its named parts (F2), as {x, y, size, labels}. A part in the left half of the object gets its
- * label at the left, each other part at the right. With labels, the object stands in the middle of the space that the two label columns
- * leave in the width of the picture, as large as that space permits and at most SIZE, at the height Y. Each label is {part, lines, px, py, x,
- * y, align, clipped}: px, py is the point of its part, x, y the end of its leader line, and clipped is true for a label that leaves the
- * picture. With no named part, the object keeps X, Y, and SIZE.
+ * The name chip of a part (stage A, K3): a rounded box in the surface color with the name in the accent color on one line. It stands centered
+ * above the ring of radius ring around the point [x, y] when it has room there, else under it, and it moves inside the picture [width, height].
+ * when is its visible= text.
  */
-export function layoutOf(found, named, [X, Y, S], [width, height], lang) {
-  const parts = namedParts(found, named), [w, h] = found.entry.box, { line, gap, margin } = LABEL;
-  if (!parts.length) return { x: X, y: Y, size: S, labels: [] };
-  const items = parts.map((part) => ({ part, lines: labelLines(shownName(part, lang, named)), left: part.label[0] < 0 }));
-  const column = (left) => Math.max(0, ...items.filter((one) => one.left === left).flatMap((one) => one.lines.map(lineWidth)));
-  const [L, R] = [column(true), column(false)];
-  const xl = margin + (L ? L + gap : 0), xr = width - margin - (R ? R + gap : 0);
-  const size = Math.max(0, Math.min(S, ((xr - xl) * UNITS) / w, ((height - 2 * margin) * UNITS) / h));
-  const k = size / UNITS, x = (xl + xr) / 2, y = Math.min(Math.max(Y, margin + (h * k) / 2), height - margin - (h * k) / 2);
-  const labels = [];
-  for (const left of [true, false]) {
-    const side = items.filter((one) => one.left === left).map((one) => ({ ...one, px: x + one.part.label[0] * k, py: y + one.part.label[1] * k })).sort((a, b) => a.py - b.py);
-    // Each label starts at the height of its point. Then the labels of one side move down, so none overlaps the one above it, and up, so the
-    // last one stays inside the picture.
-    let bottom = -Infinity;
-    for (const one of side) { one.y = Math.max(one.py, bottom + 2 + (one.lines.length * line) / 2); bottom = one.y + (one.lines.length * line) / 2; }
-    let top = height - margin;
-    for (const one of [...side].reverse()) { one.y = Math.min(one.y, top - (one.lines.length * line) / 2); top = one.y - (one.lines.length * line) / 2 - 2; }
-    for (const one of side) {
-      labels.push({ ...one, align: left ? "end" : "start", x: left ? x - (w * k) / 2 - gap : x + (w * k) / 2 + gap, clipped: one.y - (one.lines.length * line) / 2 < margin - 0.5 });
-    }
-  }
-  return { x, y, size, labels };
+function chipOf([x, y], ring, name, [width, height], when = "") {
+  const { size, pad, height: tall, gap, margin } = LABEL, wide = lineWidth(name) + 2 * pad, above = y - ring - gap - tall;
+  const top = above >= margin ? above : Math.min(y + ring + gap, height - margin - tall), left = Math.min(Math.max(x - wide / 2, margin), width - margin - wide);
+  return [`rect(${fixed(left)}, ${fixed(top)}, ${fixed(wide)}, ${tall}, "surface", ${tall / 2}${when})`, `text(${fixed(left + wide / 2)}, ${fixed(top + tall / 2)}, ${JSON.stringify(name)}, "accent", ${size}${when})`];
 }
+/** The dot of a part that is not the present one (K3): a small accent dot on a surface dot, so that it shows on a part in the accent color too. */
+const dotOf = ([x, y], when = "") => [`circle(${fixed(x)}, ${fixed(y)}, ${DOT + 1.5}, "surface"${when})`, `circle(${fixed(x)}, ${fixed(y)}, ${DOT}, "accent"${when})`];
+/** The radius of the dot of a part. */
+const DOT = 2.5;
+/** The room around the point of a part of a vector entry, which has no ring radius: its chip stands this far from the point, in units of the entry. */
+const ROOM = 8;
+/** The visible= text of a mark that shows while on holds ("true" or a formula) and while the line is visible (visible= of the line, or undefined). */
+const whenOn = (on, visible) => {
+  const tests = [visible && `(${show(visible)})`, on !== "true" && on].filter(Boolean);
+  return tests.length ? `, visible=${tests.join(" && ")}` : "";
+};
 
 /**
- * The shapes of a library line (useFault gives it no fault), as {shapes, lines}: an object as one group of its layers with its part labels at
- * the sides, or an element as one group of the shapes of its draw rule. lines are app lines before the drawing: a mark that is a formula of
- * $/v becomes the value $/KEYm once, so each layer reads it with no copy of the formula. lang picks the names of the parts, and picture is
- * [width, height] of the drawing, for the places of the labels.
+ * The shapes of a library line (useFault gives it no fault), as {shapes, lines, marks}: an object as one group of its layers at X, Y, and
+ * SIZE, or an element as one group of the shapes of its draw rule. lines are app lines before the drawing: a mark that is a formula of $/v
+ * becomes the value $/KEYm once, so each layer reads it with no copy of the formula. marks are the name chip of the marked part and a dot at
+ * each other part of parts=, which the drawing puts after each shape (stage A, K3). lang picks the names of the parts, and picture is
+ * [width, height] of the drawing, which holds each chip.
  */
 export function useShapes(tree, lang, picture = [300, 300], key = "s") {
   const [name, x, y, size, numbers] = tree.args, found = entryOf(name.v), { label, mark: given, parts, turn, color, visible } = tree.named;
@@ -227,7 +187,7 @@ export function useShapes(tree, lang, picture = [300, 300], key = "s") {
       const [lx, ly, align] = entry.label ?? [0, 62, "center"];
       shapes.push(tidy(`text(${X} + ${S} * ${lx / 100}, ${Y} + ${S} * ${ly / 100}, ${show(label)}, "ink", 13${align === "center" ? "" : `, align=${JSON.stringify(align)}`}${shown})`));
     }
-    return { shapes, lines };
+    return { shapes, lines, marks: [] };
   }
   const entry = found.entry, [, h] = entry.box, list = entry.parts ?? [];
   const fixedMark = isText(given) ? list.find((part) => part.id === given.v || Object.values(part.names).includes(given.v)) : null;
@@ -260,75 +220,48 @@ export function useShapes(tree, lang, picture = [300, 300], key = "s") {
     }
     shapes.push(...layerShapes(layer, (step, alpha) => JSON.stringify(tone(layer.role, step, alpha)), null));
   }
-  // The labels of the parts: with parts=true each part, else the marked part. Each one is a text at the side and a thin leader line to its point.
-  // With a mark that is a formula and no parts=true, each label shows only while its part is the marked one. With labels, the kit places the
-  // object between the two label columns (layoutOf).
-  const at = [X, Y, S].map(Number), alone = mark && parts?.v !== true;
-  const placed = at.every(Number.isFinite) ? layoutOf(found, tree.named, at, picture, lang) : null;
-  const [GX, GY, GS] = placed?.labels.length ? [placed.x, placed.y, placed.size].map(fixed) : [X, Y, S];
-  const out = [tidy(`group(${GX}, ${GY}, ${GS} / ${UNITS}, [${shapes.join(", ")}]${turn ? `, turn=${show(turn)}` : ""}${shown})`)];
-  out.push(...labelShapes(placed?.labels ?? [], marked, alone, visible));
-  if (label) out.push(tidy(`text(${GX}, ${GY} + ${GS} * ${h / 200} + 12, ${show(label)}, "ink", 13${shown})`));
-  return { shapes: out, lines };
+  // The marks of the parts (K3): the marked part has its name in a chip, and parts= (true, or the ids of the parts of a walk) puts a dot at each
+  // other part. A mark that is a formula gives each part a chip that shows only while it is the marked one. The object keeps X, Y, and SIZE.
+  // A turned object, or one whose place is a formula, has no marks.
+  const out = [tidy(`group(${X}, ${Y}, ${S} / ${UNITS}, [${shapes.join(", ")}]${turn ? `, turn=${show(turn)}` : ""}${shown})`)];
+  if (label) out.push(tidy(`text(${X}, ${Y} + ${S} * ${h / 200} + 12, ${show(label)}, "ink", 13${shown})`));
+  const at = [X, Y, S].map(Number), k = at[2] / UNITS, dotted = (part) => parts?.v === true || (Array.isArray(parts?.v) && parts.v.includes(part.id));
+  const dots = [], chips = [];
+  if (at.every(Number.isFinite) && !turn) {
+    for (const part of list) {
+      const point = [at[0] + part.label[0] * k, at[1] + part.label[1] * k], on = marked(part);
+      if (on !== "false") chips.push(...chipOf(point, (part.ring ?? ROOM) * k, shownName(part, lang, tree.named), picture, whenOn(on, visible)));
+      if (dotted(part) && on !== "true") dots.push(...dotOf(point, whenOn(on === "false" ? "true" : `!(${on})`, visible)));
+    }
+  }
+  return { shapes: out, lines, marks: [...dots, ...chips] };
 }
 
-/** A test text as a color: yes while on holds, else no. on is "true", "false", or a formula. */
-const choose = (on, yes, no) => (on === "false" ? JSON.stringify(no) : on === "true" ? JSON.stringify(yes) : `(${on} ? ${JSON.stringify(yes)} : ${JSON.stringify(no)})`);
-/**
- * The shapes of the part labels of layoutOf: for each label a thin leader line to its point, a dot at the point, and its text lines. marked
- * gives the test text of a part. A marked part has the accent. alone is true when each label shows only while its part is the marked one.
- * visible is the visible= formula of the line, or undefined.
- */
-function labelShapes(labels, marked, alone, visible) {
-  const shown = visible ? `, visible=${show(visible)}` : "", out = [];
-  for (const one of labels) {
-    const ink = alone ? '"accent"' : choose(marked(one.part), "accent", "ink"), end = one.align === "end" ? one.x + 3 : one.x - 3, [px, py, ty] = [one.px, one.py, one.y].map(fixed);
-    const seen = alone ? `, visible=${visible ? `(${show(visible)}) && ` : ""}${marked(one.part)}` : shown;
-    out.push(`line(${px}, ${py}, ${fixed(end)}, ${ty}, "ink@55", 1${seen})`, `circle(${px}, ${py}, 2.5, ${ink}${seen})`,
-      ...one.lines.map((text, index) => `text(${fixed(one.x)}, ${fixed(one.y + (index - (one.lines.length - 1) / 2) * LABEL.line)}, ${JSON.stringify(text)}, ${ink}, ${LABEL.size}, align=${JSON.stringify(one.align)}${seen})`));
-  }
-  return out;
-}
 /** The accent ring of a marked point [x, y] with its radius and its width, while on holds (I4, I5): no shape when on is "false". */
 const ringOf = ([x, y], radius, width, on, color = "accent") => (on === "false" ? [] : [`arc(${fixed(x)}, ${fixed(y)}, ${radius}, 0, 360, "${color}", ${width}${on === "true" ? "" : `, visible=${on}`})`]);
 
 /**
- * A diagram of a thing with no ready object (stage 7b, R3): the model draws it with shapes in the drawing zone of FREE and gives each part
- * its name and a point [NAME, X, Y]. The kit names the parts with layoutOf and labelShapes, as the parts of an object whose box is the zone:
- * the names stand in the two side columns, and the drawing moves and shrinks with that object when the names need more room. The part of
- * the step ($/v is its name) has the accent ring at its point and the accent name. Returns {shapes, lines}: the shapes of the drawing, with
- * no names and no rings when named is false (a stream whose shapes can still grow), and the app lines before the drawing.
+ * The marks of a diagram of a thing with no ready object (stage 7b, R3, and stage A, K3), as {lines, marks}: the model draws the thing with
+ * shapes that fill the box, and gives each part its name and a point [NAME, X, Y]. The part of the step ($/v is its name) has an accent ring
+ * at its point and its name in a chip, and each other part has a dot. The drawing of the model stays as it is.
  */
-export function freeShapes(shapes, points, picture = [300, 300], named = true) {
-  const [cx, cy] = [picture[0] / 2, picture[1] / 2], placed = freeLayout(points, picture), k = fixed(placed.size / UNITS);
-  // The number of the marked part is the value $/fp once, so each shape compares a short number and the source stays small.
-  const index = (part) => points.findIndex(([name]) => name === part.id) + 1, marked = (part) => `$/fp == ${index(part)}`;
-  const lines = [`$/fp := ${points.reduceRight((rest, [name], at) => `($/v == ${JSON.stringify(name)} ? ${at + 1} : ${rest})`, "0")}`];
-  const moved = k !== 1 || placed.x !== cx || placed.y !== cy;
-  // Each shape has a group of its own: the move comes from the points alone, so the drawing of a stream only grows (compile.js previewStep).
-  const out = moved ? shapes.map((shape) => `group(${fixed(placed.x - k * cx)}, ${fixed(placed.y - k * cy)}, ${k}, [${shape}])`) : [...shapes];
-  if (!named) return { shapes: out, lines: [] };
-  // The model can paint a part in the accent color, so a wider ring in the surface color under the accent ring keeps the mark visible.
-  for (const one of placed.labels) {
-    out.push(...ringOf([one.px, one.py], FREE.ring, FREE.rim + FREE.halo, marked(one.part), "surface"), ...ringOf([one.px, one.py], FREE.ring, FREE.rim, marked(one.part)));
-  }
-  return { shapes: [...out, ...labelShapes(placed.labels, marked, false)], lines };
+export function freeMarks(points, picture = [300, 300]) {
+  // The number of the marked part is the value $/fp once, so each mark compares a short number and the source stays small.
+  const lines = [`$/fp := ${points.reduceRight((rest, [name], at) => `($/v == ${JSON.stringify(name)} ? ${at + 1} : ${rest})`, "0")}`], dots = [], chips = [];
+  points.forEach(([name, x, y], index) => {
+    const on = `$/fp == ${index + 1}`;
+    dots.push(...dotOf([x, y], `, visible=!(${on})`));
+    // The model can paint a part in the accent color, so a wider ring in the surface color under the accent ring keeps the mark visible.
+    chips.push(...ringOf([x, y], FREE.ring, FREE.rim + FREE.halo, on, "surface"), ...ringOf([x, y], FREE.ring, FREE.rim, on),
+      ...chipOf([x, y], FREE.ring + FREE.rim / 2, name, picture, `, visible=${on}`));
+  });
+  return { lines, marks: [...dots, ...chips] };
 }
 /**
- * The drawing zone of a diagram of a thing with no ready object, from x = zone[0] to x = zone[1] of the picture (the prompt says it), the
- * smallest scale of its drawing beside the names (fewest), the radius and the width of its accent ring, and the added width of the
- * surface ring under it (halo).
+ * The margin of the points of a diagram of a thing with no ready object to the edge of the box, the radius and the width of the accent ring of
+ * its marked part, and the added width of the surface ring under it (halo).
  */
-export const FREE = { zone: [80, 220], fewest: 0.6, ring: 8, rim: 4, halo: 4 };
-/**
- * The place of a diagram of a thing with no ready object (freeShapes): layoutOf of an object at the center of the picture whose box is the
- * zone of FREE and the height of the picture, with a part at each point [NAME, X, Y]. size / UNITS is the scale of the drawing.
- */
-export function freeLayout(points, picture = [300, 300]) {
-  const [cx, cy] = [picture[0] / 2, picture[1] / 2];
-  const parts = points.map(([name, x, y]) => ({ id: name, names: { en: name }, label: [x - cx, y - cy] }));
-  return layoutOf({ kind: "object", entry: { box: [FREE.zone[1] - FREE.zone[0], picture[1] - 2 * LABEL.margin], parts } }, { parts: { k: "lit", v: true } }, [cx, cy, UNITS], picture, "en");
-}
+export const FREE = { margin: 10, ring: 8, rim: 4, halo: 4 };
 
 /** The width of the accent rim of a marked part, in the units of its entry (F3). */
 const MARK_RIM = 3;

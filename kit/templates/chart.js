@@ -2,8 +2,8 @@
 // a line, one marked point, and a card with the caption. The native chart shows a label and a value at each point (ToolUiCatalog).
 
 import { show } from "../src/dsl.js";
-import { CONTROL_VALUE, NARRATION, cardLine, isText, numberOf } from "../src/form-base.js";
-import { DATA_BUDGET, SOURCE_LINE, checkSource, contextFaults, cutLabels, dataFill, markLine, markStart } from "../src/form-data.js";
+import { CONTROL_VALUE, NARRATION, isText, numberOf } from "../src/form-base.js";
+import { DATA_BUDGET, cardLine, SOURCE_LINE, checkSource, contextFaults, cutLabels, dataFill, markLine, markStart } from "../src/form-data.js";
 
 function partFault(tree) {
   if (tree.k !== "call" || tree.name !== "point" || tree.args.length !== 2 || Object.keys(tree.named).length) return "a point is point(LABEL, NUMBER)";

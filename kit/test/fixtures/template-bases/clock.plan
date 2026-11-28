@@ -5,5 +5,5 @@ s2 = circle(150, 150, 120, "ink", stroke=true)
 s3 = line(150, 150, 150 + 60 * sin($/v * 0.5), 150 - 60 * cos($/v * 0.5), "ink", 6)
 s4 = line(150, 150, 150 + 100 * sin($/v * 6), 150 - 100 * cos($/v * 6), "accent", 3)
 s5 = circle(150, 150, 6, "ink")
-card = card("Two hands, two speeds", "The long hand goes round once an hour. The short hand moves only one twelfth of the way in that time.")
+caption = "The long hand goes round once an hour. The short hand moves only one twelfth of the way in that time."
 say = "Drag the minutes and watch how slowly the short hand moves."

@@ -28,7 +28,7 @@ import kotlin.math.roundToInt
 /**
  * Gate 3 (Task 9): a template file at its text caps, also with each text inside the picture at 1.25 times its cap, fits the dialogue stage with no scroll. For each cap
  * file, the scripted template reply is the file and the voice path stores it. Then the stage has no vertical scroll, and the canvas, the
- * control, and each text, also the whole card text, are shown above the strip. Each file prints one JSON line with the file and the size
+ * control, and each text, also the whole caption, are shown above the strip. Each file prints one JSON line with the file and the size
  * class. The controller runs the class at the phone and the fold size.
  */
 class StageTemplateFitTest {
@@ -56,15 +56,19 @@ class StageTemplateFitTest {
                     if (if (data) stored?.startsWith(file.trimEnd()) != true else stored != file) faults += "the stored app file is not the reply"
                     val template = if (free == null) Template(file) else null
                     if (template != null) robot.waitUntil(30_000) {
-                        (data || stageParts(scenario).any { it.isCanvasOf(template.title) }) && robot.composedTextIn(scenario, STAGE, template.card.first())
+                        (data || stageParts(scenario).any { it.isCanvasOf(template.title) }) && robot.composedTextIn(scenario, STAGE, template.caption.first())
                     }
                     // The stage settles: an app shows its parts with a short motion, so the texts and the bounds of each part stay the same for 1 s.
+                    // At least 3 parts show: the title, the caption, and the control. A stepper or an inline choice has its label only as its
+                    // accessible name, so that name counts as the control (stage A, join).
                     fun key(parts: List<Part>) = parts.map { it.bounds to it.config.getOrNull(SemanticsProperties.Text) }
+                    fun named(part: Part) = part.config.getOrNull(SemanticsProperties.Text) != null ||
+                        template?.control != null && part.config.getOrNull(SemanticsProperties.ContentDescription) == listOf(template.control)
                     var parts = stageParts(scenario)
                     robot.waitUntil(30_000) {
                         SystemClock.sleep(1_000)
                         val next = stageParts(scenario)
-                        (key(next) == key(parts) && next.count { it.config.getOrNull(SemanticsProperties.Text) != null } >= 3).also { parts = next }
+                        (key(next) == key(parts) && next.count(::named) >= 3).also { parts = next }
                     }
                     val strip = robot.composedBounds(scenario, STRIP).first.top
                     // The rows of a table scroll inside its box, and the page does not (block 2 plan, D3).
@@ -80,18 +84,20 @@ class StageTemplateFitTest {
                     }
                     if (template != null && !data) {
                         if (shown.none { it.isCanvasOf(template.title) }) faults += "no canvas"
-                        // A slider shows its label with its value, such as "Votes for: 11".
-                        if (shown.none { part -> part.config.getOrNull(SemanticsProperties.Text)?.any { it.text.startsWith(checkNotNull(template.control)) } == true })
+                        // A slider shows its label with its value, such as "Votes for: 11". A stepper on the stage shows dots, an inline choice shows
+                        // no label line, and the speed chip of a play row shows its speed: their label is their accessible name (stage A, AH4, K2).
+                        if (shown.none { part -> part.config.getOrNull(SemanticsProperties.Text)?.any { it.text.startsWith(checkNotNull(template.control)) } == true } &&
+                            parts.none { it.config.getOrNull(SemanticsProperties.ContentDescription) == listOf(template.control) })
                             faults += "no control label"
                         if (shown.none { SemanticsActions.OnClick in it.config || SemanticsActions.SetProgress in it.config }) faults += "no control"
                     }
-                    template?.card?.filterNot { text -> shown.any { robot.hasText(text)(it.config) } }?.forEach { faults += "no card text \"$it\"" }
+                    template?.caption?.filterNot { text -> shown.any { robot.hasText(text)(it.config) } }?.forEach { faults += "no caption \"$it\"" }
                     val lowest = shown.maxOfOrNull { it.bounds.bottom } ?: strip
                     shown.filter { it.bounds.bottom > strip }.forEach { faults += "${it.name()} ends ${dp((it.bounds.bottom - strip).toFloat(), density)} dp under the top of the strip" }
                     if (faults.any { it.startsWith("no control") }) println("gate 3 ${name}: stage parts " + parts.mapNotNull { it.name().takeIf { n -> n != "a part" } })
-                    // The whole card text: no card text is cut. Some one-line labels report an overflow of their font padding, so only the card texts count.
-                    template?.card?.let { card -> robot.composedTextFit(scenario, STAGE).filter { it.third && it.first.trimEnd() in card } }
-                        ?.forEach { faults += "the card text \"${it.first}\" is cut" }
+                    // The whole caption: no caption is cut. Some one-line labels report an overflow of their font padding, so only the caption counts.
+                    template?.caption?.let { caption -> robot.composedTextFit(scenario, STAGE).filter { it.third && it.first.trimEnd() in caption } }
+                        ?.forEach { faults += "the caption \"${it.first}\" is cut" }
                     val line = JSONObject().put("gate", "3").put("file", name).put("size", size).put("scrollDp", dp(scroll, density))
                         .put("underStripDp", dp(maxOf(0, lowest - strip).toFloat(), density)).put("faults", JSONArray(faults))
                         // The box of the rows of a table and the stage height above the strip, so an overflow names its parts.
@@ -107,7 +113,7 @@ class StageTemplateFitTest {
 
     /**
      * Stage 6, F1: on a phone the square picture takes the height that the other parts of the stage leave, in one layout pass. With a short
-     * card it has the full width of the column (the width of the title). A shorter window makes it smaller, and the first window gives it its
+     * caption it has the full width of the column (the width of the title). A shorter window makes it smaller, and the first window gives it its
      * first size again. A free app file with one square drawing gets the same rule: the lesson app is taller than the stage, so its square
      * picture stands at the floor, 0.6 of the column width, and the stage scrolls.
      */
@@ -199,15 +205,24 @@ class StageTemplateFitTest {
     }
 
     /**
-     * The title (the first text of the first line), the control label, and the card texts of a template file. The label of a play line is a
-     * control label too. A diagram has no card line: its card is the first part with a capital first letter and the first narration line (G1).
+     * The title (the first text of the first line), the control label, and the caption of a template file at its start (stage A, K1). The label
+     * of a play line is a control label too. The caption is the text of the caption line, the texts of the card of a data form, the text of
+     * the start item of items, or the narration line of the start step of a walk: the answer step of steps (by default the last step), or the
+     * first part of a diagram.
      */
     private class Template(file: String) {
         private val lines = file.lines()
         val title = texts(lines.first()).first()
         val control = lines.firstOrNull { it.startsWith("control = ") || it.startsWith("play = ") }?.let { texts(it).first() }
-        val card = lines.singleOrNull { it.startsWith("card = ") }?.let(::texts)
-            ?: listOf(texts(lines.single { it.startsWith("control = parts(") })[1].replaceFirstChar { it.uppercase() }, texts(lines.single { it.startsWith("say1 = ") }).single())
+        val caption = (lines.singleOrNull { it.startsWith("caption = ") } ?: lines.singleOrNull { it.startsWith("card = ") })?.let(::texts) ?: listOf(startCaption())
+        private fun startCaption(): String {
+            val line = lines.single { it.startsWith("control = ") }
+            val items = lines.filter { Regex("^i[1-9] = item\\(").containsMatchIn(it) }.map(::texts)
+            if (items.isNotEmpty()) return (texts(line).getOrNull(1)?.let { start -> items.single { it[0] == start } } ?: items.first())[2]
+            val steps = Regex("\\[(.*)]").find(line)?.groupValues?.get(1)?.let(::texts).orEmpty()
+            val start = if (line.startsWith("control = parts(")) 0 else texts(line.substringAfterLast(']')).firstOrNull()?.let(steps::indexOf) ?: steps.lastIndex
+            return texts(lines.single { it.startsWith("say${start + 1} = ") }).single()
+        }
         private fun texts(line: String) = Regex("\"((?:[^\"\\\\]|\\\\.)*)\"").findAll(line).map { it.groupValues[1] }.toList()
     }
 

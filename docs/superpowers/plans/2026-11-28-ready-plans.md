@@ -99,9 +99,29 @@ Tests (device, `emulator-5596` only):
 
 Tests: the kit tests of each rule, the golden check with a new record for the approved behavior change, the template check numbers against Alpha 24, and real pictures at both sizes.
 
-## Job B: task templates (after job A)
+## Stage B: task templates
 
-Requirements B1 to B3 of the spec, section 7. The job gets the list of the first task templates and the voice rule for a check.
+The owner approved the drawn sample on 2026-11-28 («давай Stage B делай, там с теми экранами»): `evidence/ready-plans/stage-a/sample-tasks-phone.png` and `sample-tasks-fold.png`.
+Job B is one job for the kit, the prompt, and the host. It starts after jobs AH and AK are joined in this tree, because it changes the same files.
+
+Requirements:
+
+- B1. Two task templates ship as ready plans with line tables: `collect` (collect a quantity, the owner's picture 01) and `predict` (predict, then test, the owner's picture 03). Their reply forms start from the test fixtures of job R (`kit/test/fixtures/ready/`), which move to `kit/templates/`.
+- B2. `collect`: places for the target count (2 to 10, rows of five) and pieces with volume (a gradient), a counter (less and more), a check button, and one caption. Before the check the caption is the hint. After the check it is the right text or the wrong text.
+- B3. `predict`: a picture of shapes that read the variable `$/v` and the run value `$/t`, one control of the variable (a slider or a choice), a question with 2 to 4 options, and a button that runs the experiment. The time of the run can be a formula of `$/v`, so the experiment shows the effect. The button is ready only after the person selected an option. After the run the caption is the right text or the wrong text for that option.
+- B4. The feedback of a task is its caption. When a press of a control of the stage app (a tap, or a spoken press) changes the caption, the voice says the new caption word for word: as the answer of the hand-off for a spoken press, and as thinking for a tap while the voice does not speak. A caption that changes with a step of a walk says nothing more (the narrator says that sentence).
+- B5. Layout as in the sample. On a compact width: the picture, the hint, the controls, the button. On a wide stage: the picture at the left and one panel at the right with the task title, the hint, the controls, and the button. The picture keeps the rules of stage A (it fills its column, and a background goes to its edges).
+- B6. A spoken request to practice that fits one of the two templates gets it on the fast path, with the stream preview. Each other request to practice (a quiz, a test, a timer, a list, a form, a game) still gets `outside("learn")`. The explain screens are not worse: the held-out sets of stage A keep their numbers.
+- B7. The template check has a tuning set and a held-out set for tasks. The requests come from the two domains of the owner's pictures (counting and number composition for ages 5 to 7; forces, motion, and experiment for ages 12 to 18) and from the recorded `outside("learn")` requests.
+- B8. The documents (`kit/README.md`, `docs/voice-integration.md`, `docs/tool-integration.md`) describe the task templates, the feedback rule, and the panel.
+
+Tests:
+
+- TB1. Kit tests for each line and fault of both templates, the stream order, the merge and the repair by name, and the feedback caption in each state (before a check, right, wrong).
+- TB2. Device tests: a tap on the check button of `collect` with the right count shows the right text, and the voice gets that text after the mark; a spoken press does the same as the answer of its hand-off; a tap on a step of a walk sends no second text.
+- TB3. Device tests of the layout at 412 × 915 dp and 864 × 930 dp, as TH1 of job AH, with the panel at the right on the wide stage.
+- TB4. The template check: the task sets, and the held-out sets of stage A again, within the stated paid budget.
+- TB5. Real pictures of both task screens at both sizes and both themes, for the owner.
 
 ## Review focus
 

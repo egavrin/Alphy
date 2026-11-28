@@ -2,8 +2,8 @@
 // sign, up to 6 rows with one value for each thing, one marked row, and a card with the point. The kit shows it as a native table with signs=
 // (a comparison): the host draws a head cell for each thing and a row block with a bar under each value (stage 5 look).
 
-import { CONTROL_VALUE, NARRATION, cardLine, isText } from "../src/form-base.js";
-import { DATA_BUDGET, SOURCE_LINE, cellText, checkSource, contextFaults, cutLabel, cutLabels, dataFill, markLine, markStart, rowFault, tableLine } from "../src/form-data.js";
+import { CONTROL_VALUE, NARRATION, isText } from "../src/form-base.js";
+import { DATA_BUDGET, cardLine, SOURCE_LINE, cellText, checkSource, contextFaults, cutLabel, cutLabels, dataFill, markLine, markStart, rowFault, tableLine } from "../src/form-data.js";
 
 const THING = /^t[1-3]$/;
 

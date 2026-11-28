@@ -95,8 +95,8 @@ class DialogueStageRehearsalTest {
     @Test fun shipStreams() {
         val dialogue = Dialogue("ship-stream", listOf(ask("volcano-explain", "Объясни, как устроен вулкан.", "screen")), adaptive = true)
         val lines = SHIP.lines()
-        // Each watched text and the index of its line: the title, the control label, a shape text, and the card title.
-        val watched = mapOf("Почему корабль не тонет?" to 0, "Предмет" to 1, "Воздух внутри" to 4, "Вытеснение воды" to 5)
+        // Each watched text and the index of its line: the title, the control label, a shape text, and the caption.
+        val watched = mapOf("Почему корабль не тонет?" to 0, "Предмет" to 1, "Воздух внутри" to 4, "Полый корабль вытесняет" to 5)
         val sent = CopyOnWriteArrayList<Pair<Long, String>>()
         val seen = ConcurrentHashMap<String, Long>()
         val report = run(dialogue, mapOf(1 to StepReplies(screen("Сейчас покажу на экране."), listOf(TEMPLATE to deltas(SHIP)))),
@@ -411,7 +411,7 @@ class DialogueStageRehearsalTest {
             s1 = rect(0, 110, 300, 110, "water", 0)
             s2 = polygon([45, 75, 255, 75, 225, 140, 75, 140], "ink", visible=${'$'}/v == "Корабль")
             s3 = text(150, 50, "Воздух внутри", "ink", 14, visible=${'$'}/v == "Корабль")
-            card = card("Вытеснение воды", "Полый корабль вытесняет достаточно воды, чтобы удержаться на плаву.")
+            caption = "Полый корабль вытесняет достаточно воды, чтобы удержаться на плаву."
         """.trimIndent() + "\n"
 
         /** The template replies of each template dialogue. Each file compiles clean with the kit, and each change merges clean. */
@@ -423,7 +423,7 @@ class DialogueStageRehearsalTest {
                 s2 = text(65, 115, "Магнит", "surface", 14)
                 s3 = circle(110 + ${'$'}/v, 110, 12, "muted")
                 s4 = text(150, 190, "Чем ближе, тем сильнее", "ink", 14)
-                card = card("Магнитное поле", "Магнит создаёт вокруг себя поле. Железо в этом поле само становится магнитом и тянется к нему.")
+                caption = "Магнит создаёт вокруг себя поле. Железо в этом поле само становится магнитом и тянется к нему."
             """, """
                 s5 = line(98 + ${'$'}/v, 110, 104, 110, "ink", 3)
                 s6 = text(150, 40, "Скрепку тянет к магниту", "ink", 14)
@@ -435,7 +435,7 @@ class DialogueStageRehearsalTest {
                 s3 = line(250 - ${'$'}/v, 160, 260, 70, "ink", 2)
                 s4 = line(260, 70, 250 - ${'$'}/v, 180, "accent", 2)
                 s5 = text(150, 30, "Звук отражается от скалы", "ink", 13)
-                card = card("Отражённый звук", "Звук долетает до скалы, отражается и возвращается. Чем дальше скала, тем позже слышно эхо.")
+                caption = "Звук долетает до скалы, отражается и возвращается. Чем дальше скала, тем позже слышно эхо."
             """),
             "tpl-b" to TemplateFiles("""
                 scene("Как рождается ураган?", lang="ru", palette="teal")
@@ -445,17 +445,17 @@ class DialogueStageRehearsalTest {
                 s3 = circle(150, 90, 40, "muted", stroke=true, visible=${'$'}/v == "Вихрь")
                 s4 = circle(150, 90, 60, "muted", visible=${'$'}/v == "Ураган")
                 s5 = circle(150, 90, 12, "surface", visible=${'$'}/v == "Ураган")
-                card = card("Тепло океана", "Над тёплым океаном влажный воздух поднимается и закручивается. Чем теплее вода, тем сильнее вихрь.")
+                caption = "Над тёплым океаном влажный воздух поднимается и закручивается. Чем теплее вода, тем сильнее вихрь."
             """, """
                 s6 = text(150, 20, "Последний ураган ослаб", "ink", 13)
-                card = card("Тепло океана", "Над тёплым океаном влажный воздух поднимается и закручивается. По свежим новостям, последний ураган уже ослаб.")
+                caption = "Над тёплым океаном влажный воздух поднимается и закручивается. По свежим новостям, последний ураган уже ослаб."
             """, """
                 scene("Почему гром позже молнии?", lang="ru", palette="purple")
                 control = slider("Расстояние до грозы, км", 1, 5, 1, 3)
                 s1 = polygon([60, 20, 40, 90, 60, 90, 45, 150, 90, 70, 68, 70, 85, 20], "yellow")
                 s2 = circle(70 + 40 * ${'$'}/v, 180, 10, "ink")
                 s3 = text(150, 210, "Звук идёт 3 секунды на км", "ink", 12)
-                card = card("Свет быстрее звука", "Свет молнии приходит сразу, а звук грома идёт около трёх секунд на каждый километр.")
+                caption = "Свет молнии приходит сразу, а звук грома идёт около трёх секунд на каждый километр."
             """),
             "tpl-c" to TemplateFiles("""
                 scene("Зачем велосипеду передачи?", lang="ru", palette="green")
@@ -466,7 +466,7 @@ class DialogueStageRehearsalTest {
                 s4 = line(80, 70, 230, ${'$'}/v == "Лёгкая" ? 90 : 105, "muted", 2)
                 s5 = line(80, 170, 230, ${'$'}/v == "Лёгкая" ? 150 : 135, "muted", 2)
                 s6 = text(150, 205, "Цепь передаёт усилие", "ink", 13)
-                card = card("Звёздочки разного размера", "Большая задняя звёздочка делает педали лёгкими, а маленькая делает езду быстрой, но тяжёлой.")
+                caption = "Большая задняя звёздочка делает педали лёгкими, а маленькая делает езду быстрой, но тяжёлой."
             """, """
                 s2 = circle(230, 120, 40, "ink", stroke=true, visible=${'$'}/v == "Лёгкая")
                 s4 = line(80, 70, 230, ${'$'}/v == "Лёгкая" ? 80 : 105, "muted", 2)
@@ -478,7 +478,7 @@ class DialogueStageRehearsalTest {
                 s2 = line(150, 110, 150, 50, "ink", 4)
                 s3 = line(150, 110, 150 + 80 * sin(${'$'}/v * 6), 110 - 80 * cos(${'$'}/v * 6), "accent", 2)
                 s4 = text(150, 35, "12", "ink", 14)
-                card = card("Минутная стрелка", "За час минутная стрелка проходит полный круг, а часовая стрелка проходит только одно деление из двенадцати.")
+                caption = "За час минутная стрелка проходит полный круг, а часовая стрелка проходит только одно деление из двенадцати."
             """),
             "tpl-d" to TemplateFiles("""
                 items("Из гусеницы в бабочку", lang="ru", palette="orange")
@@ -487,7 +487,6 @@ class DialogueStageRehearsalTest {
                 i2 = item("Гусеница", "ест и растёт", "Гусеница много ест и быстро растёт, несколько раз сбрасывая старую кожу.")
                 i3 = item("Куколка", "в оболочке", "Гусеница прячется в твёрдую оболочку, и внутри её тело полностью перестраивается.")
                 i4 = item("Бабочка", "летает", "Из куколки выходит бабочка, расправляет крылья и скоро начинает летать.")
-                card = card("Полное превращение")
             """, """
                 i1 = item("Яйцо", "5 дней", "Бабочка откладывает яйца на лист. Примерно через пять дней из яйца выходит гусеница.")
                 i2 = item("Гусеница", "2 недели", "Гусеница две недели много ест и быстро растёт, несколько раз сбрасывая старую кожу.")
@@ -501,7 +500,7 @@ class DialogueStageRehearsalTest {
                 s3 = circle(150, 110, 56, "brown", stroke=true, visible=${'$'}/v >= 3)
                 s4 = circle(150, 110, 74, "brown", stroke=true, visible=${'$'}/v >= 4)
                 s5 = circle(150, 110, 92, "brown", stroke=true, visible=${'$'}/v >= 5)
-                card = card("Одно кольцо за один год", "Летом дерево растёт быстро и даёт светлый слой, осенью медленно и даёт тёмный. Так за год выходит одно кольцо.")
+                caption = "Летом дерево растёт быстро и даёт светлый слой, осенью медленно и даёт тёмный. Так за год выходит одно кольцо."
             """),
             "tpl-e" to TemplateFiles("""
                 scene("How does a plane stay up?", lang="en", palette="blue")
@@ -509,7 +508,7 @@ class DialogueStageRehearsalTest {
                 s1 = polygon([60, 120, 240, 110, 240, 125, 60, 130], "ink")
                 s2 = line(150, 115, 150, 115 - 20 * ${'$'}/v, "accent", 4)
                 s3 = text(150, 30, "Faster air means more lift", "ink", 13)
-                card = card("Lift from the wings", "Air flows faster over the curved wing, so the pressure above it drops and the wing is pushed up.")
+                caption = "Air flows faster over the curved wing, so the pressure above it drops and the wing is pushed up."
             """, """
                 s4 = line(150, 115 - 20 * ${'$'}/v, 140, 127 - 20 * ${'$'}/v, "accent", 4)
                 s5 = line(150, 115 - 20 * ${'$'}/v, 160, 127 - 20 * ${'$'}/v, "accent", 4)
@@ -522,12 +521,12 @@ class DialogueStageRehearsalTest {
                 s3 = line(210, 80, 150, 150, "ink", 1, visible=${'$'}/v == "Open")
                 s4 = circle(150, ${'$'}/v == "Open" ? 160 : 190, 10, "ink")
                 s5 = text(150, 210, "Air drag slows the fall", "ink", 13)
-                card = card("Drag against the air", "The wide canopy pushes against a lot of air. This drag grows until it balances your weight, so you fall slowly.")
+                caption = "The wide canopy pushes on a lot of air. This drag grows until it balances your weight, so you fall slowly."
             """),
             "tpl-f" to TemplateFiles("""
                 cells("Что такое площадь фигуры?", lang="ru", palette="teal")
                 control = slider("Клеток в фигуре", 0, 24, 1, 12)
-                card = card("Площадь в клетках", "Площадь показывает, сколько одинаковых квадратиков помещается в фигуру. Каждый квадратик здесь равен одной единице.")
+                caption = "Площадь показывает, сколько одинаковых квадратиков помещается в фигуру. Каждый квадратик равен одной единице."
             """, """
                 control = slider("Клеток в фигуре", 0, 100, 1, 50)
             """, """
@@ -537,7 +536,6 @@ class DialogueStageRehearsalTest {
                 i2 = item("Пять", "V", "V значит пять. Палочка перед V вычитает, IV это четыре, а палочка после прибавляет, VI это шесть.")
                 i3 = item("Десять", "X", "X значит десять. IX это девять, XI это одиннадцать, а XX это двадцать.")
                 i4 = item("Пятьдесят", "L", "L значит пятьдесят. XL это сорок, а LX это шестьдесят.")
-                card = card("Римская цифра")
             """),
         // A change ends with no line end, as the model sends its last line, so the round end completes it.
         ).mapValues { (_, raw) -> raw.run { TemplateFiles(file(first), file(change).trimEnd(), file(next)) } }

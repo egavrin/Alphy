@@ -31,6 +31,7 @@ import kotlinx.coroutines.awaitCancellation
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
@@ -61,7 +62,7 @@ class StageMotionWorkflowTest {
         shell.live(MotionTalk(AgentScriptProvider(orbit))) { scenario, model, _ ->
             socket.say(MOTION_REQUEST, "d1", 100)
             shell.finalFile(model, shell.shown(model).id)
-            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, ORBIT_CARD) && pictures() > 0 }
+            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, ORBIT_CAPTION) && pictures() > 0 }
             SystemClock.sleep(1_000)
             val trace = checkNotNull(SurfaceFrameMetrics.snapshot())
             val start = SystemClock.elapsedRealtimeNanos()
@@ -87,7 +88,7 @@ class StageMotionWorkflowTest {
             socket.say(MOTION_REQUEST, "d1", 100)
             val app = shell.shown(model)
             shell.finalFile(model, app.id)
-            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, ORBIT_CARD) }
+            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, ORBIT_CAPTION) }
             fun shown() = checkNotNull(ShownScreen.of(shell.stored(model, app.id)))
             assertEquals(SceneMotion(true, "Обычно"), shown().motion)
             assertEquals(listOf("Пауза", "Движение: Медленно", "Движение: Обычно", "Движение: Быстро"), shown().controls.map { it.label })
@@ -131,7 +132,7 @@ class StageMotionWorkflowTest {
             socket.say(MOTION_REQUEST, "d1", 100)
             val app = shell.shown(model)
             shell.finalFile(model, app.id)
-            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, ORBIT_CARD) }
+            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, ORBIT_CAPTION) }
             fun shown() = checkNotNull(ShownScreen.of(shell.stored(model, app.id)))
             fun slower(id: String, atMs: Long) { val count = shell.messages(model).size; socket.say(SLOWER, id, atMs); shell.waitForTheAnswer(model, count) }
             slower("d2", 2_000)
@@ -153,7 +154,7 @@ class StageMotionWorkflowTest {
         shell.live(MotionTalk(AgentScriptProvider(orbit))) { scenario, model, _ ->
             socket.say(MOTION_REQUEST, "d1", 100)
             shell.finalFile(model, shell.shown(model).id)
-            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, ORBIT_CARD) && pictures() > 0 }
+            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, ORBIT_CAPTION) && pictures() > 0 }
             SystemClock.sleep(1_000)
             fun gray(nodes: List<SemanticsNode>) = nodes.count { SemanticsActions.OnClick in it.config && SemanticsProperties.Disabled in it.config }
             val start = readStage(robot, ::gray)
@@ -196,25 +197,29 @@ class StageMotionWorkflowTest {
     }
 
     /**
-     * A tap on the control with the text or the accessible name [label]: the click action of the nearest node around it that has one. False
-     * when the stage shows no such control.
+     * A tap on the control with the text or the accessible name [label]: the click action of the nearest node around it that has one. A speed
+     * is a tap of the speed chip of the large picture, which selects the next speed (stage A, AH5), so [label] must be the speed after the
+     * present one. False when the stage shows no such control.
      */
     private fun press(nodes: List<SemanticsNode>, label: String): Boolean {
-        val node = nodes.firstOrNull { robot.hasText(label)(it.config) || it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(label) == true }
-            ?: return false
+        val node = if (label in ORBIT_SPEEDS) nodes.firstOrNull { it.config.getOrNull(SemanticsProperties.ContentDescription) == listOf(MOTION) }?.also { chip ->
+            val present = chip.config.getOrNull(SemanticsProperties.StateDescription)
+            check(ORBIT_SPEEDS[(ORBIT_SPEEDS.indexOf(present) + 1) % ORBIT_SPEEDS.size] == label) { "the speed after $present is not $label" }
+        } else nodes.firstOrNull { robot.hasText(label)(it.config) || it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(label) == true }
+        if (node == null) return false
         val target = generateSequence(node) { it.parent }.first { SemanticsActions.OnClick in it.config }
         checkNotNull(target.config[SemanticsActions.OnClick].action).invoke()
         return true
     }
 
-    /** True when the stage shows the state after a tap of [label]: the speed is selected, or the button shows the other state. */
+    /** True when the stage shows the state after a tap of [label]: the speed chip shows the speed, or the button shows the other state. */
     private fun pressedState(nodes: List<SemanticsNode>, label: String): Boolean {
         fun named(name: String) = nodes.any { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(name) == true }
         return when (label) {
             PAUSE -> named(PLAY)
             PLAY -> named(PAUSE)
-            else -> nodes.any { node -> robot.hasText(label)(node.config) &&
-                generateSequence(node) { it.parent }.any { it.config.getOrNull(SemanticsProperties.Selected) == true } }
+            else -> nodes.any { it.config.getOrNull(SemanticsProperties.ContentDescription) == listOf(MOTION) &&
+                it.config.getOrNull(SemanticsProperties.StateDescription) == label }
         }
     }
 
@@ -224,7 +229,7 @@ class StageMotionWorkflowTest {
             socket.say(MOTION_REQUEST, "d1", 100)
             val app = shell.shown(model)
             shell.finalFile(model, app.id)
-            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, "Вытеснение воды") && pictures() > 0 }
+            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, SHIP_CAPTION) && pictures() > 0 }
             SystemClock.sleep(1_000)
             val before = checkNotNull(SurfaceFrameMetrics.snapshot()).glideEnds.size
             val pressed = SystemClock.elapsedRealtimeNanos()
@@ -242,7 +247,7 @@ class StageMotionWorkflowTest {
         shell.live(MotionTalk(AgentScriptProvider(orbit))) { scenario, model, _ ->
             socket.say(MOTION_REQUEST, "d1", 100)
             shell.finalFile(model, shell.shown(model).id)
-            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, ORBIT_CARD) && pictures() > 0 }
+            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, ORBIT_CAPTION) && pictures() > 0 }
             val running = checkNotNull(SurfaceFrameMetrics.snapshot())
             scenario.moveToState(Lifecycle.State.STARTED)
             robot.waitUntil(5_000) { SurfaceFrameMetrics.snapshot()?.stoppedAtNs != null }
@@ -256,28 +261,38 @@ class StageMotionWorkflowTest {
         }
     }
 
-    /** G1 to G3: a diagram shows its first part with its card, the routing presses «Покажи третий шаг», and the card follows the part. */
-    @Test fun aDiagramWalksItsPartsAndThePressMovesTheCard() {
+    /**
+     * G1 to G3: a diagram shows its first part with its name chip and its caption, the routing presses «Покажи третий шаг», and the chip and
+     * the caption follow the part. The caption is the sentence of the part (stage A, K1).
+     */
+    @Test fun aDiagramWalksItsPartsAndThePressMovesTheCaption() {
         val talk = MotionTalk(AgentScriptProvider(heart))
         shell.live(talk) { scenario, model, _ ->
             socket.say(HEART_REQUEST, "d1", 100)
             val app = shell.shown(model)
             shell.finalFile(model, app.id)
-            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, "Полая вена") && robot.composedTextIn(scenario, STAGE, "Приносит в сердце кровь от тела.") }
+            robot.waitUntil(30_000) { drew(scenario, "полая вена") && robot.composedTextIn(scenario, STAGE, "Приносит в сердце кровь от тела.") }
             fun shown() = checkNotNull(ShownScreen.of(shell.stored(model, app.id)))
             assertEquals(SceneStep(1, 7, "полая вена"), shown().step)
-            assertTrue(robot.composedIn(scenario, STAGE) { config -> config.getOrNull(SemanticsProperties.Text)?.any { COUNT.matches(it.text) && it.text.startsWith("1 ") } == true })
+            // Only the marked part has its name chip, so the chip of the third part comes with the press.
+            assertFalse("the chip of the third part shows at step 1", drew(scenario, "правый желудочек"))
+            assertTrue(robot.composedIn(scenario, STAGE) { config -> config.getOrNull(SemanticsProperties.StateDescription)?.let { COUNT.matches(it) && it.startsWith("1 ") } == true })
             val count = shell.messages(model).size
             socket.say(THIRD, "d2", 2_000)
             shell.waitForTheAnswer(model, count)
-            robot.waitUntil(10_000) { robot.composedTextIn(scenario, STAGE, "Правый желудочек") && robot.composedTextIn(scenario, STAGE, "Толкает кровь в лёгкие.") }
+            robot.waitUntil(10_000) { drew(scenario, "правый желудочек") && robot.composedTextIn(scenario, STAGE, "Толкает кровь в лёгкие.") }
             assertEquals(SceneStep(3, 7, "правый желудочек"), shown().step)
-            assertTrue(robot.composedIn(scenario, STAGE) { config -> config.getOrNull(SemanticsProperties.Text)?.any { COUNT.matches(it.text) && it.text.startsWith("3 ") } == true })
+            assertTrue(robot.composedIn(scenario, STAGE) { config -> config.getOrNull(SemanticsProperties.StateDescription)?.let { COUNT.matches(it) && it.startsWith("3 ") } == true })
             assertEquals(1, talk.calls.size)
         }
     }
 
     private fun pictures() = SurfaceFrameMetrics.snapshot()?.pictures ?: 0L
+
+    /** True when a label of the stage canvas holds [text] in any case: the canvas draws a text part with it, such as a name chip. */
+    private fun drew(scenario: ActivityScenario<CloudTestActivity>, text: String) = robot.composedIn(scenario, STAGE) { config ->
+        config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.contains(text, ignoreCase = true) } == true
+    }
 
     /** A tap on the control with [text]: the click action of the nearest node around it that has one. */
     private fun tap(scenario: ActivityScenario<CloudTestActivity>, text: String) = scenario.onActivity { activity ->
@@ -288,10 +303,13 @@ class StageMotionWorkflowTest {
 
     private companion object {
         const val STAGE = "dialogue_stage"
-        const val ORBIT_CARD = "Год — это один круг"
+        const val ORBIT_CAPTION = "Земля обходит Солнце за год, а Луна обходит Землю примерно за месяц."
         const val PAUSE = "Пауза"
         const val PLAY = "Пуск"
-        /** The count of a stepper, such as "3 из 7" (or "3 of 7" in the English strings). */
+        /** The label of the play line of the orbit, the accessible name of its speed chip, and its speeds in the order of the chip. */
+        const val MOTION = "Движение"
+        val ORBIT_SPEEDS = listOf("Медленно", "Обычно", "Быстро")
+        /** The count of a stepper, such as "3 из 7" (or "3 of 7" in the English strings): its accessible state on the stage (Stage A, AH4). */
         val COUNT = Regex("""\d+ (из|of) 7""")
     }
 }

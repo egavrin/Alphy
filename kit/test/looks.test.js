@@ -206,7 +206,7 @@ test("look: an unknown value of a look option, and an option that the component 
     'e = Row([Text("x")], align="top")', 'f = Column([Text("x")], gap="wide")', 'g = Grid([Text("x")], columns=5)', 'h = Metric("x", $/n, emphasis="title")',
     'i = Notice("x", tone="info")', 'j = CheckBox("x", $/b, variant="square")', "k = Text(\"x\", tone=$/t)", 'l = Text("x", tone=$/b ? "success" : "error")');
   expect(faults).toEqual([
-    'a: the emphasis of a Text is one of body, title, headline, label, number, display, and "huge" is not one',
+    'a: the emphasis of a Text is one of body, title, headline, label, number, display, caption, and "huge" is not one',
     "b: Text has no property size",
     'c: the size of an Emoji is one of small, medium, large, and "tiny" is not one',
     'd: the variant of a Button is one of filled, outlined, text, tonal, tonalIcon, and "fab" is not one',

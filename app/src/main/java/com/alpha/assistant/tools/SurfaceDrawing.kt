@@ -72,23 +72,26 @@ internal fun surfaceTextBoxes(commands: JSONArray): List<RectF> = buildList {
 
 /** Each surface and group restores the native canvas. Each leaf shape owns its paint, and the images of one pass share one paint. */
 internal fun drawSurfaceFrame(canvas: Canvas,surface: ToolSurface,commands: JSONArray,width: Float,height: Float,roleColors: Map<String,Int>,
-    images: Map<String,Bitmap> = emptyMap()) = drawSurfaceLayers(canvas,surface,listOf(GlideLayer(commands,1f)),width,height,roleColors,images,Color.TRANSPARENT)
+    images: Map<String,Bitmap> = emptyMap(),clip: Boolean = true) =
+    drawSurfaceLayers(canvas,surface,listOf(GlideLayer(commands,1f)),width,height,roleColors,images,Color.TRANSPARENT,clip)
 
 /**
  * The layers of a glide frame (SurfaceGlide) in their order. A layer below alpha 1 draws in a layer of its alpha, and an opaque layer first
  * fills the surface with [background], so a cross-fade of a whole picture does not show the old picture through the new one.
+ * With [clip] false a shape past the surface box shows too, and the view around the canvas clips it (the large stage picture, Stage A, AH3).
  */
 internal fun drawSurfaceLayers(canvas: Canvas,surface: ToolSurface,layers: List<GlideLayer>,width: Float,height: Float,roleColors: Map<String,Int>,
-    images: Map<String,Bitmap>,background: Int) {
+    images: Map<String,Bitmap>,background: Int,clip: Boolean = true) {
     val saved=canvas.save()
     // The review of stage 7: one paint for each image draw pass, not one for each image.
     val imagePaint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     try {
         canvas.scale(width/surface.width,height/surface.height)
-        canvas.clipRect(0f,0f,surface.width.toFloat(),surface.height.toFloat())
+        if(clip) canvas.clipRect(0f,0f,surface.width.toFloat(),surface.height.toFloat())
         for(layer in layers) {
             if(layer.alpha>=1f) {drawSurface(canvas,layer.commands,roleColors,images,imagePaint);continue}
-            val layerSaved=canvas.saveLayerAlpha(0f,0f,surface.width.toFloat(),surface.height.toFloat(),Math.round(layer.alpha.coerceIn(0f,1f)*255))
+            val alpha=Math.round(layer.alpha.coerceIn(0f,1f)*255)
+            val layerSaved=if(clip) canvas.saveLayerAlpha(0f,0f,surface.width.toFloat(),surface.height.toFloat(),alpha) else canvas.saveLayerAlpha(null,alpha)
             try {
                 if(layer.opaque) canvas.drawColor(background)
                 drawSurface(canvas,layer.commands,roleColors,images,imagePaint)

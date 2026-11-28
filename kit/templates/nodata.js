@@ -2,8 +2,8 @@
 // say next, at most 2 sentences. The voice says the same sentences: a file with no narration line gets say with the text of its card (voice).
 // The card has a search icon at the left of its title (stage 5 look), and the ready plan holds it.
 
-import { CONTROL_LINE, CONTROL_VALUE, NARRATION, cardLine } from "../src/form-base.js";
-import { DATA_BUDGET, SOURCE_LINE, dataFill, sentences } from "../src/form-data.js";
+import { CONTROL_LINE, CONTROL_VALUE, NARRATION } from "../src/form-base.js";
+import { DATA_BUDGET, cardLine, SOURCE_LINE, dataFill, sentences } from "../src/form-data.js";
 
 export const NODATA = {
   word: "nodata",

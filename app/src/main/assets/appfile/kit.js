@@ -1387,9 +1387,8 @@ const PARTS = {
   // need t = play("Motion", 0, 360, 14): a value that runs from 0 to 360 in 14 s, again and again, from the first state (block 2 plan, M1 and
   // M2). Under the label, a tonal button pauses and plays it, and a choice of three speeds sets the time of one round: slow is two times the
   // time, and fast is half of it. A pause keeps the value, and a play or a new speed goes on from it (core.js animate with a loop).
-  // Beside a control (need v, the control of a scene), the motion runs from the first state with no play row (stage 7, fix list 2, H4): the
-  // row is hidden, and its button keeps the loop that starts the motion.
-  play(name, need, { word, controlled }) {
+  // The row shows beside each other control too (stage A, K4).
+  play(name, need, { word }) {
     const [title, from, to, seconds] = need.args, v = `$/${name}`;
     if (need.args.length !== 4) throw new DslError('play needs a label, a start, an end, and the seconds of one round: play("Motion", 0, 360, 10)');
     const run = `animate(${v}, ${show(to)}, ${show(seconds)} * (${v}_sp == "slow" ? 2000 : ${v}_sp == "fast" ? 500 : 1000), ${show(from)})`;
@@ -1399,7 +1398,7 @@ const PARTS = {
         // Fix list 1, F2: one row, a round button with the icon only (its text is its spoken name), then the speeds in the rest of the row.
         `${name}_button = Button(${v}_on ? ${q(word("Pause"))} : ${q(word("Play"))}, action=[toggle(${v}_on), when(${v}_on, ${run}), when(!${v}_on, animate(${v}, ${v}, 0))], variant="tonalIcon", icon=${v}_on ? "Pause" : "Play")`,
         `${name}_speed = Segmented(${show(title)}, ${v}_sp, ${speeds}, action=when(${v}_on, ${run}), variant="inline", weight=1)`,
-        `${name}_view = Column([${name}_label, Row([${name}_button, ${name}_speed], gap="small")], gap="small"${controlled ? ", visible=false" : ""})`],
+        `${name}_view = Column([${name}_label, Row([${name}_button, ${name}_speed], gap="small")], gap="small")`],
       top: [`${name}_view`],
     };
   },
@@ -1871,7 +1870,12 @@ const PARTS = {
   },
 
   // need intro = content("Shown as text")
-  content(name, need) { return { lines: [`${name}_view = Text(${show(need.args[0])})`], top: [`${name}_view`] }; },
+  // A ready plan gives variant="caption" to the caption of an explain screen (stage A, K1). It becomes the muted caption emphasis, so the
+  // run-time needs no style of its own and the definitions of other apps stay the same.
+  content(name, need) {
+    const variant = need.named.variant, look = !variant ? "" : variant.v === "caption" ? ', emphasis="caption", tone="muted"' : `, variant=${show(variant)}`;
+    return { lines: [`${name}_view = Text(${show(need.args[0])}${look})`], top: [`${name}_view`] };
+  },
 
   // need chart = hole("A bar chart of spending by category"): nothing ready does it, so a model writes NAME_view later.
   hole(name, need) { return { lines: [`${name}_view = Notice("Not built yet: " + ${show(need.args[0])})`], top: [`${name}_view`] }; },
@@ -1888,7 +1892,7 @@ const OPTIONS = {
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max", "lessText", "moreText", "addText", "icon", "resetText"],
   timer: ["alert", "rounds", "rest", "cycle", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],
   model3d: ["turn", "parts", "explode", "joinText", "explodeText"], card: ["eyebrow", "icon"], link: ["note"], lesson: ["next", "back", "stepText"],
-  question: ["options", "right", "rightText", "wrongText"], content: [], hole: [],
+  question: ["options", "right", "rightText", "wrongText"], content: ["variant"], hole: [],
 };
 /** The options that each kind of input uses. A number kind is a number field or a slider, and a kind that is not here is a fault of the need. */
 const NUMBER_USES = ["min", "max", "step", "icon"];
@@ -1978,9 +1982,7 @@ function expand(file) {
         const tree = needs.find((other) => other.tree.name === "entries" && show(list) === `$/${other.key}`)?.tree.named.emptyText;
         return tree && (read = show(tree));
       };
-      // shortcut: a need app with an input named v also hides its play row, upgrade to a mark of the template when such an app is real.
-      const controlled = needs.some((other) => other.key === "v" && other.tree.name === "input");
-      built = part(entry.key, entry.tree, { hero, word, caption, emptyOf, controlled, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
+      built = part(entry.key, entry.tree, { hero, word, caption, emptyOf, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
       // A part line that the host cannot read is a fault of this need, never an exception. The other needs still expand.
       parsed = built.lines.map((line) => parseLine(line));
       if (parsed.includes(null)) throw new DslError("the part made an empty line");
@@ -2107,10 +2109,8 @@ function smokeRun(file, limit, clock) {
     if (usable) out.forEach((control) => reached.add(control.key));
     return out;
   };
-  // The play row of a scene stays hidden beside a control and keeps the loop of the motion (stage 7, fix list 2, H4), so the run does not
-  // ask that the two controls of a play need come to the screen. Each other control must come to the screen, also one that runs animate.
-  const playRow = new Set(file.of("need").filter((need) => need.tree.name === "play").flatMap((need) => [`${need.key}_button`, `${need.key}_speed`]));
-  const start = save(), all = controls(false).filter((control) => !playRow.has(control.key)).map((control) => control.key);
+  // Each control must come to the screen, also one that runs animate, such as the play row beside the control of a scene (stage A, K4).
+  const start = save(), all = controls(false).map((control) => control.key);
   /** The paths of the app that an expression reads, such as "name" for $/name, also through each formula that it reads. */
   const reads = (tree, out = new Set()) => {
     walk(tree, (node) => {
@@ -2415,7 +2415,7 @@ const LOOKS = {
   variant: { Button: ["filled", "outlined", "text", "tonal", "tonalIcon"], Text: ["muted", "eyebrow", "source"], Card: ["hero"], CheckBox: ["circle"], Progress: ["bar", "dots"],
     Segmented: ["inline", "stepper"], Select: ["inline", "stepper"] },
   size: { Emoji: SIZES },
-  emphasis: { Text: ["body", "title", "headline", "label", "number", "display"], Metric: ["display", "number"] },
+  emphasis: { Text: ["body", "title", "headline", "label", "number", "display", "caption"], Metric: ["display", "number"] },
   align: { Text: ALIGNS, Row: ALIGNS },
   tone: { Text: TONES, Metric: TONES, Badge: TONES, Notice: TONES },
   gap: { Row: GAPS, Column: GAPS },
@@ -4053,7 +4053,7 @@ function nextState(file, { app, definition, owners, objects }, previous, build) 
 return { BLOCKS, MISMATCH, isRecord, nextState };
 })();
 // form-base.js
-const { BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, FEW_OPTIONS, optionCap, optionFault, labelsFault, optionsFault, SENTENCE_END, cut, cutLong, headFault, formOf, formFault, cutOf, CONTROL_VALUE, CONTROL_LINE, CONTROL_LABEL, CARD_TITLE, CARD_TEXT, cardLine, NARRATION, namedColors, colored, colorFault } = (() => {
+const { BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, FEW_OPTIONS, optionCap, optionFault, labelsFault, optionsFault, SENTENCE_END, cut, cutTexts, cutLong, headFault, formOf, formFault, cutOf, CONTROL_VALUE, CONTROL_LINE, CONTROL_LABEL, CAPTION, NARRATION, namedColors, colored, colorFault } = (() => {
 // What each line table of a ready plan uses (kit/templates, kit/README.md section "Ready plans"): the budget, the drawing size, the faults of
 // a text and of the first line, the check of a value by the forms of its line (formFault), the cut of a long text, the colors of a shape, and
 // the lines that most templates share. template.js reads, merges, fills, and builds a template file with the line tables.
@@ -4065,14 +4065,14 @@ const { BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numbe
 
 /**
  * The content budget of each template: texts in characters, lists in items. A text inside the picture (a shape text, a sign) has no fault up to
- * floor(1.25 × cap), because it cannot change the height of the screen. A card text or an item text past its cap is cut after its last whole
+ * floor(1.25 × cap), because it cannot change the height of the screen. A caption or an item text past its cap is cut after its last whole
  * sentence inside the cap (cut). Each other text past its cap, a long text with no sentence end inside its cap, and a list past its cap are faults.
  * A narration line (say) is cut the same way, and one with no sentence end inside its cap is left out with no fault (template.js).
  */
-const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, fewOption: 16, sign: 14, text: 28, options: 6, items: 6, shapes: 20, cells: 100, say: 110,
+const BUDGET = { title: 30, control: 28, caption: 110, option: 12, fewOption: 16, sign: 14, text: 28, options: 6, items: 6, shapes: 20, cells: 100, say: 110,
   // A diagram walks up to 8 parts (block 2 plan, C2), and the name of a part with no entry has at most 16 characters: the stepper shows no name.
-  // Stage 7b (R3): a name that the model gives has at most 20 characters, so that "intestino delgado" or "rechte Herzkammer" fits. A name of two
-  // words breaks into two lines, and 8 such names leave the drawing more than FREE.fewest of its size (the fit file parts-caps).
+  // Stage 7b (R3): a name that the model gives has at most 20 characters, so that "intestino delgado" or "rechte Herzkammer" fits. The kit
+  // writes it on one line in the name chip of its part (stage A, K3), and a chip of 20 wide letters fits the width of the picture.
   parts: 8, part: 20 };
 /** The common color names that the kit takes with no call, by their small letters: the template check had one repair for a color name. */
 const COLOR_NAMES = { red: "#dc2626", orange: "#ea580c", yellow: "#facc15", green: "#16a34a", blue: "#2563eb", purple: "#9333ea", violet: "#7c3aed", pink: "#db2777",
@@ -4170,12 +4170,14 @@ function cut(text, cap) {
 /** The node with each text in it given again by map. */
 const textsMapped = (node, map) => (!node || typeof node !== "object" ? node : isText(node) ? map(node)
   : Array.isArray(node) ? node.map((inner) => textsMapped(inner, map)) : Object.fromEntries(Object.entries(node).map(([key, inner]) => [key, textsMapped(inner, map)])));
+/** The node with each text in it cut to cap (cut), such as a caption: each text of a formula is cut by itself. */
+const cutTexts = (node, cap) => textsMapped(node, (text) => ({ ...text, v: cut(text.v, cap) }));
 /**
- * The call with each text of its argument at cut to cap (cut), such as a card text or an item text. Each text of a formula is cut by itself.
- * The same tree when no text changes.
+ * The call with each text of its argument at cut to cap (cut), such as an item text or a card text of a data form. The same tree when no
+ * text changes.
  */
 function cutLong(tree, at, cap) {
-  const long = tree.args[at], short = long && textsMapped(long, (node) => ({ ...node, v: cut(node.v, cap) }));
+  const long = tree.args[at], short = long && cutTexts(long, cap);
   return !long || show(short) === show(long) ? tree : { ...tree, args: tree.args.map((arg, index) => (index === at ? short : arg)) };
 }
 
@@ -4232,11 +4234,13 @@ const CONTROL_VALUE = { name: "v", what: "the value of the control" };
 /** The control line: the line $/v = VALUE stands for it, it sets $/v, a new one goes after the first line, and it owns the faults of need v. */
 const CONTROL_LINE = { name: "control", held: true, sets: "v", merge: 1, owner: "v" };
 const CONTROL_LABEL = { slot: "label", type: "text", what: "the label", cap: BUDGET.control };
-const CARD_TITLE = { slot: "cardTitle", type: "text", what: "the card title", cap: BUDGET.cardTitle, formula: true };
-/** The card text: the kit cuts a long one after its last whole sentence inside the cap. */
-const CARD_TEXT = { slot: "cardText", type: "text", what: "the card text", cap: BUDGET.cardText, formula: true, long: true };
-/** The card line card(TITLE, TEXT) of the template word: it holds the card of a frame, and it owns the faults of need card. */
-const cardLine = (word) => ({ name: "card", holds: "card", owner: "card", form: `the card of ${word} is card(TITLE, TEXT)`, forms: { card: [CARD_TITLE, CARD_TEXT] } });
+/**
+ * The caption line caption = TEXT of an explain screen (stage A, K1): one or two short sentences under the controls, a text in quotes or a
+ * formula of texts that reads $/v. The kit cuts each text past BUDGET.caption after its last whole sentence, so only a long text with no
+ * sentence end inside the cap is a fault. It holds the text of a frame, and it owns the faults of need caption.
+ */
+const CAPTION = { name: "caption", slot: "caption", holds: "card", owner: "caption", cut: (tree) => cutTexts(tree, BUDGET.caption),
+  fault: (tree) => textFault("the caption", tree, BUDGET.caption, true) };
 /** The narration lines: say for one sentence, and say1 to sayN for the steps of a walk. They draw nothing, so they have no fault. */
 const NARRATION = { name: "say", narration: true };
 
@@ -4258,7 +4262,7 @@ const colorFault = (tree) => {
   return wrong ? `the color ${show(wrong)} is not a color of the kit. Use one of ${Object.keys(TONES).join(", ")}, a tone of one such as "water+1" or "accent-1@50", one of ${Object.keys(COLOR_NAMES).join(", ")}, or a hex such as "#336699"` : null;
 };
 
-return { BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, FEW_OPTIONS, optionCap, optionFault, labelsFault, optionsFault, SENTENCE_END, cut, cutLong, headFault, formOf, formFault, cutOf, CONTROL_VALUE, CONTROL_LINE, CONTROL_LABEL, CARD_TITLE, CARD_TEXT, cardLine, NARRATION, namedColors, colored, colorFault };
+return { BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, FEW_OPTIONS, optionCap, optionFault, labelsFault, optionsFault, SENTENCE_END, cut, cutTexts, cutLong, headFault, formOf, formFault, cutOf, CONTROL_VALUE, CONTROL_LINE, CONTROL_LABEL, CAPTION, NARRATION, namedColors, colored, colorFault };
 })();
 // elements.js
 const { toneOf, ELEMENTS } = (() => {
@@ -4503,7 +4507,7 @@ const OBJECTS = {"brain":{"id":"body.brain","box":[100,91.4],"image":true,"parts
 return { OBJECTS };
 })();
 // library.js
-const { UNITS, SMALLEST, LEAST, SEGMENTS, USE_NAMED, LIBRARY, entryOf, partName, missOf, useFault, roomFault, LABEL, lineWidth, labelLines, layoutOf, useShapes, freeShapes, FREE, freeLayout, segmentsOfEntry } = (() => {
+const { UNITS, SMALLEST, LEAST, SEGMENTS, USE_NAMED, LIBRARY, entryOf, partName, missOf, useFault, LABEL, lineWidth, useShapes, freeMarks, FREE, segmentsOfEntry } = (() => {
 // The library of a scene (stage 6, L4 to L6): the generic elements (elements.js) and the ready objects (catalog.js, which build.js writes
 // from kit/library/objects). A template line places one of them:
 //
@@ -4532,7 +4536,7 @@ const LEAST = 24;
 /** The largest number of path segments of one entry (L5). A gradient, a highlight, and the ground shadow cost no segment. */
 const SEGMENTS = 40;
 /** The named arguments of a library line. */
-const USE_NAMED = { label: "a text under it", mark: "the name of a part to mark", parts: "true to name each part", turn: "degrees", color: "a color of an element" };
+const USE_NAMED = { label: "a text under it", mark: "the name of a part to mark", parts: "true to put a dot at each part", turn: "degrees", color: "a color of an element" };
 
 /** The state of the library in one call of the host: the ids of the image entries whose image the host cannot open (compile.js sets it). */
 const LIBRARY = { missing: new Set() };
@@ -4558,10 +4562,10 @@ const missOf = (tree) => (tree?.k === "call" && tree.name === "use" && isText(tr
 
 /**
  * The fault of a library line use(NAME, X, Y, SIZE, [NUMBERS], ...), or null. A mark, a label, and the numbers are literals or formulas of
- * $/v. An unknown name is a fault that names it (missOf), so the repair draws the thing with shapes or an emoji. lang is the language of the
- * scene, whose part names must fit at the sides of the object.
+ * $/v. An unknown name is a fault that names it (missOf), so the repair draws the thing with shapes or an emoji. The name of a marked part
+ * stands in a chip inside the picture (chipOf), so no name needs room at the sides of the object (stage A, K3).
  */
-function useFault(tree, picture = [300, 300], lang = "en") {
+function useFault(tree) {
   const [name, ...rest] = tree.args ?? [], form = "a library line is use(NAME, X, Y, SIZE), with [NUMBERS] of an element after SIZE";
   if (!isText(name)) return `${form}, and NAME is a name in quotes`;
   const found = entryOf(name.v);
@@ -4585,19 +4589,6 @@ function useFault(tree, picture = [300, 300], lang = "en") {
   // A SIZE under LEAST or past the picture is a fault (H2).
   const size = numberOf(rest[2]), least = found.kind === "object" ? LEAST : 12;
   if (size !== undefined && (size < least || size > 300)) return `the SIZE of ${name.v} is from ${least} to 300, and this line has ${size}`;
-  return roomFault(tree, tree.named, picture, lang);
-}
-
-/**
- * The fault of the part names of a library line of an object whose X, Y, and SIZE are numbers, or null. The names stand at the sides of the
- * object, inside the picture, and leave the object its SIZE, or SMALLEST for a larger SIZE. named holds parts=, mark=, and the names that the model gives.
- */
-function roomFault(tree, named, picture, lang) {
-  const found = entryOf(tree.args[0].v), at = tree.args.slice(1, 4).map(numberOf);
-  const placed = found.kind === "object" && at.every((value) => value !== undefined) ? layoutOf(found, named, at, picture, lang) : null;
-  if (placed && (placed.size < Math.min(SMALLEST, at[2]) - 0.01 || placed.labels.some((one) => one.clipped))) {
-    return `the names of the parts of ${tree.args[0].v} leave it too little room: name fewer parts, write shorter names, or give it more height`;
-  }
   return null;
 }
 
@@ -4652,65 +4643,38 @@ function layerShapes(layer, paint, opacity) {
   return out;
 }
 
-/**
- * The parts that a line names: each part with parts=true or with a mark that is a formula (only the marked one shows), else the marked part when
- * the mark is a name. A turned object names no part.
- */
-function namedParts(found, { mark, parts, turn }) {
-  const list = found.kind === "object" ? found.entry.parts ?? [] : [];
-  return turn ? [] : parts?.v === true || (mark && !isText(mark)) ? list : isText(mark) ? list.filter((part) => part.id === mark.v || Object.values(part.names).includes(mark.v)) : [];
-}
-/** The size, the line height, the gap to the object, and the margin of the part labels, in the units of the picture. */
-const LABEL = { size: 12, line: 14, gap: 8, margin: 4 };
-/** The width of a text line of the part labels: a wide letter (м, ю, m, w, a capital) takes 0.85 of the size, each other character 0.56. */
+/** The size of the text of a name chip, its side padding, its height, its gap to the ring of its part, and its margin to the edge of the picture. */
+const LABEL = { size: 12, pad: 6, height: 20, gap: 4, margin: 4 };
+/** The width of a text line of a name chip: a wide letter (м, ю, m, w, a capital) takes 0.85 of the size, each other character 0.56. */
 const lineWidth = (text) => [...text].reduce((sum, char) => sum + (/[мшщжюыфmw]/.test(char) || char !== char.toLowerCase() ? 0.85 : 0.56), 0) * LABEL.size;
-/** The lines of a part label: a name of more than 8 characters breaks at the space that gives the shortest longer line, if each line keeps 3 characters. */
-function labelLines(text) {
-  const chars = [...text];
-  if (chars.length <= 8) return [text];
-  const breaks = chars.map((char, index) => (char === " " && index >= 3 && chars.length - index - 1 >= 3 ? index : -1)).filter((index) => index > 0);
-  if (!breaks.length) return [text];
-  const best = breaks.reduce((a, b) => (Math.max(a, chars.length - a - 1) <= Math.max(b, chars.length - b - 1) ? a : b));
-  return [chars.slice(0, best).join(""), chars.slice(best + 1).join("")];
-}
-
 /**
- * The place of an object with the labels of its named parts (F2), as {x, y, size, labels}. A part in the left half of the object gets its
- * label at the left, each other part at the right. With labels, the object stands in the middle of the space that the two label columns
- * leave in the width of the picture, as large as that space permits and at most SIZE, at the height Y. Each label is {part, lines, px, py, x,
- * y, align, clipped}: px, py is the point of its part, x, y the end of its leader line, and clipped is true for a label that leaves the
- * picture. With no named part, the object keeps X, Y, and SIZE.
+ * The name chip of a part (stage A, K3): a rounded box in the surface color with the name in the accent color on one line. It stands centered
+ * above the ring of radius ring around the point [x, y] when it has room there, else under it, and it moves inside the picture [width, height].
+ * when is its visible= text.
  */
-function layoutOf(found, named, [X, Y, S], [width, height], lang) {
-  const parts = namedParts(found, named), [w, h] = found.entry.box, { line, gap, margin } = LABEL;
-  if (!parts.length) return { x: X, y: Y, size: S, labels: [] };
-  const items = parts.map((part) => ({ part, lines: labelLines(shownName(part, lang, named)), left: part.label[0] < 0 }));
-  const column = (left) => Math.max(0, ...items.filter((one) => one.left === left).flatMap((one) => one.lines.map(lineWidth)));
-  const [L, R] = [column(true), column(false)];
-  const xl = margin + (L ? L + gap : 0), xr = width - margin - (R ? R + gap : 0);
-  const size = Math.max(0, Math.min(S, ((xr - xl) * UNITS) / w, ((height - 2 * margin) * UNITS) / h));
-  const k = size / UNITS, x = (xl + xr) / 2, y = Math.min(Math.max(Y, margin + (h * k) / 2), height - margin - (h * k) / 2);
-  const labels = [];
-  for (const left of [true, false]) {
-    const side = items.filter((one) => one.left === left).map((one) => ({ ...one, px: x + one.part.label[0] * k, py: y + one.part.label[1] * k })).sort((a, b) => a.py - b.py);
-    // Each label starts at the height of its point. Then the labels of one side move down, so none overlaps the one above it, and up, so the
-    // last one stays inside the picture.
-    let bottom = -Infinity;
-    for (const one of side) { one.y = Math.max(one.py, bottom + 2 + (one.lines.length * line) / 2); bottom = one.y + (one.lines.length * line) / 2; }
-    let top = height - margin;
-    for (const one of [...side].reverse()) { one.y = Math.min(one.y, top - (one.lines.length * line) / 2); top = one.y - (one.lines.length * line) / 2 - 2; }
-    for (const one of side) {
-      labels.push({ ...one, align: left ? "end" : "start", x: left ? x - (w * k) / 2 - gap : x + (w * k) / 2 + gap, clipped: one.y - (one.lines.length * line) / 2 < margin - 0.5 });
-    }
-  }
-  return { x, y, size, labels };
+function chipOf([x, y], ring, name, [width, height], when = "") {
+  const { size, pad, height: tall, gap, margin } = LABEL, wide = lineWidth(name) + 2 * pad, above = y - ring - gap - tall;
+  const top = above >= margin ? above : Math.min(y + ring + gap, height - margin - tall), left = Math.min(Math.max(x - wide / 2, margin), width - margin - wide);
+  return [`rect(${fixed(left)}, ${fixed(top)}, ${fixed(wide)}, ${tall}, "surface", ${tall / 2}${when})`, `text(${fixed(left + wide / 2)}, ${fixed(top + tall / 2)}, ${JSON.stringify(name)}, "accent", ${size}${when})`];
 }
+/** The dot of a part that is not the present one (K3): a small accent dot on a surface dot, so that it shows on a part in the accent color too. */
+const dotOf = ([x, y], when = "") => [`circle(${fixed(x)}, ${fixed(y)}, ${DOT + 1.5}, "surface"${when})`, `circle(${fixed(x)}, ${fixed(y)}, ${DOT}, "accent"${when})`];
+/** The radius of the dot of a part. */
+const DOT = 2.5;
+/** The room around the point of a part of a vector entry, which has no ring radius: its chip stands this far from the point, in units of the entry. */
+const ROOM = 8;
+/** The visible= text of a mark that shows while on holds ("true" or a formula) and while the line is visible (visible= of the line, or undefined). */
+const whenOn = (on, visible) => {
+  const tests = [visible && `(${show(visible)})`, on !== "true" && on].filter(Boolean);
+  return tests.length ? `, visible=${tests.join(" && ")}` : "";
+};
 
 /**
- * The shapes of a library line (useFault gives it no fault), as {shapes, lines}: an object as one group of its layers with its part labels at
- * the sides, or an element as one group of the shapes of its draw rule. lines are app lines before the drawing: a mark that is a formula of
- * $/v becomes the value $/KEYm once, so each layer reads it with no copy of the formula. lang picks the names of the parts, and picture is
- * [width, height] of the drawing, for the places of the labels.
+ * The shapes of a library line (useFault gives it no fault), as {shapes, lines, marks}: an object as one group of its layers at X, Y, and
+ * SIZE, or an element as one group of the shapes of its draw rule. lines are app lines before the drawing: a mark that is a formula of $/v
+ * becomes the value $/KEYm once, so each layer reads it with no copy of the formula. marks are the name chip of the marked part and a dot at
+ * each other part of parts=, which the drawing puts after each shape (stage A, K3). lang picks the names of the parts, and picture is
+ * [width, height] of the drawing, which holds each chip.
  */
 function useShapes(tree, lang, picture = [300, 300], key = "s") {
   const [name, x, y, size, numbers] = tree.args, found = entryOf(name.v), { label, mark: given, parts, turn, color, visible } = tree.named;
@@ -4733,7 +4697,7 @@ function useShapes(tree, lang, picture = [300, 300], key = "s") {
       const [lx, ly, align] = entry.label ?? [0, 62, "center"];
       shapes.push(tidy(`text(${X} + ${S} * ${lx / 100}, ${Y} + ${S} * ${ly / 100}, ${show(label)}, "ink", 13${align === "center" ? "" : `, align=${JSON.stringify(align)}`}${shown})`));
     }
-    return { shapes, lines };
+    return { shapes, lines, marks: [] };
   }
   const entry = found.entry, [, h] = entry.box, list = entry.parts ?? [];
   const fixedMark = isText(given) ? list.find((part) => part.id === given.v || Object.values(part.names).includes(given.v)) : null;
@@ -4766,75 +4730,48 @@ function useShapes(tree, lang, picture = [300, 300], key = "s") {
     }
     shapes.push(...layerShapes(layer, (step, alpha) => JSON.stringify(tone(layer.role, step, alpha)), null));
   }
-  // The labels of the parts: with parts=true each part, else the marked part. Each one is a text at the side and a thin leader line to its point.
-  // With a mark that is a formula and no parts=true, each label shows only while its part is the marked one. With labels, the kit places the
-  // object between the two label columns (layoutOf).
-  const at = [X, Y, S].map(Number), alone = mark && parts?.v !== true;
-  const placed = at.every(Number.isFinite) ? layoutOf(found, tree.named, at, picture, lang) : null;
-  const [GX, GY, GS] = placed?.labels.length ? [placed.x, placed.y, placed.size].map(fixed) : [X, Y, S];
-  const out = [tidy(`group(${GX}, ${GY}, ${GS} / ${UNITS}, [${shapes.join(", ")}]${turn ? `, turn=${show(turn)}` : ""}${shown})`)];
-  out.push(...labelShapes(placed?.labels ?? [], marked, alone, visible));
-  if (label) out.push(tidy(`text(${GX}, ${GY} + ${GS} * ${h / 200} + 12, ${show(label)}, "ink", 13${shown})`));
-  return { shapes: out, lines };
+  // The marks of the parts (K3): the marked part has its name in a chip, and parts= (true, or the ids of the parts of a walk) puts a dot at each
+  // other part. A mark that is a formula gives each part a chip that shows only while it is the marked one. The object keeps X, Y, and SIZE.
+  // A turned object, or one whose place is a formula, has no marks.
+  const out = [tidy(`group(${X}, ${Y}, ${S} / ${UNITS}, [${shapes.join(", ")}]${turn ? `, turn=${show(turn)}` : ""}${shown})`)];
+  if (label) out.push(tidy(`text(${X}, ${Y} + ${S} * ${h / 200} + 12, ${show(label)}, "ink", 13${shown})`));
+  const at = [X, Y, S].map(Number), k = at[2] / UNITS, dotted = (part) => parts?.v === true || (Array.isArray(parts?.v) && parts.v.includes(part.id));
+  const dots = [], chips = [];
+  if (at.every(Number.isFinite) && !turn) {
+    for (const part of list) {
+      const point = [at[0] + part.label[0] * k, at[1] + part.label[1] * k], on = marked(part);
+      if (on !== "false") chips.push(...chipOf(point, (part.ring ?? ROOM) * k, shownName(part, lang, tree.named), picture, whenOn(on, visible)));
+      if (dotted(part) && on !== "true") dots.push(...dotOf(point, whenOn(on === "false" ? "true" : `!(${on})`, visible)));
+    }
+  }
+  return { shapes: out, lines, marks: [...dots, ...chips] };
 }
 
-/** A test text as a color: yes while on holds, else no. on is "true", "false", or a formula. */
-const choose = (on, yes, no) => (on === "false" ? JSON.stringify(no) : on === "true" ? JSON.stringify(yes) : `(${on} ? ${JSON.stringify(yes)} : ${JSON.stringify(no)})`);
-/**
- * The shapes of the part labels of layoutOf: for each label a thin leader line to its point, a dot at the point, and its text lines. marked
- * gives the test text of a part. A marked part has the accent. alone is true when each label shows only while its part is the marked one.
- * visible is the visible= formula of the line, or undefined.
- */
-function labelShapes(labels, marked, alone, visible) {
-  const shown = visible ? `, visible=${show(visible)}` : "", out = [];
-  for (const one of labels) {
-    const ink = alone ? '"accent"' : choose(marked(one.part), "accent", "ink"), end = one.align === "end" ? one.x + 3 : one.x - 3, [px, py, ty] = [one.px, one.py, one.y].map(fixed);
-    const seen = alone ? `, visible=${visible ? `(${show(visible)}) && ` : ""}${marked(one.part)}` : shown;
-    out.push(`line(${px}, ${py}, ${fixed(end)}, ${ty}, "ink@55", 1${seen})`, `circle(${px}, ${py}, 2.5, ${ink}${seen})`,
-      ...one.lines.map((text, index) => `text(${fixed(one.x)}, ${fixed(one.y + (index - (one.lines.length - 1) / 2) * LABEL.line)}, ${JSON.stringify(text)}, ${ink}, ${LABEL.size}, align=${JSON.stringify(one.align)}${seen})`));
-  }
-  return out;
-}
 /** The accent ring of a marked point [x, y] with its radius and its width, while on holds (I4, I5): no shape when on is "false". */
 const ringOf = ([x, y], radius, width, on, color = "accent") => (on === "false" ? [] : [`arc(${fixed(x)}, ${fixed(y)}, ${radius}, 0, 360, "${color}", ${width}${on === "true" ? "" : `, visible=${on}`})`]);
 
 /**
- * A diagram of a thing with no ready object (stage 7b, R3): the model draws it with shapes in the drawing zone of FREE and gives each part
- * its name and a point [NAME, X, Y]. The kit names the parts with layoutOf and labelShapes, as the parts of an object whose box is the zone:
- * the names stand in the two side columns, and the drawing moves and shrinks with that object when the names need more room. The part of
- * the step ($/v is its name) has the accent ring at its point and the accent name. Returns {shapes, lines}: the shapes of the drawing, with
- * no names and no rings when named is false (a stream whose shapes can still grow), and the app lines before the drawing.
+ * The marks of a diagram of a thing with no ready object (stage 7b, R3, and stage A, K3), as {lines, marks}: the model draws the thing with
+ * shapes that fill the box, and gives each part its name and a point [NAME, X, Y]. The part of the step ($/v is its name) has an accent ring
+ * at its point and its name in a chip, and each other part has a dot. The drawing of the model stays as it is.
  */
-function freeShapes(shapes, points, picture = [300, 300], named = true) {
-  const [cx, cy] = [picture[0] / 2, picture[1] / 2], placed = freeLayout(points, picture), k = fixed(placed.size / UNITS);
-  // The number of the marked part is the value $/fp once, so each shape compares a short number and the source stays small.
-  const index = (part) => points.findIndex(([name]) => name === part.id) + 1, marked = (part) => `$/fp == ${index(part)}`;
-  const lines = [`$/fp := ${points.reduceRight((rest, [name], at) => `($/v == ${JSON.stringify(name)} ? ${at + 1} : ${rest})`, "0")}`];
-  const moved = k !== 1 || placed.x !== cx || placed.y !== cy;
-  // Each shape has a group of its own: the move comes from the points alone, so the drawing of a stream only grows (compile.js previewStep).
-  const out = moved ? shapes.map((shape) => `group(${fixed(placed.x - k * cx)}, ${fixed(placed.y - k * cy)}, ${k}, [${shape}])`) : [...shapes];
-  if (!named) return { shapes: out, lines: [] };
-  // The model can paint a part in the accent color, so a wider ring in the surface color under the accent ring keeps the mark visible.
-  for (const one of placed.labels) {
-    out.push(...ringOf([one.px, one.py], FREE.ring, FREE.rim + FREE.halo, marked(one.part), "surface"), ...ringOf([one.px, one.py], FREE.ring, FREE.rim, marked(one.part)));
-  }
-  return { shapes: [...out, ...labelShapes(placed.labels, marked, false)], lines };
+function freeMarks(points, picture = [300, 300]) {
+  // The number of the marked part is the value $/fp once, so each mark compares a short number and the source stays small.
+  const lines = [`$/fp := ${points.reduceRight((rest, [name], at) => `($/v == ${JSON.stringify(name)} ? ${at + 1} : ${rest})`, "0")}`], dots = [], chips = [];
+  points.forEach(([name, x, y], index) => {
+    const on = `$/fp == ${index + 1}`;
+    dots.push(...dotOf([x, y], `, visible=!(${on})`));
+    // The model can paint a part in the accent color, so a wider ring in the surface color under the accent ring keeps the mark visible.
+    chips.push(...ringOf([x, y], FREE.ring, FREE.rim + FREE.halo, on, "surface"), ...ringOf([x, y], FREE.ring, FREE.rim, on),
+      ...chipOf([x, y], FREE.ring + FREE.rim / 2, name, picture, `, visible=${on}`));
+  });
+  return { lines, marks: [...dots, ...chips] };
 }
 /**
- * The drawing zone of a diagram of a thing with no ready object, from x = zone[0] to x = zone[1] of the picture (the prompt says it), the
- * smallest scale of its drawing beside the names (fewest), the radius and the width of its accent ring, and the added width of the
- * surface ring under it (halo).
+ * The margin of the points of a diagram of a thing with no ready object to the edge of the box, the radius and the width of the accent ring of
+ * its marked part, and the added width of the surface ring under it (halo).
  */
-const FREE = { zone: [80, 220], fewest: 0.6, ring: 8, rim: 4, halo: 4 };
-/**
- * The place of a diagram of a thing with no ready object (freeShapes): layoutOf of an object at the center of the picture whose box is the
- * zone of FREE and the height of the picture, with a part at each point [NAME, X, Y]. size / UNITS is the scale of the drawing.
- */
-function freeLayout(points, picture = [300, 300]) {
-  const [cx, cy] = [picture[0] / 2, picture[1] / 2];
-  const parts = points.map(([name, x, y]) => ({ id: name, names: { en: name }, label: [x - cx, y - cy] }));
-  return layoutOf({ kind: "object", entry: { box: [FREE.zone[1] - FREE.zone[0], picture[1] - 2 * LABEL.margin], parts } }, { parts: { k: "lit", v: true } }, [cx, cy, UNITS], picture, "en");
-}
+const FREE = { margin: 10, ring: 8, rim: 4, halo: 4 };
 
 /** The width of the accent rim of a marked part, in the units of its entry (F3). */
 const MARK_RIM = 3;
@@ -4852,10 +4789,10 @@ const segmentsOfEntry = (entry) => (entry.layers ?? []).reduce((sum, layer) => {
   return sum + (layer.line ? 0 : points) + (layer.outline !== undefined || layer.line ? points : 0);
 }, 0);
 
-return { UNITS, SMALLEST, LEAST, SEGMENTS, USE_NAMED, LIBRARY, entryOf, partName, missOf, useFault, roomFault, LABEL, lineWidth, labelLines, layoutOf, useShapes, freeShapes, FREE, freeLayout, segmentsOfEntry };
+return { UNITS, SMALLEST, LEAST, SEGMENTS, USE_NAMED, LIBRARY, entryOf, partName, missOf, useFault, LABEL, lineWidth, useShapes, freeMarks, FREE, segmentsOfEntry };
 })();
 // form-data.js
-const { DATA_BUDGET, cutLabel, cutLabels, cellText, rowFault, markFault, contextFaults, markLine, SOURCE_LINE, dataFill, tableLine, markStart, sentences, numbersIn, checkSource } = (() => {
+const { DATA_BUDGET, cardLine, cutLabel, cutLabels, cellText, rowFault, markFault, contextFaults, markLine, SOURCE_LINE, dataFill, tableLine, markStart, sentences, numbersIn, checkSource } = (() => {
 // What the line tables of the data family use (docs/superpowers/plans/2026-11-22-block-2-forms-library-motion.md, stage 5): compare, table,
 // chart, and nodata. Their call starts after the routing call, with the section "Template data" of prompt.md. A data form shows its rows or
 // points in a native table or chart, and the marked row or point is the value $/v: a tap on a row or a point moves it (decision 2). The host
@@ -4865,9 +4802,16 @@ const { DATA_BUDGET, cutLabel, cutLabels, cellText, rowFault, markFault, context
 
 /**
  * The caps of the data forms, in characters and items. A label (a row label, a thing name, a column head, a point label) past its cap is cut
- * with "…", because a cut label keeps its meaning. A value past its cap is a fault, because a cut number is a wrong number.
+ * with "…", because a cut label keeps its meaning. A value past its cap is a fault, because a cut number is a wrong number. A card text past
+ * its cap is cut after its last whole sentence inside the cap (form-base.js cut).
  */
-const DATA_BUDGET = { things: 3, compareRows: 6, columns: 4, tableRows: 12, visibleRows: 8, points: 8, label: 16, value: 12, sign: 4, nodataSentences: 2 };
+const DATA_BUDGET = { things: 3, compareRows: 6, columns: 4, tableRows: 12, visibleRows: 8, points: 8, label: 16, value: 12, sign: 4, nodataSentences: 2,
+  cardTitle: 32, cardText: 140 };
+const CARD_TITLE = { slot: "cardTitle", type: "text", what: "the card title", cap: DATA_BUDGET.cardTitle, formula: true };
+/** The card text: the kit cuts a long one after its last whole sentence inside the cap. */
+const CARD_TEXT = { slot: "cardText", type: "text", what: "the card text", cap: DATA_BUDGET.cardText, formula: true, long: true };
+/** The card line card(TITLE, TEXT) of the data form word: it holds the card of a frame, and it owns the faults of need card. */
+const cardLine = (word) => ({ name: "card", holds: "card", owner: "card", form: `the card of ${word} is card(TITLE, TEXT)`, forms: { card: [CARD_TITLE, CARD_TEXT] } });
 
 /** A label past cap: its first cap - 1 characters and "…". */
 const cutLabel = (text, cap = DATA_BUDGET.label) => ([...text].length > cap ? [...text].slice(0, cap - 1).join("") + "…" : text);
@@ -5016,7 +4960,7 @@ function rejectFile(head, value) {
   return `nodata(${show(head.args[0])}, lang=${show(head.named.lang ?? { k: "lit", v: "en" })}${palette})\ncard = card(${show({ k: "lit", v: title })}, ${show({ k: "lit", v: text })})\nsay = ${JSON.stringify(text)}\n`;
 }
 
-return { DATA_BUDGET, cutLabel, cutLabels, cellText, rowFault, markFault, contextFaults, markLine, SOURCE_LINE, dataFill, tableLine, markStart, sentences, numbersIn, checkSource };
+return { DATA_BUDGET, cardLine, cutLabel, cutLabels, cellText, rowFault, markFault, contextFaults, markLine, SOURCE_LINE, dataFill, tableLine, markStart, sentences, numbersIn, checkSource };
 })();
 // plans.js
 const { PLANS } = (() => {
@@ -5024,12 +4968,12 @@ const { PLANS } = (() => {
 
 /** The ready plan of each template by its word (kit/README.md, section "Ready plans"). */
 const PLANS = {
- "cells": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"slider\", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})\nneed card = card({{cardTitle}}, {{cardText}})\n",
+ "cells": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"slider\", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})\nneed caption = content({{caption}}, variant=\"caption\")\n",
  "chart": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/v = {{mark}}\ndata_view = {{main}}\nneed card = card({{cardTitle}}, {{cardText}})\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n",
  "compare": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/v = {{mark}}\ndata_view = {{main}}\nneed card = card({{cardTitle}}, {{cardText}})\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n",
- "items": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/items := [{{items}}]\n$/now := find($/items, $label == $/v)\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"choice\", {{label}}, {{start}}, options={{options}})\nneed card = card({{cardTitle}}, $/now/text)\n",
+ "items": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/items := [{{items}}]\n$/now := find($/items, $label == $/v)\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"choice\", {{label}}, {{start}}, options={{options}}, variant=\"inline\")\nneed caption = content({{caption}}, variant=\"caption\")\n",
  "nodata": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\nneed card = card({{cardTitle}}, {{cardText}}, icon=\"Search\")\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n",
- "scene": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n{{lines}}\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"slider\", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})\nneed v = input(\"choice\", {{label}}, {{start}}, options={{options}})\nneed v = input(\"choice\", {{label}}, {{start}}, options={{steps}}, variant=\"stepper\")\nneed t = {{play}}\nneed card = card({{cardTitle}}, {{cardText}})\n",
+ "scene": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n{{lines}}\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"slider\", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})\nneed v = input(\"choice\", {{label}}, {{start}}, options={{options}}, variant=\"inline\")\nneed v = input(\"choice\", {{label}}, {{start}}, options={{steps}}, variant=\"stepper\")\nneed t = {{play}}\nneed caption = content({{caption}}, variant=\"caption\")\n",
  "table": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/v = {{mark}}\ndata_view = {{main}}\nneed card = card({{cardTitle}}, {{cardText}})\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n"
 };
 
@@ -5038,8 +4982,8 @@ return { PLANS };
 // ../templates/scene.js
 const { partFault, SHAPES, controlStart, SCENE, diagramOf } = (() => {
 // The line table of the ready plan scene.plan (kit/README.md, section "Ready plans"): a picture of the shapes s1 to s20, one slider, choice,
-// steps, or parts control, a play line, and a card with a text. The kit draws each shape as it is, and a library line as the shapes of its
-// element or object (library.js). The shape kinds and their properties come from the registry of kinds.js, so a new kind needs no edit here.
+// steps, or parts control, a play line, and a caption. The kit draws each shape as it is, and a library line as the shapes of its element or
+// object (library.js). The shape kinds and their properties come from the registry of kinds.js, so a new kind needs no edit here.
 
 
 
@@ -5052,8 +4996,11 @@ const PLAY = "play(LABEL, FROM, TO, SECONDS) with numbers: $/t runs from FROM to
 const PLAY_SECONDS = 120;
 const SHAPE = new RegExp(`^s(?:${Array.from({ length: BUDGET.shapes }, (_, index) => index + 1).join("|")})$`);
 const number = (slot) => ({ slot, type: "number" });
-/** The options of a choice or the steps of a steps control: 2 to 6 labels, each within the cap of their number (optionsFault). */
-const labels = (what, word) => ({ slot: "options", type: "list", what, word, least: 2, most: BUDGET.options });
+/**
+ * The options of a choice or the steps of a steps control: 2 to 6 labels, each within the cap of their number (optionsFault). Both fill the
+ * inline choice of the ready plan (stage A, J3). The host tells the steps from the speeds of the play row by the row of the play button.
+ */
+const labels = (what, word, slot) => ({ slot, type: "list", what, word, least: 2, most: BUDGET.options });
 const START = { slot: "start", type: "word", optional: true };
 
 /**
@@ -5087,9 +5034,9 @@ function partsFault(tree) {
   return textFault("the label", args[0], BUDGET.control);
 }
 
-/** The fault of a shape line: a shape of the kind registry, or a library line use(NAME, X, Y, SIZE, …) in the language lang. */
-function partFault(tree, lang) {
-  if (tree.k === "call" && tree.name === "use") return useFault(tree, [WIDTH, HEIGHT], lang ?? "en");
+/** The fault of a shape line: a shape of the kind registry, or a library line use(NAME, X, Y, SIZE, …). */
+function partFault(tree) {
+  if (tree.k === "call" && tree.name === "use") return useFault(tree);
   const kinds = Object.keys(KINDS).filter((name) => KINDS[name].prompt !== null), kind = tree.k === "call" && kinds.includes(tree.name) ? KINDS[tree.name] : null;
   if (!kind) return `a shape is ${kinds.join(", ")}, or use(NAME, X, Y, SIZE) of the library`;
   const named = [...Object.keys(PROPERTIES).filter((key) => PROPERTIES[key].prompt !== null), ...(kind.named ?? [])], other = Object.keys(tree.named).find((key) => !named.includes(key));
@@ -5104,17 +5051,24 @@ function partFault(tree, lang) {
 
 /**
  * The shapes of the drawing and the app lines before it: each shape as it is, and each library line as its shapes, with the part names in the
- * language of the first line (library.js useShapes).
+ * language of the first line (library.js useShapes). The marks of the parts (a name chip, a dot) come after each shape, so no later shape
+ * covers them, and only when marked is true.
  */
-function shapesOf(parts, lang) {
-  const used = parts.map((part) => (part.tree.k === "call" && part.tree.name === "use" ? useShapes(part.tree, lang, [WIDTH, HEIGHT], part.name) : { shapes: [show(part.tree)], lines: [] }));
-  return { shapes: used.flatMap((one) => one.shapes), lines: used.flatMap((one) => one.lines) };
+function shapesOf(parts, lang, marked = true) {
+  const used = parts.map((part) => (part.tree.k === "call" && part.tree.name === "use" ? useShapes(part.tree, lang, [WIDTH, HEIGHT], part.name) : { shapes: [show(part.tree)], lines: [], marks: [] }));
+  return { shapes: [...used.flatMap((one) => one.shapes), ...(marked ? used.flatMap((one) => one.marks) : [])], lines: used.flatMap((one) => one.lines) };
 }
+/**
+ * Whether the marks of the parts can come: in a stream (preview), only after a line that comes after the shapes, such as the caption or a
+ * narration line, so that each later shape still goes before the marks and the drawing only grows.
+ */
+const marksCome = ({ read, preview }) => !preview || read.lines.some((one) => one.tree && LATER.test(one.name));
+const LATER = /^(?:caption|say(?:[1-9]\d*)?)$/;
 
 /** The shape lines s1 to s20: each one a shape with the kit's color for each color name, or a library line. predict of the tests uses them too. */
-const SHAPES = { name: "s", count: BUDGET.shapes, part: true, fault: (tree, { lang }) => partFault(tree, lang), draw: colored, check: colorFault,
-  fill(parts, { lang }) {
-    const { shapes, lines } = shapesOf(parts, lang);
+const SHAPES = { name: "s", count: BUDGET.shapes, part: true, fault: (tree) => partFault(tree), draw: colored, check: colorFault,
+  fill(parts, context) {
+    const { shapes, lines } = shapesOf(parts, context.lang, marksCome(context));
     return { shapes: shapes.join(", "), lines: lines.join("\n") };
   } };
 
@@ -5129,17 +5083,20 @@ function controlStart({ tree, parts, lang }) {
   return isText(start) || numberOf(start) !== undefined ? start : { k: "lit", v: 0 };
 }
 
-/** The card of a diagram (C2): the name of the part of the step with a capital first letter, and the sentence of the step, else the card text of the file. */
-function diagramCard(read, steps, card) {
-  const said = (index) => { const raw = read.lines.find((line) => line.name === `say${index + 1}` && line.tree)?.raw; try { return raw && JSON.parse(raw.slice(raw.indexOf("=") + 1)); } catch { return null; } };
-  const pick = (values) => parseExpression(steps.slice(0, -1).reduceRight((rest, step, index) => `($/v == ${JSON.stringify(step)} ? ${JSON.stringify(values[index])} : ${rest})`, JSON.stringify(values.at(-1))));
-  const fallback = card?.args?.[1] && isText(card.args[1]) ? card.args[1].v : null;
-  return { k: "call", name: "card", named: {}, args: [pick(steps.map((step) => step.charAt(0).toUpperCase() + step.slice(1))), pick(steps.map((step, index) => said(index) ?? fallback ?? step))] };
+/**
+ * The caption of a walk (stage A, K1): the narration sentence of the present step (sayK), else the name of the step, as a formula of $/v.
+ * Null with no narration line, so a walk with no narration has no caption, and the caption of a stream comes with its first narration line.
+ */
+function walkCaption(read, steps) {
+  const said = steps.map((_, index) => { const raw = read.lines.find((line) => line.name === `say${index + 1}` && line.tree)?.raw; try { return raw && JSON.parse(raw.slice(raw.indexOf("=") + 1)); } catch { return null; } });
+  if (!said.some(Boolean)) return null;
+  const values = steps.map((step, index) => said[index] ?? step);
+  return steps.slice(0, -1).reduceRight((rest, step, index) => `($/v == ${JSON.stringify(step)} ? ${JSON.stringify(values[index])} : ${rest})`, JSON.stringify(values.at(-1)));
 }
 
 const SCENE = {
   word: "scene",
-  text: `control, play, s1 to s${BUDGET.shapes} (at most ${BUDGET.shapes} shapes), and card`,
+  text: `control, play, s1 to s${BUDGET.shapes} (at most ${BUDGET.shapes} shapes), and caption`,
   values: [CONTROL_VALUE, { name: "t", what: "the value of play", line: "play" }],
   whole: { line: "s", count: 1, fault: "scene: the picture needs a shape with no fault" },
   // A scene whose first line and control alone have faults gives them to control (template.js ownersOf).
@@ -5147,14 +5104,14 @@ const SCENE = {
   lines: [
     { ...CONTROL_LINE, form: `the control of scene is ${CONTROL}`,
       // A steps control is a choice whose start is its answer step, by default the last step (decision 3).
-      forms: { slider: [CONTROL_LABEL, number("min"), number("max"), number("step"), number("start")], choice: [CONTROL_LABEL, labels("choice control", "option"), START],
-        steps: [CONTROL_LABEL, labels("steps control", "step"), START], parts: partsFault },
+      forms: { slider: [CONTROL_LABEL, number("min"), number("max"), number("step"), number("start")], choice: [CONTROL_LABEL, labels("choice control", "option", "options"), START],
+        steps: [CONTROL_LABEL, labels("steps control", "step", "options"), START], parts: partsFault },
       // The kit adds mark=$/v to the object of a diagram, so only the other forms need a line that reads $/v.
       unread: { forms: ["slider", "choice", "steps"], fault: "the control changes nothing on the screen, because no line reads $/v. Make a part read $/v, such as visible=$/v > 2" },
       walk: (tree, { parts, lang }) => (tree.name === "steps" ? tree.args[1].items.length : tree.name === "parts" ? diagramOf(parts, tree, lang).steps?.length ?? 0 : null) },
     { name: "play", sets: "t", merge: 2, owner: "t", slot: "play", fault: playFault },
     SHAPES,
-    cardLine("scene"),
+    CAPTION,
     NARRATION,
   ],
   start: controlStart,
@@ -5166,22 +5123,23 @@ const SCENE = {
     return diagram.fault ? [["control", diagram.fault]] : [];
   },
   /**
-   * A diagram (G1, C2): the kit names the parts of its object, or the parts of a thing with no entry at their points (stage 7b, R3), and marks
-   * the part of the step. The card shows the name of the part and its sentence. The model writes no label and no condition for it. In a stream,
-   * a thing with no entry names its parts only after a line that comes after the shapes, so that its drawing only grows.
+   * A walk: the caption is the narration sentence of the present step, and a caption line beside it goes (walkCaption). A diagram (G1, C2)
+   * also names the part of the step in a chip with a ring, and puts a dot at each other part of the walk (stage A, K3): the parts of its
+   * object, or the points of a thing with no entry (stage 7b, R3). The model writes no label and no condition for it. In a stream, the marks
+   * come only after a line that comes after the shapes (marksCome), so that the drawing only grows.
    */
-  fill({ read, call, line, parts, lang, preview }) {
+  fill(context) {
+    const { read, call, parts, lang } = context;
+    if (call?.name === "steps") return { caption: walkCaption(read, call.args[1].items.map((item) => item.v)) };
     const diagram = call?.name === "parts" ? diagramOf(parts, call, lang) : null;
     if (!diagram?.steps) return call?.name === "parts" ? { label: show(call.args[0]), options: show(call.args[1]) } : {};
     const names = diagram.names ? { names: { k: "lit", v: diagram.names } } : {};
-    const marked = parts.map((part) => (part === diagram.object ? { ...part, tree: { ...part.tree, named: { ...part.tree.named, parts: { k: "lit", v: true }, mark: parseExpression("$/v"), ...names } } } : part));
-    const card = diagramCard(read, diagram.steps, line("card")?.tree), own = shapesOf(marked, lang);
-    const after = !preview || read.lines.some((one) => one.name === "card" || NARRATION_NAME.test(one.name));
-    const { shapes, lines } = diagram.points ? freeShapes(own.shapes, diagram.points, [WIDTH, HEIGHT], after) : { shapes: own.shapes, lines: [] };
-    return { lines: [...own.lines, ...lines].join("\n"), shapes: shapes.join(", "), label: show(call.args[0]), steps: JSON.stringify(diagram.steps), cardTitle: show(card.args[0]), cardText: show(card.args[1]) };
+    const marked = parts.map((part) => (part === diagram.object ? { ...part, tree: { ...part.tree, named: { ...part.tree.named, parts: { k: "lit", v: diagram.ids }, mark: parseExpression("$/v"), ...names } } } : part));
+    const come = marksCome(context), own = shapesOf(marked, lang, come), free = diagram.points && come ? freeMarks(diagram.points, [WIDTH, HEIGHT]) : { lines: [], marks: [] };
+    return { lines: [...own.lines, ...free.lines].join("\n"), shapes: [...own.shapes, ...free.marks].join(", "), label: show(call.args[0]), steps: JSON.stringify(diagram.steps),
+      caption: walkCaption(read, diagram.steps) };
   },
 };
-const NARRATION_NAME = /^say(?:[1-9]\d*)?$/;
 
 /** The forms of a part of a parts control (stage 7b, R3). */
 const PART = "the name or the id of a part of the ready object in quotes, part(ID, NAME) with the name in the language of the request, or part(NAME, X, Y) with a point of a thing that you draw";
@@ -5197,9 +5155,9 @@ function partKind(item) {
 const nameOfPart = (item) => ({ id: item, named: item.args?.[1], point: item.args?.[0] })[partKind(item)];
 
 /**
- * The diagram of a parts control (block 2 plan, G1, G2, and C2), as {object, steps, names, points, fault}. object is the first part line that
- * places a ready object with parts, and steps are the names of the walk in the language of the scene: the names of the control, else each
- * part of the object in its order, at most BUDGET.parts. A name of the control that is a part of the object (by its name or its id) takes the
+ * The diagram of a parts control (block 2 plan, G1, G2, and C2), as {object, steps, ids, names, points, fault}. object is the first part line
+ * that places a ready object with parts, and steps are the names of the walk in the language of the scene: the names of the control, else each
+ * part of the object in its order, at most BUDGET.parts. ids are the ids of the parts of the walk. A name of the control that is a part of the object (by its name or its id) takes the
  * name of the entry. The entries have Russian and English names only, so in another language the model gives each name with part(ID, NAME),
  * and names maps each id to its name (stage 7b, R3).
  * With no object, each part is part(NAME, X, Y) of a thing that the model draws (G2, stage 7b), and points are [NAME, X, Y] (library.js freeShapes).
@@ -5214,28 +5172,27 @@ function diagramOf(parts, control, lang) {
   if (!known && kind !== "named") {
     return { fault: `the kit has no names in the language "${lang}" for the parts of ${object.tree.args[0].v}: write each part as part(ID, NAME) with the name in "${lang}", such as part(${JSON.stringify(list[0].id)}, NAME)` };
   }
-  if (!items) return { object, steps: list.slice(0, BUDGET.parts).map((part) => partName(part, lang)) };
+  if (!items) return { object, steps: list.slice(0, BUDGET.parts).map((part) => partName(part, lang)), ids: list.slice(0, BUDGET.parts).map((part) => part.id) };
   const keys = items.map((item) => (kind === "named" ? item.args[0] : item));
   const found = keys.map((key) => list.find((part) => part.id === key.v || partName(part, lang).toLowerCase() === key.v.toLowerCase() || Object.values(part.names).includes(key.v)));
   const missing = keys.find((_, index) => !found[index]);
   if (missing) return { fault: `${object.tree.args[0].v} has no part ${JSON.stringify(missing.v)}. Its parts are ${list.map((part) => (known ? partName(part, lang) : part.id)).join(", ")}` };
-  if (kind !== "named") return { object, steps: found.map((part) => partName(part, lang)) };
+  const ids = found.map((part) => part.id);
+  if (kind !== "named") return { object, steps: found.map((part) => partName(part, lang)), ids };
   const names = Object.fromEntries(found.map((part, index) => [part.id, items[index].args[1].v]));
-  const tree = object.tree, room = roomFault(tree, { ...tree.named, parts: { k: "lit", v: true }, names: { k: "lit", v: names } }, [WIDTH, HEIGHT], lang);
-  return { object, steps: Object.values(names), names, fault: room };
+  return { object, steps: Object.values(names), names, ids };
 }
 
-/** The diagram of a parts control with no ready object in the picture (G2, stage 7b): each part is part(NAME, X, Y) at a point of the drawing zone. */
+/**
+ * The diagram of a parts control with no ready object in the picture (G2, stage 7b): each part is part(NAME, X, Y) at a point of the thing that
+ * the model draws. The thing fills the box (stage A, K3), so each point stays inside the box less FREE.margin, where its ring and its chip fit.
+ */
 function freeDiagram(items, kind) {
   if (!items) return { fault: "a parts control with no names needs a ready object with parts in the picture, such as use(\"heart\", 150, 150, 220), or part(NAME, X, Y) for each part of a thing that you draw" };
-  if (kind !== "point") return { fault: "with no ready object in the picture, write each part as part(NAME, X, Y): its name and a point of the part in your drawing, and the kit writes the name beside the drawing" };
-  const points = items.map((item) => [item.args[0].v, numberOf(item.args[1]), numberOf(item.args[2])]), [left, right] = FREE.zone;
-  const out = points.findIndex(([, x, y]) => x < left || x > right || y < 0 || y > HEIGHT);
-  if (out >= 0) return { fault: `the point of part ${out + 1} is at ${points[out][1]}, ${points[out][2]}: the drawing and each point stay from x = ${left} to x = ${right} and from y = 0 to y = ${HEIGHT}, so the names have room at the sides` };
-  const placed = freeLayout(points, [WIDTH, HEIGHT]);
-  if (placed.size / UNITS < FREE.fewest || placed.labels.some((one) => one.clipped)) {
-    return { fault: "the names of the parts leave the drawing too little room: write shorter names, or names of two words, or name fewer parts" };
-  }
+  if (kind !== "point") return { fault: "with no ready object in the picture, write each part as part(NAME, X, Y): its name and a point of the part in your drawing, and the kit writes the name of the present part beside it" };
+  const points = items.map((item) => [item.args[0].v, numberOf(item.args[1]), numberOf(item.args[2])]), [low, high] = [FREE.margin, WIDTH - FREE.margin];
+  const out = points.findIndex(([, x, y]) => x < low || x > high || y < low || y > HEIGHT - FREE.margin);
+  if (out >= 0) return { fault: `the point of part ${out + 1} is at ${points[out][1]}, ${points[out][2]}: each point stays inside the box, from ${low} to ${high} in x and in y` };
   return { object: null, steps: points.map(([name]) => name), points };
 }
 
@@ -5243,8 +5200,8 @@ return { partFault, SHAPES, controlStart, SCENE, diagramOf };
 })();
 // ../templates/items.js
 const { ITEMS } = (() => {
-// The line table of the ready plan items.plan (kit/README.md, section "Ready plans"): the items i1 to i6, a choice of their labels, and a card
-// that shows the text of the chosen item. The drawing shows the sign and the label of the chosen item.
+// The line table of the ready plan items.plan (kit/README.md, section "Ready plans"): the items i1 to i6 and a choice of their labels. The
+// drawing shows the sign and the label of the chosen item, and the caption under the choice is its text (stage A, K1).
 
 
 
@@ -5254,7 +5211,7 @@ const ITEM = /^i[1-6]$/;
 
 const ITEMS = {
   word: "items",
-  text: "control, i1 to i6 (at most 6 items), and card",
+  text: "control and i1 to i6 (at most 6 items)",
   values: [CONTROL_VALUE],
   whole: { line: "i", count: 1, fault: "items: the picture needs a item with no fault" },
   lines: [
@@ -5262,21 +5219,25 @@ const ITEMS = {
       walk: (tree, { parts }) => (tree.name === "steps" ? parts.length : null) },
     { name: "i", count: BUDGET.items, part: true, form: "an item is item(LABEL, SIGN, TEXT)",
       forms: { item: [{ type: "text", what: "the label", cap: BUDGET.fewOption }, { type: "text", what: "the sign", cap: BUDGET.sign, inside: true },
-        { type: "text", what: "the text", cap: BUDGET.cardText, long: true }] },
+        { type: "text", what: "the text", cap: BUDGET.caption, long: true }] },
       // The choice of items shows their labels, so it cannot tell two items of one label apart.
       check(tree, { lines }) {
         const twin = lines.find((line) => line.tree && ITEM.test(line.name) && line.tree.args[0].v === tree.args[0].v);
         return twin ? `the label ${show(tree.args[0])} is the label of ${twin.name} too. Each item needs a label of its own: the choice shows the labels` : null;
       },
-      /** The list of the items and the chosen item, the drawing of its sign and label, and the labels as the options of the choice. */
-      fill: (parts) => ({
+      /**
+       * The list of the items and the chosen item, the drawing of its sign and label, the labels as the options of the inline choice (also
+       * for a steps control, stage A, J3), and the caption.
+       */
+      fill: (parts, { call }) => ({
         items: parts.map(({ tree: { args: [label, sign, text] } }) => `{label: ${show(label)}, sign: ${show(sign)}, text: ${show(text)}}`).join(", "),
         // The sign is large when it is one or two characters, and smaller for a word, so a sign at 1.25 times its cap fits the 300 px of the drawing.
         // A preview with no item yet draws nothing, so the first item only adds to the picture.
         shapes: parts.length ? 'text(150, 95, $/now/sign, "accent", len($/now/sign) <= 2 ? 72 : (len($/now/sign) <= 6 ? 44 : 24)), text(150, 190, $/v, "ink", 20)' : "",
         options: show({ k: "list", items: parts.map((part) => part.tree.args[0]) }),
+        // The caption is the text of the chosen item, so it comes with the first item, after the choice.
+        caption: parts.length ? "$/now/text" : null,
       }) },
-    { name: "card", holds: "card", owner: "card", form: "the card of items is card(TITLE): it shows the text of the chosen item", forms: { card: [CARD_TITLE] } },
     NARRATION,
   ],
   /** The labels are the options of the choice, so their cap follows the number of items and the control (optionFault), which only the whole file knows. */
@@ -5295,7 +5256,7 @@ return { ITEMS };
 })();
 // ../templates/cells.js
 const { CELLS } = (() => {
-// The line table of the ready plan cells.plan (kit/README.md, section "Ready plans"): a slider of a count of cells and a card with a text.
+// The line table of the ready plan cells.plan (kit/README.md, section "Ready plans"): a slider of a count of cells and a caption.
 // The control draws the cells, so a cells file has no part line.
 
 
@@ -5303,14 +5264,14 @@ const { CELLS } = (() => {
 
 const CELLS = {
   word: "cells",
-  text: "control and card",
+  text: "control and caption",
   values: [CONTROL_VALUE],
   whole: { line: "control", count: 1, fault: "cells: the cells need a line control = slider(LABEL, 0, COUNT, 1, START) with no fault" },
   lines: [
     { ...CONTROL_LINE, holds: "parts", form: "the control of cells is slider(LABEL, 0, COUNT, 1, START)",
       forms: { slider: [CONTROL_LABEL, { slot: "min", type: "number", is: 0 }, { slot: "max", type: "whole", what: "COUNT", least: 2, most: BUDGET.cells },
         { slot: "step", type: "number", is: 1 }, { slot: "start", type: "number" }] } },
-    cardLine("cells"),
+    CAPTION,
     NARRATION,
   ],
   start: controlStart,
@@ -5521,7 +5482,7 @@ const { isTemplateFile, readTemplate, mergeTemplate, checkData, expandTemplate, 
 //   scene("Почему корабль не тонет?", lang="ru", palette="blue")      the first line: the template, the title, the language, the palette
 //   control = choice("Предмет", ["Корабль", "Гвоздь"])                 the one control. A part reads its value as $/v
 //   s1 = rect(0, 110, 300, 110, "water", 0)                            the parts: s1 to s20 are shapes (scene), i1 to i6 items (items)
-//   card = card("Вытеснение воды", "Полый корабль ...")                 the card
+//   caption = "Полый корабль вытесняет много воды."                    the caption under the controls
 //   say = "Выбери предмет и смотри на воду."                           the narration: say for one sentence, say1 to sayN for steps
 //
 // This module is the engine: it names no template and no line of one. Each template is a ready plan with its line table (ready.js,
@@ -5751,7 +5712,7 @@ function keptOf(read, leftOut) {
 
 /**
  * The owner of each fault of the compile of an expansion, as a map of a line name to its faults. A fault of a need belongs to the line whose entry
- * owns that need, such as need v to the control and need card to the card. Each other fault belongs to each part whose compile with the first
+ * owns that need, such as need v to the control and need caption to the caption. Each other fault belongs to each part whose compile with the first
  * line and the control alone has faults, and the faults of that compile name the part in the place of the need. A line table with owner gives
  * the faults of the first line and the control alone to that line.
  */
@@ -5778,8 +5739,9 @@ function ownersOf(read, leftOut, faults, build) {
  * with no definition and expanded null: a fault of the first line, fewer lines of an entry than the whole rule of its line table, or a kit fault
  * of the last compile.
  * preview is true for the lines so far of a stream (compile.js previewStep): an unread control stays, and only a fault of the first line or a
- * kit fault of the last compile is whole, so the first line alone gives the frame. holds is what kept draws: "card", "parts" (a part, or a line
- * of an entry that holds parts, such as the control of cells), or "frame" (the first line, maybe the control).
+ * kit fault of the last compile is whole, so the first line alone gives the frame. holds is what kept draws: "card" (the text of the screen,
+ * such as a caption or a card), "parts" (a part, or a line of an entry that holds parts, such as the control of cells), or "frame" (the first
+ * line, maybe the control).
  */
 function buildTemplate(text, stored, build, preview = false) {
   const old = stored === null ? null : readTemplate(stored), faults = [], out = new Set();
@@ -5828,7 +5790,8 @@ function buildTemplate(text, stored, build, preview = false) {
   const lacking = whole();
   faults.push(...(lacking ? [lacking] : built.faults.map((fault) => `${read.word}: ${fault}`)));
   const unique = [...new Set(faults)], broken = Boolean(lacking) || built.faults.length > 0;
-  const holding = (kind) => drawn((line, entry) => entry?.holds === kind && line.tree.k === "call");
+  // A held line holds its kind only as a call: $/v = VALUE in its place draws no control. A text line, such as a caption, holds it as a text.
+  const holding = (kind) => drawn((line, entry) => entry?.holds === kind && (line.tree.k === "call" || !entry.held));
   const holds = holding("card") ? "card" : drawnParts(read, leftOut).length || holding("parts") ? "parts" : "frame";
   return { built: broken ? { faults: unique, notes: built?.notes ?? [], definition: null, language: null, hole: false } : { ...built, faults: unique },
     word: read.word, kept, expanded: broken ? null : expanded, leftOut: [...leftOut], holds, misses };

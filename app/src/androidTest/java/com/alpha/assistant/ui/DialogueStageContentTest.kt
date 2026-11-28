@@ -20,6 +20,7 @@ import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.images.ImageProvider
 import com.alpha.assistant.images.ProviderImage
 import com.alpha.assistant.tools.AgentScriptProvider
+import com.alpha.assistant.tools.STAGE_PICTURE_TAG
 import com.alpha.assistant.tools.Scripted
 import com.alpha.assistant.tools.agentFixtureFinish
 import com.alpha.assistant.tools.agentWrite
@@ -127,7 +128,7 @@ class DialogueStageContentTest {
             shell.live(TemplateTalk(AgentScriptProvider(shipTemplate()), full)) { scenario, model, _ ->
                 scenario.onActivity { assertTrue("dark theme", (it.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES) }
                 val ship = shell.screen(model)
-                assertOneSurface(scenario, "template", SHIP_CARD, canvas = null)
+                assertOneSurface(scenario, "template", SHIP_CAPTION, canvas = null, picture = true)
                 val before = shell.messages(model).size
                 stage.socket.say(TemplateTalk.APP_REQUEST, "d2", 2_000)
                 shell.waitForTheAnswer(model, before)
@@ -139,9 +140,11 @@ class DialogueStageContentTest {
 
     /**
      * The page in the stage gutter, the app background in the padding of its column, and [canvas] by its left edge equal the shell surface
-     * within 2 for each channel. The card with the title [card] differs. All pixels are at the height of that title, away from the corners.
+     * within 2 for each channel, at the height of the text [card], away from the corners. The card with the title [card] differs. With
+     * [picture], the text is the caption under the large picture (stage A, K1), and the card that differs is the picture card: its pixel is
+     * 6 dp from its left edge and 24 dp under its top, under its corner.
      */
-    private fun assertOneSurface(scenario: ActivityScenario<CloudTestActivity>, name: String, card: String, canvas: String?) {
+    private fun assertOneSurface(scenario: ActivityScenario<CloudTestActivity>, name: String, card: String, canvas: String?, picture: Boolean = false) {
         robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, card) &&
             (canvas == null || robot.composedIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.ContentDescription)?.any { d -> d.startsWith("$canvas.") } == true }) }
         robot.awaitFrames(5)
@@ -150,12 +153,13 @@ class DialogueStageContentTest {
         val density = stage.fixture.context.resources.displayMetrics.density
         fun dp(value: Int) = (value * density).roundToInt()
         val page = robot.composedBounds(scenario, STAGE).first
-        // The gutter of the stage (DialogueStage), and the column padding «medium» of the app.
-        val gutter = dp(if (page.width() / density >= 600) 28 else 20)
+        // The gutter of the stage (DialogueStage, Stage A F1), and the column padding «medium» of the app.
+        val gutter = dp(if (page.width() / density >= 600) 16 else 8)
         val title = checkNotNull(robot.composedBoundsIn(scenario, STAGE, robot.hasText(card)))
         val drawing = canvas?.let { label ->
             checkNotNull(robot.composedBoundsIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.ContentDescription)?.any { d -> d.startsWith("$label.") } == true })
         }
+        val pictureCard = if (picture) checkNotNull(robot.composedBoundsIn(scenario, STAGE) { it.getOrNull(SemanticsProperties.TestTag) == STAGE_PICTURE_TAG }) else null
         val shot = checkNotNull(robot.automation.takeScreenshot())
         try {
             File(checkNotNull(stage.fixture.context.getExternalFilesDir("one-surface")), "$name.png").outputStream().use {
@@ -166,7 +170,7 @@ class DialogueStageContentTest {
             val surface = AlphaDarkColors.surface.toArgb()
             val pixels = listOfNotNull("page" to at(page.left + gutter / 2, y), "app" to at(page.left + gutter + dp(6), y),
                 drawing?.let { "canvas" to at(it.left + dp(8), it.centerY()) })
-            val cardPixel = at(title.left - dp(6), y)
+            val cardPixel = pictureCard?.let { at(it.left + dp(6), it.top + dp(24)) } ?: at(title.left - dp(6), y)
             val found = (pixels + ("card" to cardPixel)).joinToString { "${it.first} #${Integer.toHexString(it.second)}" }
             Log.i("OneSurface", "$name: $found")
             pixels.forEach { (part, pixel) -> assertTrue("$name: $part is the shell surface #${Integer.toHexString(surface)}: $found", near(pixel, surface)) }
@@ -205,8 +209,6 @@ class DialogueStageContentTest {
         val PICTURE_ANSWER: String = JSONObject(chatDecision("answer", "Вот сердце в разрезе.")).put("image", JSONObject()
             .put("slot", "heart").put("prompt", "A human heart in section").put("alt", ALT).put("aspect", "1:1").put("required", true)
             .toString()).toString()
-        /** The title of the text card of the ship template. */
-        const val SHIP_CARD = "Вытеснение воды"
         const val ORBIT = "Земля на орбите"
         const val ORBIT_CARD = "Один оборот"
         /** A full mini-app in the blue palette with its canvas straight in the column of its theme, as the full generation writes one. */

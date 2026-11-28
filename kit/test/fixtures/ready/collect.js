@@ -5,7 +5,7 @@
 import { BUDGET, CONTROL_LINE, CONTROL_VALUE, CONTROL_LABEL, NARRATION } from "../../../src/form-base.js";
 
 const number = (slot) => ({ slot, type: "number" });
-const text = (slot, what, cap = BUDGET.cardText) => ({ slot, type: "text", what, cap });
+const text = (slot, what, cap = 140) => ({ slot, type: "text", what, cap });
 
 export const COLLECT = {
   word: "collect",

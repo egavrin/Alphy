@@ -3,7 +3,7 @@ app({{title}}, lang={{lang}}, preset="clean", palette={{palette}})
 need picture = drawing({{title}}, 300, 300, [{{shapes}}])
 $/v = {{held}}
 need v = input("slider", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})
-need v = input("choice", {{label}}, {{start}}, options={{options}})
+need v = input("choice", {{label}}, {{start}}, options={{options}}, variant="inline")
 need v = input("choice", {{label}}, {{start}}, options={{steps}}, variant="stepper")
 need t = {{play}}
-need card = card({{cardTitle}}, {{cardText}})
+need caption = content({{caption}}, variant="caption")

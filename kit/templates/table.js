@@ -2,8 +2,8 @@
 // or cell, and a card with the caption. The native table shows 8 rows (6 on a compact width), and more rows scroll inside its box
 // (ToolUiCatalog visibleRows).
 
-import { CONTROL_VALUE, NARRATION, cardLine, isText } from "../src/form-base.js";
-import { DATA_BUDGET, SOURCE_LINE, cellText, checkSource, contextFaults, cutLabel, cutLabels, dataFill, markLine, markStart, rowFault, tableLine } from "../src/form-data.js";
+import { CONTROL_VALUE, NARRATION, isText } from "../src/form-base.js";
+import { DATA_BUDGET, cardLine, SOURCE_LINE, cellText, checkSource, contextFaults, cutLabel, cutLabels, dataFill, markLine, markStart, rowFault, tableLine } from "../src/form-data.js";
 
 const heads = (lines) => lines.find((line) => line.name === "head" && line.tree)?.tree.args[0].items.map((item) => item.v) ?? [];
 

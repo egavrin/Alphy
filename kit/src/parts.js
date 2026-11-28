@@ -149,9 +149,8 @@ const PARTS = {
   // need t = play("Motion", 0, 360, 14): a value that runs from 0 to 360 in 14 s, again and again, from the first state (block 2 plan, M1 and
   // M2). Under the label, a tonal button pauses and plays it, and a choice of three speeds sets the time of one round: slow is two times the
   // time, and fast is half of it. A pause keeps the value, and a play or a new speed goes on from it (core.js animate with a loop).
-  // Beside a control (need v, the control of a scene), the motion runs from the first state with no play row (stage 7, fix list 2, H4): the
-  // row is hidden, and its button keeps the loop that starts the motion.
-  play(name, need, { word, controlled }) {
+  // The row shows beside each other control too (stage A, K4).
+  play(name, need, { word }) {
     const [title, from, to, seconds] = need.args, v = `$/${name}`;
     if (need.args.length !== 4) throw new DslError('play needs a label, a start, an end, and the seconds of one round: play("Motion", 0, 360, 10)');
     const run = `animate(${v}, ${show(to)}, ${show(seconds)} * (${v}_sp == "slow" ? 2000 : ${v}_sp == "fast" ? 500 : 1000), ${show(from)})`;
@@ -161,7 +160,7 @@ const PARTS = {
         // Fix list 1, F2: one row, a round button with the icon only (its text is its spoken name), then the speeds in the rest of the row.
         `${name}_button = Button(${v}_on ? ${q(word("Pause"))} : ${q(word("Play"))}, action=[toggle(${v}_on), when(${v}_on, ${run}), when(!${v}_on, animate(${v}, ${v}, 0))], variant="tonalIcon", icon=${v}_on ? "Pause" : "Play")`,
         `${name}_speed = Segmented(${show(title)}, ${v}_sp, ${speeds}, action=when(${v}_on, ${run}), variant="inline", weight=1)`,
-        `${name}_view = Column([${name}_label, Row([${name}_button, ${name}_speed], gap="small")], gap="small"${controlled ? ", visible=false" : ""})`],
+        `${name}_view = Column([${name}_label, Row([${name}_button, ${name}_speed], gap="small")], gap="small")`],
       top: [`${name}_view`],
     };
   },
@@ -633,7 +632,12 @@ const PARTS = {
   },
 
   // need intro = content("Shown as text")
-  content(name, need) { return { lines: [`${name}_view = Text(${show(need.args[0])})`], top: [`${name}_view`] }; },
+  // A ready plan gives variant="caption" to the caption of an explain screen (stage A, K1). It becomes the muted caption emphasis, so the
+  // run-time needs no style of its own and the definitions of other apps stay the same.
+  content(name, need) {
+    const variant = need.named.variant, look = !variant ? "" : variant.v === "caption" ? ', emphasis="caption", tone="muted"' : `, variant=${show(variant)}`;
+    return { lines: [`${name}_view = Text(${show(need.args[0])}${look})`], top: [`${name}_view`] };
+  },
 
   // need chart = hole("A bar chart of spending by category"): nothing ready does it, so a model writes NAME_view later.
   hole(name, need) { return { lines: [`${name}_view = Notice("Not built yet: " + ${show(need.args[0])})`], top: [`${name}_view`] }; },
@@ -650,7 +654,7 @@ const OPTIONS = {
   steps: ["back", "next", "finish", "done"], tabs: ["title"], progress: [], counter: ["step", "min", "max", "lessText", "moreText", "addText", "icon", "resetText"],
   timer: ["alert", "rounds", "rest", "cycle", "start", "pause", "reset", "done", "workText", "restText"], picture: ["found", "caption", "credit", "tag"], drawing: [],
   model3d: ["turn", "parts", "explode", "joinText", "explodeText"], card: ["eyebrow", "icon"], link: ["note"], lesson: ["next", "back", "stepText"],
-  question: ["options", "right", "rightText", "wrongText"], content: [], hole: [],
+  question: ["options", "right", "rightText", "wrongText"], content: ["variant"], hole: [],
 };
 /** The options that each kind of input uses. A number kind is a number field or a slider, and a kind that is not here is a fault of the need. */
 const NUMBER_USES = ["min", "max", "step", "icon"];
@@ -740,9 +744,7 @@ export function expand(file) {
         const tree = needs.find((other) => other.tree.name === "entries" && show(list) === `$/${other.key}`)?.tree.named.emptyText;
         return tree && (read = show(tree));
       };
-      // shortcut: a need app with an input named v also hides its play row, upgrade to a mark of the template when such an app is real.
-      const controlled = needs.some((other) => other.key === "v" && other.tree.name === "input");
-      built = part(entry.key, entry.tree, { hero, word, caption, emptyOf, controlled, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
+      built = part(entry.key, entry.tree, { hero, word, caption, emptyOf, count: entry.key === listHero, role: roleOf(entry.key), tops: (other) => { if (!file.tops.has(other)) throw new DslError(`${entry.tree.name} names ${other}, and no need has that name`); return file.tops.get(other); } });
       // A part line that the host cannot read is a fault of this need, never an exception. The other needs still expand.
       parsed = built.lines.map((line) => parseLine(line));
       if (parsed.includes(null)) throw new DslError("the part made an empty line");

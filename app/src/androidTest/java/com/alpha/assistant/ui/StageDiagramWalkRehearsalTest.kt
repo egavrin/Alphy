@@ -44,10 +44,13 @@ class StageDiagramWalkRehearsalTest {
             assertEquals(MARK + say, rig.thinkings()[index])
             rig.speak(say, marker = index + 1, atMs = 2_000L + index * 1_000)
             waitStep(model, scene, index + 1) { it?.index == index + 1 }
-            val before = pictures()
+            val first = SurfaceFrameMetrics.snapshot()
+            val before = first?.pictures ?: 0L
             SystemClock.sleep(700)
-            val grown = pictures() - before
-            assertTrue("step ${index + 1} drew $grown new pictures in 700 ms", grown >= 10)
+            val last = SurfaceFrameMetrics.snapshot()
+            val grown = (last?.pictures ?: 0L) - before
+            assertTrue("step ${index + 1} drew $grown new pictures in 700 ms: generation ${first?.generation} ${first?.status} stopped ${first?.stoppedAtNs} " +
+                "then generation ${last?.generation} ${last?.status} stopped ${last?.stoppedAtNs}", grown >= 10)
         }
         assertEquals(M7_SAYS.map { MARK + it }, rig.thinkings())
     }
@@ -71,8 +74,6 @@ class StageDiagramWalkRehearsalTest {
     }
 
     private val pressLines = robot.shell("logcat -d -s AlphyPress").lines().size
-
-    private fun pictures() = SurfaceFrameMetrics.snapshot()?.pictures ?: 0L
 
     private fun step(model: ShellViewModel, scene: ToolRecord) = ShownScreen.of(shell.stored(model, scene.id))?.step
 

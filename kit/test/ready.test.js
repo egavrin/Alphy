@@ -96,8 +96,8 @@ test("a line that reads a value that its ready plan does not name is a fault of 
 test("a ready plan line with a slot that has no value is not in the app file", async () => {
   const { result } = await step(reply("predict").split("\n").filter((line) => !line.startsWith("ask =")).join("\n"));
   expect([result.faults, result.expanded.includes("need go = button("), result.expanded.includes("need guess")]).toEqual([[], true, false]);
-  const ship = await step(read("./fixtures/template/ship.plan").split("\n").filter((line) => !line.startsWith("card =")).join("\n"));
-  expect([ship.result.faults, ship.result.expanded.includes("need picture"), ship.result.expanded.includes("need card")]).toEqual([[], true, false]);
+  const ship = await step(read("./fixtures/template/ship.plan").split("\n").filter((line) => !line.startsWith("caption =")).join("\n"));
+  expect([ship.result.faults, ship.result.expanded.includes("need picture"), ship.result.expanded.includes("need caption")]).toEqual([[], true, false]);
 });
 
 test("the engine names no template word outside a comment", () => {

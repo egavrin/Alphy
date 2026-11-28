@@ -9,14 +9,14 @@ import { KINDS } from "./kinds.js";
 
 /**
  * The content budget of each template: texts in characters, lists in items. A text inside the picture (a shape text, a sign) has no fault up to
- * floor(1.25 × cap), because it cannot change the height of the screen. A card text or an item text past its cap is cut after its last whole
+ * floor(1.25 × cap), because it cannot change the height of the screen. A caption or an item text past its cap is cut after its last whole
  * sentence inside the cap (cut). Each other text past its cap, a long text with no sentence end inside its cap, and a list past its cap are faults.
  * A narration line (say) is cut the same way, and one with no sentence end inside its cap is left out with no fault (template.js).
  */
-export const BUDGET = { title: 30, control: 28, cardTitle: 32, cardText: 140, option: 12, fewOption: 16, sign: 14, text: 28, options: 6, items: 6, shapes: 20, cells: 100, say: 110,
+export const BUDGET = { title: 30, control: 28, caption: 110, option: 12, fewOption: 16, sign: 14, text: 28, options: 6, items: 6, shapes: 20, cells: 100, say: 110,
   // A diagram walks up to 8 parts (block 2 plan, C2), and the name of a part with no entry has at most 16 characters: the stepper shows no name.
-  // Stage 7b (R3): a name that the model gives has at most 20 characters, so that "intestino delgado" or "rechte Herzkammer" fits. A name of two
-  // words breaks into two lines, and 8 such names leave the drawing more than FREE.fewest of its size (the fit file parts-caps).
+  // Stage 7b (R3): a name that the model gives has at most 20 characters, so that "intestino delgado" or "rechte Herzkammer" fits. The kit
+  // writes it on one line in the name chip of its part (stage A, K3), and a chip of 20 wide letters fits the width of the picture.
   parts: 8, part: 20 };
 /** The common color names that the kit takes with no call, by their small letters: the template check had one repair for a color name. */
 export const COLOR_NAMES = { red: "#dc2626", orange: "#ea580c", yellow: "#facc15", green: "#16a34a", blue: "#2563eb", purple: "#9333ea", violet: "#7c3aed", pink: "#db2777",
@@ -114,12 +114,14 @@ export function cut(text, cap) {
 /** The node with each text in it given again by map. */
 const textsMapped = (node, map) => (!node || typeof node !== "object" ? node : isText(node) ? map(node)
   : Array.isArray(node) ? node.map((inner) => textsMapped(inner, map)) : Object.fromEntries(Object.entries(node).map(([key, inner]) => [key, textsMapped(inner, map)])));
+/** The node with each text in it cut to cap (cut), such as a caption: each text of a formula is cut by itself. */
+export const cutTexts = (node, cap) => textsMapped(node, (text) => ({ ...text, v: cut(text.v, cap) }));
 /**
- * The call with each text of its argument at cut to cap (cut), such as a card text or an item text. Each text of a formula is cut by itself.
- * The same tree when no text changes.
+ * The call with each text of its argument at cut to cap (cut), such as an item text or a card text of a data form. The same tree when no
+ * text changes.
  */
 export function cutLong(tree, at, cap) {
-  const long = tree.args[at], short = long && textsMapped(long, (node) => ({ ...node, v: cut(node.v, cap) }));
+  const long = tree.args[at], short = long && cutTexts(long, cap);
   return !long || show(short) === show(long) ? tree : { ...tree, args: tree.args.map((arg, index) => (index === at ? short : arg)) };
 }
 
@@ -176,11 +178,13 @@ export const CONTROL_VALUE = { name: "v", what: "the value of the control" };
 /** The control line: the line $/v = VALUE stands for it, it sets $/v, a new one goes after the first line, and it owns the faults of need v. */
 export const CONTROL_LINE = { name: "control", held: true, sets: "v", merge: 1, owner: "v" };
 export const CONTROL_LABEL = { slot: "label", type: "text", what: "the label", cap: BUDGET.control };
-export const CARD_TITLE = { slot: "cardTitle", type: "text", what: "the card title", cap: BUDGET.cardTitle, formula: true };
-/** The card text: the kit cuts a long one after its last whole sentence inside the cap. */
-export const CARD_TEXT = { slot: "cardText", type: "text", what: "the card text", cap: BUDGET.cardText, formula: true, long: true };
-/** The card line card(TITLE, TEXT) of the template word: it holds the card of a frame, and it owns the faults of need card. */
-export const cardLine = (word) => ({ name: "card", holds: "card", owner: "card", form: `the card of ${word} is card(TITLE, TEXT)`, forms: { card: [CARD_TITLE, CARD_TEXT] } });
+/**
+ * The caption line caption = TEXT of an explain screen (stage A, K1): one or two short sentences under the controls, a text in quotes or a
+ * formula of texts that reads $/v. The kit cuts each text past BUDGET.caption after its last whole sentence, so only a long text with no
+ * sentence end inside the cap is a fault. It holds the text of a frame, and it owns the faults of need caption.
+ */
+export const CAPTION = { name: "caption", slot: "caption", holds: "card", owner: "caption", cut: (tree) => cutTexts(tree, BUDGET.caption),
+  fault: (tree) => textFault("the caption", tree, BUDGET.caption, true) };
 /** The narration lines: say for one sentence, and say1 to sayN for the steps of a walk. They draw nothing, so they have no fault. */
 export const NARRATION = { name: "say", narration: true };
 

@@ -170,9 +170,9 @@ The request above asks for a change of your app file. Write each line that chang
 
 ## Template
 
-You fill a ready screen for a talk between a person and a voice assistant. The voice gives the answer in words, and the screen shows the thing itself, with few words: one picture, one control that changes the picture, and one card.
+You fill a ready screen for a talk between a person and a voice assistant. The voice gives the answer in words, and the screen shows the thing itself, with few words: one picture, a control only when the person picks a value or a step, and one caption.
 Reply with the lines of the screen only: plain lines, one item on each line, no line break inside an item, no markdown, no comments, no explanation. In each example below, the reply is the lines between the two fence lines.
-Each line is complete by itself and starts with its name. The order of the lines is fixed: the first line, the control, the play line, the parts of the picture, the card, then the narration lines. Write one line for each part.
+Each line is complete by itself and starts with its name. The order of the lines is fixed: the first line, the control, the play line, the parts of the picture, the caption, then the narration lines. Write one line for each part.
 Write every visible text in the language of the request. Write each text in quotes, also an option. A number has no quotes.
 
 When the person asks to explain or to show a thing, fill a template, also when the person asks for it in steps.
@@ -181,26 +181,27 @@ When the request needs a picture, a photo, a map, a device function, a 3D model,
 
 The first line names the template: scene(TITLE, lang=CODE, palette=PALETTE), or items(...) or cells(...) with the same arguments.
 TITLE: the title of the screen, at most 30 characters. CODE: the two-letter code of the language of the request, such as "en", "de", or "ja". palette= is optional: "teal", "green", "blue", "amber", "orange", "red", "pink", "purple", "indigo", "brown", or "graphite". Choose one that fits the topic.
-The control is the line control = ..., and its LABEL has at most 28 characters. The last line is the card: its TITLE has at most 32 characters, and its TEXT is one to three short sentences, at most 140 characters.
+The control is the line control = ..., and its LABEL has at most 28 characters. A control appears only when the person picks a value or a step: a number that changes the thing, one of two or more cases to compare, or a step of a sequence. To compare cases, show one case at a time, and let the control pick the case: use items when a sign and a short text show each case, such as kinds, types, or words, and a scene when the picture changes. Write no control only for a thing with nothing to pick.
+The caption is the line caption = TEXT under the picture: one or two short sentences, at most 110 characters. TEXT can be a formula of $/v, such as a text for each option. With steps or parts, write no caption line: the screen shows the narration line of the present step.
 
-Template scene: a scheme from plain shapes that one control changes, for a thing to understand, such as a motion, a position, a size, a path, a part, or a step that the person picks.
+Template scene: a scheme from plain shapes, for a thing to understand, such as a motion, a position, a size, a path, a part, or a step that the person picks.
 control = slider(LABEL, MIN, MAX, STEP, START), or control = choice(LABEL, [OPTION, ...], START), or control = steps(LABEL, [STEP, ...], ANSWER), or control = parts(LABEL, [PART, ...])
 play = play(LABEL, FROM, TO, SECONDS)
 s1 = SHAPE, and so on to s{{shapes}} = SHAPE
-card = card(TITLE, TEXT)
+caption = TEXT
 A slider is a number that the person drags from MIN to MAX in steps of STEP, and START is its start value. A choice has 2 to 6 options, each at most 16 characters (at most 12 with 5 or 6 options), and START is one of them. With no START the first option is the start.
 Steps are a sequence in their order, such as the stages of a process: 2 to 6 steps, each at most 16 characters (at most 12 with 5 or 6 steps). ANSWER is the step that shows the answer best, and the screen starts at it. With no ANSWER the last step is the answer. Use steps for a sequence, and a choice for things with no order.
-Parts are a diagram: one thing with each of its parts named, and a walk over the parts, one at a time, in the order of the list. The kit writes the name of each part beside the picture with a line to the part, and marks the part of the step: write no text and no label= for a part, and no parts= and no mark=. A scene with parts has no card line: the card shows the name of the part and its narration line.
+Parts are a diagram: one thing and a walk over its parts, one at a time, in the order of the list. The kit marks the part of the step with a ring and its name, and puts a dot on each other part: write no text and no label= for a part, and no parts= and no mark=.
 With a ready object with parts in the picture, each PART is a part of its list, or leave the list out to walk all its parts. The kit has the names of these parts in Russian and English only: in another language, write each PART as part(ID, NAME), with NAME in the language of the request.
-With no such object, draw the thing with shapes from x = {{zoneLeft}} to x = {{zoneRight}}, and write each PART as part(NAME, X, Y), where X, Y is a point on the part in your drawing. A point with X under {{middle}} gets its name in the left column, and each other point in the right column: put about one half of the points at each side.
+With no such object, draw the thing with shapes over the whole box, and write each PART as part(NAME, X, Y), where X, Y is a point on the part in your drawing, from 10 to 290 in x and in y.
 Write each NAME as in the middle of a sentence, with at most {{part}} characters.
-Play is a thing that moves by itself, such as an orbit, a swing, a wave, or a wheel: $/t runs from FROM to TO in SECONDS, again and again, from the first state, and the person can stop it and change its speed. SECONDS is at most 120. A scene with play needs no control: add one only when the person also picks a value or a step, and then the motion runs inside each step with no stop and no speeds.
-s1 to s{{shapes}} are at most {{shapes}} shapes in a box {{width}} wide and {{height}} high. Use as few shapes as show the thing: most pictures need 4 to 8. x goes right and y goes down. At least one shape reads $/v, so that the control changes the picture, and with play at least one shape reads $/t. Parts need no $/v.
+Play is a thing that moves by itself, such as an orbit, a swing, a wave, or a wheel: $/t runs from FROM to TO in SECONDS, again and again, from the first state, and the person can stop it and change its speed. SECONDS is at most 120. A scene with play needs no control: add one only when the person also picks a value or a step.
+s1 to s{{shapes}} are at most {{shapes}} shapes in a box {{width}} wide and {{height}} high. Draw the thing large, so that it fills the box. A background, such as the sky, water, or the ground, goes 150 units past the box at each side, so that it fills a wider screen. Use as few shapes as show the thing: most pictures need 4 to 8. x goes right and y goes down. With a control, at least one shape reads $/v, so that the control changes the picture, and with play at least one shape reads $/t. Parts need no $/v.
 Shapes: {{kinds}}. A shape takes {{properties}}. The center of a text is at x, y, and a text in quotes in a shape has at most 28 characters.
-Keep each shape inside the box, and put a text where no shape covers it. The point at angle a on a circle around cx, cy is cx + r * cos(a), cy - r * sin(a). A later shape covers an earlier one.
+Keep each shape other than a background inside the box, and put a text where no shape covers it. The point at angle a on a circle around cx, cy is cx + r * cos(a), cy - r * sin(a). A later shape covers an earlier one.
 color: {{colors}}, a tone of one of them, or "#RRGGBB". +1 to +3 makes a tone lighter, -1 to -3 darker, and @PERCENT see-through, such as "water+1", "land-1", or "accent@40". A thing of the world gets volume from gradient= of a darker tone with radial=1, and a figure of mathematics stays flat. A line or an outline is never "muted".
 Library: a part line places a ready thing with use(NAME, X, Y, SIZE): X, Y is its center, and SIZE is its longer side, at most 300. It counts as one shape. label="TEXT" writes a short text under it, and visible= and turn= work as for a shape.
-Objects: the list under the request names ready objects that may fit it, with their parts. An object has a SIZE of 24 or more. parts=true names each part beside it, and mark="PART" marks one part and names it. With parts=true or mark=, the names stand at both sides and the object takes the middle of the picture width: put other shapes above or under it. Use an object of the list only for the thing that it shows, and draw the rest with shapes. With no list, use elements and shapes only.
+Objects: the list under the request names ready objects that may fit it, with their parts. An object has a SIZE of 24 or more. parts=true puts a dot on each part, and mark="PART" marks one part with a ring and its name. Use an object of the list only for the thing that it shows, and draw the rest with shapes. With no list, use elements and shapes only.
 Elements, for any subject: use(NAME, X, Y, SIZE, [NUMBERS]), and each number can read $/v. color= changes the color of an element. Use an element in place of shapes that draw the same thing.
 {{elements}}
 For a thing with no object in the list and no element, draw it with shapes, or with an emoji in a text shape.
@@ -208,22 +209,21 @@ For a thing with no object in the list and no element, draw it with shapes, or w
 Template items: a choice of 2 to 6 things and a large sign of the chosen one, for things that the person looks at one at a time, such as words of a language, kinds, parts, or stages.
 control = choice(LABEL), or control = steps(LABEL, ANSWER)
 i1 = item(LABEL, SIGN, TEXT), and so on to i6
-card = card(TITLE)
-i1 to i6 are at most 6 items. With a choice, i1 is the start. With steps, the items are the steps in their order, and the screen starts at the item with the label ANSWER, by default the last item. LABEL is the option of the choice or the step, at most 16 characters with 2 to 4 items, else 12, and each label is different. SIGN is the large sign, such as an emoji, a character, a number, or a short word, at most 14 characters. TEXT is the text of the card for this item, at most 140 characters.
-The control has no options: its options are the labels of the items. The card shows TITLE and the text of the chosen item.
+i1 to i6 are at most 6 items. With a choice, i1 is the start. With steps, the items are the steps in their order, and the screen starts at the item with the label ANSWER, by default the last item. LABEL is the option of the choice or the step, at most 16 characters with 2 to 4 items, else 12, and each label is different. SIGN is the large sign, such as an emoji, a character, a number, or a short word, at most 14 characters. TEXT is the caption of this item, at most 110 characters.
+The control has no options: its options are the labels of the items. items has no caption line: the caption is the text of the chosen item.
 
 Template cells: a whole of equal cells and a slider that fills some of them, for a part of a whole, a share, or a count out of a total.
 control = slider(LABEL, 0, COUNT, 1, START)
-card = card(TITLE, TEXT)
+caption = TEXT
 COUNT is the number of cells, a whole number from 2 to 100. START is the number of filled cells at the start, from 0 to COUNT. The screen shows the cells and the text "K / N = P%" under them. cells has no part lines.
 
 Narration: the voice says each narration line word for word while the screen shows it. A narration line is one short spoken sentence in the language of the request, at most 110 characters, with no quote marks inside. A Russian sentence addresses the person with «ты».
 With steps or parts, write say1 = TEXT, and so on to sayN, one sentence for each step or part in their order: sayK says what the picture shows at step K, or what part K does.
-With a slider, a choice, or only play, write one line say = TEXT: what to move or what to watch.
+Else write one line say = TEXT: what to move, what to watch, or what to look at.
 The first state shows the point: the answer step of steps, or a START of a slider that shows the answer.
 
 Formulas:
-$/v is the value of the control: the number of the slider, or the text of the chosen option, such as visible=$/v == "Night". Each number of a shape is a formula, so the shapes follow $/v. A text of the card can also be a formula of $/v, such as a text for each step. A line reads no value other than $/v, and $/t of play.
+$/v is the value of the control: the number of the slider, or the text of the chosen option, such as visible=$/v == "Night". Each number of a shape is a formula, so the shapes follow $/v. A line reads no value other than $/v, and $/t of play.
 Numbers, "text", true, false, + - * / %, == != < <= > >=, && || !, test ? a : b, and parentheses. + also joins text. Functions: round(x, digits), floor(x), abs(x), min(a, b), max(a, b), sqrt(x), pow(x, y), sin(degrees), cos(degrees), text(x), fixed(x, digits).
 pow(x, y) is x to the power y. There is no ^ and no **. sin and cos take an angle in degrees: sin(90) is 1, and cos(180) is -1. A value must never divide by zero.
 
@@ -232,14 +232,13 @@ Request: Покажи по шагам, как шлюз поднимает лод
 ```
 scene("Как шлюз поднимает лодку", lang="ru", palette="teal")
 control = steps("Шаг", ["Вход", "Подъём", "Выход"], "Подъём")
-s1 = rect(0, 230, 100, 70, "water", 0, gradient="water-1")
-s2 = rect(200, 150, 100, 150, "water", 0, gradient="water-1")
-s3 = rect(100, $/v == "Вход" ? 230 : 150, 100, $/v == "Вход" ? 70 : 150, "water", 0, gradient="water-1")
+s1 = rect(-150, 230, 250, 220, "water", 0, gradient="water-1")
+s2 = rect(200, 150, 250, 300, "water", 0, gradient="water-1")
+s3 = rect(100, $/v == "Вход" ? 230 : 150, 100, $/v == "Вход" ? 220 : 300, "water", 0, gradient="water-1")
 s4 = rect($/v == "Выход" ? 222 : 122, $/v == "Вход" ? 216 : 136, 56, 14, "wood", 4)
 s5 = line(100, 120, 100, 300, "ink", 4, visible=$/v != "Вход")
 s6 = line(200, 120, 200, 300, "ink", 4, visible=$/v != "Выход")
 s7 = use("curved_arrow", 150, 70, 60, [120], visible=$/v == "Подъём")
-card = card("Шлюз — лифт для лодок", $/v == "Вход" ? "Лодка входит в камеру с нижней реки, и ворота за ней закрываются." : $/v == "Подъём" ? "Вода из верхней реки наполняет камеру и поднимает лодку." : "Вода в камере на уровне верхней реки. Ворота открыты, и лодка плывёт дальше.")
 say1 = "Смотри: лодка входит в камеру с нижней реки, и ворота за ней закрываются."
 say2 = "Вода из верхней реки наполняет камеру, и лодка поднимается вместе с ней."
 say3 = "Верхние ворота открываются, и лодка плывёт дальше по верхней реке."
@@ -252,9 +251,9 @@ Ready objects that may fit this request, for use(NAME, X, Y, SIZE):
 ```
 scene("Sides of a right triangle", lang="en", palette="indigo")
 control = choice("Side", ["Leg a", "Leg b", "Hypotenuse"], "Hypotenuse")
-s1 = use("right_triangle", 150, 140, 200, parts=true, mark=$/v == "Leg a" ? "leg_a" : $/v == "Leg b" ? "leg_b" : "hypotenuse")
-s2 = use("formula", 150, 270, 160, label="a^2 + b^2 = c^2")
-card = card("The longest side", $/v == "Hypotenuse" ? "The hypotenuse lies opposite the right angle. It is the longest side." : "A leg is a side of the right angle. The two legs meet at 90 degrees.")
+s1 = use("right_triangle", 150, 130, 240, parts=true, mark=$/v == "Leg a" ? "leg_a" : $/v == "Leg b" ? "leg_b" : "hypotenuse")
+s2 = use("formula", 150, 275, 160, label="a^2 + b^2 = c^2")
+caption = $/v == "Hypotenuse" ? "The hypotenuse lies opposite the right angle. It is the longest side." : "A leg is a side of the right angle. The two legs meet at 90 degrees."
 say = "Pick a side and see where it lies."
 ```
 
@@ -266,7 +265,6 @@ control = choice("Gestein")
 i1 = item("Magmatisch", "🌋", "Entsteht, wenn heißes Magma abkühlt und fest wird, wie Granit oder Basalt.")
 i2 = item("Sediment", "🐚", "Entsteht aus Sand, Schlamm und Muscheln, die sich über lange Zeit in Schichten pressen.")
 i3 = item("Metamorph", "💎", "Entsteht, wenn Hitze und Druck tief in der Erde ein altes Gestein umformen, wie bei Marmor.")
-card = card("So entsteht es")
 say = "Tippe auf eine Art und lies, wie dieses Gestein entsteht."
 ```
 
@@ -275,7 +273,7 @@ Request: ¿Qué parte de la Tierra está cubierta de agua?
 ```
 cells("El agua de la Tierra", lang="es", palette="blue")
 control = slider("Partes de cada 100", 0, 100, 1, 71)
-card = card("Unas siete de cada diez", "El agua cubre cerca del 71 % de la superficie de la Tierra. La tierra firme es menos de un tercio.")
+caption = "El agua cubre cerca del 71 % de la superficie de la Tierra. La tierra firme es menos de un tercio."
 say = "Mueve el control y mira cuántas de cada cien partes de la superficie son agua."
 ```
 
@@ -284,15 +282,16 @@ Request: Show me how a Ferris wheel turns.
 ```
 scene("A Ferris wheel turns", lang="en", palette="blue")
 play = play("Turn", 0, 360, 20)
-s1 = polygon([150, 140, 100, 280, 200, 280], "graphite")
-s2 = circle(150, 140, 100, "ink", stroke=true)
-s3 = line(150 + 100 * cos($/t), 140 - 100 * sin($/t), 150 - 100 * cos($/t), 140 + 100 * sin($/t), "ink", 2)
-s4 = line(150 - 100 * sin($/t), 140 - 100 * cos($/t), 150 + 100 * sin($/t), 140 + 100 * cos($/t), "ink", 2)
-s5 = rect(136 + 100 * cos($/t), 132 - 100 * sin($/t), 28, 22, "red", 6)
-s6 = rect(136 - 100 * cos($/t), 132 + 100 * sin($/t), 28, 22, "amber", 6)
-s7 = rect(136 - 100 * sin($/t), 132 - 100 * cos($/t), 28, 22, "green", 6)
-s8 = rect(136 + 100 * sin($/t), 132 + 100 * cos($/t), 28, 22, "teal", 6)
-card = card("Always upright", "The wheel turns around its axle, and each cabin hangs from a pin, so it stays upright the whole way round.")
+s1 = rect(-150, 272, 600, 178, "land", 0)
+s2 = polygon([150, 140, 86, 280, 214, 280], "graphite")
+s3 = circle(150, 140, 115, "ink", stroke=true)
+s4 = line(150 + 115 * cos($/t), 140 - 115 * sin($/t), 150 - 115 * cos($/t), 140 + 115 * sin($/t), "ink", 2)
+s5 = line(150 - 115 * sin($/t), 140 - 115 * cos($/t), 150 + 115 * sin($/t), 140 + 115 * cos($/t), "ink", 2)
+s6 = rect(136 + 115 * cos($/t), 132 - 115 * sin($/t), 28, 22, "red", 6)
+s7 = rect(136 - 115 * cos($/t), 132 + 115 * sin($/t), 28, 22, "amber", 6)
+s8 = rect(136 - 115 * sin($/t), 132 - 115 * cos($/t), 28, 22, "green", 6)
+s9 = rect(136 + 115 * sin($/t), 132 + 115 * cos($/t), 28, 22, "teal", 6)
+caption = "Each cabin hangs from a pin, so it stays upright the whole way round."
 say = "Watch a cabin: it goes all the way round, but it never turns upside down."
 ```
 
@@ -303,7 +302,7 @@ Ready objects that may fit this request, for use(NAME, X, Y, SIZE):
 ```
 scene("Из чего состоит мозг", lang="ru", palette="pink")
 control = parts("Отдел", ["cerebrum", "cerebellum", "brain_stem"])
-s1 = use("brain", 150, 150, 220)
+s1 = use("brain", 150, 150, 280)
 say1 = "Большие полушария думают, помнят и говорят за тебя."
 say2 = "Мозжечок держит равновесие и делает движения точными."
 say3 = "Ствол мозга сам ведёт дыхание и стук сердца."
@@ -313,9 +312,9 @@ Example 7
 Request: What are the parts of a candle?
 ```
 scene("Parts of a candle", lang="en", palette="amber")
-control = parts("Part", [part("flame", 150, 64), part("wick", 146, 108), part("melted wax", 166, 122), part("wax body", 130, 210)])
-s1 = rect(112, 120, 76, 168, "sand+1", 10, gradient="sand-1")
-s2 = path([112, 122, 150, 112, 188, 122, 150, 132], "sand+2", smooth=true, closed=true)
+control = parts("Part", [part("flame", 150, 64), part("wick", 146, 108), part("melted wax", 174, 122), part("wax body", 124, 210)])
+s1 = rect(96, 120, 108, 168, "sand+1", 10, gradient="sand-1")
+s2 = path([96, 122, 150, 110, 204, 122, 150, 134], "sand+2", smooth=true, closed=true)
 s3 = line(150, 122, 150, 100, "ink", 3)
 s4 = path([150, 34, 166, 76, 150, 102, 134, 76], "sun", smooth=true, closed=true, gradient="warning", glow=true)
 say1 = "The flame burns wax vapor and gives light and heat."
@@ -345,7 +344,7 @@ The request above asks for a change of your screen. Write each line that changes
 
 ## Template rest
 
-Your reply stopped before its end, and the lines above are the complete lines of your screen so far. Write only the lines that the screen does not hold yet, each complete and with its name, and nothing more: keep the fixed order of the first line, the control, the play line, the parts, and the card, and give a new part the next free name, such as s4 after s3. Do not write a line of the screen again. Reply with lines only.
+Your reply stopped before its end, and the lines above are the complete lines of your screen so far. Write only the lines that the screen does not hold yet, each complete and with its name, and nothing more: keep the fixed order of the first line, the control, the play line, the parts, and the caption or the card, and give a new part the next free name, such as s4 after s3. Do not write a line of the screen again. Reply with lines only.
 
 ## Template data
 

@@ -326,7 +326,10 @@ private data class DraftPreviewContent(val spec: ToolSpec, val ui: String, val s
 // Its own layer: a redraw around the preview, such as each frame of the pulse of the character, does not draw the commands of its canvas again.
 @Composable internal fun StagePreviewContent(frame: StagePreviewFrame, canvasHeight: Dp) =
     Column(Modifier.graphicsLayer(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    DraftPreviewContent(frame.spec, frame.ui, frame.state, frame.drawing).Render(canvasHeight, dialogueTitle = frame.spec.title)
+    // Until the control and the caption come, the large picture keeps their room, so it does not get smaller when a line arrives (Stage A, AH9).
+    CompositionLocalProvider(LocalStageStream provides (frame.holds == "frame" || frame.holds == "parts")) {
+        DraftPreviewContent(frame.spec, frame.ui, frame.state, frame.drawing).Render(canvasHeight, dialogueTitle = frame.spec.title)
+    }
 }
 
 @Composable internal fun GeneratedToolPreview(draft: ToolDraft?, snapshot: ToolDraftPreview?) {

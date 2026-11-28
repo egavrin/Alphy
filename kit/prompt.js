@@ -6,7 +6,6 @@ import { KINDS, PROPERTIES } from "./src/kinds.js";
 import { ELEMENTS } from "./src/elements.js";
 import { TONES } from "./src/core.js";
 import { BUDGET, HEIGHT, WIDTH } from "./src/form-base.js";
-import { FREE } from "./src/library.js";
 
 /** The text under each level-2 heading of kit/prompt.md, by the heading, as it is in the file. */
 const SECTIONS = Object.fromEntries(readFileSync(new URL("./prompt.md", import.meta.url), "utf8").split(/^## /m).slice(1)
@@ -17,8 +16,8 @@ const SECTIONS = Object.fromEntries(readFileSync(new URL("./prompt.md", import.m
  */
 export function registryValues() {
   const groups = Object.entries(ELEMENTS).reduce((out, [name, entry]) => ({ ...out, [entry.group]: [...(out[entry.group] ?? []), `${name}(${entry.numbers.join(", ")}) ${entry.prompt}`] }), {});
-  // The drawing zone of a diagram of a thing with no ready object, and the cap of a part name that the model gives (stage 7b, R3).
-  return { shapes: String(BUDGET.shapes), width: String(WIDTH), height: String(HEIGHT), zoneLeft: String(FREE.zone[0]), zoneRight: String(FREE.zone[1]), middle: String(WIDTH / 2), part: String(BUDGET.part),
+  // part is the cap of a part name that the model gives (stage 7b, R3).
+  return { shapes: String(BUDGET.shapes), width: String(WIDTH), height: String(HEIGHT), part: String(BUDGET.part),
     kinds: Object.values(KINDS).filter((kind) => kind.prompt).map((kind) => kind.prompt).join("; "),
     properties: Object.values(PROPERTIES).filter((property) => property.prompt).map((property) => property.prompt).join("; "),
     colors: Object.keys(TONES).map((name) => JSON.stringify(name)).join(", "),

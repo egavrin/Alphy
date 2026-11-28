@@ -58,10 +58,8 @@ function smokeRun(file, limit, clock) {
     if (usable) out.forEach((control) => reached.add(control.key));
     return out;
   };
-  // The play row of a scene stays hidden beside a control and keeps the loop of the motion (stage 7, fix list 2, H4), so the run does not
-  // ask that the two controls of a play need come to the screen. Each other control must come to the screen, also one that runs animate.
-  const playRow = new Set(file.of("need").filter((need) => need.tree.name === "play").flatMap((need) => [`${need.key}_button`, `${need.key}_speed`]));
-  const start = save(), all = controls(false).filter((control) => !playRow.has(control.key)).map((control) => control.key);
+  // Each control must come to the screen, also one that runs animate, such as the play row beside the control of a scene (stage A, K4).
+  const start = save(), all = controls(false).map((control) => control.key);
   /** The paths of the app that an expression reads, such as "name" for $/name, also through each formula that it reads. */
   const reads = (tree, out = new Set()) => {
     walk(tree, (node) => {
@@ -366,7 +364,7 @@ const LOOKS = {
   variant: { Button: ["filled", "outlined", "text", "tonal", "tonalIcon"], Text: ["muted", "eyebrow", "source"], Card: ["hero"], CheckBox: ["circle"], Progress: ["bar", "dots"],
     Segmented: ["inline", "stepper"], Select: ["inline", "stepper"] },
   size: { Emoji: SIZES },
-  emphasis: { Text: ["body", "title", "headline", "label", "number", "display"], Metric: ["display", "number"] },
+  emphasis: { Text: ["body", "title", "headline", "label", "number", "display", "caption"], Metric: ["display", "number"] },
   align: { Text: ALIGNS, Row: ALIGNS },
   tone: { Text: TONES, Metric: TONES, Badge: TONES, Notice: TONES },
   gap: { Row: GAPS, Column: GAPS },

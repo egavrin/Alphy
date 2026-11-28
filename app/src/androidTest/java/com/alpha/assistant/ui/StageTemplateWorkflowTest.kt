@@ -75,7 +75,7 @@ class StageTemplateWorkflowTest {
             assertEquals(ship, appFileOf(app))
             assertEquals(listOf(APP_FILE_TEMPLATE), talk.stages)
             assertEquals(shell.messages(model).last().toolId, model.stageToolId)
-            robot.waitUntil { robot.composedTextIn(scenario, STAGE, SHIP_CARD) }
+            robot.waitUntil { robot.composedTextIn(scenario, STAGE, SHIP_CAPTION) }
             assertTrue(phases.toString(), "template_outcome:clean0" in phases)
         }
     }
@@ -92,7 +92,8 @@ class StageTemplateWorkflowTest {
             assertEquals(ear, shell.finalFile(model, app.id))
             assertEquals(listOf(APP_FILE_TEMPLATE), talk.stages)
             assertTrue(phases.toString(), "template_outcome:clean0" in phases && phases.none { "fallback" in it })
-            robot.waitUntil(30_000) { robot.composedTextIn(scenario, STAGE, "Oído externo") && robot.composedTextIn(scenario, STAGE, EAR_SAY1) }
+            // The name of the part is a chip on the canvas now (stage A), not a text at its side.
+            robot.waitUntil(30_000) { drew(scenario, "oído externo") && robot.composedTextIn(scenario, STAGE, EAR_SAY1) }
             assertEquals(SceneStep(1, 5, "oído externo"), checkNotNull(ShownScreen.of(shell.stored(model, app.id))).step)
         }
     }
@@ -242,7 +243,6 @@ class StageTemplateWorkflowTest {
 
     private companion object {
         const val STAGE = "dialogue_stage"
-        const val SHIP_CARD = "Вытеснение воды"
         /** The text of s3 of the ship template. */
         const val SHIP_AIR = "Воздух внутри"
         const val HULL_TEXT = "Корпус"
@@ -285,19 +285,19 @@ internal const val NAIL = "Гвоздь"
 internal const val SHIP_S4 = "s4 = circle(150, 180, 15, \"sun\", visible=\$/v == \"$NAIL\")"
 /** An s2 of the ship template as a polygon with 3 numbers: the kit names its line. */
 internal const val BAD_S2 = "s2 = polygon(45, 75, 255)"
-/** A change line of the expansion of the ship template: a new text of its card. */
-internal const val SHIP_CARD_CHANGE = "need card = card(\"Вытеснение воды\", \"Корабль вытесняет воду и плывёт.\")"
+/** A change line of the expansion of the ship template: a new text of its caption. */
+internal const val SHIP_CAPTION_CHANGE = "need caption = content(\"Корабль вытесняет воду и плывёт.\", variant=\"caption\")"
 
-/** The ship template with [SHIP_S4] before its card, as the kit merges it. */
-internal fun shipWithS4() = shipTemplate().replace("card = ", "$SHIP_S4\ncard = ")
+/** The ship template with [SHIP_S4] after its last part, before its caption, as the kit merges it. */
+internal fun shipWithS4() = shipTemplate().replace("caption = ", "$SHIP_S4\ncaption = ")
 
 /** The expansion of the ship template, as the kit gives it. Call it while no shell holds the sandbox. */
 internal fun shipExpansion(context: Context) =
     checkNotNull(runBlocking { AppFileCompiler(context, SandboxClient(context)).compile(shipTemplate()) }.expanded)
 
-/** [expanded] with [SHIP_CARD_CHANGE] merged, as the kit merges it. */
-internal fun shipCardChanged(expanded: String) =
-    expanded.lines().joinToString("\n") { if (it.startsWith("need card = ")) SHIP_CARD_CHANGE else it }
+/** [expanded] with [SHIP_CAPTION_CHANGE] merged, as the kit merges it. */
+internal fun shipCaptionChanged(expanded: String) =
+    expanded.lines().joinToString("\n") { if (it.startsWith("need caption = ")) SHIP_CAPTION_CHANGE else it }
 
 /**
  * The scripted provider of a talk with templates. A template call answers from [templates] ([NO_TEMPLATE] by default), and each other

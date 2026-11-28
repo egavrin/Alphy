@@ -118,7 +118,12 @@ Unresolved decision: the layout of the phone and of the fold. It blocks the buil
 - B2. Each one is a ready plan and a line table, with a section of the template prompt and a set of the model check.
 - B3. A request to practice stays on the fast path. The voice reads the check result from the shown screen.
 
-Unresolved decision: which task templates come first, and how the voice reacts to a check. It blocks the plan of stage B, not the refactor.
+The owner decided on 2026-11-28: the first task templates are "collect a quantity" (picture 01) and "predict, then test" (picture 03), with the layout of the drawn sample (`evidence/ready-plans/stage-a/sample-tasks-phone.png`, `sample-tasks-fold.png`).
+"Compare forms" (picture 02) and "balance by rules" (picture 04) need parts that the kit does not have (pieces that a person moves, and tabs of forms), so they come later.
+
+Implementation choice: the feedback of a task is its caption, and the voice says a caption that a press changed. One host rule then serves each task template. A feedback inside a part of its own (the banner of a `question`) would need a rule for each part.
+
+The plan (`docs/superpowers/plans/2026-11-28-ready-plans.md`, section "Stage B") holds the requirements B1 to B8.
 
 ## 8. Acceptance of the refactor
 

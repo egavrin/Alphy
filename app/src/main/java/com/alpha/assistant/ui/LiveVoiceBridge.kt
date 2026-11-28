@@ -25,6 +25,7 @@ import com.alpha.assistant.tools.ShownControl
 import com.alpha.assistant.tools.ShownScreen
 import com.alpha.assistant.tools.ToolRecord
 import com.alpha.assistant.tools.ToolSpec
+import com.alpha.assistant.tools.ToolUiCatalog
 import com.alpha.assistant.tools.VoicePress
 import com.alpha.assistant.voice.ApprovalWindow
 import com.alpha.assistant.voice.LiveEvent
@@ -47,6 +48,24 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import org.json.JSONObject
+
+/**
+ * The text of the present step of a stage scene (decision 14), which the narrator says for a step with no sentence: the texts after the title
+ * of the last card that is not the picture card, or, in a scene with no such card, its caption (Stage A, F5). A bound text gives its value in
+ * [state]. Null when the screen has no such text.
+ */
+internal fun stepText(ui: JSONObject, state: JSONObject): String? {
+    fun nodes(node: JSONObject): List<JSONObject> = listOf(node) + node.optJSONArray("children")?.let { children ->
+        List(children.length()) { children.getJSONObject(it) }.flatMap(::nodes) }.orEmpty()
+    fun text(node: JSONObject) = node.optString("bind").takeIf { node.optString("type") == "text" && it.isNotEmpty() }
+        ?.let { runCatching { ToolUiCatalog.value(state, it) }.getOrNull()?.takeIf { value -> value != JSONObject.NULL }?.toString() }
+        ?: node.optString("text")
+    val all = nodes(ui)
+    val card = all.lastOrNull { it.optString("type") == "card" && it.optString("variant") != "hero" }
+    val texts = if (card != null) nodes(card).drop(1).map(::text).filter { it.isNotBlank() }.let { it.drop(1).ifEmpty { it } }
+        else all.filter { it.optString("type") == "text" && it.optJSONObject("style")?.optString("emphasis") == "caption" }.map(::text)
+    return texts.joinToString(" ").takeIf { it.isNotBlank() }
+}
 
 /**
  * The chat side of the voice mode (spec 5.5 to 5.8). Each hand-off goes to the chat agent as a normal message, and its result goes
@@ -158,7 +177,7 @@ internal class LiveVoiceBridge(
     private var moving: Pair<String, Int>? = null
 
     /** The walk of a new stepped scene (plan "one scene", decisions 14 to 17). Branch (b) of Task 24, by ruling 1 of stage 2. */
-    private val narrator = StageNarrator(send = { session.thinking(it) }, press = ::pressStep, cardText = ::cardText,
+    private val narrator = StageNarrator(send = { session.thinking(it) }, press = ::pressStep, stepText = ::stepText,
         onsetAfter = session::onsetAfter, cancelOnset = session::cancelOnset, skip = session::skip, skipAfterSpeech = true,
         scope = model.viewModelScope, pieces = { pieceCount })
 
@@ -258,14 +277,10 @@ internal class LiveVoiceBridge(
         return press(toolId, control, "narrator", cause)
     }
 
-    /** The text of the card of the scene of the walk now: the texts in its card after the title (decision 14). */
-    private fun cardText(): String? {
+    /** The text of the step of the scene of the walk now ([stepText]). */
+    private fun stepText(): String? {
         val record = narrator.scene?.let { id -> model.tools.tools.find { it.id == id } } ?: return null
-        fun nodes(node: JSONObject): List<JSONObject> = listOf(node) + node.optJSONArray("children")?.let { children ->
-            List(children.length()) { children.getJSONObject(it) }.flatMap(::nodes) }.orEmpty()
-        val card = runCatching { nodes(JSONObject(record.ui)).lastOrNull { it.optString("type") == "card" } }.getOrNull() ?: return null
-        val texts = nodes(card).drop(1).mapNotNull { node -> node.optString("text").takeIf { it.isNotBlank() } }
-        return texts.drop(1).ifEmpty { texts }.joinToString(" ").takeIf { it.isNotBlank() }
+        return runCatching { stepText(JSONObject(record.ui), JSONObject(record.state)) }.getOrNull()
     }
 
     /**

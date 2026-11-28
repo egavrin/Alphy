@@ -13,7 +13,6 @@ s9 = text(150, 14, "White light enters the prism", "ink", 12)
 s10 = text(150, 32, "Each color bends a bit apart", "ink", 12)
 s11 = text(150, 180, "Violet bends the most of all", "surface", 12)
 s12 = text(150, 200, "Red bends least of all hues.", "surface", 12)
-card = card("Refraction splits the colors up.", "White light holds every color. In glass each color slows down by a different amount, so it bends at its own angle and the colors come apart.")
 say1 = "At step 1 the picture shows how the light moves and what it means for the whole of the thing that you seessss."
 say2 = "At step 2 the picture shows how the light moves and what it means for the whole of the thing that you seessss."
 say3 = "At step 3 the picture shows how the light moves and what it means for the whole of the thing that you seessss."

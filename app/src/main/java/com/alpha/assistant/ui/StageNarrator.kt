@@ -27,7 +27,7 @@ internal class StageNarrator(
     private val send: (String) -> Unit,
     /** Presses a step. The cause names a sync fire only: "exact" (the transcript comparison) or "classifier" (K5, K9), else null. */
     private val press: suspend (step: String, cause: String?) -> Boolean,
-    private val cardText: () -> String?,
+    private val stepText: () -> String?,
     private val onsetAfter: (Long, () -> Unit) -> Unit,
     private val cancelOnset: () -> Unit,
     private val skip: (String) -> Unit,
@@ -54,7 +54,7 @@ internal class StageNarrator(
     private var heard = ""
     /** A reply boundary came inside the armed sentence since the last piece ([boundary]). */
     private var crossed = false
-    /** The step with no sentence that the narrator presses at the next reply end, and then says its card text (decision 14). */
+    /** The step with no sentence that the narrator presses at the next reply end, and then says its step text (decision 14). */
     private var cardStep: Int? = null
     /** The press of the walk that runs now. A stop cancels it, so a press that the stage has not run yet never runs (fix list item 1). */
     private var pressJob: Job? = null
@@ -69,7 +69,7 @@ internal class StageNarrator(
     /**
      * The walk of the rest of the steps of [toolId] after [present] («Продолжай», decision 16). Gives the sentence of the next step for the
      * caller to say, and the narrator arms on it as on its own. Null when no step is left, or when that step has no sentence: then the
-     * narrator presses it and says its card text.
+     * narrator presses it and says its step text.
      */
     fun rest(toolId: String, steps: List<String>, narration: SceneNarration, present: Int): String? {
         if (present >= steps.size) return null
@@ -98,13 +98,13 @@ internal class StageNarrator(
         waiting = k; waitingText = sentence; waitingPressed = pressed; armed = false; confirmed = false; sentAt = pieces()
     }
 
-    /** Presses step [k] with no sentence, then sends its card text, which exists only after the press. */
+    /** Presses step [k] with no sentence, then sends its step text (the card or the caption), which exists only after the press. */
     private fun pressCard(k: Int) {
         val walkOf = scene
         pressJob = scope.launch {
             if (!walking || scene != walkOf || !press(steps[k - 1], null)) return@launch
             step = k
-            val card = cardText()?.takeIf { it.isNotBlank() }
+            val card = stepText()?.takeIf { it.isNotBlank() }
             if (!walking || scene != walkOf) return@launch
             if (card == null) { if (k < steps.size) sendStep(k + 1, send = true) else walking = false; return@launch }
             wait(k, card, pressed = true)
@@ -165,7 +165,7 @@ internal class StageNarrator(
         }
     }
 
-    /** The end of a reply: a step with no sentence is pressed now, and its card text goes to the voice (decision 14). */
+    /** The end of a reply: a step with no sentence is pressed now, and its step text goes to the voice (decision 14). */
     fun replyEnded() {
         boundary()
         if (!walking) return

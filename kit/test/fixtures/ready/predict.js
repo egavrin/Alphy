@@ -6,7 +6,7 @@ import { BUDGET, CONTROL_LINE, CONTROL_VALUE, CONTROL_LABEL, NARRATION } from ".
 import { SHAPES } from "../../../templates/scene.js";
 
 const number = (slot) => ({ slot, type: "number" });
-const text = (slot, what, cap = BUDGET.cardText) => ({ slot, type: "text", what, cap });
+const text = (slot, what, cap = 140) => ({ slot, type: "text", what, cap });
 
 export const PREDICT = {
   word: "predict",

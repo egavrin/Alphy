@@ -187,7 +187,8 @@ class StageChangeWorkflowTest {
                 robot.waitUntil(60_000) { provider.changeCalled.isCompleted && stageDimmed(robot) }
                 val dimmed = checkNotNull(game())
                 SystemClock.sleep(500)
-                assertTrue("the session stopped before the stage dimmed", checkNotNull(game()).tick > dimmed.tick)
+                val after = checkNotNull(game()).tick
+                assertTrue("the session stopped before the stage dimmed: tick ${dimmed.tick} at the dim, $after 500 ms later", after > dimmed.tick)
                 // The session stops while the change waits: two reads 1 s apart show the same tick. No read shows the stopped line.
                 var shown = false
                 var last = -1
@@ -288,11 +289,11 @@ class StageChangeWorkflowTest {
 
     @Test fun aTemplateOutsideRunsTodaysChangeOnTheExpansion() {
         val expanded = shipExpansion(fixture.context)
-        templateChange(Scripted.Text(NO_TEMPLATE), plans = AgentScriptProvider(SHIP_CARD_CHANGE)) { model, talk, before, _ ->
+        templateChange(Scripted.Text(NO_TEMPLATE), plans = AgentScriptProvider(SHIP_CAPTION_CHANGE)) { model, talk, before, _ ->
             assertEquals(List(2) { APP_FILE_TEMPLATE } + APP_FILE_CHANGE, talk.stages)
             assertEquals(listOf(prompt.changeText(changeTask, expanded)), talk.calls[2].turns.map { it.text })
             val saved = saved(model, before)
-            assertEquals(shipCardChanged(expanded), appFileOf(saved))
+            assertEquals(shipCaptionChanged(expanded), appFileOf(saved))
             assertFalse(prompt.isTemplate(checkNotNull(appFileOf(saved))))
             assertEquals(NAIL, shipSubject(saved))
         }
@@ -336,7 +337,7 @@ class StageChangeWorkflowTest {
     // old labels and the old card for about 6 s.
     @Test fun theOldSceneDimsDuringAChange() {
         var samples = emptyList<ChangeSample>()
-        templateChange(Scripted.Deltas(halves("$S4_TEXT\n$CARD_CHANGE").map { 300L to it }), nail = false,
+        templateChange(Scripted.Deltas(halves("$S4_TEXT\n$CAPTION_CHANGE").map { 300L to it }), nail = false,
             watch = { model, before -> samples = watchChange(model, before) }) { model, _, before, _ ->
             val framed = samples.filter { it.preview }
             // The host still makes the frames of the change: the last one seeds the drawing of the stored change.
@@ -352,7 +353,7 @@ class StageChangeWorkflowTest {
             robot.waitUntil { shipCanvasTexts(robot) == listOf(AIR, NAIL_SINKS) && stageControlOn(robot) && !stageDimmed(robot) }
             robot.waitUntil { socket.commentary().any { it.first == "d2" } }
             assertEquals(listOf("d2" to "${LiveProtocol.MARK}Готово."), socket.commentary().filter { it.first == "d2" })
-            assertEquals(ship.replace("card = ", "$S4_TEXT\ncard = ").lines().joinToString("\n") { if (it.startsWith("card = ")) CARD_CHANGE else it },
+            assertEquals(ship.replace("caption = ", "$S4_TEXT\ncaption = ").lines().joinToString("\n") { if (it.startsWith("caption = ")) CAPTION_CHANGE else it },
                 appFileOf(saved(model, before)))
         }
     }
@@ -450,7 +451,7 @@ class StageChangeWorkflowTest {
 
     @Test fun anOutsideChangeShowsNoStream() =
         templateChange(Scripted.Deltas(listOf(300L to NO_TEMPLATE.take(4), 300L to NO_TEMPLATE.drop(4) + "\n")),
-            plans = AgentScriptProvider(SHIP_CARD_CHANGE)) { model, talk, before, phases ->
+            plans = AgentScriptProvider(SHIP_CAPTION_CHANGE)) { model, talk, before, phases ->
             assertEquals(List(2) { APP_FILE_TEMPLATE } + APP_FILE_CHANGE, talk.stages)
             assertTrue(phases.toString(), phases.none { it.startsWith("stage_preview") })
             assertEquals(2, saved(model, before).revision)
@@ -614,7 +615,8 @@ class StageChangeWorkflowTest {
         const val NAIL_SINKS = "Гвоздь тонет"
         /** A new text part of the ship template that shows for each choice. */
         const val S4_TEXT = "s4 = text(150, 190, \"$NAIL_SINKS\", \"ink\", 14)"
-        const val CARD_CHANGE = "card = card(\"Вытеснение воды\", \"Гвоздь тонет, корабль плывёт.\")"
+        /** A new caption of the ship template. */
+        const val CAPTION_CHANGE = "caption = \"Гвоздь тонет, корабль плывёт.\""
         const val FACT_TITLE = "Факт"
         /** A card that a change of the lesson plan adds after its question, below the fold of the stage. */
         const val FACT_CARD = "need fact = card(\"$FACT_TITLE\", \"Луна делает один оборот вокруг оси за 27 суток.\")"

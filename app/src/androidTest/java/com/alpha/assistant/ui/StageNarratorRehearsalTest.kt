@@ -43,7 +43,7 @@ class StageNarratorRehearsalTest {
                 causes += cause
                 try { pressGate?.await() ?: true } catch (cancel: CancellationException) { pressCancels++; throw cancel }
             },
-            cardText = { CARDS.getOrNull(STEPS.indexOf(pressed.lastOrNull())) },
+            stepText = { CARDS.getOrNull(STEPS.indexOf(pressed.lastOrNull())) },
             onsetAfter = { _, fire -> arms++; pending = fire }, cancelOnset = { cancels++; pending = null }, skip = { skipped += it },
             skipAfterSpeech = skipAfterSpeech, scope = scope)
 

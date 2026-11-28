@@ -2,6 +2,7 @@ package com.alpha.assistant.ui
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -50,7 +51,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -65,6 +65,7 @@ import com.alpha.assistant.images.GeneratedImage
 import com.alpha.assistant.tools.ArtifactSnapshot
 import com.alpha.assistant.tools.CoveredToolSurface
 import com.alpha.assistant.tools.DIALOGUE_WIDE_DP
+import com.alpha.assistant.tools.DialogueTitle
 import com.alpha.assistant.tools.LocalNodeMark
 import com.alpha.assistant.tools.MiniAppActions
 import com.alpha.assistant.tools.MiniAppContent
@@ -113,6 +114,9 @@ internal fun showsOnTheStage(message: Message): Boolean = message.status !in unf
  * stage, and its title, its control label, and two rows of options took about 274 dp.
  */
 private val STAGE_TEXT_HEIGHT = 276.dp
+
+/** The side padding of a stage item that is not an app column, such as a chat card or a 3D scene: the column padding «medium» of an app (F1). */
+private val STAGE_ITEM_INSET = Modifier.padding(horizontal = 12.dp)
 
 /** The canvas height of an app on a stage of [maxHeight]. The stage preview and its cost test use the same height. */
 internal fun stageCanvasHeight(maxHeight: Dp, fold: Boolean): Dp = (if (fold) maxHeight - STAGE_TEXT_HEIGHT else maxHeight * 0.65f).coerceIn(120.dp, 560.dp)
@@ -236,41 +240,47 @@ private fun stageShowsApp(model: ShellViewModel): Boolean =
     DisposableEffect(previews) { onDispose { previews.current?.toolId?.let(previews::drawn) } }
     val fold = LocalConfiguration.current.smallestScreenWidthDp >= DIALOGUE_WIDE_DP
     BoxWithConstraints(modifier.fillMaxWidth().testTag("dialogue_stage").pointerInput(model) { reportTouches(model::liveStageTouch) }) {
-        // The gutter of an open mini-app (FocusedToolPane).
-        val gutter = if (maxWidth >= 600.dp) 28.dp else 20.dp
+        // A drawing takes the height that the other parts of the stage leave, in one layout pass: the stage gives its column the height of the
+        // stage plus STAGE_FIT_MARK, each part above the app and each padding takes its part of it, and the column of the app (DialogueColumns)
+        // gives its drawing what is left. A drawing with no side part is the large picture at each width (Stage A, AH1 and AH2). On a phone a
+        // square picture with a side part fits too (stage 6, F1). Other apps, 3D scenes, and two columns keep canvasHeight and an unbounded column.
+        val shown = preview?.frame?.spec ?: tool?.let { remember(it.spec, it.ui, it.state) { ToolSpec.availablePersisted(it) } }
+        val split = shown?.let { remember(it.ui) { dialogueSplit(it.ui) } }
+        val large = split?.drawing == true && split.side.isEmpty()
+        val fit = shown != null && split?.drawing == true && !shown.threeScene &&
+            (large || !fold && shown.surfaces.values.singleOrNull()?.let { it.width == it.height } == true)
+        val stageHeight = constraints.maxHeight
+        // The large picture card has a side padding of 8 dp, or 16 dp on a wide stage (AH2): each stage app has that gutter, and the card reaches
+        // past the padding of its app column, which stays around the other parts. So a title or a control keeps its place when a side part comes (F1).
+        val gutter = if (maxWidth >= 600.dp) 16.dp else 8.dp
         // In a short space, such as landscape with the keyboard, the decorative character goes.
         val character = minOf(160.dp, maxHeight / 4).takeIf { it >= 48.dp }
         // The canvas height of an open mini-app (FocusedToolPane), less at the fold size so the first control fits above the strip (Da2 ruling 1).
         val canvasHeight = stageCanvasHeight(maxHeight, fold)
-        // Stage 6, F1: on a phone a square picture (the 300 × 300 picture of a template) takes the height that the other parts of the stage
-        // leave, in one layout pass: the stage gives its column the height of the stage plus STAGE_FIT_MARK, each part above the app and each
-        // padding takes its part of it, and the column of the app (DialogueColumns) gives its drawing what is left. Other apps, also wide
-        // pictures, 3D scenes, and the fold, keep canvasHeight and an unbounded column.
-        val shown = preview?.frame?.spec ?: tool?.let { remember(it.spec, it.ui, it.state) { ToolSpec.availablePersisted(it) } }
-        val drawing = shown?.let { remember(it.ui) { dialogueSplit(it.ui)?.drawing == true } } == true
-        val fit = shown != null && drawing && !fold && !shown.threeScene && shown.surfaces.values.singleOrNull()?.let { it.width == it.height } == true
-        val stageHeight = constraints.maxHeight
+        // Under the last part of the large picture less space stays (AH2).
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
             .layout { measurable, outer ->
                 val placeable = measurable.measure(if (fit) outer.copy(maxHeight = stageHeight + STAGE_FIT_MARK) else outer)
                 layout(placeable.width, placeable.height) { placeable.place(0, 0) }
             }.heightIn(min = maxHeight)
-            .padding(horizontal = gutter, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(start = gutter, end = gutter, top = 12.dp, bottom = if (large) 8.dp else 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(15.dp, if (stageShowsApp(model)) Alignment.Top else Alignment.CenterVertically)) {
             if (chat != null) {
                 chat.messages.find { it.id == model.liveVoiceCardId }?.takeIf(::showsOnTheStage)?.let { message ->
-                    ChatMessageItem(model, chat, message, cardActions, openTool, openAutomation, showLivePreviews = true,
-                        pairedToolId = null, pairedDraftId = null, share = { shareText = it }, settings = settings,
-                        linkError = { linkError = true }, errorText = stringResource(stageError(message.errorCode)))
+                    Box(STAGE_ITEM_INSET) {
+                        ChatMessageItem(model, chat, message, cardActions, openTool, openAutomation, showLivePreviews = true,
+                            pairedToolId = null, pairedDraftId = null, share = { shareText = it }, settings = settings,
+                            linkError = { linkError = true }, errorText = stringResource(stageError(message.errorCode)))
+                    }
                 }
                 // The plan of the chat, as the chat list shows it. A later hand-off keeps it while it waits for a tap.
                 // A waiting plan card of an earlier subject leaves the stage, and the chat keeps it (plan "one scene", decision 21).
-                model.agent.plan?.takeIf { it.conversationId == chat.id && it.id != model.liveHiddenPlan }?.let { AgentPlanCard(model.agent, it) }
+                model.agent.plan?.takeIf { it.conversationId == chat.id && it.id != model.liveHiddenPlan }?.let { Box(STAGE_ITEM_INSET) { AgentPlanCard(model.agent, it) } }
             }
             val work = model.liveWorkCard
             when {
                 preview != null -> StagePreviewContent(preview.frame, canvasHeight)
-                work != null -> StageWorkCard(work)
+                work != null -> Box(STAGE_ITEM_INSET) { StageWorkCard(work) }
                 // One layer that stays while the change runs, so the app keeps its frames and timers (ToolEngine.acceptDraft).
                 tool != null -> Column(Modifier.graphicsLayer { alpha = if (changing) CHANGING_ALPHA else 1f }
                     .then(if (changing) Modifier.testTag("stage_dimmed") else Modifier),
@@ -315,9 +325,8 @@ private suspend fun PointerInputScope.reportTouches(report: (Boolean) -> Unit) {
     presses: Flow<VoicePress>?, seed: StagePreview?, changing: Boolean) {
     val spec = remember(tool.spec, tool.ui, tool.state) { ToolSpec.availablePersisted(tool) }
     val voicePresses = remember(presses, tool.id) { presses?.filter { it.toolId == tool.id } }
-    if (spec == null || spec.threeScene) Text(spec?.title ?: ToolSpec.storedTitle(tool.spec), Modifier.fillMaxWidth().semantics { heading() },
-        style = MaterialTheme.typography.headlineSmall)
-    if (spec == null) { Text(stringResource(R.string.tool_closed_format)); return }
+    if (spec == null || spec.threeScene) DialogueTitle(spec?.title ?: ToolSpec.storedTitle(tool.spec), STAGE_ITEM_INSET)
+    if (spec == null) { Text(stringResource(R.string.tool_closed_format), STAGE_ITEM_INSET); return }
     val enabled = !changing && !controller.busy && !actions.covers(tool.id)
     val host = if (!spec.threeScene && spec.surfaces.isNotEmpty()) remember(controller, tool.id, tool.revision) { controller.artifactHost(tool) }
         else null
@@ -330,7 +339,7 @@ private suspend fun PointerInputScope.reportTouches(report: (Boolean) -> Unit) {
             liveAllowed = !actions.covers(tool.id), allowVideo = true, dialogueTitle = spec.title, voicePresses = voicePresses)
     }
     when {
-        spec.threeScene -> ThreeScenePane(controller, tool, spec, canvasHeight, null, enabled)
+        spec.threeScene -> Box(STAGE_ITEM_INSET) { ThreeScenePane(controller, tool, spec, canvasHeight, null, enabled) }
         // The drawing keeps its frames and timers while a change of its app runs: the save of the change takes the newest state (ToolEngine.acceptDraft).
         host != null -> CoveredToolSurface(tool, spec, true, canvasHeight, host, actions, drawingSeed = drawingSeed, content = content,
             input = !changing) {

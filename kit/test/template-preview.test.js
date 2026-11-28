@@ -36,11 +36,12 @@ test("theFirstLineAloneGivesAFrame", async () => {
 
 test("eachLineAddsItsPart", async () => {
   const control = await frameOf(first(ship, 2));
-  expect([control.holds, nodes(control, "segmented").map((node) => node.text), commands(control)]).toEqual(["frame", ["Предмет"], []]);
+  expect([control.holds, nodes(control, "singleChoice").map((node) => [node.text, node.variant]), commands(control)]).toEqual(["frame", [["Предмет", "inline"]], []]);
   const s1 = await frameOf(first(ship, 3));
   expect([s1.holds, commands(s1).length]).toEqual(["parts", 1]);
-  const card = await frameOf(ship);
-  expect([card.holds, nodes(card, "card").length, commands(card).length]).toEqual(["card", 2, 3]);
+  // The caption holds the text of the screen, and the only card is the picture card (stage A, K1).
+  const caption = await frameOf(ship);
+  expect([caption.holds, nodes(caption, "card").length, nodes(caption, "text").map((node) => node.style), commands(caption).length]).toEqual(["card", 1, [{ emphasis: "caption", tone: "muted" }], 3]);
 });
 
 test("aFaultyLineIsLeftOutOfThePreview", async () => {
@@ -63,7 +64,7 @@ test("anItemsFrameShowsOneItem", async () => {
   expect(frame.holds).toBe("parts");
   // The sign and the label of the first item.
   expect(commands(frame).map((command) => command.text)).toEqual(["пере-", "Приставка"]);
-  expect(nodes(frame, "segmented")[0].options.map((option) => option.text)).toEqual(["Приставка"]);
+  expect(nodes(frame, "singleChoice")[0].options.map((option) => option.text)).toEqual(["Приставка"]);
 });
 
 test("aCellsFrameDrawsAtTheControl", async () => {

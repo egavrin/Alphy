@@ -6,5 +6,5 @@ s3 = line(150, 110, 150 + 90 * cos($/v), 110 - 90 * sin($/v), "ink", 6)
 s4 = line(150, 110, 150 + 90 * cos($/v + 120), 110 - 90 * sin($/v + 120), "ink", 6)
 s5 = line(150, 110, 150 + 90 * cos($/v + 240), 110 - 90 * sin($/v + 240), "ink", 6)
 s6 = circle(150, 110, 8, "accent")
-card = card("Wind wird Strom", "Der Wind dreht die drei Flügel. Die Achse treibt oben im Turm einen Generator an.")
+caption = "Der Wind dreht die drei Flügel. Die Achse treibt oben im Turm einen Generator an."
 say = "Dreh den Winkel und sieh, wie die drei Flügel um die Achse gehen."

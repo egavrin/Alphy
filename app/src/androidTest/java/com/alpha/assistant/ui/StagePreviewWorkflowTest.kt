@@ -347,6 +347,6 @@ class StagePreviewWorkflowTest {
         /** The cells template of `template/majority` in Russian: a live slider, as the template of the study had. */
         const val SLIDER = "cells(\"$SLIDER_TITLE\", lang=\"ru\", palette=\"teal\")\n" +
             "control = slider(\"$SLIDER_LABEL\", 0, 20, 1, 11)\n" +
-            "card = card(\"Больше половины\", \"Большинство — больше половины голосов: 11 из 20 — большинство, а 10 из 20 — только половина.\")"
+            "caption = \"Большинство — больше половины голосов: 11 из 20 — большинство, а 10 из 20 — только половина.\""
     }
 }

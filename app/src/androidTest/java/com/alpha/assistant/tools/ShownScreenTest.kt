@@ -105,7 +105,7 @@ class ShownScreenTest {
         scene("Сила и пружина", lang="ru", palette="blue")
         control = slider("Сила", 1, 5, 1, 3)
         s1 = rect(20, 100, 40 * ${'$'}/v, 20, "accent", 4)
-        card = card("Закон Гука", "Чем больше сила, тем сильнее растягивается пружина.")
+        caption = "Чем больше сила, тем сильнее растягивается пружина."
     """.trimIndent() + "\n"
 
     /** The data of the line of [screen], which has at most 8000 characters. */
@@ -127,7 +127,7 @@ class ShownScreenTest {
             scene("Как мы дышим?", lang="ru", palette="teal")
             control = choice("Фаза", ["Вдох", "Выдох"], "Вдох")
             s1 = circle(150, 110, ${'$'}/v == "Вдох" ? 70 : 40, "accent")
-            card = card("Лёгкие", "При вдохе лёгкие расширяются, при выдохе сжимаются.")
+            caption = "При вдохе лёгкие расширяются, при выдохе сжимаются."
         """.trimIndent() + "\n"
         val chosen = stored(breath) { state -> state.put(state.keys().asSequence().single { state.opt(it) == "Вдох" }, "Выдох") }
         val now = checkNotNull(ShownScreen.of(chosen)).line()
@@ -209,12 +209,14 @@ class ShownScreenTest {
         assertEquals(3, values.getJSONObject(0).get("value"))
     }
 
-    /** A steps scene of three steps that starts at its answer step «Выдох», with one narration line for each step. */
+    /**
+     * A steps scene of three steps that starts at its answer step «Выдох», with one narration line for each step. A walk has no caption line:
+     * its caption is the sentence of the step (stage A, K1).
+     */
     private val phases = """
         scene("Как мы дышим?", lang="ru", palette="teal")
         control = steps("Фаза", ["Вдох", "Выдох", "Пауза"], "Выдох")
         s1 = circle(150, 110, ${'$'}/v == "Вдох" ? 70 : 40, "accent")
-        card = card("Лёгкие", "При вдохе лёгкие расширяются, при выдохе сжимаются.")
         say1 = "Сначала вдох: лёгкие растут."
         say2 = "Потом выдох: они сжимаются."
         say3 = "В паузе всё замирает."
@@ -227,7 +229,7 @@ class ShownScreenTest {
         val chosen = stored(phases) { state -> state.put(state.keys().asSequence().single { state.opt(it) == "Выдох" }, "Пауза") }
         assertEquals(SceneStep(3, 3, "Пауза"), ShownScreen.of(chosen)?.step)
         val choice = stored(phases.replace("steps(\"Фаза\", [\"Вдох\", \"Выдох\", \"Пауза\"], \"Выдох\")", "choice(\"Фаза\", [\"Вдох\", \"Выдох\", \"Пауза\"], \"Выдох\")")
-            .lines().filterNot { it.startsWith("say") }.joinToString("\n"))
+            .lines().filterNot { it.startsWith("say") }.joinToString("\n") + "caption = \"Лёгкие растут и сжимаются.\"\n")
         assertFalse(data(ShownScreen.of(choice)).has("step"))
         assertNull(ShownScreen.of(stored(slider))?.step)
     }
@@ -254,14 +256,13 @@ class ShownScreenTest {
         play = play("Движение", 0, 360, 12)
         s1 = use("sun", 150, 150, 70)
         s2 = use("earth", 150 + 110 * cos(${'$'}/t), 150 - 110 * sin(${'$'}/t), 36)
-        card = card("Год — один круг", "Земля обходит Солнце за год.")
+        caption = "Земля обходит Солнце за год."
         say = "Смотри, как Земля идёт по кругу."
     """.trimIndent() + "\n"
 
     /**
      * Block 2 plan, M4: the line names the state of the play control, running or stopped, and its speed. Its button and each speed are
-     * controls, so a spoken «быстрее» or «стоп» is one routing press. The speeds are no step. Only a scene with no control line has the play
-     * control (stage 7, fix list 2, H4).
+     * controls, so a spoken «быстрее» or «стоп» is one routing press. The speeds are no step.
      */
     @Test fun theLineHoldsTheStateOfAPlayControl(): Unit = runBlocking {
         val running = checkNotNull(ShownScreen.of(stored(orbit)))
@@ -277,13 +278,39 @@ class ShownScreenTest {
         assertFalse(data(ShownScreen.of(stored(slider))).has("motion"))
     }
 
-    /** Stage 7, fix list 2, H4: motion beside steps (the kit fixture m7) has no play row, so the line has only the steps and no motion. */
-    @Test fun motionBesideStepsGivesNoPlayControl(): Unit = runBlocking {
+    /**
+     * Stage A, K4, J2, and J3: the play row shows beside steps (the kit fixture m7). The steps and the speeds are both inline choices: the
+     * speeds of the play row give the motion, and the other inline choice gives the step. A press of one leaves the other as it was.
+     */
+    @Test fun motionBesideStepsGivesTheStepAndThePlayControl(): Unit = runBlocking {
         val screen = checkNotNull(ShownScreen.of(stored(plan("template/m7"))))
-        assertEquals(listOf("Утро", "День", "Вечер", "Ночь").map { "Время: $it" }, screen.controls.map { it.label })
-        assertNull(screen.motion)
-        assertFalse(data(screen).has("motion"))
-        assertEquals(SceneStep(1, 4, "Утро"), screen.step)
+        val steps = listOf("Утро", "День", "Вечер", "Ночь")
+        assertEquals(steps.map { "Время: $it" } + "Пауза" + listOf("Медленно", "Обычно", "Быстро").map { "Вращение Земли: $it" }, screen.controls.map { it.label })
+        assertEquals(listOf("Время" to "Утро", "Вращение Земли" to "Обычно"), screen.values)
+        assertEquals(SceneMotion(true, "Обычно"), screen.motion)
+        assertEquals(listOf(SceneStep(1, 4, "Утро"), "Время", steps), listOf(screen.step, screen.stepControl, screen.steps))
+        assertEquals("""{"state":"running","speed":"Обычно"}""", data(screen).getJSONObject("motion").toString())
+        val faster = checkNotNull(ShownScreen.of(stored(plan("template/m7")) { state -> state.getJSONObject("t_s").put("sp", "fast") }))
+        assertEquals(listOf(SceneMotion(true, "Быстро"), SceneStep(1, 4, "Утро")), listOf(faster.motion, faster.step))
+        val evening = checkNotNull(ShownScreen.of(stored(plan("template/m7")) { state -> state.put(state.keys().asSequence().single { state.opt(it) == "Утро" }, "Вечер") }))
+        assertEquals(listOf(SceneMotion(true, "Обычно"), SceneStep(3, 4, "Вечер")), listOf(evening.motion, evening.step))
+    }
+
+    /** Stage A, J2: in a choice scene with play, the choice of the scene comes first, and the speed is still the inline choice of the play row. */
+    @Test fun theSpeedIsTheChoiceOfThePlayRow(): Unit = runBlocking {
+        val moon = """
+            scene("Фазы Луны", lang="ru", palette="indigo")
+            control = choice("Фаза", ["Новая", "Полная"], "Новая")
+            play = play("Оборот", 0, 360, 8)
+            s1 = circle(150, 150, 30, "water")
+            s2 = circle(150 + 100 * cos(${'$'}/t), 150 - 100 * sin(${'$'}/t), ${'$'}/v == "Полная" ? 18 : 12, "graphite")
+            caption = "Луна обходит Землю."
+        """.trimIndent() + "\n"
+        val screen = checkNotNull(ShownScreen.of(stored(moon) { state -> state.getJSONObject("t_s").put("sp", "slow") }))
+        assertEquals(listOf("Фаза" to "Новая", "Оборот" to "Медленно"), screen.values)
+        assertEquals(SceneMotion(true, "Медленно"), screen.motion)
+        assertNull(screen.step)
+        assertEquals(listOf("Фаза: Новая", "Фаза: Полная", "Пауза", "Оборот: Медленно", "Оборот: Обычно", "Оборот: Быстро"), screen.controls.map { it.label })
     }
 
     /**

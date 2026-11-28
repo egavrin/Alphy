@@ -2,9 +2,11 @@ package com.alpha.assistant.tools
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -13,6 +15,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.platform.LocalResources
@@ -54,8 +58,17 @@ import org.json.JSONObject
     val pictures = rememberLibraryImages(remember(surfacesJson) { JSONObject(surfacesJson) })
 
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        // A bound of the column also limits the drawing. In a fitted phone column the preview takes the size of the final picture (stage 6, F1).
-        Canvas(Modifier.width(minOf(maxWidth, (fittedPicture(constraints, maxHeight) ?: minOf(maxHeight, this.maxHeight)) * ratio)).aspectRatio(ratio).clip(MaterialTheme.shapes.medium)
+        // A bound of the column also limits the drawing. In a fitted stage column the preview takes the size of the final picture (stage 6, F1),
+        // and the large stage picture is drawn as NativeToolSurface draws it (Stage A, AH3).
+        val stagePicture = LocalStagePicture.current
+        val room = fittedPicture(constraints, if (stagePicture) Dp.Infinity else maxHeight)
+        val large = stagePicture && room != null
+        val clipBox = !large || frames.size > 1
+        val width = minOf(maxWidth, (room ?: minOf(maxHeight, this.maxHeight)) * ratio)
+        Box(if (large) Modifier.fillMaxWidth().height(checkNotNull(room)).clipToBounds().background(canvasBackground).testTag(STAGE_PICTURE_TAG) else Modifier,
+            contentAlignment = Alignment.Center) {
+        Canvas(Modifier.width(width).aspectRatio(ratio)
+            .then(if (large) Modifier else Modifier.clip(MaterialTheme.shapes.medium))
             .background(canvasBackground).semantics { contentDescription = description }) {
             val canvas = drawContext.canvas.nativeCanvas
             val stage = canvas.save()
@@ -66,7 +79,7 @@ import org.json.JSONObject
                     val frame = canvas.save()
                     try {
                         canvas.translate(placement.x.toFloat(), placement.y.toFloat())
-                        drawSurfaceFrame(canvas, surface, commands, surface.width.toFloat(), surface.height.toFloat(), roleColors, pictures)
+                        drawSurfaceFrame(canvas, surface, commands, surface.width.toFloat(), surface.height.toFloat(), roleColors, pictures, clipBox)
                     } finally {
                         canvas.restoreToCount(frame)
                     }
@@ -74,6 +87,7 @@ import org.json.JSONObject
             } finally {
                 canvas.restoreToCount(stage)
             }
+        }
         }
     }
 }
