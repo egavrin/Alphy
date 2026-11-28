@@ -1,15 +1,10 @@
-// What the forms of the data family use (docs/superpowers/plans/2026-11-22-block-2-forms-library-motion.md, stage 5): compare, table, chart,
-// and nodata. Their call starts after the routing call, with the section "Template data" of prompt.md. A data form shows its rows or points
-// in a native table or chart, and the marked row or point is the value $/v: a tap on a row or a point moves it (decision 2). The host check
-// of decision 3 (checkData) compares each number of a searched form with the source excerpts.
+// What the line tables of the data family use (docs/superpowers/plans/2026-11-22-block-2-forms-library-motion.md, stage 5): compare, table,
+// chart, and nodata. Their call starts after the routing call, with the section "Template data" of prompt.md. A data form shows its rows or
+// points in a native table or chart, and the marked row or point is the value $/v: a tap on a row or a point moves it (decision 2). The host
+// check of decision 3 (checkSource, template.js checkData) compares each number of a searched form with the source excerpts.
 
 import { show } from "./dsl.js";
-import { BUDGET, SENTENCE_END, isText, labelsFault, numberOf, textFault } from "./form-base.js";
-
-/** The words of the data family. */
-export const DATA_WORDS = new Set(["compare", "table", "chart", "nodata"]);
-/** The first line of a data form, as the host tells it (prompt.json dataHead): a spoken change of such a screen is a new data screen. */
-export const DATA_HEAD = new RegExp(`^\\s*(?:${[...DATA_WORDS].join("|")})\\s*\\(`);
+import { CONTROL_LINE, SENTENCE_END, isText, labelsFault, numberOf } from "./form-base.js";
 /**
  * The caps of the data forms, in characters and items. A label (a row label, a thing name, a column head, a point label) past its cap is cut
  * with "…", because a cut label keeps its meaning. A value past its cap is a fault, because a cut number is a wrong number.
@@ -71,28 +66,24 @@ export function contextFaults(lines, labels, count, columns = []) {
   return out;
 }
 
-/** The fault of the host line source(SITE, TIME): two texts in quotes. */
-export function sourceFault(tree) {
-  if (tree.k !== "call" || tree.name !== "source" || tree.args.length !== 2 || Object.keys(tree.named).length) return "the source is source(SITE, TIME), and only the host writes it";
-  return tree.args.map((arg, index) => textFault(index ? "the time" : "the site", arg, 100)).find(Boolean) ?? null;
-}
+/** The control line mark(ROW) of a data form, or mark(ROW, COLUMN) when column is true (markFault). */
+export const markLine = (column = false) => ({ ...CONTROL_LINE, fault: (tree) => markFault(tree, column) });
+/** The host line source(SITE, TIME) of a searched form: two texts in quotes. */
+export const SOURCE_LINE = { name: "source", form: "the source is source(SITE, TIME), and only the host writes it",
+  forms: { source: [{ type: "text", what: "the site", cap: 100 }, { type: "text", what: "the time", cap: 100 }] } };
 
 /**
- * The app lines of a data form: the mark $/v, the main component, the card, the source, and the root in that order. main is the line of the
- * table or the chart, or null for nodata. A form with no source line shows none.
+ * The fill of a data form (template.js expandTemplate): main is the line of its table or chart from the first line, the parts, and the mark, or
+ * null with no row or point yet. The ready plan shows the mark $/v and main only with main, the source only with a source line, and the
+ * divider data_wait only when the screen shows nothing else.
  */
-export function dataFile(head, main, start, card, source, icon) {
-  const title = show(head.args[0]), out = [`app(${title}, lang=${show(head.named.lang)}, preset="clean", palette=${show(head.named.palette ?? { k: "lit", v: "blue" })})`];
-  if (main) out.push(`$/v = ${show(start)}`, `data_view = ${main}`);
-  if (card) out.push(`need card = card(${show(card.args[0])}, ${show(card.args[1])}${icon ? `, icon=${show({ k: "lit", v: icon })}` : ""})`);
+export const dataFill = (mainOf) => ({ head, parts, call, line }) => {
+  const main = mainOf?.(head, parts, call) ?? null, source = line("source")?.tree;
+  const top = [main && "data_view", line("card") && "card_view", source && "data_source"].filter(Boolean);
   // The source line is one small muted line with a link icon (stage 5 look).
-  if (source) out.push(`data_source = Text(${show({ k: "lit", v: `${source.args[0].v} · ${source.args[1].v}` })}, variant="source")`);
-  const top = [main && "data_view", card && "card_view", source && "data_source"].filter(Boolean);
-  // The first line alone is a frame of the stream (the preview step): its screen holds one divider under the title.
-  if (!top.length) out.push("data_wait = Divider()");
-  out.push(`root = Column([${(top.length ? top : ["data_wait"]).join(", ")}])`);
-  return out.join("\n") + "\n";
-}
+  return { main: main ?? undefined, mark: main ? show(markStart(call)) : undefined, source: source && show({ k: "lit", v: `${source.args[0].v} · ${source.args[1].v}` }),
+    top: (top.length ? top : ["data_wait"]).join(", "), wait: top.length ? undefined : "" };
+};
 
 /**
  * The line Table(TITLE, COLUMNS, ROWS, $/v) of the table of a form, with column= for a marked cell (its index among the columns, from 0).
@@ -135,7 +126,7 @@ export function numbersIn(text) {
 }
 
 /** The values of the cells and points of a data form that the host check reads: no label, no head, and no column that only counts the rows. */
-export function checkedValues(read) {
+function checkedValues(read) {
   const rows = read.lines.filter((line) => line.tree?.k === "call" && line.tree.name === "row").map((line) => line.tree.args[1].items.map(cellText));
   const points = read.lines.filter((line) => line.tree?.k === "call" && line.tree.name === "point").map((line) => cellText(line.tree.args[1]));
   // A column whose values are 1, 2, 3, … in the order of the rows is a rank that the model adds, not a data value.
@@ -145,13 +136,23 @@ export function checkedValues(read) {
   return [...cells, ...points].filter((text) => text !== undefined);
 }
 
+/**
+ * The host check of a searched data form (block 2 plan, decision 3): {line} with the host line source = source(SITE, TIME) when each number of
+ * a cell or a point is in the source excerpts, else {text, rejected}: the nodata file with the reason, and the value that no excerpt holds.
+ */
+export function checkSource(read, { excerpts, site, time }) {
+  const known = new Set(numbersIn(excerpts)), rejected = checkedValues(read).find((value) => numbersIn(value).some((number) => !known.has(number)));
+  if (rejected !== undefined) return { text: rejectFile(read.lines[0].tree, rejected), rejected };
+  return { line: `source = source(${show({ k: "lit", v: site })}, ${show({ k: "lit", v: time })})` };
+}
+
 /** The words of the nodata card that the host check writes, by the language of the form. Each other language gets en. */
 const REJECT = {
   ru: ["Нет точных данных", (value) => `Источники не подтверждают значение ${value}. Скажи «найди ещё раз» или спроси по-другому.`],
   en: ["No exact data", (value) => `The sources do not hold the value ${value}. Say «search again» or ask another way.`],
 };
 /** The nodata file of a form whose value is in no excerpt: the title of the form, the reason, and the same sentences for the voice. */
-export function rejectFile(head, value) {
+function rejectFile(head, value) {
   const [title, reason] = REJECT[head.named.lang?.v] ?? REJECT.en, text = reason(value);
   const palette = head.named.palette ? `, palette=${show(head.named.palette)}` : "";
   return `nodata(${show(head.args[0])}, lang=${show(head.named.lang ?? { k: "lit", v: "en" })}${palette})\ncard = card(${show({ k: "lit", v: title })}, ${show({ k: "lit", v: text })})\nsay = ${JSON.stringify(text)}\n`;

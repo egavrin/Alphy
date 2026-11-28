@@ -1,0 +1,5 @@
+app({{title}}, lang={{lang}}, preset="clean", palette={{palette}})
+need picture = drawing({{title}}, 300, 300, [{{shapes}}])
+$/v = {{held}}
+need v = input("slider", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})
+need card = card({{cardTitle}}, {{cardText}})

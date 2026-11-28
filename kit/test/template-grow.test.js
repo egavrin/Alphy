@@ -6,7 +6,7 @@ import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compileStep, previewStep } from "../src/compile.js";
 import { plansIn } from "../build.js";
-import { DATA_WORDS } from "../src/form-data.js";
+import { DATA_WORDS } from "../src/ready.js";
 import "./helpers.js";
 
 /** The saved template files: the examples and the cap files, and the change bases when they exist. */
@@ -17,7 +17,7 @@ const FOLDERS = ["template", "template-bases"].map((name) => fileURLToPath(new U
  * properties, or children or options of before that are not the start of those of after. New nodes and new options come only after the old ones.
  */
 function moved(before, after, path = "ui", gains = false) {
-  // The divider of a data form holds the place of its table or chart until a line of rows or points comes (form-data.js dataFile).
+  // The divider of a data form holds the place of its table or chart until a line of rows or points comes (form-data.js dataFill).
   if (gains && before.type === "divider") return [];
   if (after?.type !== before.type) return [`${path}: ${before.type} is ${after?.type ?? "gone"}`];
   const { children = [], options = [], ...own } = before, { children: more = [], options: moreOptions = [], ...ownAfter } = after;

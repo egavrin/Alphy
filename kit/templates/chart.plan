@@ -1,0 +1,7 @@
+app({{title}}, lang={{lang}}, preset="clean", palette={{palette}})
+$/v = {{mark}}
+data_view = {{main}}
+need card = card({{cardTitle}}, {{cardText}})
+data_source = Text({{source}}, variant="source")
+data_wait = Divider({{wait}})
+root = Column([{{top}}])

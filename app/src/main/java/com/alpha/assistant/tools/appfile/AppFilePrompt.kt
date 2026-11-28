@@ -18,9 +18,9 @@ internal class AppFilePrompt(val system: String,
     /** The section Template data: the instructions of a template call of the data family (block 2 plan, D1). */ val templateData: String,
     dataHead: String,
     /** The section Template library with its placeholder {{candidates}} (stage 6, S3). */ private val templateLibrary: String) {
-    /** TEMPLATE_HEAD of kit/src/template.js. */
+    /** TEMPLATE_HEAD of kit/src/ready.js. */
     private val head=Regex(templateHead)
-    /** DATA_HEAD of kit/src/form-data.js. */
+    /** DATA_HEAD of kit/src/ready.js. */
     private val dataHead=Regex(dataHead)
     /** The text of a repair call, as repairText of kit/prompt.js builds it. */
     fun repairText(task: String,plan: String,faults: List<String>)=fill(repairTask,mapOf("task" to task,"plan" to plan.trimEnd(),"faults" to faults.joinToString("\n- ")))

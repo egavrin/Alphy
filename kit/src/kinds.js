@@ -1,5 +1,5 @@
 // The registry of the shape kinds and the shape properties (stage 6, L1 and L2). The evaluator (core.js), the drawing (draw.js), the faults
-// of a template line (form-scene.js), and the prompt text (prompt.js) come from it: a new kind is one entry here, with its arguments, its
+// of a template line (templates/scene.js), and the prompt text (prompt.js) come from it: a new kind is one entry here, with its arguments, its
 // prompt text, and its draw rule. A draw rule gives Alphy's drawing commands with no color: draw.js adds the paint.
 
 /** False in the run-time text of an app (dsl.js). */

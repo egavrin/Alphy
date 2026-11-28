@@ -1,16 +1,18 @@
-// The template forms (one scene plan, Task 2): the code of each template form is in a module of its own, and forms.js finds each one by its word.
+// The ready plans (kit/README.md, section "Ready plans"): each template is a ready plan with its line table in kit/templates, and the registry
+// ready.js finds each one by its word.
 
 import { expect, test } from "bun:test";
-import { FORMS_BY_WORD } from "../src/forms.js";
+import { READY } from "../src/ready.js";
 import { script } from "../build.js";
 
-test("each form has its own module", () => {
-  expect(Object.keys(FORMS_BY_WORD)).toEqual(["scene", "items", "cells", "compare", "table", "chart", "nodata"]);
-  expect(FORMS_BY_WORD.scene.part.test("s12")).toBe(true);
-  expect(FORMS_BY_WORD.cells.part.test("s1")).toBe(false);
+test("each template has its ready plan and its line table", () => {
+  expect(Object.keys(READY)).toEqual(["scene", "items", "cells", "compare", "table", "chart", "nodata"]);
+  for (const entry of Object.values(READY)) expect([entry.word, typeof entry.plan, Array.isArray(entry.lines)]).toEqual([entry.word, "string", true]);
+  expect(READY.scene.lines.some((entry) => entry.name === "s" && entry.count >= 12)).toBe(true);
+  expect(READY.cells.lines.some((entry) => entry.name === "s")).toBe(false);
 });
 
-// template.js exports BUDGET and TEMPLATE_HEAD of form-base.js again, so its importers stay unchanged.
+// template.js exports BUDGET of form-base.js and TEMPLATE_HEAD of ready.js again, so its importers stay unchanged.
 test("bundle: a module exports again the names of a module before it, and the script declares each name once", () => {
   const a = ["a", "export const x = 1;"], text = script([a, ["b", 'export { x } from "./a.js";\nexport const z = 2;'], ["c", 'import { x, z } from "./b.js";\nexport const w = x + z;']]);
   expect(new Function(`${text}return w;`)()).toBe(3);

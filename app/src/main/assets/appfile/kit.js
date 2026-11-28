@@ -306,7 +306,7 @@ return { DslError, parseExpression, parseLine, HEADS, AppFile, show };
 // kinds.js
 const { fixed, inside, segmentsOf, KINDS, PROPERTIES, boxOf } = (() => {
 // The registry of the shape kinds and the shape properties (stage 6, L1 and L2). The evaluator (core.js), the drawing (draw.js), the faults
-// of a template line (form-scene.js), and the prompt text (prompt.js) come from it: a new kind is one entry here, with its arguments, its
+// of a template line (templates/scene.js), and the prompt text (prompt.js) come from it: a new kind is one entry here, with its arguments, its
 // prompt text, and its draw rule. A draw rule gives Alphy's drawing commands with no color: draw.js adds the paint.
 
 /** False in the run-time text of an app (dsl.js). */
@@ -4053,18 +4053,16 @@ function nextState(file, { app, definition, owners, objects }, previous, build) 
 return { BLOCKS, MISMATCH, isRecord, nextState };
 })();
 // form-base.js
-const { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, FEW_OPTIONS, optionCap, optionFault, labelsFault, optionsFault, SENTENCE_END, cut, cutLong, headFault, textCardFault, namedColors, colored, colorFault } = (() => {
-// What each template form uses (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): the first line, the budget, the drawing size,
-// the faults of a text, of the first line, and of a card with a text, the cut of a long text, and the colors of a shape. Each form has a
-// module of its own (forms.js), and template.js reads, merges, expands, and builds a template file with them.
+const { BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, FEW_OPTIONS, optionCap, optionFault, labelsFault, optionsFault, SENTENCE_END, cut, cutLong, headFault, formOf, formFault, cutOf, CONTROL_VALUE, CONTROL_LINE, CONTROL_LABEL, CARD_TITLE, CARD_TEXT, cardLine, NARRATION, namedColors, colored, colorFault } = (() => {
+// What each line table of a ready plan uses (kit/templates, kit/README.md section "Ready plans"): the budget, the drawing size, the faults of
+// a text and of the first line, the check of a value by the forms of its line (formFault), the cut of a long text, the colors of a shape, and
+// the lines that most templates share. template.js reads, merges, fills, and builds a template file with the line tables.
 
 
 
 
 
 
-/** The first line of a template file, with the template word as group 1: the explain family, then the data family (form-data.js). */
-const TEMPLATE_HEAD = /^\s*(scene|items|cells|compare|table|chart|nodata)\s*\(/;
 /**
  * The content budget of each template: texts in characters, lists in items. A text inside the picture (a shape text, a sign) has no fault up to
  * floor(1.25 × cap), because it cannot change the height of the screen. A card text or an item text past its cap is cut after its last whole
@@ -4173,29 +4171,74 @@ function cut(text, cap) {
 const textsMapped = (node, map) => (!node || typeof node !== "object" ? node : isText(node) ? map(node)
   : Array.isArray(node) ? node.map((inner) => textsMapped(inner, map)) : Object.fromEntries(Object.entries(node).map(([key, inner]) => [key, textsMapped(inner, map)])));
 /**
- * The tree of a card line of scene and cells, or of an item line, with each text of its card text or item text cut to the cap (cut). Each
- * text of a formula is cut by itself. The same tree when no text changes.
+ * The call with each text of its argument at cut to cap (cut), such as a card text or an item text. Each text of a formula is cut by itself.
+ * The same tree when no text changes.
  */
-function cutLong(tree, name, word) {
-  const at = name === "card" ? (word === "items" ? -1 : 1) : word === "items" ? 2 : -1, long = tree.k === "call" && tree.name === (name === "card" ? "card" : "item") ? tree.args[at] : undefined;
-  const short = long && textsMapped(long, (node) => ({ ...node, v: cut(node.v, BUDGET.cardText) }));
+function cutLong(tree, at, cap) {
+  const long = tree.args[at], short = long && textsMapped(long, (node) => ({ ...node, v: cut(node.v, cap) }));
   return !long || show(short) === show(long) ? tree : { ...tree, args: tree.args.map((arg, index) => (index === at ? short : arg)) };
 }
 
-/** The fault of the first line. extra names a named argument of the form beyond lang= and palette=, such as kind= of chart, which the form checks. */
-function headFault(tree, word, extra) {
-  const [title, ...more] = tree.args ?? [], { lang, palette, [extra]: _own, ...other } = tree.named ?? {};
+/**
+ * The fault of the first line. head is the named argument of a template beyond lang= and palette=, such as {name: "kind", values: ["bar",
+ * "line"]} of chart: its value is one of values.
+ */
+function headFault(tree, word, head) {
+  const extra = head?.name, [title, ...more] = tree.args ?? [], { lang, palette, [extra]: own, ...other } = tree.named ?? {};
   if (tree.k !== "call" || more.length || Object.keys(other).length) return `the first line is ${word}(TITLE, lang=CODE, palette=NAME${extra ? `, ${extra}=…` : ""}), and palette= is optional`;
   if (!(isText(lang) && /^[a-z]{2}$/.test(lang.v))) return 'lang= is the two-letter code of the language of the request, such as "en"';
   if (palette && !(isText(palette) && PALETTES.includes(palette.v))) return `palette= is one of ${PALETTES.join(", ")}, and ${show(palette)} is not one`;
-  return textFault("the title", title, BUDGET.title);
+  return textFault("the title", title, BUDGET.title)
+    ?? (own && !(isText(own) && head.values.includes(own.v)) ? `${extra}= is ${head.values.map((value) => JSON.stringify(value)).join(" or ")}, and ${show(own)} is not one` : null);
 }
 
-/** The fault of the card line card(TITLE, TEXT) of the template word: the card of scene and of cells. */
-function textCardFault(tree, word) {
-  if (tree.k !== "call" || tree.name !== "card" || tree.args.length !== 2 || Object.keys(tree.named).length) return `the card of ${word} is card(TITLE, TEXT)`;
-  return textFault("the card title", tree.args[0], BUDGET.cardTitle, true) ?? textFault("the card text", tree.args[1], BUDGET.cardText, true);
+/** The form of a value in the forms of a line entry: a list of argument kinds, a function that checks the value, or null for no call of a form. */
+const formOf = (entry, tree) => (tree?.k === "call" && Object.hasOwn(entry.forms ?? {}, tree.name) ? entry.forms[tree.name] : null);
+/** Whether a node fits an argument kind before its caps: a number (with is, that number), a whole number, a word (a text in quotes), or a list. */
+const fits = (spec, node) => (!node ? Boolean(spec.optional) : spec.type === "number" ? numberOf(node) !== undefined && (spec.is === undefined || numberOf(node) === spec.is)
+  : spec.type === "whole" ? numberOf(node) !== undefined : spec.type === "word" ? isText(node) : spec.type === "list" ? node.k === "list" : true);
+/**
+ * The fault of a value by the forms of its line entry (kit/README.md, section "Ready plans"): entry.form for a value that is no call of a form,
+ * the fault of a form that is a function, else the first fault of the arguments. The count and the kinds of the arguments come first, then a
+ * whole number out of its range, a list past its counts or with a label past its cap (optionsFault), and a text past its cap (textFault).
+ */
+function formFault(entry, tree) {
+  const form = formOf(entry, tree), args = tree.args ?? [];
+  if (typeof form === "function") return form(tree);
+  if (!form || Object.keys(tree.named).length || args.length > form.length || form.some((spec, index) => !fits(spec, args[index]))) return entry.form;
+  const given = (type) => form.map((spec, index) => [spec, args[index]]).filter(([spec, node]) => spec.type === type && node);
+  for (const [spec, node] of given("whole")) {
+    const value = numberOf(node);
+    if (!(Number.isInteger(value) && value >= spec.least && value <= spec.most)) return `${spec.what} is a whole number from ${spec.least} to ${spec.most}, and ${show(node)} is not one`;
+  }
+  for (const [spec, { items }] of given("list")) {
+    if (items.length > spec.most) return `the ${spec.what} has ${items.length} ${spec.word}s, and its cap is ${spec.most}. Keep the ones that matter most`;
+    if (items.length < spec.least) return `a ${spec.what} needs at least ${spec.least} ${spec.word}s`;
+    const fault = optionsFault(spec.word, items);
+    if (fault) return fault;
+  }
+  return given("text").map(([spec, node]) => textFault(spec.what, node, spec.cap, spec.formula, spec.inside ? INSIDE : 1)).find(Boolean) ?? null;
 }
+/** The tree of a line with each long text of its form cut to its cap (cutLong), then with the cut of its entry, such as the cut of a label. */
+function cutOf(entry, tree) {
+  const form = formOf(entry, tree), short = Array.isArray(form) ? form.reduce((one, spec, index) => (spec.long ? cutLong(one, index, spec.cap) : one), tree) : tree;
+  return entry.cut ? entry.cut(short) : short;
+}
+
+// The lines and the arguments that most line tables share.
+
+/** The value of the control, which a line reads as $/v. */
+const CONTROL_VALUE = { name: "v", what: "the value of the control" };
+/** The control line: the line $/v = VALUE stands for it, it sets $/v, a new one goes after the first line, and it owns the faults of need v. */
+const CONTROL_LINE = { name: "control", held: true, sets: "v", merge: 1, owner: "v" };
+const CONTROL_LABEL = { slot: "label", type: "text", what: "the label", cap: BUDGET.control };
+const CARD_TITLE = { slot: "cardTitle", type: "text", what: "the card title", cap: BUDGET.cardTitle, formula: true };
+/** The card text: the kit cuts a long one after its last whole sentence inside the cap. */
+const CARD_TEXT = { slot: "cardText", type: "text", what: "the card text", cap: BUDGET.cardText, formula: true, long: true };
+/** The card line card(TITLE, TEXT) of the template word: it holds the card of a frame, and it owns the faults of need card. */
+const cardLine = (word) => ({ name: "card", holds: "card", owner: "card", form: `the card of ${word} is card(TITLE, TEXT)`, forms: { card: [CARD_TITLE, CARD_TEXT] } });
+/** The narration lines: say for one sentence, and say1 to sayN for the steps of a walk. They draw nothing, so they have no fault. */
+const NARRATION = { name: "say", narration: true };
 
 /** The values of a color: the color, or each value of a choice (test ? a : b, or if(test, a, b)), as choices in parts.js reads them. map gives each value again. */
 const colorValues = (node, map) => node?.k === "if" ? { ...node, yes: colorValues(node.yes, map), no: colorValues(node.no, map) }
@@ -4215,7 +4258,7 @@ const colorFault = (tree) => {
   return wrong ? `the color ${show(wrong)} is not a color of the kit. Use one of ${Object.keys(TONES).join(", ")}, a tone of one such as "water+1" or "accent-1@50", one of ${Object.keys(COLOR_NAMES).join(", ")}, or a hex such as "#336699"` : null;
 };
 
-return { TEMPLATE_HEAD, BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, FEW_OPTIONS, optionCap, optionFault, labelsFault, optionsFault, SENTENCE_END, cut, cutLong, headFault, textCardFault, namedColors, colored, colorFault };
+return { BUDGET, COLOR_NAMES, namedColor, toneColor, WIDTH, HEIGHT, isText, numberOf, nodesIn, INSIDE, textFault, FEW_OPTIONS, optionCap, optionFault, labelsFault, optionsFault, SENTENCE_END, cut, cutLong, headFault, formOf, formFault, cutOf, CONTROL_VALUE, CONTROL_LINE, CONTROL_LABEL, CARD_TITLE, CARD_TEXT, cardLine, NARRATION, namedColors, colored, colorFault };
 })();
 // elements.js
 const { toneOf, ELEMENTS } = (() => {
@@ -4811,272 +4854,15 @@ const segmentsOfEntry = (entry) => (entry.layers ?? []).reduce((sum, layer) => {
 
 return { UNITS, SMALLEST, LEAST, SEGMENTS, USE_NAMED, LIBRARY, entryOf, partName, missOf, useFault, roomFault, LABEL, lineWidth, labelLines, layoutOf, useShapes, freeShapes, FREE, freeLayout, segmentsOfEntry };
 })();
-// form-scene.js
-const { PLAY_SECONDS, SCENE_FORM, diagramOf } = (() => {
-// The template scene (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): a picture of the shapes s1 to s20, one slider or choice,
-// and a card with a text. The kit draws each shape as it is, and a library line as the shapes of its element or object (library.js). The
-// shape kinds and their properties come from the registry of kinds.js, so a new kind needs no edit here.
-
-
-
-
-
-
-const CONTROL = "slider(LABEL, MIN, MAX, STEP, START) with numbers, choice(LABEL, [OPTION, …], START), steps(LABEL, [STEP, …], ANSWER), or parts(LABEL, [PART, …])";
-const PLAY = "play(LABEL, FROM, TO, SECONDS) with numbers: $/t runs from FROM to TO in SECONDS, again and again";
-/** The longest round of a play line in seconds. */
-const PLAY_SECONDS = 120;
-
-/** The form of scene (forms.js TemplateForm). */
-const SCENE_FORM = {
-  word: "scene",
-  part: new RegExp(`^s(?:${Array.from({ length: BUDGET.shapes }, (_, index) => index + 1).join("|")})$`),
-  lines: `control, play, s1 to s${BUDGET.shapes} (at most ${BUDGET.shapes} shapes), and card`,
-  control: CONTROL,
-  /**
-   * The fault of the motion line play = play(LABEL, FROM, TO, SECONDS) (block 2 plan, M1): $/t runs from FROM to TO in SECONDS, again and
-   * again, beside the control of $/v (M7).
-   */
-  playFault(tree) {
-    const args = tree.args ?? [], [from, to, seconds] = args.slice(1).map(numberOf), form = `the motion line is ${PLAY}`;
-    if (tree.k !== "call" || tree.name !== "play" || Object.keys(tree.named).length || args.length !== 4 || [from, to, seconds].includes(undefined)) return form;
-    if (from === to) return "FROM and TO of play are the same number, so nothing moves";
-    if (!(seconds > 0 && seconds <= PLAY_SECONDS)) return `the SECONDS of play are above 0 and at most ${PLAY_SECONDS}, and this line has ${seconds}`;
-    return textFault("the label", args[0], BUDGET.control);
-  },
-  /** The fault of a control line. The kit checks the bounds and the start of a slider and of a choice when it compiles the expansion. */
-  controlFault(tree) {
-    const args = tree.args ?? [], form = `the control of scene is ${CONTROL}`;
-    if (tree.k !== "call" || Object.keys(tree.named).length) return form;
-    if (tree.name === "slider") {
-      if (args.length !== 5 || args.slice(1).some((arg) => numberOf(arg) === undefined)) return form;
-    } else if (tree.name === "parts") {
-      // A diagram (block 2 plan, G1 and C2): a walk over up to BUDGET.parts parts, each named in the picture. The kit takes the parts of the
-      // ready object of the scene in their order when the line names none. A part is a text, or part(...) with the name that the model gives (diagramOf).
-      const names = args[1]?.items;
-      if (args.length < 1 || args.length > 3 || (args[1] && !names) || (args[2] && !isText(args[2]))) return form;
-      if (names && names.length > BUDGET.parts) return `the parts control has ${names.length} parts, and its cap is ${BUDGET.parts}. Keep the ones that matter most`;
-      if (names && names.length < 2) return "a parts control needs at least 2 parts";
-      const given = names?.map(nameOfPart);
-      if (given?.some((name) => name === undefined) || new Set(names?.map(partKind)).size > 1) return `each part of a parts control has the same form: ${PART}`;
-      // The cap of a name holds only for a name that the model gives (diagramOf): the name of a part of an entry can be longer (C2).
-      const fault = names && labelsFault("part", given, names.every(isText) ? Infinity : BUDGET.part);
-      if (fault) return fault;
-      if (args[2] && names && !given.some((name) => name.v === args[2].v)) return `the start ${JSON.stringify(args[2].v)} is not one of the parts`;
-    } else if (tree.name === "choice" || tree.name === "steps") {
-      // A steps control is a choice whose start is its answer step, by default the last step (decision 3).
-      const options = args[1]?.items, what = tree.name === "steps" ? "steps" : "options";
-      if (args.length < 2 || args.length > 3 || !options || (args[2] && !isText(args[2]))) return form;
-      if (options.length > BUDGET.options) return `the ${tree.name} control has ${options.length} ${what}, and its cap is ${BUDGET.options}. Keep the ones that matter most`;
-      if (options.length < 2) return `a ${tree.name} control needs at least 2 ${what}`;
-      const fault = optionsFault(tree.name === "steps" ? "step" : "option", options);
-      if (fault) return fault;
-    } else return form;
-    return textFault("the label", args[0], BUDGET.control);
-  },
-  partFault(tree, lang) {
-    if (tree.k === "call" && tree.name === "use") return useFault(tree, [WIDTH, HEIGHT], lang ?? "en");
-    const kinds = Object.keys(KINDS).filter((name) => KINDS[name].prompt !== null), kind = tree.k === "call" && kinds.includes(tree.name) ? KINDS[tree.name] : null;
-    if (!kind) return `a shape is ${kinds.join(", ")}, or use(NAME, X, Y, SIZE) of the library`;
-    const named = [...Object.keys(PROPERTIES).filter((key) => PROPERTIES[key].prompt !== null), ...(kind.named ?? [])], other = Object.keys(tree.named).find((key) => !named.includes(key));
-    if (other) return `a shape takes only ${named.map((key) => `${key}=`).join(", ")} by name, and ${other}= is not one`;
-    const text = kind.args.indexOf("text");
-    if (text >= 0) return textFault("the text", tree.args[text], BUDGET.text, true, INSIDE);
-    // The kit compiles a shorter or an odd list clean: it draws nothing for too few points and drops the last number of an odd list.
-    const points = kind.points && tree.args[0]?.k === "list" ? tree.args[0].items.length : 2 * (kind.points ?? 0);
-    if (kind.points && (points < 2 * kind.points || points % 2)) return `the points of a ${tree.name} are a list of x and y numbers for at least ${kind.points} points (${2 * kind.points} numbers), and this list has ${points} numbers`;
-    return null;
-  },
-  /**
-   * The shapes of the drawing: each shape as it is, and each library line as its shapes, with the part names in the language of the first
-   * line. A library line can add app lines before the drawing (library.js useShapes).
-   */
-  expand(parts, control, head) {
-    const used = parts.map((part) => (part.tree.k === "call" && part.tree.name === "use" ? useShapes(part.tree, head.named.lang?.v ?? "en", [WIDTH, HEIGHT], part.name) : { shapes: [show(part.tree)], lines: [] }));
-    return { shapes: used.flatMap((one) => one.shapes), lines: used.flatMap((one) => one.lines) };
-  },
-  cardFault: (tree) => textCardFault(tree, "scene"),
-  /** A parts control with names of a ready object of the scene names its parts, and one with no names needs such an object (diagramOf). */
-  context(lines) {
-    const control = lines.find((line) => line.name === "control" && line.tree?.name === "parts")?.tree, lang = lines[0].tree?.named?.lang?.v ?? "en";
-    if (!control) return [];
-    const diagram = diagramOf(lines.filter((line) => line.tree && SCENE_FORM.part.test(line.name)), control, lang);
-    return diagram.fault ? [["control", diagram.fault]] : [];
-  },
-  /** A scene whose first line and control alone have faults gives them to control (template.js ownersOf). */
-  owners(owners, alone, parts, add) {
-    if (!owners.has("control")) alone(parts).forEach((fault) => add("control", fault));
-  },
-};
-
-/** The forms of a part of a parts control (stage 7b, R3). */
-const PART = "the name or the id of a part of the ready object in quotes, part(ID, NAME) with the name in the language of the request, or part(NAME, X, Y) with a point of a thing that you draw";
-/** The kind of a part of a parts control: "id" (a text), "named" (part(ID, NAME)), "point" (part(NAME, X, Y)), or undefined. */
-function partKind(item) {
-  if (isText(item)) return "id";
-  const args = item?.k === "call" && item.name === "part" && !Object.keys(item.named).length ? item.args : [];
-  if (args.length === 2 && args.every(isText)) return "named";
-  if (args.length === 3 && isText(args[0]) && numberOf(args[1]) !== undefined && numberOf(args[2]) !== undefined) return "point";
-  return undefined;
-}
-/** The name of a part of a parts control as a text node: the text, NAME of part(ID, NAME), or NAME of part(NAME, X, Y). */
-const nameOfPart = (item) => ({ id: item, named: item.args?.[1], point: item.args?.[0] })[partKind(item)];
-
-/**
- * The diagram of a parts control (block 2 plan, G1, G2, and C2), as {object, steps, names, points, fault}. object is the first part line that
- * places a ready object with parts, and steps are the names of the walk in the language of the scene: the names of the control, else each
- * part of the object in its order, at most BUDGET.parts. A name of the control that is a part of the object (by its name or its id) takes the
- * name of the entry. The entries have Russian and English names only, so in another language the model gives each name with part(ID, NAME),
- * and names maps each id to its name (stage 7b, R3).
- * With no object, each part is part(NAME, X, Y) of a thing that the model draws (G2, stage 7b), and points are [NAME, X, Y] (library.js freeShapes).
- */
-function diagramOf(parts, control, lang) {
-  const object = parts.find((part) => part.tree.k === "call" && part.tree.name === "use" && isText(part.tree.args[0]) && entryOf(part.tree.args[0].v)?.entry.parts?.length);
-  const list = object && entryOf(object.tree.args[0].v).entry.parts, items = control.args[1]?.items, kinds = new Set(items?.map(partKind)), [kind] = kinds;
-  if (kinds.size > 1 || (items && !kind)) return { fault: `each part of a parts control has the same form: ${PART}` };
-  if (!list) return freeDiagram(items, kind);
-  if (kind === "point") return { fault: `with the ready object ${object.tree.args[0].v}, a part is not part(NAME, X, Y): the kit knows where its parts are. Write the id of each part, or part(ID, NAME)` };
-  const known = Object.hasOwn(list[0].names, lang);
-  if (!known && kind !== "named") {
-    return { fault: `the kit has no names in the language "${lang}" for the parts of ${object.tree.args[0].v}: write each part as part(ID, NAME) with the name in "${lang}", such as part(${JSON.stringify(list[0].id)}, NAME)` };
-  }
-  if (!items) return { object, steps: list.slice(0, BUDGET.parts).map((part) => partName(part, lang)) };
-  const keys = items.map((item) => (kind === "named" ? item.args[0] : item));
-  const found = keys.map((key) => list.find((part) => part.id === key.v || partName(part, lang).toLowerCase() === key.v.toLowerCase() || Object.values(part.names).includes(key.v)));
-  const missing = keys.find((_, index) => !found[index]);
-  if (missing) return { fault: `${object.tree.args[0].v} has no part ${JSON.stringify(missing.v)}. Its parts are ${list.map((part) => (known ? partName(part, lang) : part.id)).join(", ")}` };
-  if (kind !== "named") return { object, steps: found.map((part) => partName(part, lang)) };
-  const names = Object.fromEntries(found.map((part, index) => [part.id, items[index].args[1].v]));
-  const tree = object.tree, room = roomFault(tree, { ...tree.named, parts: { k: "lit", v: true }, names: { k: "lit", v: names } }, [WIDTH, HEIGHT], lang);
-  return { object, steps: Object.values(names), names, fault: room };
-}
-
-/** The diagram of a parts control with no ready object in the picture (G2, stage 7b): each part is part(NAME, X, Y) at a point of the drawing zone. */
-function freeDiagram(items, kind) {
-  if (!items) return { fault: "a parts control with no names needs a ready object with parts in the picture, such as use(\"heart\", 150, 150, 220), or part(NAME, X, Y) for each part of a thing that you draw" };
-  if (kind !== "point") return { fault: "with no ready object in the picture, write each part as part(NAME, X, Y): its name and a point of the part in your drawing, and the kit writes the name beside the drawing" };
-  const points = items.map((item) => [item.args[0].v, numberOf(item.args[1]), numberOf(item.args[2])]), [left, right] = FREE.zone;
-  const out = points.findIndex(([, x, y]) => x < left || x > right || y < 0 || y > HEIGHT);
-  if (out >= 0) return { fault: `the point of part ${out + 1} is at ${points[out][1]}, ${points[out][2]}: the drawing and each point stay from x = ${left} to x = ${right} and from y = 0 to y = ${HEIGHT}, so the names have room at the sides` };
-  const placed = freeLayout(points, [WIDTH, HEIGHT]);
-  if (placed.size / UNITS < FREE.fewest || placed.labels.some((one) => one.clipped)) {
-    return { fault: "the names of the parts leave the drawing too little room: write shorter names, or names of two words, or name fewer parts" };
-  }
-  return { object: null, steps: points.map(([name]) => name), points };
-}
-
-return { PLAY_SECONDS, SCENE_FORM, diagramOf };
-})();
-// form-items.js
-const { ITEMS_FORM } = (() => {
-// The template items (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): the items i1 to i6, a choice of their labels, and a card
-// that shows the text of the chosen item. The drawing shows the sign and the label of the chosen item.
-
-
-
-
-const CONTROL = "choice(LABEL), or steps(LABEL, ANSWER): its options are the labels of the items";
-
-/** The form of items (forms.js TemplateForm). */
-const ITEMS_FORM = {
-  word: "items",
-  part: /^i[1-6]$/,
-  lines: "control, i1 to i6 (at most 6 items), and card",
-  control: CONTROL,
-  controlFault(tree) {
-    const args = tree.args ?? [], form = `the control of items is ${CONTROL}`;
-    if (tree.k !== "call" || Object.keys(tree.named).length) return form;
-    if (!(tree.name === "choice" && args.length === 1 || tree.name === "steps" && args.length <= 2 && args.length >= 1 && (!args[1] || isText(args[1])))) return form;
-    return textFault("the label", args[0], BUDGET.control);
-  },
-  partFault(tree) {
-    if (tree.k !== "call" || tree.name !== "item" || tree.args.length !== 3 || Object.keys(tree.named).length) return "an item is item(LABEL, SIGN, TEXT)";
-    return textFault("the label", tree.args[0], BUDGET.fewOption) ?? textFault("the sign", tree.args[1], BUDGET.sign, false, INSIDE) ?? textFault("the text", tree.args[2], BUDGET.cardText);
-  },
-  /** The labels are the options of the choice, so their cap follows the number of items and the control (optionFault), which only the whole file knows. */
-  context(lines) {
-    const items = lines.filter((line) => line.tree && ITEMS_FORM.part.test(line.name));
-    return items.flatMap((line) => [optionFault("the label", line.tree.args[0], items.length, "item")].filter(Boolean).map((fault) => [line.name, fault]));
-  },
-  cardFault(tree) {
-    if (tree.k !== "call" || tree.name !== "card" || tree.args.length !== 1 || Object.keys(tree.named).length) return "the card of items is card(TITLE): it shows the text of the chosen item";
-    return textFault("the card title", tree.args[0], BUDGET.cardTitle, true);
-  },
-  /** The list of the items and the chosen item, the drawing of its sign and label, the labels as the options of the choice, and its text on the card. */
-  expand(parts) {
-    // The sign is large when it is one or two characters, and smaller for a word, so a sign at 1.25 times its cap fits the 300 px of the drawing.
-    // A preview with no item yet draws nothing, so the first item only adds to the picture.
-    return {
-      lines: [`$/items := [${parts.map(({ tree: { args: [label, sign, text] } }) => `{label: ${show(label)}, sign: ${show(sign)}, text: ${show(text)}}`).join(", ")}]`, "$/now := find($/items, $label == $/v)"],
-      shapes: parts.length ? ['text(150, 95, $/now/sign, "accent", len($/now/sign) <= 2 ? 72 : (len($/now/sign) <= 6 ? 44 : 24))', 'text(150, 190, $/v, "ink", 20)'] : [],
-      options: { k: "list", items: parts.map((part) => part.tree.args[0]) },
-      cardText: "$/now/text",
-    };
-  },
-  /**
-   * The start of $/v: the answer of a steps control, by default the label of the last item (decision 3), else the label of the first item,
-   * or 0 with no item.
-   */
-  start: (parts, control) => (control?.name === "steps" ? control.args[1] ?? parts.at(-1)?.tree.args[0] : parts[0]?.tree.args[0]) ?? { k: "lit", v: 0 },
-};
-
-return { ITEMS_FORM };
-})();
-// form-cells.js
-const { CELLS_FORM } = (() => {
-// The template cells (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): a slider of a count of cells and a card with a text.
-// The control draws the cells, so a cells file has no part line.
-
-
-
-
-const CONTROL = "slider(LABEL, 0, COUNT, 1, START)";
-
-/** The form of cells (forms.js TemplateForm). It has no partFault, because its part names match no line. */
-const CELLS_FORM = {
-  word: "cells",
-  part: /(?!)/,
-  lines: "control and card",
-  control: CONTROL,
-  controlFault(tree) {
-    const args = tree.args ?? [], form = `the control of cells is ${CONTROL}`;
-    if (tree.k !== "call" || Object.keys(tree.named).length) return form;
-    if (tree.name !== "slider") return form;
-    if (args.length !== 5 || args.slice(1).some((arg) => numberOf(arg) === undefined)) return form;
-    const count = numberOf(args[2]);
-    if (numberOf(args[1]) !== 0 || numberOf(args[3]) !== 1) return form;
-    if (!(Number.isInteger(count) && count >= 2 && count <= BUDGET.cells)) return `COUNT is a whole number from 2 to ${BUDGET.cells}, and ${show(args[2])} is not one`;
-    return textFault("the label", args[0], BUDGET.control);
-  },
-  cardFault: (tree) => textCardFault(tree, "cells"),
-  /** The drawing of the cells of a control line that the kit can read, else the parts as they are. */
-  expand(parts, control) {
-    if (control?.k !== "call") return {};
-    // Rows of at most ten cells, filled evenly, in the top 176 px, and the caption "K / N = P%" under them. One row of few cells gets taller cells.
-    const count = numberOf(control.args[2]), rows = Math.ceil(count / 10), cols = Math.ceil(count / rows);
-    const pitch = rows > 1 ? Math.min(Math.floor(280 / cols), Math.floor(176 / rows)) : Math.min(56, Math.floor(280 / cols)), side = pitch - 4, tall = rows > 1 ? side : Math.min(60, Math.round(side * 1.4));
-    const x0 = Math.round((WIDTH - (cols * pitch - 4)) / 2), y0 = 8 + Math.round((176 - ((rows - 1) * pitch + tall)) / 2);
-    return { shapes: [`each(${count}, rect(${x0} + ($index % ${cols}) * ${pitch}, ${y0} + floor($index / ${cols}) * ${pitch}, ${side}, ${tall}, $index < $/v ? "accent" : "muted", 3))`,
-      `text(150, 202, text($/v) + " / ${count} = " + text(round($/v / ${count} * 100)) + "%", "ink", 18)`] };
-  },
-};
-
-return { CELLS_FORM };
-})();
 // form-data.js
-const { DATA_WORDS, DATA_HEAD, DATA_BUDGET, cutLabel, cutLabels, cellText, rowFault, markFault, contextFaults, sourceFault, dataFile, tableLine, markStart, sentences, numbersIn, checkedValues, rejectFile } = (() => {
-// What the forms of the data family use (docs/superpowers/plans/2026-11-22-block-2-forms-library-motion.md, stage 5): compare, table, chart,
-// and nodata. Their call starts after the routing call, with the section "Template data" of prompt.md. A data form shows its rows or points
-// in a native table or chart, and the marked row or point is the value $/v: a tap on a row or a point moves it (decision 2). The host check
-// of decision 3 (checkData) compares each number of a searched form with the source excerpts.
+const { DATA_BUDGET, cutLabel, cutLabels, cellText, rowFault, markFault, contextFaults, markLine, SOURCE_LINE, dataFill, tableLine, markStart, sentences, numbersIn, checkSource } = (() => {
+// What the line tables of the data family use (docs/superpowers/plans/2026-11-22-block-2-forms-library-motion.md, stage 5): compare, table,
+// chart, and nodata. Their call starts after the routing call, with the section "Template data" of prompt.md. A data form shows its rows or
+// points in a native table or chart, and the marked row or point is the value $/v: a tap on a row or a point moves it (decision 2). The host
+// check of decision 3 (checkSource, template.js checkData) compares each number of a searched form with the source excerpts.
 
 
 
-
-/** The words of the data family. */
-const DATA_WORDS = new Set(["compare", "table", "chart", "nodata"]);
-/** The first line of a data form, as the host tells it (prompt.json dataHead): a spoken change of such a screen is a new data screen. */
-const DATA_HEAD = new RegExp(`^\\s*(?:${[...DATA_WORDS].join("|")})\\s*\\(`);
 /**
  * The caps of the data forms, in characters and items. A label (a row label, a thing name, a column head, a point label) past its cap is cut
  * with "…", because a cut label keeps its meaning. A value past its cap is a fault, because a cut number is a wrong number.
@@ -5138,28 +4924,24 @@ function contextFaults(lines, labels, count, columns = []) {
   return out;
 }
 
-/** The fault of the host line source(SITE, TIME): two texts in quotes. */
-function sourceFault(tree) {
-  if (tree.k !== "call" || tree.name !== "source" || tree.args.length !== 2 || Object.keys(tree.named).length) return "the source is source(SITE, TIME), and only the host writes it";
-  return tree.args.map((arg, index) => textFault(index ? "the time" : "the site", arg, 100)).find(Boolean) ?? null;
-}
+/** The control line mark(ROW) of a data form, or mark(ROW, COLUMN) when column is true (markFault). */
+const markLine = (column = false) => ({ ...CONTROL_LINE, fault: (tree) => markFault(tree, column) });
+/** The host line source(SITE, TIME) of a searched form: two texts in quotes. */
+const SOURCE_LINE = { name: "source", form: "the source is source(SITE, TIME), and only the host writes it",
+  forms: { source: [{ type: "text", what: "the site", cap: 100 }, { type: "text", what: "the time", cap: 100 }] } };
 
 /**
- * The app lines of a data form: the mark $/v, the main component, the card, the source, and the root in that order. main is the line of the
- * table or the chart, or null for nodata. A form with no source line shows none.
+ * The fill of a data form (template.js expandTemplate): main is the line of its table or chart from the first line, the parts, and the mark, or
+ * null with no row or point yet. The ready plan shows the mark $/v and main only with main, the source only with a source line, and the
+ * divider data_wait only when the screen shows nothing else.
  */
-function dataFile(head, main, start, card, source, icon) {
-  const title = show(head.args[0]), out = [`app(${title}, lang=${show(head.named.lang)}, preset="clean", palette=${show(head.named.palette ?? { k: "lit", v: "blue" })})`];
-  if (main) out.push(`$/v = ${show(start)}`, `data_view = ${main}`);
-  if (card) out.push(`need card = card(${show(card.args[0])}, ${show(card.args[1])}${icon ? `, icon=${show({ k: "lit", v: icon })}` : ""})`);
+const dataFill = (mainOf) => ({ head, parts, call, line }) => {
+  const main = mainOf?.(head, parts, call) ?? null, source = line("source")?.tree;
+  const top = [main && "data_view", line("card") && "card_view", source && "data_source"].filter(Boolean);
   // The source line is one small muted line with a link icon (stage 5 look).
-  if (source) out.push(`data_source = Text(${show({ k: "lit", v: `${source.args[0].v} · ${source.args[1].v}` })}, variant="source")`);
-  const top = [main && "data_view", card && "card_view", source && "data_source"].filter(Boolean);
-  // The first line alone is a frame of the stream (the preview step): its screen holds one divider under the title.
-  if (!top.length) out.push("data_wait = Divider()");
-  out.push(`root = Column([${(top.length ? top : ["data_wait"]).join(", ")}])`);
-  return out.join("\n") + "\n";
-}
+  return { main: main ?? undefined, mark: main ? show(markStart(call)) : undefined, source: source && show({ k: "lit", v: `${source.args[0].v} · ${source.args[1].v}` }),
+    top: (top.length ? top : ["data_wait"]).join(", "), wait: top.length ? undefined : "" };
+};
 
 /**
  * The line Table(TITLE, COLUMNS, ROWS, $/v) of the table of a form, with column= for a marked cell (its index among the columns, from 0).
@@ -5212,6 +4994,16 @@ function checkedValues(read) {
   return [...cells, ...points].filter((text) => text !== undefined);
 }
 
+/**
+ * The host check of a searched data form (block 2 plan, decision 3): {line} with the host line source = source(SITE, TIME) when each number of
+ * a cell or a point is in the source excerpts, else {text, rejected}: the nodata file with the reason, and the value that no excerpt holds.
+ */
+function checkSource(read, { excerpts, site, time }) {
+  const known = new Set(numbersIn(excerpts)), rejected = checkedValues(read).find((value) => numbersIn(value).some((number) => !known.has(number)));
+  if (rejected !== undefined) return { text: rejectFile(read.lines[0].tree, rejected), rejected };
+  return { line: `source = source(${show({ k: "lit", v: site })}, ${show({ k: "lit", v: time })})` };
+}
+
 /** The words of the nodata card that the host check writes, by the language of the form. Each other language gets en. */
 const REJECT = {
   ru: ["Нет точных данных", (value) => `Источники не подтверждают значение ${value}. Скажи «найди ещё раз» или спроси по-другому.`],
@@ -5224,411 +5016,117 @@ function rejectFile(head, value) {
   return `nodata(${show(head.args[0])}, lang=${show(head.named.lang ?? { k: "lit", v: "en" })}${palette})\ncard = card(${show({ k: "lit", v: title })}, ${show({ k: "lit", v: text })})\nsay = ${JSON.stringify(text)}\n`;
 }
 
-return { DATA_WORDS, DATA_HEAD, DATA_BUDGET, cutLabel, cutLabels, cellText, rowFault, markFault, contextFaults, sourceFault, dataFile, tableLine, markStart, sentences, numbersIn, checkedValues, rejectFile };
+return { DATA_BUDGET, cutLabel, cutLabels, cellText, rowFault, markFault, contextFaults, markLine, SOURCE_LINE, dataFill, tableLine, markStart, sentences, numbersIn, checkSource };
 })();
-// form-compare.js
-const { COMPARE_FORM } = (() => {
-// The template compare of the data family (block 2 plan, D2): two or three things side by side, each with a name and a sign, up to 6 rows
-// with one value for each thing, one marked row, and a card with the point. The kit shows it as a native table with signs= (a comparison):
-// the host draws a head cell for each thing and a row block with a bar under each value (stage 5 look).
+// plans.js
+const { PLANS } = (() => {
+// Built by kit/build.js from kit/templates. Do not edit: run bun kit/build.js.
 
-
-
-
-const THING = /^t[1-3]$/;
-
-/** The form of compare (forms.js TemplateForm). */
-const COMPARE_FORM = {
-  word: "compare",
-  family: "data",
-  part: /^(?:t[1-3]|r[1-6])$/,
-  lines: "control, t1 to t3 (2 or 3 things), r1 to r6 (at most 6 rows), and card",
-  control: "mark(LABEL): LABEL is the label of the marked row",
-  controlFault: (tree) => markFault(tree),
-  partFault(tree) {
-    if (tree.k === "call" && tree.name === "row") return rowFault(tree, DATA_BUDGET.things);
-    if (tree.k !== "call" || tree.name !== "thing" || !tree.args.length || tree.args.length > 2 || Object.keys(tree.named).length) return "a thing is thing(NAME, SIGN): its name and a sign, such as an emoji";
-    const [name, sign] = tree.args;
-    if (!isText(name) || !name.v.trim()) return "the name is a text in quotes";
-    if (sign && !(isText(sign) && [...sign.v].length <= DATA_BUDGET.sign)) return `the sign is a text in quotes of at most ${DATA_BUDGET.sign} characters, such as an emoji`;
-    return null;
-  },
-  cardFault: (tree) => textCardFault(tree, "compare"),
-  cut: (tree) => cutLabels(tree, tree.name === "thing" || tree.name === "row" ? [0] : []),
-  context: (lines) => contextFaults(lines, lines.filter((line) => line.tree?.name === "row").map((line) => line.tree.args[0].v),
-    lines.filter((line) => THING.test(line.name) && line.tree).length || undefined),
-  start: (parts, control) => markStart(control),
-  whole: (parts) => (parts.filter((part) => THING.test(part.name)).length < 2 ? "compare: the form needs 2 or 3 things with no fault" : null),
-  file(head, parts, control, card, source) {
-    const things = parts.filter((part) => THING.test(part.name)).map(({ tree: { args: [name, sign] } }) => [cutLabel(name.v), sign?.v ?? ""]);
-    const rows = parts.filter((part) => !THING.test(part.name)).map(({ tree: { args: [label, values] } }) => [label.v, ...values.items.map(cellText)]);
-    return dataFile(head, things.length ? tableLine(head, [" ", ...things.map(([name]) => name)], rows, -1, things.map(([, sign]) => sign)) : null, markStart(control), card, source);
-  },
+/** The ready plan of each template by its word (kit/README.md, section "Ready plans"). */
+const PLANS = {
+ "cells": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"slider\", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})\nneed card = card({{cardTitle}}, {{cardText}})\n",
+ "chart": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/v = {{mark}}\ndata_view = {{main}}\nneed card = card({{cardTitle}}, {{cardText}})\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n",
+ "compare": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/v = {{mark}}\ndata_view = {{main}}\nneed card = card({{cardTitle}}, {{cardText}})\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n",
+ "items": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/items := [{{items}}]\n$/now := find($/items, $label == $/v)\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"choice\", {{label}}, {{start}}, options={{options}})\nneed card = card({{cardTitle}}, $/now/text)\n",
+ "nodata": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\nneed card = card({{cardTitle}}, {{cardText}}, icon=\"Search\")\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n",
+ "scene": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n{{lines}}\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"slider\", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})\nneed v = input(\"choice\", {{label}}, {{start}}, options={{options}})\nneed v = input(\"choice\", {{label}}, {{start}}, options={{steps}}, variant=\"stepper\")\nneed t = {{play}}\nneed card = card({{cardTitle}}, {{cardText}})\n",
+ "table": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/v = {{mark}}\ndata_view = {{main}}\nneed card = card({{cardTitle}}, {{cardText}})\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n"
 };
 
-return { COMPARE_FORM };
+return { PLANS };
 })();
-// form-table.js
-const { TABLE_FORM } = (() => {
-// The template table of the data family (block 2 plan, D3): a head of 2 to 4 columns, up to 12 rows, one marked row or cell, and a card
-// with the caption. The native table shows 8 rows (6 on a compact width), and more rows scroll inside its box (ToolUiCatalog visibleRows).
-
-
-
-
-const heads = (lines) => lines.find((line) => line.name === "head" && line.tree)?.tree.args[0].items.map((item) => item.v) ?? [];
-
-/** The form of table (forms.js TemplateForm). */
-const TABLE_FORM = {
-  word: "table",
-  family: "data",
-  part: /^(?:head|r(?:[1-9]|1[0-2]))$/,
-  lines: "control, head, r1 to r12 (at most 12 rows), and card",
-  control: "mark(ROW) or mark(ROW, COLUMN): ROW is the label of the marked row, and COLUMN is the head of the marked cell",
-  controlFault: (tree) => markFault(tree, true),
-  partFault(tree) {
-    if (tree.k === "call" && tree.name === "row") return rowFault(tree, DATA_BUDGET.columns - 1);
-    if (tree.k !== "call" || tree.name !== "head" || tree.args.length !== 1 || Object.keys(tree.named).length || tree.args[0]?.k !== "list") return "the head is head([COLUMN, …]): the first column is the head of the row labels";
-    const items = tree.args[0].items;
-    if (items.length < 2 || items.length > DATA_BUDGET.columns) return `the head has 2 to ${DATA_BUDGET.columns} columns, and this one has ${items.length}. Keep the columns that matter most`;
-    return items.map((item, index) => (!isText(item) || !item.v.trim() ? `column ${index + 1} is a text in quotes` : null)).find(Boolean) ?? null;
-  },
-  cardFault: (tree) => textCardFault(tree, "table"),
-  cut: (tree) => cutLabels(tree, tree.name === "row" ? [0] : [], tree.name === "head" ? 0 : -1),
-  context(lines) {
-    const head = heads(lines);
-    return contextFaults(lines, lines.filter((line) => line.tree?.name === "row").map((line) => line.tree.args[0].v), head.length ? head.length - 1 : undefined, head.slice(1));
-  },
-  start: (parts, control) => markStart(control),
-  whole: (parts) => (parts.some((part) => part.name === "head") ? null : "table: the form needs the line head with no fault"),
-  file(head, parts, control, card, source) {
-    const columns = parts.find((part) => part.name === "head")?.tree.args[0].items.map((item) => item.v) ?? [];
-    const rows = parts.filter((part) => part.name !== "head").map(({ tree: { args: [label, values] } }) => [label.v, ...values.items.map(cellText)]);
-    const column = isText(control?.args?.[1]) ? columns.indexOf(cutLabel(control.args[1].v)) : -1;
-    return dataFile(head, columns.length ? tableLine(head, columns, rows, column) : null, markStart(control), card, source);
-  },
-};
-
-return { TABLE_FORM };
-})();
-// form-chart.js
-const { CHART_FORM } = (() => {
-// The template chart of the data family (block 2 plan, D4): 2 to 8 points with a label and a number each, as bars or a line, one marked
-// point, and a card with the caption. The native chart shows a label and a value at each point (ToolUiCatalog).
-
-
-
-
-
-const KINDS = ["bar", "line"];
-
-/** The form of chart (forms.js TemplateForm). */
-const CHART_FORM = {
-  word: "chart",
-  family: "data",
-  head: "kind",
-  part: /^p[1-8]$/,
-  lines: "control, p1 to p8 (at most 8 points), and card",
-  control: "mark(LABEL): LABEL is the label of the marked point",
-  headFault: (tree) => (tree.named.kind && !(isText(tree.named.kind) && KINDS.includes(tree.named.kind.v)) ? `kind= is "bar" or "line", and ${show(tree.named.kind)} is not one` : null),
-  controlFault: (tree) => markFault(tree),
-  partFault(tree) {
-    if (tree.k !== "call" || tree.name !== "point" || tree.args.length !== 2 || Object.keys(tree.named).length) return "a point is point(LABEL, NUMBER)";
-    if (!isText(tree.args[0]) || !tree.args[0].v.trim()) return "the label is a text in quotes";
-    return numberOf(tree.args[1]) === undefined ? "the value of a point is a number with no quotes and no unit, such as 88" : null;
-  },
-  cardFault: (tree) => textCardFault(tree, "chart"),
-  cut: (tree) => cutLabels(tree, tree.name === "point" ? [0] : []),
-  context: (lines) => contextFaults(lines, lines.filter((line) => line.tree?.name === "point").map((line) => line.tree.args[0].v)),
-  start: (parts, control) => markStart(control),
-  whole: (parts) => (parts.length < 2 ? "chart: the form needs 2 points with no fault" : null),
-  file(head, parts, control, card, source) {
-    const points = parts.map(({ tree: { args: [label, value] } }) => `{label: ${show(label)}, value: ${numberOf(value)}}`);
-    return dataFile(head, points.length ? `Chart([${points.join(", ")}], $label, $value, label=${show(head.args[0])}, kind=${show(head.named.kind ?? { k: "lit", v: "bar" })}, bind=$/v)` : null,
-      markStart(control), card, source);
-  },
-};
-
-return { CHART_FORM };
-})();
-// form-nodata.js
-const { NODATA_FORM } = (() => {
-// The template nodata of the data family (block 2 plan, D5): a short card with what is missing and what the person can say next, at most
-// 2 sentences. The voice says the same sentences: a file with no narration line gets say with the text of its card (template.js).
-
-
-
-
-/** The form of nodata (forms.js TemplateForm). It has no part and no control. */
-const NODATA_FORM = {
-  word: "nodata",
-  family: "data",
-  part: /(?!)/,
-  lines: "card",
-  control: "no control",
-  controlFault: () => "nodata has no control",
-  cardFault: (tree) => textCardFault(tree, "nodata"),
-  /** The card text keeps its first 2 sentences. */
-  cut: (tree) => (tree.k === "call" && tree.name === "card" && tree.args[1]?.k === "lit" && typeof tree.args[1].v === "string"
-    ? { ...tree, args: [tree.args[0], { ...tree.args[1], v: sentences(tree.args[1].v, DATA_BUDGET.nodataSentences) }] } : tree),
-  start: () => ({ k: "lit", v: "" }),
-  whole: (parts, lines, drawn) => (drawn("card") ? null : "nodata: the form needs a card with no fault"),
-  // The card has a search icon at the left of its title (stage 5 look).
-  file: (head, parts, control, card, source) => dataFile(head, null, null, card, source, "Search"),
-};
-
-return { NODATA_FORM };
-})();
-// forms.js
-const { FORMS_BY_WORD } = (() => {
-// The template forms by their word (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1). A new form is a module of its own and its
-// entry here. template.js reads, merges, expands, and builds a template file with the form of its first line.
+// ../templates/scene.js
+const { partFault, SHAPES, controlStart, SCENE, diagramOf } = (() => {
+// The line table of the ready plan scene.plan (kit/README.md, section "Ready plans"): a picture of the shapes s1 to s20, one slider, choice,
+// steps, or parts control, a play line, and a card with a text. The kit draws each shape as it is, and a library line as the shapes of its
+// element or object (library.js). The shape kinds and their properties come from the registry of kinds.js, so a new kind needs no edit here.
 
 
 
 
 
 
-
-
+const CONTROL = "slider(LABEL, MIN, MAX, STEP, START) with numbers, choice(LABEL, [OPTION, …], START), steps(LABEL, [STEP, …], ANSWER), or parts(LABEL, [PART, …])";
+const PLAY = "play(LABEL, FROM, TO, SECONDS) with numbers: $/t runs from FROM to TO in SECONDS, again and again";
+/** The longest round of a play line in seconds. */
+const PLAY_SECONDS = 120;
+const SHAPE = new RegExp(`^s(?:${Array.from({ length: BUDGET.shapes }, (_, index) => index + 1).join("|")})$`);
+const number = (slot) => ({ slot, type: "number" });
+/** The options of a choice or the steps of a steps control: 2 to 6 labels, each within the cap of their number (optionsFault). */
+const labels = (what, word) => ({ slot: "options", type: "list", what, word, least: 2, most: BUDGET.options });
+const START = { slot: "start", type: "word", optional: true };
 
 /**
- * @typedef {object} TemplateForm
- * @property {string} word
- * @property {"data"} [family]  a form of the data family (form-data.js): it has the host line source, and its own app file (file)
- * @property {RegExp} part   the names of its part lines
- * @property {string} lines  its line text for a fault
- * @property {string} control  its control forms for a fault
- * @property {(tree: object) => string | null} controlFault  the fault of its control line
- * @property {(tree: object) => string | null} [partFault]  the fault of a part line. A form whose part names match no line has none.
- * @property {(tree: object) => string | null} cardFault  the fault of its card line
- * @property {(parts: object[], control?: object) => {lines?: string[], shapes?: string[], options?: object, cardText?: string}} [expand]
- *   what the expansion of template.js takes from the form: app lines before the drawing, the shapes of the drawing, the options of a
- *   choice, and the card text. Each one that it leaves out keeps the default: no line, the parts as shapes, the options of the control,
- *   and the text of the card line.
- * @property {(parts: object[]) => object} [start]  the value that $/v keeps when the control is left out. Without it, the start of the control.
- * @property {(owners: Map<string, string[]>, alone: (names: string[]) => string[], parts: string[], add: (name: string, fault: string) => void) => void} [owners]
- *   the owners of the faults of the compile of an expansion that the form gives before the parts (template.js ownersOf).
- * @property {string} [head]  a named argument of the first line beyond lang= and palette=, which headFault of the form checks
- * @property {(tree: object) => string | null} [headFault]  the fault of that argument
- * @property {(tree: object, name: string) => object} [cut]  the tree of a line with each long label cut (the kept line holds the cut text)
- * @property {(lines: object[]) => [string, string][]} [context]  the faults that need more than one line, as [name, message]
- * @property {(parts: object[], lines: object[], drawn: (name: string) => boolean) => string | null} [whole]  the whole fault of a file with these parts
- * @property {(head: object, parts: object[], control?: object, card?: object, source?: object) => string} [file]  the whole app file of a data form
+ * The fault of the motion line play = play(LABEL, FROM, TO, SECONDS) (block 2 plan, M1): $/t runs from FROM to TO in SECONDS, again and
+ * again, beside the control of $/v (M7).
  */
-
-/** @type {Record<string, TemplateForm>} */
-const FORMS_BY_WORD = { scene: SCENE_FORM, items: ITEMS_FORM, cells: CELLS_FORM, compare: COMPARE_FORM, table: TABLE_FORM, chart: CHART_FORM, nodata: NODATA_FORM };
-
-return { FORMS_BY_WORD };
-})();
-// template.js
-const { isTemplateFile, readTemplate, mergeTemplate, checkData, expandTemplate, buildTemplate } = (() => {
-// The template file of a voice screen (docs/superpowers/specs/2026-11-21-stage-templates-stream-design.md, sections 1 and 2): named lines
-// in a fixed order, which the kit checks, fixes, and expands into an app file of today's kinds. compile.js branches here for a template text,
-// plan, or stored app file.
-//
-//   scene("Почему корабль не тонет?", lang="ru", palette="blue")      the first line: the template, the title, the language, the palette
-//   control = choice("Предмет", ["Корабль", "Гвоздь"])                 the one control. A part reads its value as $/v
-//   s1 = rect(0, 110, 300, 110, "water", 0)                            the parts: s1 to s12 are shapes (scene), i1 to i6 items (items)
-//   card = card("Вытеснение воды", "Полый корабль ...")                 the card
-//   say = "Выбери предмет и смотри на воду."                           the narration: say for one sentence, say1 to sayN for steps
-//
-// The code of each template form is in a module of its own (forms.js), and what each form uses is in form-base.js.
-
-
-
-
-
-
-
-
-
-
-const isTemplateFile = (text) => typeof text === "string" && TEMPLATE_HEAD.test(text.split("\n").find((line) => line.trim()) ?? "");
-
-const readsV = (node) => node.k === "path" && node.abs && node.segs.length === 1 && node.segs[0] === "v";
-/** The value of a play line (block 2 plan, M1): $/t, which a part reads beside $/v. */
-const readsT = (node) => node.k === "path" && node.abs && node.segs.length === 1 && node.segs[0] === "t";
-
-/** A line of a template file or of a reply: {name, raw}, a first line with head, a delete as {gone}, or null for a line with no name. $/v is the line control. */
-function lineOf(raw) {
-  const line = raw.trim(), word = TEMPLATE_HEAD.exec(line)?.[1], gone = /^delete\s+(\S+)$/.exec(line)?.[1], name = /^(\$\/v|[\p{L}_][\p{L}\p{N}_]*)\s*=(?!=)/u.exec(line)?.[1];
-  return word ? { name: word, head: true, raw: line } : gone ? { gone } : name ? { name: name === "$/v" ? "control" : name, raw: line } : null;
-}
-/** A narration line (plan "one scene", decision 2): say beside a slider, a choice, or no control, and say1 to sayN beside a steps control. */
-const NARRATION = /^say(?:[1-9]\d*)?$/;
-/**
- * The place of each kind of line in the fixed order. The narration lines come last. The head of a table and the things of a compare come before
- * the rows, and the source line of a data form, which the host writes, comes after the card.
- */
-const rank = (name, word) => (name === word ? 0 : name === "control" ? 1 : name === "play" ? 1.2 : name === "head" || /^t[1-3]$/.test(name) ? 1.5 : name === "card" ? 3 : name === "source" ? 3.5
-  : NARRATION.test(name) ? 4 : 2);
-/**
- * A narration line: its sentence with each run of space as one space, cut to BUDGET.say, as say = "<JSON string>", so the host reads it as JSON.
- * Null for a line that is no text or has no sentence end inside the cap: a narration line draws nothing, so it is left out with no fault.
- */
-function narrationOf(name, raw) {
-  let tree;
-  try { tree = parseLine(raw.trim())?.tree; } catch (failure) { if (failure instanceof DslError) return null; throw failure; }
-  const text = isText(tree) ? cut(tree.v.replace(/\s+/gu, " ").trim(), BUDGET.say) : "";
-  return [...text].length <= BUDGET.say && SENTENCE_END.test(text) ? `${name} = ${JSON.stringify(text)}` : null;
+function playFault(tree) {
+  const args = tree.args ?? [], [from, to, seconds] = args.slice(1).map(numberOf), form = `the motion line is ${PLAY}`;
+  if (tree.k !== "call" || tree.name !== "play" || Object.keys(tree.named).length || args.length !== 4 || [from, to, seconds].includes(undefined)) return form;
+  if (from === to) return "FROM and TO of play are the same number, so nothing moves";
+  if (!(seconds > 0 && seconds <= PLAY_SECONDS)) return `the SECONDS of play are above 0 and at most ${PLAY_SECONDS}, and this line has ${seconds}`;
+  return textFault("the label", args[0], BUDGET.control);
 }
 
 /**
- * The lines of a template file in the fixed order (the first line, the control, the parts in their order, the card), and the fault of each
- * line as "NAME: message", where NAME is the template word for the first line and for a line with no name. A line of a known name has the tree
- * of its value, with the kit's color for each color name, or null when it has a fault. A second line of a name, a line of a name that the
- * template does not have, and a line with no name are faults and not lines. The kit-written line $/v = VALUE is the line control.
- * misses names each library name that a line places and the library does not have (library.js missOf): the miss log of spec 12.8.
+ * The fault of a parts control (block 2 plan, G1 and C2): a walk over up to BUDGET.parts parts, each named in the picture. The kit takes the
+ * parts of the ready object of the scene in their order when the line names none. A part is a text, or part(...) with the name that the model
+ * gives (diagramOf).
  */
-function readTemplate(text) {
-  const [first = "", ...rest] = text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#")), word = TEMPLATE_HEAD.exec(first)?.[1], form = FORMS_BY_WORD[word];
-  const faults = [], lines = [], misses = [], fault = (name, message) => { faults.push(`${name}: ${message}`); return message; };
-  // A part reads $/t only beside a play line of a scene.
-  const playing = Boolean(form.playFault) && rest.some((raw) => lineOf(raw)?.name === "play"), read$ = (node) => readsV(node) || (playing && readsT(node));
-  const read = (raw, parse) => { try { return parse(raw.trim()); } catch (failure) { if (failure instanceof DslError) return failure; throw failure; } };
-  const head = read(first, parseExpression), headless = head instanceof DslError ? head.message : headFault(head, word, form.head) ?? form.headFault?.(head) ?? null;
-  if (headless) fault(word, headless);
-  lines.push({ name: word, raw: first.trim(), tree: headless ? null : head });
-  for (const raw of rest) {
-    const one = lineOf(raw), name = one?.name;
-    if (!one || one.head) { fault(word, `${JSON.stringify(raw.trim().slice(0, 40))} is not a line of the template. Its lines are the first line, ${form.lines}`); continue; }
-    if (one.gone) { fault(one.gone, "a template file has no delete line. Only a repair or a change reply deletes a line"); continue; }
-    // A narration line has no fault: one that the kit cannot keep is left out, and a second line of a name goes.
-    if (NARRATION.test(name)) {
-      if (lines.some((line) => line.name === name)) continue;
-      const kept = narrationOf(name, raw);
-      lines.push({ name, raw: kept ?? raw.trim(), tree: kept && { k: "lit", v: name } });
-      continue;
-    }
-    if (name !== "control" && name !== "card" && !form.part.test(name) && !(name === "source" && form.family) && !(name === "play" && form.playFault)) { fault(name, `the template ${word} has no line ${name}. Its lines are ${form.lines}`); continue; }
-    if (lines.some((line) => line.name === name)) { fault(name, `this is a second line ${name}. Each line has its own name`); continue; }
-    const entry = read(raw, parseLine);
-    let tree = entry instanceof DslError ? null : entry.tree, message = entry instanceof DslError ? entry.message : null, source = raw.trim();
-    if (missOf(tree)) misses.push(missOf(tree));
-    if (tree && name === "control") message = entry.kind === "state" ? (isText(tree) || numberOf(tree) !== undefined ? null : "$/v = VALUE takes a number or a text in quotes") : form.controlFault(tree);
-    else if (tree && name === "play") message = form.playFault(tree);
-    else if (tree) {
-      // The kept line has the cut text, so the stored file and a later change have it too.
-      const long = cutLong(tree, name, word), short = form.cut ? form.cut(long, name) : long;
-      if (show(short) !== show(tree)) { tree = short; source = `${name} = ${show(tree)}`; }
-      const shape = name !== "card" && word === "scene", path = nodesIn(tree, (node) => node.k === "path" && !read$(node))[0];
-      message = (name === "card" ? form.cardFault(tree) : name === "source" ? sourceFault(tree) : form.partFault(tree, head?.named?.lang?.v))
-        ?? (path ? `a line reads only $/v, the value of the control${playing ? ", and $/t, the value of play" : ""}, and this line reads ${show(path)}` : null);
-      if (shape && !message) message = colorFault(tree = colored(tree));
-      // The choice of items shows their labels, so it cannot tell two items of one label apart.
-      const twin = !message && word === "items" && name !== "card" && lines.find((line) => line.tree && FORMS_BY_WORD.items.part.test(line.name) && line.tree.args[0].v === tree.args[0].v);
-      if (twin) message = `the label ${show(tree.args[0])} is the label of ${twin.name} too. Each item needs a label of its own: the choice shows the labels`;
-    }
-    if (message) fault(name, message);
-    lines.push({ name, raw: source, tree: message ? null : tree });
-  }
-  // The faults that need more than one line, such as a row with fewer values than the columns of the form.
-  for (const [name, message] of form.context?.(lines) ?? []) {
-    const line = lines.find((one) => one.name === name && one.tree);
-    if (line) { fault(name, message); line.tree = null; }
-  }
-  // The voice of a nodata form says its card (D5): a file with no narration line gets say with the text of the card.
-  const card = lines.find((line) => line.name === "card" && line.tree);
-  if (word === "nodata" && !lines.some((line) => NARRATION.test(line.name)) && isText(card?.tree.args[1])) {
-    const say = narrationOf("say", `say = ${JSON.stringify(card.tree.args[1].v)}`);
-    if (say) lines.push({ name: "say", raw: say, tree: { k: "lit", v: "say" } });
-  }
-  lines.sort((a, b) => rank(a.name, word) - rank(b.name, word));
-  return { word, lines, faults, misses };
+function partsFault(tree) {
+  const args = tree.args, names = args[1]?.items, form = `the control of scene is ${CONTROL}`;
+  if (Object.keys(tree.named).length || args.length < 1 || args.length > 3 || (args[1] && !names) || (args[2] && !isText(args[2]))) return form;
+  if (names && names.length > BUDGET.parts) return `the parts control has ${names.length} parts, and its cap is ${BUDGET.parts}. Keep the ones that matter most`;
+  if (names && names.length < 2) return "a parts control needs at least 2 parts";
+  const given = names?.map(nameOfPart);
+  if (given?.some((name) => name === undefined) || new Set(names?.map(partKind)).size > 1) return `each part of a parts control has the same form: ${PART}`;
+  // The cap of a name holds only for a name that the model gives (diagramOf): the name of a part of an entry can be longer (C2).
+  const fault = names && labelsFault("part", given, names.every(isText) ? Infinity : BUDGET.part);
+  if (fault) return fault;
+  if (args[2] && names && !given.some((name) => name.v === args[2].v)) return `the start ${JSON.stringify(args[2].v)} is not one of the parts`;
+  return textFault("the label", args[0], BUDGET.control);
+}
+
+/** The fault of a shape line: a shape of the kind registry, or a library line use(NAME, X, Y, SIZE, …) in the language lang. */
+function partFault(tree, lang) {
+  if (tree.k === "call" && tree.name === "use") return useFault(tree, [WIDTH, HEIGHT], lang ?? "en");
+  const kinds = Object.keys(KINDS).filter((name) => KINDS[name].prompt !== null), kind = tree.k === "call" && kinds.includes(tree.name) ? KINDS[tree.name] : null;
+  if (!kind) return `a shape is ${kinds.join(", ")}, or use(NAME, X, Y, SIZE) of the library`;
+  const named = [...Object.keys(PROPERTIES).filter((key) => PROPERTIES[key].prompt !== null), ...(kind.named ?? [])], other = Object.keys(tree.named).find((key) => !named.includes(key));
+  if (other) return `a shape takes only ${named.map((key) => `${key}=`).join(", ")} by name, and ${other}= is not one`;
+  const text = kind.args.indexOf("text");
+  if (text >= 0) return textFault("the text", tree.args[text], BUDGET.text, true, INSIDE);
+  // The kit compiles a shorter or an odd list clean: it draws nothing for too few points and drops the last number of an odd list.
+  const points = kind.points && tree.args[0]?.k === "list" ? tree.args[0].items.length : 2 * (kind.points ?? 0);
+  if (kind.points && (points < 2 * kind.points || points % 2)) return `the points of a ${tree.name} are a list of x and y numbers for at least ${kind.points} points (${2 * kind.points} numbers), and this list has ${points} numbers`;
+  return null;
 }
 
 /**
- * The template file after a repair or a change reply: a line of a name that the file has goes in its place, a new part after the last part,
- * a new control after the first line, and each other new line at the end. A delete removes the line of its name, and a new first line replaces
- * the first line. A line with no name, such as prose or a fence, goes.
+ * The shapes of the drawing and the app lines before it: each shape as it is, and each library line as its shapes, with the part names in the
+ * language of the first line (library.js useShapes).
  */
-function mergeTemplate(stored, reply) {
-  let lines = stored.split("\n").map(lineOf).filter((line) => line && !line.gone);
-  const last = (test) => lines.reduce((found, line, index) => (test(line) ? index : found), -1), part = (line) => /^(?:[sitrp]\d+|head)$/.test(line.name);
-  for (const line of reply.split("\n").map(lineOf).filter(Boolean)) {
-    if (line.gone) { lines = lines.filter((one) => one.head || one.name !== line.gone); continue; }
-    const same = lines.findIndex((one) => (line.head ? one.head : !one.head && one.name === line.name));
-    if (same >= 0) { lines[same] = line; continue; }
-    const head = last((one) => one.head);
-    const control = last((one) => one.name === "control");
-    lines.splice(line.head ? 0 : part(line) ? Math.max(last(part), control, last((one) => one.name === "play"), head) + 1 : line.name === "control" ? head + 1
-      : line.name === "play" ? Math.max(control, head) + 1 : lines.length, 0, line);
-  }
-  return lines.map((line) => line.raw).join("\n") + "\n";
+function shapesOf(parts, lang) {
+  const used = parts.map((part) => (part.tree.k === "call" && part.tree.name === "use" ? useShapes(part.tree, lang, [WIDTH, HEIGHT], part.name) : { shapes: [show(part.tree)], lines: [] }));
+  return { shapes: used.flatMap((one) => one.shapes), lines: used.flatMap((one) => one.lines) };
 }
 
-/**
- * The host check of a searched data form (block 2 plan, decision 3): each number of a data cell or of a point is in the source excerpts.
- * A form that passes gets the host line source = source(SITE, TIME), so it shows its source. A form with a number that no excerpt holds
- * becomes a nodata file with the reason (rejected is that value). A file that is no data form, or nodata, stays as it is.
- */
-function checkData(text, { excerpts, site, time }) {
-  const read = isTemplateFile(text) ? readTemplate(text) : null, head = read?.lines[0].tree;
-  if (!head || !DATA_WORDS.has(read.word) || read.word === "nodata") return { text, rejected: null };
-  const known = new Set(numbersIn(excerpts)), rejected = checkedValues(read).find((value) => numbersIn(value).some((number) => !known.has(number)));
-  if (rejected !== undefined) return { text: rejectFile(head, rejected), rejected };
-  return { text: mergeTemplate(text, `source = source(${show({ k: "lit", v: site })}, ${show({ k: "lit", v: time })})`), rejected: null };
-}
+/** The shape lines s1 to s20: each one a shape with the kit's color for each color name, or a library line. predict of the tests uses them too. */
+const SHAPES = { name: "s", count: BUDGET.shapes, part: true, fault: (tree, { lang }) => partFault(tree, lang), draw: colored, check: colorFault,
+  fill(parts, { lang }) {
+    const { shapes, lines } = shapesOf(parts, lang);
+    return { shapes: shapes.join(", "), lines: lines.join("\n") };
+  } };
 
-/** The language of the first line of a template, or "en". */
-const langOf = (read) => read.lines[0].tree?.named?.lang?.v ?? "en";
-/** The parts of a template that are drawn: each part line with no fault that is not left out. */
-const drawnParts = (read, leftOut) => read.lines.filter((line) => line.tree && !leftOut.has(line.name) && FORMS_BY_WORD[read.word].part.test(line.name));
 /**
- * The value that $/v keeps when the control is left out: the start of a slider or a choice, the first item of items, or 0 when the file has no
- * control line that the kit can read.
+ * The value that $/v keeps when the control is left out: the start of a slider or a choice, the answer of a steps control (by default its last
+ * step, decision 3), the first part of a diagram (C2), or 0. tree is the control line, also one with a fault. cells takes it too.
  */
-function startOf(read, leftOut) {
-  const form = FORMS_BY_WORD[read.word], line = read.lines.find((one) => one.name === "control");
-  if (form.start) return form.start(drawnParts(read, leftOut), !leftOut.has("control") && line?.tree?.k === "call" ? line.tree : undefined);
-  let tree = line?.tree;
-  try { tree ??= line && parseLine(line.raw)?.tree; } catch { tree = null; }
-  // A steps control starts at its answer step, by default the last step (decision 3).
+function controlStart({ tree, parts, lang }) {
   const start = tree?.k !== "call" ? tree : tree.name === "slider" ? tree.args[4] : tree.name === "choice" ? tree.args[2] ?? tree.args[1]?.items?.[0]
     : tree.name === "steps" ? tree.args[2] ?? tree.args[1]?.items?.at(-1)
-      // A diagram starts at its first part (C2), or at the start of its line.
-      : tree.name === "parts" ? tree.args[2] ?? { k: "lit", v: diagramOf(drawnParts(read, leftOut), tree, langOf(read)).steps?.[0] ?? "" } : null;
+      : tree.name === "parts" ? tree.args[2] ?? { k: "lit", v: diagramOf(parts, tree, lang).steps?.[0] ?? "" } : null;
   return isText(start) || numberOf(start) !== undefined ? start : { k: "lit", v: 0 };
-}
-
-/**
- * The app file of a template with each line of leftOut left out: the app line, the drawing of 300 × 220, the control (or $/v = START for a
- * control that is left out or has a fault), and the card. Null when the first line has a fault: a stored file with one then fails the change
- * rules as a mismatch (change.js). preview is true for the lines so far of a stream: a diagram of a thing with no entry then names its parts
- * only after a line that comes after the shapes, so that its drawing only grows.
- */
-function expandTemplate(read, leftOut, preview = false) {
-  const [{ tree: head }] = read.lines, line = (name) => read.lines.find((one) => one.name === name && one.tree && !leftOut.has(name));
-  let parts = drawnParts(read, leftOut);
-  if (!head) return null;
-  const control = line("control")?.tree, title = show(head.args[0]), form = FORMS_BY_WORD[read.word];
-  let card = line("card")?.tree;
-  if (form.file) return form.file(head, parts, control, card, line("source")?.tree);
-  const out = [`app(${title}, lang=${show(head.named.lang)}, preset="clean", palette=${show(head.named.palette ?? { k: "lit", v: "blue" })})`];
-  // A diagram (G1, C2): the kit names the parts of its object, or the parts of a thing with no entry at their points (stage 7b, R3), and marks
-  // the part of the step. The card shows the name of the part and its sentence. The model writes no label and no condition for it.
-  const diagram = control?.k === "call" && control.name === "parts" ? diagramOf(parts, control, langOf(read)) : null;
-  if (diagram?.steps) {
-    const names = diagram.names ? { names: { k: "lit", v: diagram.names } } : {};
-    parts = parts.map((part) => (part === diagram.object ? { ...part, tree: { ...part.tree, named: { ...part.tree.named, parts: { k: "lit", v: true }, mark: parseExpression("$/v"), ...names } } } : part));
-    card = diagramCard(read, diagram.steps, card);
-  }
-  // What the form gives in place of the defaults (forms.js TemplateForm expand).
-  const own = FORMS_BY_WORD[read.word].expand?.(parts, control, head) ?? {}, drawn = own.shapes ?? parts.map((part) => show(part.tree));
-  const after = !preview || read.lines.some((one) => one.name === "card" || NARRATION.test(one.name));
-  const { shapes, lines } = diagram?.points ? freeShapes(drawn, diagram.points, [WIDTH, HEIGHT], after) : { shapes: drawn, lines: [] };
-  out.push(...(own.lines ?? []), ...lines, `need picture = drawing(${title}, ${WIDTH}, ${HEIGHT}, [${shapes.join(", ")}])`);
-  const [label, ...args] = control?.args ?? [], start = show(startOf(read, leftOut));
-  if (control?.k !== "call") out.push(`$/v = ${control ? show(control) : start}`);
-  else if (control.name === "slider") out.push(`need v = input("slider", ${show(label)}, ${start}, min=${show(args[0])}, max=${show(args[1])}, step=${show(args[2])})`);
-  else if (diagram?.steps) out.push(`need v = input("choice", ${show(label)}, ${start}, options=${JSON.stringify(diagram.steps)}, variant="stepper")`);
-  else out.push(`need v = input("choice", ${show(label)}, ${start}, options=${show(own.options ?? args[0])})`);
-  const play = line("play")?.tree;
-  if (play) out.push(`need t = ${show(play)}`);
-  if (card) out.push(`need card = card(${show(card.args[0])}, ${own.cardText ?? show(card.args[1])})`);
-  return out.join("\n") + "\n";
 }
 
 /** The card of a diagram (C2): the name of the part of the step with a capital first letter, and the sentence of the step, else the card text of the file. */
@@ -5639,21 +5137,633 @@ function diagramCard(read, steps, card) {
   return { k: "call", name: "card", named: {}, args: [pick(steps.map((step) => step.charAt(0).toUpperCase() + step.slice(1))), pick(steps.map((step, index) => said(index) ?? fallback ?? step))] };
 }
 
-/** The text to store: each line with no fault that is not left out, and $/v = START in the place of a control that is left out or has a fault. */
-const keptOf = (read, leftOut) => read.lines.flatMap((line) => (line.name === "control" && (!line.tree || leftOut.has("control")) ? [`$/v = ${show(startOf(read, leftOut))}`]
-  : line.tree && !leftOut.has(line.name) ? [line.raw] : [])).join("\n") + "\n";
+const SCENE = {
+  word: "scene",
+  text: `control, play, s1 to s${BUDGET.shapes} (at most ${BUDGET.shapes} shapes), and card`,
+  values: [CONTROL_VALUE, { name: "t", what: "the value of play", line: "play" }],
+  whole: { line: "s", count: 1, fault: "scene: the picture needs a shape with no fault" },
+  // A scene whose first line and control alone have faults gives them to control (template.js ownersOf).
+  owner: "control",
+  lines: [
+    { ...CONTROL_LINE, form: `the control of scene is ${CONTROL}`,
+      // A steps control is a choice whose start is its answer step, by default the last step (decision 3).
+      forms: { slider: [CONTROL_LABEL, number("min"), number("max"), number("step"), number("start")], choice: [CONTROL_LABEL, labels("choice control", "option"), START],
+        steps: [CONTROL_LABEL, labels("steps control", "step"), START], parts: partsFault },
+      // The kit adds mark=$/v to the object of a diagram, so only the other forms need a line that reads $/v.
+      unread: { forms: ["slider", "choice", "steps"], fault: "the control changes nothing on the screen, because no line reads $/v. Make a part read $/v, such as visible=$/v > 2" },
+      walk: (tree, { parts, lang }) => (tree.name === "steps" ? tree.args[1].items.length : tree.name === "parts" ? diagramOf(parts, tree, lang).steps?.length ?? 0 : null) },
+    { name: "play", sets: "t", merge: 2, owner: "t", slot: "play", fault: playFault },
+    SHAPES,
+    cardLine("scene"),
+    NARRATION,
+  ],
+  start: controlStart,
+  /** A parts control with names of a ready object of the scene names its parts, and one with no names needs such an object (diagramOf). */
+  context(lines) {
+    const control = lines.find((line) => line.name === "control" && line.tree?.name === "parts")?.tree, lang = lines[0].tree?.named?.lang?.v ?? "en";
+    if (!control) return [];
+    const diagram = diagramOf(lines.filter((line) => line.tree && SHAPE.test(line.name)), control, lang);
+    return diagram.fault ? [["control", diagram.fault]] : [];
+  },
+  /**
+   * A diagram (G1, C2): the kit names the parts of its object, or the parts of a thing with no entry at their points (stage 7b, R3), and marks
+   * the part of the step. The card shows the name of the part and its sentence. The model writes no label and no condition for it. In a stream,
+   * a thing with no entry names its parts only after a line that comes after the shapes, so that its drawing only grows.
+   */
+  fill({ read, call, line, parts, lang, preview }) {
+    const diagram = call?.name === "parts" ? diagramOf(parts, call, lang) : null;
+    if (!diagram?.steps) return call?.name === "parts" ? { label: show(call.args[0]), options: show(call.args[1]) } : {};
+    const names = diagram.names ? { names: { k: "lit", v: diagram.names } } : {};
+    const marked = parts.map((part) => (part === diagram.object ? { ...part, tree: { ...part.tree, named: { ...part.tree.named, parts: { k: "lit", v: true }, mark: parseExpression("$/v"), ...names } } } : part));
+    const card = diagramCard(read, diagram.steps, line("card")?.tree), own = shapesOf(marked, lang);
+    const after = !preview || read.lines.some((one) => one.name === "card" || NARRATION_NAME.test(one.name));
+    const { shapes, lines } = diagram.points ? freeShapes(own.shapes, diagram.points, [WIDTH, HEIGHT], after) : { shapes: own.shapes, lines: [] };
+    return { lines: [...own.lines, ...lines].join("\n"), shapes: shapes.join(", "), label: show(call.args[0]), steps: JSON.stringify(diagram.steps), cardTitle: show(card.args[0]), cardText: show(card.args[1]) };
+  },
+};
+const NARRATION_NAME = /^say(?:[1-9]\d*)?$/;
+
+/** The forms of a part of a parts control (stage 7b, R3). */
+const PART = "the name or the id of a part of the ready object in quotes, part(ID, NAME) with the name in the language of the request, or part(NAME, X, Y) with a point of a thing that you draw";
+/** The kind of a part of a parts control: "id" (a text), "named" (part(ID, NAME)), "point" (part(NAME, X, Y)), or undefined. */
+function partKind(item) {
+  if (isText(item)) return "id";
+  const args = item?.k === "call" && item.name === "part" && !Object.keys(item.named).length ? item.args : [];
+  if (args.length === 2 && args.every(isText)) return "named";
+  if (args.length === 3 && isText(args[0]) && numberOf(args[1]) !== undefined && numberOf(args[2]) !== undefined) return "point";
+  return undefined;
+}
+/** The name of a part of a parts control as a text node: the text, NAME of part(ID, NAME), or NAME of part(NAME, X, Y). */
+const nameOfPart = (item) => ({ id: item, named: item.args?.[1], point: item.args?.[0] })[partKind(item)];
 
 /**
- * The owner of each fault of the compile of an expansion, as a map of a line name to its faults. A fault of need v belongs to control and a fault
- * of need card to card. Each other fault belongs to each part whose compile with the first line and the control alone has faults, and the
- * faults of that compile name the part in the place of the need. A scene whose first line and control alone have faults gives them to control.
+ * The diagram of a parts control (block 2 plan, G1, G2, and C2), as {object, steps, names, points, fault}. object is the first part line that
+ * places a ready object with parts, and steps are the names of the walk in the language of the scene: the names of the control, else each
+ * part of the object in its order, at most BUDGET.parts. A name of the control that is a part of the object (by its name or its id) takes the
+ * name of the entry. The entries have Russian and English names only, so in another language the model gives each name with part(ID, NAME),
+ * and names maps each id to its name (stage 7b, R3).
+ * With no object, each part is part(NAME, X, Y) of a thing that the model draws (G2, stage 7b), and points are [NAME, X, Y] (library.js freeShapes).
+ */
+function diagramOf(parts, control, lang) {
+  const object = parts.find((part) => part.tree.k === "call" && part.tree.name === "use" && isText(part.tree.args[0]) && entryOf(part.tree.args[0].v)?.entry.parts?.length);
+  const list = object && entryOf(object.tree.args[0].v).entry.parts, items = control.args[1]?.items, kinds = new Set(items?.map(partKind)), [kind] = kinds;
+  if (kinds.size > 1 || (items && !kind)) return { fault: `each part of a parts control has the same form: ${PART}` };
+  if (!list) return freeDiagram(items, kind);
+  if (kind === "point") return { fault: `with the ready object ${object.tree.args[0].v}, a part is not part(NAME, X, Y): the kit knows where its parts are. Write the id of each part, or part(ID, NAME)` };
+  const known = Object.hasOwn(list[0].names, lang);
+  if (!known && kind !== "named") {
+    return { fault: `the kit has no names in the language "${lang}" for the parts of ${object.tree.args[0].v}: write each part as part(ID, NAME) with the name in "${lang}", such as part(${JSON.stringify(list[0].id)}, NAME)` };
+  }
+  if (!items) return { object, steps: list.slice(0, BUDGET.parts).map((part) => partName(part, lang)) };
+  const keys = items.map((item) => (kind === "named" ? item.args[0] : item));
+  const found = keys.map((key) => list.find((part) => part.id === key.v || partName(part, lang).toLowerCase() === key.v.toLowerCase() || Object.values(part.names).includes(key.v)));
+  const missing = keys.find((_, index) => !found[index]);
+  if (missing) return { fault: `${object.tree.args[0].v} has no part ${JSON.stringify(missing.v)}. Its parts are ${list.map((part) => (known ? partName(part, lang) : part.id)).join(", ")}` };
+  if (kind !== "named") return { object, steps: found.map((part) => partName(part, lang)) };
+  const names = Object.fromEntries(found.map((part, index) => [part.id, items[index].args[1].v]));
+  const tree = object.tree, room = roomFault(tree, { ...tree.named, parts: { k: "lit", v: true }, names: { k: "lit", v: names } }, [WIDTH, HEIGHT], lang);
+  return { object, steps: Object.values(names), names, fault: room };
+}
+
+/** The diagram of a parts control with no ready object in the picture (G2, stage 7b): each part is part(NAME, X, Y) at a point of the drawing zone. */
+function freeDiagram(items, kind) {
+  if (!items) return { fault: "a parts control with no names needs a ready object with parts in the picture, such as use(\"heart\", 150, 150, 220), or part(NAME, X, Y) for each part of a thing that you draw" };
+  if (kind !== "point") return { fault: "with no ready object in the picture, write each part as part(NAME, X, Y): its name and a point of the part in your drawing, and the kit writes the name beside the drawing" };
+  const points = items.map((item) => [item.args[0].v, numberOf(item.args[1]), numberOf(item.args[2])]), [left, right] = FREE.zone;
+  const out = points.findIndex(([, x, y]) => x < left || x > right || y < 0 || y > HEIGHT);
+  if (out >= 0) return { fault: `the point of part ${out + 1} is at ${points[out][1]}, ${points[out][2]}: the drawing and each point stay from x = ${left} to x = ${right} and from y = 0 to y = ${HEIGHT}, so the names have room at the sides` };
+  const placed = freeLayout(points, [WIDTH, HEIGHT]);
+  if (placed.size / UNITS < FREE.fewest || placed.labels.some((one) => one.clipped)) {
+    return { fault: "the names of the parts leave the drawing too little room: write shorter names, or names of two words, or name fewer parts" };
+  }
+  return { object: null, steps: points.map(([name]) => name), points };
+}
+
+return { partFault, SHAPES, controlStart, SCENE, diagramOf };
+})();
+// ../templates/items.js
+const { ITEMS } = (() => {
+// The line table of the ready plan items.plan (kit/README.md, section "Ready plans"): the items i1 to i6, a choice of their labels, and a card
+// that shows the text of the chosen item. The drawing shows the sign and the label of the chosen item.
+
+
+
+
+const CONTROL = "choice(LABEL), or steps(LABEL, ANSWER): its options are the labels of the items";
+const ITEM = /^i[1-6]$/;
+
+const ITEMS = {
+  word: "items",
+  text: "control, i1 to i6 (at most 6 items), and card",
+  values: [CONTROL_VALUE],
+  whole: { line: "i", count: 1, fault: "items: the picture needs a item with no fault" },
+  lines: [
+    { ...CONTROL_LINE, form: `the control of items is ${CONTROL}`, forms: { choice: [CONTROL_LABEL], steps: [CONTROL_LABEL, { type: "word", optional: true }] },
+      walk: (tree, { parts }) => (tree.name === "steps" ? parts.length : null) },
+    { name: "i", count: BUDGET.items, part: true, form: "an item is item(LABEL, SIGN, TEXT)",
+      forms: { item: [{ type: "text", what: "the label", cap: BUDGET.fewOption }, { type: "text", what: "the sign", cap: BUDGET.sign, inside: true },
+        { type: "text", what: "the text", cap: BUDGET.cardText, long: true }] },
+      // The choice of items shows their labels, so it cannot tell two items of one label apart.
+      check(tree, { lines }) {
+        const twin = lines.find((line) => line.tree && ITEM.test(line.name) && line.tree.args[0].v === tree.args[0].v);
+        return twin ? `the label ${show(tree.args[0])} is the label of ${twin.name} too. Each item needs a label of its own: the choice shows the labels` : null;
+      },
+      /** The list of the items and the chosen item, the drawing of its sign and label, and the labels as the options of the choice. */
+      fill: (parts) => ({
+        items: parts.map(({ tree: { args: [label, sign, text] } }) => `{label: ${show(label)}, sign: ${show(sign)}, text: ${show(text)}}`).join(", "),
+        // The sign is large when it is one or two characters, and smaller for a word, so a sign at 1.25 times its cap fits the 300 px of the drawing.
+        // A preview with no item yet draws nothing, so the first item only adds to the picture.
+        shapes: parts.length ? 'text(150, 95, $/now/sign, "accent", len($/now/sign) <= 2 ? 72 : (len($/now/sign) <= 6 ? 44 : 24)), text(150, 190, $/v, "ink", 20)' : "",
+        options: show({ k: "list", items: parts.map((part) => part.tree.args[0]) }),
+      }) },
+    { name: "card", holds: "card", owner: "card", form: "the card of items is card(TITLE): it shows the text of the chosen item", forms: { card: [CARD_TITLE] } },
+    NARRATION,
+  ],
+  /** The labels are the options of the choice, so their cap follows the number of items and the control (optionFault), which only the whole file knows. */
+  context(lines) {
+    const items = lines.filter((line) => line.tree && ITEM.test(line.name));
+    return items.flatMap((line) => [optionFault("the label", line.tree.args[0], items.length, "item")].filter(Boolean).map((fault) => [line.name, fault]));
+  },
+  /**
+   * The start of $/v: the answer of a steps control, by default the label of the last item (decision 3), else the label of the first item,
+   * or 0 with no item.
+   */
+  start: ({ parts, call }) => (call?.name === "steps" ? call.args[1] ?? parts.at(-1)?.tree.args[0] : parts[0]?.tree.args[0]) ?? { k: "lit", v: 0 },
+};
+
+return { ITEMS };
+})();
+// ../templates/cells.js
+const { CELLS } = (() => {
+// The line table of the ready plan cells.plan (kit/README.md, section "Ready plans"): a slider of a count of cells and a card with a text.
+// The control draws the cells, so a cells file has no part line.
+
+
+
+
+const CELLS = {
+  word: "cells",
+  text: "control and card",
+  values: [CONTROL_VALUE],
+  whole: { line: "control", count: 1, fault: "cells: the cells need a line control = slider(LABEL, 0, COUNT, 1, START) with no fault" },
+  lines: [
+    { ...CONTROL_LINE, holds: "parts", form: "the control of cells is slider(LABEL, 0, COUNT, 1, START)",
+      forms: { slider: [CONTROL_LABEL, { slot: "min", type: "number", is: 0 }, { slot: "max", type: "whole", what: "COUNT", least: 2, most: BUDGET.cells },
+        { slot: "step", type: "number", is: 1 }, { slot: "start", type: "number" }] } },
+    cardLine("cells"),
+    NARRATION,
+  ],
+  start: controlStart,
+  /** The drawing of the cells of a control line that the kit can read, else no shape. */
+  fill({ call }) {
+    if (!call) return { shapes: "" };
+    // Rows of at most ten cells, filled evenly, in the top 176 px, and the caption "K / N = P%" under them. One row of few cells gets taller cells.
+    const count = numberOf(call.args[2]), rows = Math.ceil(count / 10), cols = Math.ceil(count / rows);
+    const pitch = rows > 1 ? Math.min(Math.floor(280 / cols), Math.floor(176 / rows)) : Math.min(56, Math.floor(280 / cols)), side = pitch - 4, tall = rows > 1 ? side : Math.min(60, Math.round(side * 1.4));
+    const x0 = Math.round((WIDTH - (cols * pitch - 4)) / 2), y0 = 8 + Math.round((176 - ((rows - 1) * pitch + tall)) / 2);
+    return { shapes: `each(${count}, rect(${x0} + ($index % ${cols}) * ${pitch}, ${y0} + floor($index / ${cols}) * ${pitch}, ${side}, ${tall}, $index < $/v ? "accent" : "muted", 3)), `
+      + `text(150, 202, text($/v) + " / ${count} = " + text(round($/v / ${count} * 100)) + "%", "ink", 18)` };
+  },
+};
+
+return { CELLS };
+})();
+// ../templates/compare.js
+const { COMPARE } = (() => {
+// The line table of the ready plan compare.plan of the data family (block 2 plan, D2): two or three things side by side, each with a name and a
+// sign, up to 6 rows with one value for each thing, one marked row, and a card with the point. The kit shows it as a native table with signs=
+// (a comparison): the host draws a head cell for each thing and a row block with a bar under each value (stage 5 look).
+
+
+
+
+const THING = /^t[1-3]$/;
+
+/** The fault of a thing or a row line: a thing line and a row line take either form, as the kit placed them by their call. */
+function partFault(tree) {
+  if (tree.k === "call" && tree.name === "row") return rowFault(tree, DATA_BUDGET.things);
+  if (tree.k !== "call" || tree.name !== "thing" || !tree.args.length || tree.args.length > 2 || Object.keys(tree.named).length) return "a thing is thing(NAME, SIGN): its name and a sign, such as an emoji";
+  const [name, sign] = tree.args;
+  if (!isText(name) || !name.v.trim()) return "the name is a text in quotes";
+  if (sign && !(isText(sign) && [...sign.v].length <= DATA_BUDGET.sign)) return `the sign is a text in quotes of at most ${DATA_BUDGET.sign} characters, such as an emoji`;
+  return null;
+}
+const cut = (tree) => cutLabels(tree, tree.name === "thing" || tree.name === "row" ? [0] : []);
+
+const COMPARE = {
+  word: "compare",
+  family: "data",
+  text: "control, t1 to t3 (2 or 3 things), r1 to r6 (at most 6 rows), and card",
+  values: [CONTROL_VALUE],
+  whole: { line: "t", count: 2, fault: "compare: the form needs 2 or 3 things with no fault" },
+  lines: [markLine(), { name: "t", count: DATA_BUDGET.things, part: true, fault: partFault, cut }, { name: "r", count: DATA_BUDGET.compareRows, part: true, fault: partFault, cut },
+    cardLine("compare"), SOURCE_LINE, NARRATION],
+  context: (lines) => contextFaults(lines, lines.filter((line) => line.tree?.name === "row").map((line) => line.tree.args[0].v),
+    lines.filter((line) => THING.test(line.name) && line.tree).length || undefined),
+  start: ({ call }) => markStart(call),
+  check: checkSource,
+  fill: dataFill((head, parts) => {
+    const things = parts.filter((part) => THING.test(part.name)).map(({ tree: { args: [name, sign] } }) => [cutLabel(name.v), sign?.v ?? ""]);
+    const rows = parts.filter((part) => !THING.test(part.name)).map(({ tree: { args: [label, values] } }) => [label.v, ...values.items.map(cellText)]);
+    return things.length ? tableLine(head, [" ", ...things.map(([name]) => name)], rows, -1, things.map(([, sign]) => sign)) : null;
+  }),
+};
+
+return { COMPARE };
+})();
+// ../templates/table.js
+const { TABLE } = (() => {
+// The line table of the ready plan table.plan of the data family (block 2 plan, D3): a head of 2 to 4 columns, up to 12 rows, one marked row
+// or cell, and a card with the caption. The native table shows 8 rows (6 on a compact width), and more rows scroll inside its box
+// (ToolUiCatalog visibleRows).
+
+
+
+
+const heads = (lines) => lines.find((line) => line.name === "head" && line.tree)?.tree.args[0].items.map((item) => item.v) ?? [];
+
+/** The fault of the head line or a row line: each one takes either form, as the kit placed them by their call. */
+function partFault(tree) {
+  if (tree.k === "call" && tree.name === "row") return rowFault(tree, DATA_BUDGET.columns - 1);
+  if (tree.k !== "call" || tree.name !== "head" || tree.args.length !== 1 || Object.keys(tree.named).length || tree.args[0]?.k !== "list") return "the head is head([COLUMN, …]): the first column is the head of the row labels";
+  const items = tree.args[0].items;
+  if (items.length < 2 || items.length > DATA_BUDGET.columns) return `the head has 2 to ${DATA_BUDGET.columns} columns, and this one has ${items.length}. Keep the columns that matter most`;
+  return items.map((item, index) => (!isText(item) || !item.v.trim() ? `column ${index + 1} is a text in quotes` : null)).find(Boolean) ?? null;
+}
+const cut = (tree) => cutLabels(tree, tree.name === "row" ? [0] : [], tree.name === "head" ? 0 : -1);
+
+const TABLE = {
+  word: "table",
+  family: "data",
+  text: "control, head, r1 to r12 (at most 12 rows), and card",
+  values: [CONTROL_VALUE],
+  whole: { line: "head", count: 1, fault: "table: the form needs the line head with no fault" },
+  lines: [markLine(true), { name: "head", part: true, fault: partFault, cut }, { name: "r", count: DATA_BUDGET.tableRows, part: true, fault: partFault, cut },
+    cardLine("table"), SOURCE_LINE, NARRATION],
+  context(lines) {
+    const head = heads(lines);
+    return contextFaults(lines, lines.filter((line) => line.tree?.name === "row").map((line) => line.tree.args[0].v), head.length ? head.length - 1 : undefined, head.slice(1));
+  },
+  start: ({ call }) => markStart(call),
+  check: checkSource,
+  fill: dataFill((head, parts, call) => {
+    const columns = parts.find((part) => part.name === "head")?.tree.args[0].items.map((item) => item.v) ?? [];
+    const rows = parts.filter((part) => part.name !== "head").map(({ tree: { args: [label, values] } }) => [label.v, ...values.items.map(cellText)]);
+    const column = isText(call?.args?.[1]) ? columns.indexOf(cutLabel(call.args[1].v)) : -1;
+    return columns.length ? tableLine(head, columns, rows, column) : null;
+  }),
+};
+
+return { TABLE };
+})();
+// ../templates/chart.js
+const { CHART } = (() => {
+// The line table of the ready plan chart.plan of the data family (block 2 plan, D4): 2 to 8 points with a label and a number each, as bars or
+// a line, one marked point, and a card with the caption. The native chart shows a label and a value at each point (ToolUiCatalog).
+
+
+
+
+
+function partFault(tree) {
+  if (tree.k !== "call" || tree.name !== "point" || tree.args.length !== 2 || Object.keys(tree.named).length) return "a point is point(LABEL, NUMBER)";
+  if (!isText(tree.args[0]) || !tree.args[0].v.trim()) return "the label is a text in quotes";
+  return numberOf(tree.args[1]) === undefined ? "the value of a point is a number with no quotes and no unit, such as 88" : null;
+}
+
+const CHART = {
+  word: "chart",
+  family: "data",
+  head: { name: "kind", values: ["bar", "line"] },
+  text: "control, p1 to p8 (at most 8 points), and card",
+  values: [CONTROL_VALUE],
+  whole: { line: "p", count: 2, fault: "chart: the form needs 2 points with no fault" },
+  lines: [markLine(), { name: "p", count: DATA_BUDGET.points, part: true, fault: partFault, cut: (tree) => cutLabels(tree, tree.name === "point" ? [0] : []) },
+    cardLine("chart"), SOURCE_LINE, NARRATION],
+  context: (lines) => contextFaults(lines, lines.filter((line) => line.tree?.name === "point").map((line) => line.tree.args[0].v)),
+  start: ({ call }) => markStart(call),
+  check: checkSource,
+  fill: dataFill((head, parts) => {
+    const points = parts.map(({ tree: { args: [label, value] } }) => `{label: ${show(label)}, value: ${numberOf(value)}}`);
+    return points.length ? `Chart([${points.join(", ")}], $label, $value, label=${show(head.args[0])}, kind=${show(head.named.kind ?? { k: "lit", v: "bar" })}, bind=$/v)` : null;
+  }),
+};
+
+return { CHART };
+})();
+// ../templates/nodata.js
+const { NODATA } = (() => {
+// The line table of the ready plan nodata.plan of the data family (block 2 plan, D5): a short card with what is missing and what the person can
+// say next, at most 2 sentences. The voice says the same sentences: a file with no narration line gets say with the text of its card (voice).
+// The card has a search icon at the left of its title (stage 5 look), and the ready plan holds it.
+
+
+
+
+const NODATA = {
+  word: "nodata",
+  family: "data",
+  text: "card",
+  values: [CONTROL_VALUE],
+  whole: { line: "card", count: 1, fault: "nodata: the form needs a card with no fault" },
+  voice: ["card", 1],
+  lines: [{ ...CONTROL_LINE, form: "nodata has no control" },
+    // The card text keeps its first 2 sentences.
+    { ...cardLine("nodata"), cut: (tree) => (tree.k === "call" && tree.name === "card" && tree.args[1]?.k === "lit" && typeof tree.args[1].v === "string"
+      ? { ...tree, args: [tree.args[0], { ...tree.args[1], v: sentences(tree.args[1].v, DATA_BUDGET.nodataSentences) }] } : tree) },
+    SOURCE_LINE, NARRATION],
+  start: () => ({ k: "lit", v: "" }),
+  fill: dataFill(),
+};
+
+return { NODATA };
+})();
+// ready.js
+const { READY, register, DATA_WORDS, TEMPLATE_HEAD, DATA_HEAD } = (() => {
+// The registry of the ready plans (kit/README.md, section "Ready plans"): each template is a ready plan (kit/templates/WORD.plan, in the module
+// plans.js that kit/build.js writes) and its line table (kit/templates/WORD.js). template.js reads, merges, fills, and builds a template file
+// with the entry of its word. A test can add a ready plan with register.
+
+
+
+
+
+
+
+
+
+
+/** The entry of each template by its word: its line table and its ready plan as plan. */
+const READY = {};
+/** Adds the line table with its ready plan to the registry, and returns the entry. */
+function register(table, plan) {
+  READY[table.word] = { ...table, plan };
+  return READY[table.word];
+}
+// The explain family first, then the data family.
+for (const table of [SCENE, ITEMS, CELLS, COMPARE, TABLE, CHART, NODATA]) register(table, PLANS[table.word]);
+
+/** The words of the data family. */
+const DATA_WORDS = new Set(Object.values(READY).filter((entry) => entry.family === "data").map((entry) => entry.word));
+/** The first line of a template file that the app ships, with the word as group 1 (prompt.json templateHead). */
+const TEMPLATE_HEAD = new RegExp(`^\\s*(${Object.keys(READY).join("|")})\\s*\\(`);
+/** The first line of a data form, as the host tells it (prompt.json dataHead): a spoken change of such a screen is a new data screen. */
+const DATA_HEAD = new RegExp(`^\\s*(?:${[...DATA_WORDS].join("|")})\\s*\\(`);
+
+return { READY, register, DATA_WORDS, TEMPLATE_HEAD, DATA_HEAD };
+})();
+// template.js
+const { isTemplateFile, readTemplate, mergeTemplate, checkData, expandTemplate, buildTemplate } = (() => {
+// The template file of a voice screen (docs/superpowers/specs/2026-11-21-stage-templates-stream-design.md, sections 1 and 2): named lines
+// in a fixed order, which the kit checks, fixes, and fills into the ready plan of its template, an app file of today's kinds. compile.js
+// branches here for a template text, plan, or stored app file.
+//
+//   scene("Почему корабль не тонет?", lang="ru", palette="blue")      the first line: the template, the title, the language, the palette
+//   control = choice("Предмет", ["Корабль", "Гвоздь"])                 the one control. A part reads its value as $/v
+//   s1 = rect(0, 110, 300, 110, "water", 0)                            the parts: s1 to s20 are shapes (scene), i1 to i6 items (items)
+//   card = card("Вытеснение воды", "Полый корабль ...")                 the card
+//   say = "Выбери предмет и смотри на воду."                           the narration: say for one sentence, say1 to sayN for steps
+//
+// This module is the engine: it names no template and no line of one. Each template is a ready plan with its line table (ready.js,
+// kit/README.md section "Ready plans"), and what the line tables use is in form-base.js and form-data.js.
+
+
+
+
+
+
+
+
+
+/** The word of a first line of a template file whose ready plan the registry has, else undefined. */
+const wordOf = (line) => { const word = /^\s*(\w+)\s*\(/.exec(line)?.[1]; return word && Object.hasOwn(READY, word) ? word : undefined; };
+const isTemplateFile = (text) => typeof text === "string" && Boolean(wordOf(text.split("\n").find((line) => line.trim()) ?? ""));
+
+/**
+ * Whether the line name is a line of the entry: its name, a name of a list entry with its number (NAME1 to NAMEn), or a narration line (say
+ * and say1 to sayN). loose takes each number of a list, as the merge places a line of any template by its name.
+ */
+function named(entry, name, loose = false) {
+  if (name === entry.name) return !entry.count;
+  const tail = name.startsWith(entry.name) ? name.slice(entry.name.length) : "";
+  if (entry.narration) return /^[1-9]\d*$/.test(tail);
+  return Boolean(entry.count) && (loose ? /^\d+$/.test(tail) : /^[1-9]\d*$/.test(tail) && Number(tail) <= entry.count);
+}
+/** The entry of the line table of ready for the line name, else undefined. */
+const entryNamed = (ready, name) => ready.lines.find((entry) => named(entry, name));
+/** The entry that the line $/NAME = VALUE stands for (held), such as the control. */
+const heldOf = (ready) => ready.lines.find((entry) => entry.held);
+/** The entry of the narration lines. */
+const narrationOf = (ready) => ready.lines.find((entry) => entry.narration);
+/** Whether a node reads the value $/name. */
+const reads = (name) => (node) => node.k === "path" && node.abs && node.segs.length === 1 && node.segs[0] === name;
+
+/**
+ * The place of a new line of a reply in the merge, by the line tables of each template: 3 for a part, 1 for a line that goes after the first
+ * line (the control), 2 for a line that goes after it (play), and 0 for a line at the end.
+ */
+function placeOf(name) {
+  for (const ready of Object.values(READY)) {
+    const entry = ready.lines.find((one) => named(one, name, true));
+    if (entry) return entry.part ? 3 : entry.merge ?? 0;
+  }
+  return 0;
+}
+
+/**
+ * A line of a template file or of a reply: {name, raw}, a first line with head, a delete as {gone}, or null for a line with no name. The line
+ * $/NAME = VALUE is the line of the entry that it stands for (held), such as $/v of the control.
+ */
+function lineOf(raw) {
+  const line = raw.trim(), word = wordOf(line), gone = /^delete\s+(\S+)$/.exec(line)?.[1];
+  const [, value, plain] = /^(?:\$\/([\p{L}_][\p{L}\p{N}_]*)|([\p{L}_][\p{L}\p{N}_]*))\s*=(?!=)/u.exec(line) ?? [];
+  const name = plain ?? (value && Object.values(READY).map(heldOf).find((entry) => entry?.sets === value)?.name);
+  return word ? { name: word, head: true, raw: line } : gone ? { gone } : name ? { name, raw: line } : null;
+}
+/**
+ * A narration line: its sentence with each run of space as one space, cut to BUDGET.say, as say = "<JSON string>", so the host reads it as JSON.
+ * Null for a line that is no text or has no sentence end inside the cap: a narration line draws nothing, so it is left out with no fault.
+ */
+function narrationLine(name, raw) {
+  let tree;
+  try { tree = parseLine(raw.trim())?.tree; } catch (failure) { if (failure instanceof DslError) return null; throw failure; }
+  const text = isText(tree) ? cut(tree.v.replace(/\s+/gu, " ").trim(), BUDGET.say) : "";
+  return [...text].length <= BUDGET.say && SENTENCE_END.test(text) ? `${name} = ${JSON.stringify(text)}` : null;
+}
+
+/**
+ * The lines of a template file in the order of its line table (the first line, then the lines of each entry), and the fault of each line as
+ * "NAME: message", where NAME is the template word for the first line and for a line with no name. A line of a known name has the tree of its
+ * value, as the entry draws it (such as the kit's color for each color name), or null when it has a fault. A second line of a name, a line
+ * of a name that the line table does not have, and a line with no name are faults and not lines. The line $/NAME = VALUE is the line of its entry.
+ * misses names each library name that a line places and the library does not have (library.js missOf): the miss log of spec 12.8.
+ */
+function readTemplate(text) {
+  const [first = "", ...rest] = text.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#")), word = wordOf(first), ready = READY[word];
+  const faults = [], lines = [], misses = [], fault = (name, message) => { faults.push(`${name}: ${message}`); return message; };
+  // A line reads only the values of its template, and a value of a line only beside that line, such as $/t beside play.
+  const values = ready.values.filter((value) => !value.line || rest.some((raw) => lineOf(raw)?.name === value.line));
+  const readable = (node) => node.k === "path" && node.abs && node.segs.length === 1 && values.some((value) => value.name === node.segs[0]);
+  const read = (raw, parse) => { try { return parse(raw.trim()); } catch (failure) { if (failure instanceof DslError) return failure; throw failure; } };
+  const head = read(first, parseExpression), headless = head instanceof DslError ? head.message : headFault(head, word, ready.head);
+  if (headless) fault(word, headless);
+  lines.push({ name: word, raw: first.trim(), tree: headless ? null : head });
+  const context = { lines, lang: head?.named?.lang?.v };
+  for (const raw of rest) {
+    const one = lineOf(raw), name = one?.name, entry = name && !one.head ? entryNamed(ready, name) : undefined;
+    if (!one || one.head) { fault(word, `${JSON.stringify(raw.trim().slice(0, 40))} is not a line of the template. Its lines are the first line, ${ready.text}`); continue; }
+    if (one.gone) { fault(one.gone, "a template file has no delete line. Only a repair or a change reply deletes a line"); continue; }
+    // A narration line has no fault: one that the kit cannot keep is left out, and a second line of a name goes.
+    if (entry?.narration) {
+      if (lines.some((line) => line.name === name)) continue;
+      const kept = narrationLine(name, raw);
+      lines.push({ name, raw: kept ?? raw.trim(), tree: kept && { k: "lit", v: name } });
+      continue;
+    }
+    if (!entry) { fault(name, `the template ${word} has no line ${name}. Its lines are ${ready.text}`); continue; }
+    if (lines.some((line) => line.name === name)) { fault(name, `this is a second line ${name}. Each line has its own name`); continue; }
+    const parsed = read(raw, parseLine);
+    let tree = parsed instanceof DslError ? null : parsed.tree, message = parsed instanceof DslError ? parsed.message : null, source = raw.trim();
+    if (missOf(tree)) misses.push(missOf(tree));
+    if (tree && entry.held && parsed.kind === "state") message = isText(tree) || numberOf(tree) !== undefined ? null : `$/${entry.sets} = VALUE takes a number or a text in quotes`;
+    else if (tree) {
+      // The kept line has the cut text, so the stored file and a later change have it too.
+      const short = cutOf(entry, tree);
+      if (show(short) !== show(tree)) { tree = short; source = `${name} = ${show(tree)}`; }
+      // A line that sets a value, such as the control, reads no value.
+      const path = !entry.sets && nodesIn(tree, (node) => node.k === "path" && !readable(node))[0];
+      message = (entry.fault ? entry.fault(tree, context) : formFault(entry, tree))
+        ?? (path ? `a line reads only ${values.map((value) => `$/${value.name}, ${value.what}`).join(", and ")}, and this line reads ${show(path)}` : null);
+      if (!message && entry.draw) tree = entry.draw(tree);
+      if (!message && entry.check) message = entry.check(tree, context);
+    }
+    if (message) fault(name, message);
+    lines.push({ name, raw: source, tree: message ? null : tree });
+  }
+  // The faults that need more than one line, such as a row with fewer values than the columns of the form.
+  for (const [name, message] of ready.context?.(lines) ?? []) {
+    const line = lines.find((one) => one.name === name && one.tree);
+    if (line) { fault(name, message); line.tree = null; }
+  }
+  // The voice of a template with voice says a text of a line, such as the card of nodata (D5): a file with no narration line gets say with it.
+  const narration = narrationOf(ready), [from, at] = ready.voice ?? [], said = lines.find((line) => line.name === from && line.tree)?.tree.args[at];
+  if (ready.voice && !lines.some((line) => entryNamed(ready, line.name)?.narration) && isText(said)) {
+    const say = narrationLine(narration.name, `${narration.name} = ${JSON.stringify(said.v)}`);
+    if (say) lines.push({ name: narration.name, raw: say, tree: { k: "lit", v: narration.name } });
+  }
+  const rank = (name) => (name === word ? 0 : ready.lines.indexOf(entryNamed(ready, name)) + 1);
+  lines.sort((a, b) => rank(a.name) - rank(b.name));
+  return { word, lines, faults, misses };
+}
+
+/**
+ * The template file after a repair or a change reply: a line of a name that the file has goes in its place, a new part after the last part,
+ * a new control after the first line, a new play line after the control, and each other new line at the end (placeOf). A delete removes the
+ * line of its name, and a new first line replaces the first line. A line with no name, such as prose or a fence, goes.
+ */
+function mergeTemplate(stored, reply) {
+  let lines = stored.split("\n").map(lineOf).filter((line) => line && !line.gone);
+  const last = (test) => lines.reduce((found, line, index) => (test(line) ? index : found), -1), at = (place) => (line) => !line.head && placeOf(line.name) === place;
+  for (const line of reply.split("\n").map(lineOf).filter(Boolean)) {
+    if (line.gone) { lines = lines.filter((one) => one.head || one.name !== line.gone); continue; }
+    const same = lines.findIndex((one) => (line.head ? one.head : !one.head && one.name === line.name));
+    if (same >= 0) { lines[same] = line; continue; }
+    const head = last((one) => one.head), control = last(at(1)), place = line.head ? null : placeOf(line.name);
+    lines.splice(line.head ? 0 : place === 3 ? Math.max(last(at(3)), control, last(at(2)), head) + 1 : place === 1 ? head + 1 : place === 2 ? Math.max(control, head) + 1 : lines.length, 0, line);
+  }
+  return lines.map((line) => line.raw).join("\n") + "\n";
+}
+
+/**
+ * The host check of a searched data form (block 2 plan, decision 3) by the check of its line table (form-data.js checkSource). A form that passes
+ * gets the host line source = source(SITE, TIME), so it shows its source. A form with a number that no excerpt holds becomes a nodata file with
+ * the reason (rejected is that value). A file of a template with no check stays as it is.
+ */
+function checkData(text, data) {
+  const read = isTemplateFile(text) ? readTemplate(text) : null, check = read?.lines[0].tree && READY[read.word].check;
+  if (!check) return { text, rejected: null };
+  const out = check(read, data);
+  return out.line ? { text: mergeTemplate(text, out.line), rejected: null } : out;
+}
+
+/** The parts of a template that are drawn: each line of a part entry with no fault that is not left out. */
+const drawnParts = (read, leftOut) => read.lines.filter((line) => line.tree && !leftOut.has(line.name) && entryNamed(READY[read.word], line.name)?.part);
+/**
+ * What a line table reads to fill its ready plan: the lines (line gives a drawn line by its name), the first line, its language, the drawn parts,
+ * call (the line of the control as a call when it is drawn), and tree (the tree of that line, also one with a fault or one that is left out).
+ */
+function contextOf(read, leftOut, preview) {
+  const held = heldOf(READY[read.word]), head = read.lines[0].tree, line = (name) => read.lines.find((one) => one.name === name && one.tree && !leftOut.has(name));
+  const own = held && read.lines.find((one) => one.name === held.name), drawn = held && line(held.name)?.tree;
+  let tree = own?.tree;
+  try { tree ??= own && parseLine(own.raw)?.tree; } catch { tree = null; }
+  return { read, preview, line, head, lang: head?.named?.lang?.v ?? "en", parts: drawnParts(read, leftOut), call: drawn?.k === "call" ? drawn : undefined, tree };
+}
+/**
+ * The value that the held line keeps when its line is left out: the start of the line table, else the argument of the slot start of the form
+ * of its line, else the value of its line $/NAME = VALUE, or 0.
+ */
+function startOf(context) {
+  const ready = READY[context.read.word];
+  if (ready.start) return ready.start(context);
+  const form = formOf(heldOf(ready) ?? {}, context.tree), at = Array.isArray(form) ? form.findIndex((spec) => spec.slot === "start") : -1;
+  const start = at >= 0 ? context.tree.args[at] : context.tree?.k === "call" ? undefined : context.tree;
+  return isText(start) || numberOf(start) !== undefined ? start : { k: "lit", v: 0 };
+}
+
+/** The ready plan with each slot {{name}} filled: a line with a slot that has no value goes, and so does a line that is empty after the fill. */
+const filled = (plan, slots) => plan.split("\n").flatMap((line) => {
+  let gone = false;
+  const text = line.replace(/\{\{(\w+)\}\}/g, (_, name) => { gone ||= slots[name] == null; return slots[name] ?? ""; });
+  return gone || !text.trim() ? [] : [text];
+}).join("\n") + "\n";
+
+/**
+ * The app file of a template with each line of leftOut left out: its ready plan with the slots that the line table gives. The first line gives
+ * title, lang, and palette. Each argument of the form of a line with a slot gives that slot, the value of an entry with slot gives it, and a list
+ * entry gives what its fill gives. The held line gives start, and held (the value of $/NAME = VALUE) when it is no call or is left out. The fill
+ * of the line table comes last. Null when the first line has a fault: a stored file with one then fails the change rules as a mismatch
+ * (change.js). preview is true for the lines so far of a stream.
+ */
+function expandTemplate(read, leftOut, preview = false) {
+  const ready = READY[read.word], [{ tree: head }] = read.lines;
+  if (!head) return null;
+  const context = contextOf(read, leftOut, preview), slots = { title: show(head.args[0]), lang: show(head.named.lang), palette: show(head.named.palette ?? { k: "lit", v: "blue" }) };
+  for (const entry of ready.lines) {
+    const drawn = read.lines.filter((line) => line.tree && !leftOut.has(line.name) && entryNamed(ready, line.name) === entry), tree = drawn[0]?.tree, form = formOf(entry, tree);
+    if (entry.fill) Object.assign(slots, entry.fill(drawn, context));
+    else if (!drawn.length) Object.assign(slots, entry.absent);
+    if (Array.isArray(form)) form.forEach((spec, index) => { if (spec.slot && tree.args[index]) slots[spec.slot] = show(tree.args[index]); });
+    if (entry.slot && tree) slots[entry.slot] = show(tree);
+  }
+  const held = heldOf(ready), value = held && context.line(held.name)?.tree;
+  if (held) slots.start = show(startOf(context));
+  if (held && value?.k !== "call") slots.held = value ? show(value) : slots.start;
+  return filled(ready.plan, { ...slots, ...ready.fill?.(context) });
+}
+
+/** The text to store: each line with no fault that is not left out, and $/NAME = START in the place of a held line that is left out or has a fault. */
+function keptOf(read, leftOut) {
+  const held = heldOf(READY[read.word]);
+  return read.lines.flatMap((line) => (line.name === held?.name && (!line.tree || leftOut.has(line.name)) ? [`$/${held.sets} = ${show(startOf(contextOf(read, leftOut)))}`]
+    : line.tree && !leftOut.has(line.name) ? [line.raw] : [])).join("\n") + "\n";
+}
+
+/**
+ * The owner of each fault of the compile of an expansion, as a map of a line name to its faults. A fault of a need belongs to the line whose entry
+ * owns that need, such as need v to the control and need card to the card. Each other fault belongs to each part whose compile with the first
+ * line and the control alone has faults, and the faults of that compile name the part in the place of the need. A line table with owner gives
+ * the faults of the first line and the control alone to that line.
  */
 function ownersOf(read, leftOut, faults, build) {
-  const owners = new Map(), add = (name, fault) => owners.set(name, [...(owners.get(name) ?? []), `${name}: ${fault.replace(/^need \w+: /, "")}`]), rest = [];
-  for (const fault of faults) /\bneed v\b/.test(fault) ? add("control", fault) : /\bneed card\b/.test(fault) ? add("card", fault) : /\bneed t\b/.test(fault) ? add("play", fault) : rest.push(fault);
+  const ready = READY[read.word], owners = new Map(), rest = [];
+  const add = (name, fault) => owners.set(name, [...(owners.get(name) ?? []), `${name}: ${fault.replace(/^need \w+: /, "")}`]);
+  const needs = ready.lines.flatMap((entry) => [entry.owner ?? []].flat().map((need) => [new RegExp(`\\bneed ${need}\\b`), entry.name]));
+  for (const fault of faults) { const owner = needs.find(([need]) => need.test(fault)); if (owner) add(owner[1], fault); else rest.push(fault); }
   if (!rest.length) return owners;
-  const parts = drawnParts(read, leftOut).map((part) => part.name), alone = (names) => build(expandTemplate(read, new Set([...leftOut, ...owners.keys(), "card", ...names]))).faults;
-  FORMS_BY_WORD[read.word].owners?.(owners, alone, parts, add);
+  const parts = drawnParts(read, leftOut).map((part) => part.name), cards = ready.lines.filter((entry) => entry.holds === "card").map((entry) => entry.name);
+  const alone = (names) => build(expandTemplate(read, new Set([...leftOut, ...owners.keys(), ...cards, ...names]))).faults;
+  if (ready.owner && !owners.has(ready.owner)) alone(parts).forEach((fault) => add(ready.owner, fault));
   for (const part of parts) alone(parts.filter((other) => other !== part)).forEach((fault) => add(part, fault));
   return owners;
 }
@@ -5661,14 +5771,15 @@ function ownersOf(read, leftOut, faults, build) {
 /**
  * The compile of a template file, with build, the compile of compile.js, which comes after this module in the bundle (as change.js nextState
  * takes it). stored is the template file of the stored app of a change, or null for a new screen.
- * A line with a fault is left out: a change takes the stored version of that line instead. A control that no line reads changes nothing, so
- * it is left out too. When the expansion has kit faults, each owner (ownersOf) is left out and the kit compiles once more.
- * Returns {built, word, kept, expanded, leftOut, holds, misses}, where misses are the library names that the file placed and the library does not have. built is the result of build for expanded, the expansion of kept, with each fault of a line that
- * was left out. A whole fault gives built with no definition and expanded null: a fault of the first line, no part with no fault, a cells file
- * with no control, or a kit fault of the last compile.
- * preview is true for the lines so far of a stream (compile.js previewStep): a control that no line reads yet stays, and only a fault of the first
- * line or a kit fault of the last compile is whole, so the first line alone gives the frame. holds is what kept draws: "card", "parts" (a shape, an
- * item, or the cells of a control), or "frame" (the first line, maybe the control).
+ * A line with a fault is left out: a change takes the stored version of that line instead. A held line whose value no line reads changes
+ * nothing (unread), so it is left out too. When the expansion has kit faults, each owner (ownersOf) is left out and the kit compiles once more.
+ * Returns {built, word, kept, expanded, leftOut, holds, misses}, where misses are the library names that the file placed and the library does not
+ * have. built is the result of build for expanded, the expansion of kept, with each fault of a line that was left out. A whole fault gives built
+ * with no definition and expanded null: a fault of the first line, fewer lines of an entry than the whole rule of its line table, or a kit fault
+ * of the last compile.
+ * preview is true for the lines so far of a stream (compile.js previewStep): an unread control stays, and only a fault of the first line or a
+ * kit fault of the last compile is whole, so the first line alone gives the frame. holds is what kept draws: "card", "parts" (a part, or a line
+ * of an entry that holds parts, such as the control of cells), or "frame" (the first line, maybe the control).
  */
 function buildTemplate(text, stored, build, preview = false) {
   const old = stored === null ? null : readTemplate(stored), faults = [], out = new Set();
@@ -5677,28 +5788,29 @@ function buildTemplate(text, stored, build, preview = false) {
     const back = old ? old.lines.filter((line) => line.tree && out.has(line.name)) : [];
     if (back.length) { text = mergeTemplate(text, back.map((line) => line.raw).join("\n")); read = readTemplate(text); faults.push(...read.faults); }
     leftOut = new Set([...read.lines.filter((line) => !line.tree).map((line) => line.name), ...[...out].filter((name) => !back.some((line) => line.name === name))]);
-    const control = read.lines.some((line) => line.name === "control" && line.tree?.k === "call") && !leftOut.has("control");
-    const walked = read.lines.find((line) => line.name === "control")?.tree?.name === "parts";
-    if (!preview && control && !walked && read.word === "scene" && !read.lines.some((line) => line.tree && line.name !== "control" && !leftOut.has(line.name) && nodesIn(line.tree, readsV).length)) {
-      faults.push("control: the control changes nothing on the screen, because no line reads $/v. Make a part read $/v, such as visible=$/v > 2");
-      leftOut.add("control");
+    const ready = READY[read.word], held = heldOf(ready), line = held && read.lines.find((one) => one.name === held.name);
+    const call = line?.tree?.k === "call" && !leftOut.has(line.name) ? line.tree : null;
+    if (!preview && call && held.unread?.forms.includes(call.name) && !read.lines.some((one) => one.tree && one.name !== line.name && !leftOut.has(one.name) && nodesIn(one.tree, reads(held.sets)).length)) {
+      faults.push(`${line.name}: ${held.unread.fault}`);
+      leftOut.add(line.name);
     }
-    // A narration line of the wrong kind is left out with no fault: say beside steps, sayK beside another control, or sayK above the count of steps.
-    const steps = read.lines.find((line) => line.name === "control" && ["steps", "parts"].includes(line.tree?.name) && !leftOut.has("control"))?.tree;
-    const count = !steps ? 0 : read.word === "items" ? drawnParts(read, leftOut).length
-      : steps.name === "parts" ? diagramOf(drawnParts(read, leftOut), steps, langOf(read)).steps?.length ?? 0 : steps.args[1].items.length;
-    for (const line of read.lines) {
-      const index = NARRATION.test(line.name) ? Number(line.name.slice(3)) : NaN;
-      if (index === 0 ? steps : index > count) leftOut.add(line.name);
+    // A narration line of the wrong kind is left out with no fault: say beside a walk, sayK beside another control, or sayK above the count of steps.
+    const narration = narrationOf(ready), steps = line?.tree && !leftOut.has(line.name) ? held.walk?.(line.tree, contextOf(read, leftOut, preview)) ?? null : null;
+    for (const one of read.lines.filter((each) => narration && entryNamed(ready, each.name) === narration)) {
+      const index = Number(one.name.slice(narration.name.length));
+      if (index === 0 ? steps !== null : index > (steps ?? 0)) leftOut.add(one.name);
     }
     kept = keptOf(read, leftOut);
   };
+  // A line drawn in kept that passes test with its entry.
+  const drawn = (test) => read.lines.some((line) => line.tree && !leftOut.has(line.name) && test(line, entryNamed(READY[read.word], line.name)));
   // The first line's own fault is in faults already.
-  const drawn = (test) => read.lines.some((line) => line.tree && !leftOut.has(line.name) && test(line)), cells = (line) => line.name === "control" && line.tree.k === "call";
-  const whole = () => (!read.lines[0].tree ? faults[0] : preview ? null
-    : FORMS_BY_WORD[read.word].whole ? FORMS_BY_WORD[read.word].whole(drawnParts(read, leftOut), read.lines, (name) => drawn((line) => line.name === name))
-    : read.word === "cells" ? (drawn(cells) ? null : "cells: the cells need a line control = slider(LABEL, 0, COUNT, 1, START) with no fault")
-      : drawnParts(read, leftOut).length ? null : `${read.word}: the picture needs a ${read.word === "scene" ? "shape" : "item"} with no fault`);
+  const whole = () => {
+    if (!read.lines[0].tree) return faults[0];
+    if (preview) return null;
+    const ready = READY[read.word], { line: name, count, fault } = ready.whole, entry = ready.lines.find((one) => one.name === name);
+    return read.lines.filter((line) => line.tree?.k === "call" && !leftOut.has(line.name) && entryNamed(ready, line.name) === entry).length >= count ? null : fault;
+  };
   read = readTemplate(text);
   const misses = read.misses;
   faults.push(...read.faults);
@@ -5716,7 +5828,8 @@ function buildTemplate(text, stored, build, preview = false) {
   const lacking = whole();
   faults.push(...(lacking ? [lacking] : built.faults.map((fault) => `${read.word}: ${fault}`)));
   const unique = [...new Set(faults)], broken = Boolean(lacking) || built.faults.length > 0;
-  const holds = drawn((line) => line.name === "card") ? "card" : drawnParts(read, leftOut).length || (read.word === "cells" && drawn(cells)) ? "parts" : "frame";
+  const holding = (kind) => drawn((line, entry) => entry?.holds === kind && line.tree.k === "call");
+  const holds = holding("card") ? "card" : drawnParts(read, leftOut).length || holding("parts") ? "parts" : "frame";
   return { built: broken ? { faults: unique, notes: built?.notes ?? [], definition: null, language: null, hole: false } : { ...built, faults: unique },
     word: read.word, kept, expanded: broken ? null : expanded, leftOut: [...leftOut], holds, misses };
 }

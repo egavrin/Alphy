@@ -1,5 +1,5 @@
 // Builds the sandbox bundle of the kit and the prompt asset of the app, and copies the saved plans for the device tests.
-//   bun kit/build.js           writes kit/src/icons.js and kit/src/catalog.js, app/src/main/assets/appfile/kit.js and prompt.json,
+//   bun kit/build.js           writes kit/src/icons.js, kit/src/catalog.js, and kit/src/plans.js, app/src/main/assets/appfile/kit.js and prompt.json,
 //                              app/src/main/assets/library/catalog.json with the images of the library, and the test assets of app/src/androidTest/assets
 //   bun kit/build.js --check   writes nothing, and exits 1 when a file that the build writes differs or a copied plan has no source
 //   bun kit/build.js --sheet DIR   also writes the review sheet of the library (kit/sheet.js) to DIR, in the light and the dark theme
@@ -8,14 +8,17 @@
 // text, so the bundle depends on the version of Bun (kit/README.md names the version of the checked-in bundle).
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PROMPT, changeText, repairText, templateChangeText, templateRepairText, templateRestText } from "./prompt.js";
-import { TEMPLATE_HEAD } from "./src/template.js";
-import { DATA_HEAD } from "./src/form-data.js";
+import { DATA_HEAD, TEMPLATE_HEAD } from "./src/ready.js";
 
-/** The modules of the bundle in dependency order: each one imports only modules before it. */
-const MODULES = ["icons", "dsl", "kinds", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "change", "form-base", "elements", "catalog", "library", "form-scene", "form-items", "form-cells", "form-data", "form-compare", "form-table", "form-chart", "form-nodata", "forms", "template", "compile"];
+/**
+ * The modules of the bundle in dependency order, by their path from kit/src: each one imports only modules before it. The line tables of the
+ * ready plans are in kit/templates.
+ */
+const MODULES = ["icons", "dsl", "kinds", "core", "words", "parts", "check", "rows", "draw", "drag", "run", "emit", "change", "form-base", "elements", "catalog", "library", "form-data", "plans",
+  ...["scene", "items", "cells", "compare", "table", "chart", "nodata"].map((word) => `../templates/${word}`), "ready", "template", "compile"];
 const at = (path) => fileURLToPath(new URL(path, import.meta.url));
 /** The host's sources of its icon names (ToolUiCatalog.icons): the shell glyphs and the domain icons. */
 const HOST_SOURCES = ["ToolUiCatalog", "ToolIcons"].map((name) => at(`../app/src/main/java/com/alpha/assistant/tools/${name}.kt`));
@@ -100,8 +103,18 @@ function imageCopies() {
   return [...images.map(([path, bytes]) => [join(root, "..", path), bytes]), ...gone.map((path) => [path, null])];
 }
 
-/** A module of the kit as [name, text]. The icon names and the catalog come from their sources, so the bundle never holds an old copy. */
-const source = (name) => [name, name === "icons" ? iconModule() : name === "catalog" ? catalogModule() : readFileSync(at(`src/${name}.js`), "utf8")];
+/** The text of src/plans.js: the ready plan of each template (kit/templates/WORD.plan) by its word. */
+export function plansModule(directory = at("templates")) {
+  const plans = Object.fromEntries(plansIn(directory).sort().map((path) => [basename(path, ".plan"), readFileSync(path, "utf8")]));
+  return `// Built by kit/build.js from kit/templates. Do not edit: run bun kit/build.js.
+
+/** The ready plan of each template by its word (kit/README.md, section "Ready plans"). */
+export const PLANS = ${JSON.stringify(plans, null, 1)};
+`;
+}
+
+/** A module of the kit as [name, text]. The icon names, the catalog, and the ready plans come from their sources, so the bundle never holds an old copy. */
+const source = (name) => [name, name === "icons" ? iconModule() : name === "catalog" ? catalogModule() : name === "plans" ? plansModule() : readFileSync(at(`src/${name}.js`), "utf8")];
 const scanner = new Bun.Transpiler({ loader: "js" });
 
 /**
@@ -114,11 +127,12 @@ export function script(modules) {
   const exported = new Map();
   return modules.map(([name, text]) => {
     const names = [], again = [], known = (list, from) => list.split(", ").every((one) => exported.get(from)?.has(one));
+    // A module of kit/src and a line table of kit/templates import each other by a path such as "./dsl.js" or "../src/dsl.js".
     const body = text.replace(/^import (.*);$/gm, (line, what) => {
-      const [, list, from] = /^\{ ([\w$, ]+) \} from "\.\/([\w-]+)\.js"$/.exec(what) ?? [];
+      const [, list, from] = /^\{ ([\w$, ]+) \} from "\.\.?\/(?:(?:src|templates)\/)?([\w-]+)\.js"$/.exec(what) ?? [];
       if (!list || !known(list, from)) throw new Error(`kit/src/${name}.js: the build cannot keep this import: ${line}`);
       return "";
-    }).replace(/^export \{ ([\w$, ]+) \} from "\.\/([\w-]+)\.js";$/gm, (line, list, from) => {
+    }).replace(/^export \{ ([\w$, ]+) \} from "\.\.?\/(?:(?:src|templates)\/)?([\w-]+)\.js";$/gm, (line, list, from) => {
       if (!known(list, from)) throw new Error(`kit/src/${name}.js: the build cannot keep this export: ${line}`);
       // The script declares each exported name once, so a name that a module exports again gets no second declaration.
       again.push(...list.split(", "));
@@ -129,7 +143,7 @@ export function script(modules) {
     // export const a = 1, b = 2 would share only a.
     const all = scanner.scan(text).exports, shared = [...names, ...again];
     if (all.length !== shared.length) throw new Error(`kit/src/${name}.js: an export line declares one name: ${all.filter((one) => !shared.includes(one)).join(", ")}`);
-    exported.set(name, new Set(shared));
+    exported.set(basename(name), new Set(shared));
     return `// ${name}.js\nconst { ${names.join(", ")} } = (() => {\n${body}\nreturn { ${names.join(", ")} };\n})();\n`;
   }).join("");
 }
@@ -153,7 +167,7 @@ export function withoutMessages(name, text) {
  */
 export async function runtimeText() {
   const entry = "/kit-runtime-entry.js";
-  const modules = Object.fromEntries(MODULES.map((name) => [`/kit/src/${name}.js`, withoutMessages(name, source(name)[1])]));
+  const modules = Object.fromEntries(MODULES.map((name) => [posix.join("/kit/src", `${name}.js`), withoutMessages(name, source(name)[1])]));
   const built = await Bun.build({ entrypoints: [entry], files: { [entry]: 'import { handle } from "/kit/src/run.js";\n__handle(handle);\n', ...modules },
     minify: true, format: "iife", target: "browser", define: { MESSAGES: "false" } });
   if (!built.success) throw new AggregateError(built.logs, "kit/build.js: Bun.build of the run-time failed");
@@ -174,10 +188,10 @@ export async function bundle() {
  * with the placeholders {{task}}, {{plan}}, {{faults}}, and {{request}}. The host puts the plan with no newline at its end, and the faults
  * joined by "\n- ", so a filled template is the text of repairText and changeText (prompt.js). No prompt text is typed in Kotlin.
  * The template prompt adds its section (template), the task texts of its repair and change calls with the same placeholders
- * (templateRepairTask, templateChangeTask), and templateHead, the source of the pattern that tells a template file from an app file (src/template.js).
+ * (templateRepairTask, templateChangeTask), and templateHead, the source of the pattern that tells a template file from an app file (src/ready.js).
  * templateRestTask is the task text of the call for the missing lines of a template call that stopped early, with {{task}} and {{plan}}.
  * templateData is the section of the template call of the data family (block 2 plan, D1): it shares the repair, change, and rest task texts.
- * dataHead is the source of the pattern of the first line of a data form (src/form-data.js DATA_HEAD).
+ * dataHead is the source of the pattern of the first line of a data form (src/ready.js DATA_HEAD).
  */
 export const promptAsset = () => ({ system: PROMPT.System, repair: PROMPT.Repair, dialogue: PROMPT.Dialogue, change: PROMPT.Change,
   repairTask: repairText({ task: "{{task}}", plan: "{{plan}}", faults: ["{{faults}}"] }), changeTask: changeText({ request: "{{request}}", plan: "{{plan}}" }),
@@ -203,7 +217,7 @@ export const LOOK_FIXTURES = ["water-ko", "units-pl", "shopping", "habits", "pri
  * The plans that a model wrote (test/fixtures/model) go to a directory of their own, appfile/model, with their index: the device test reads the request of each plan.
  * The template files (test/fixtures/template: the examples and the cap files) go to appfile/template.
  */
-export const outputs = async () => [[at("src/icons.js"), iconModule()], [at("src/catalog.js"), catalogModule()], [at("../app/src/main/assets/appfile/kit.js"), await bundle()],
+export const outputs = async () => [[at("src/icons.js"), iconModule()], [at("src/catalog.js"), catalogModule()], [at("src/plans.js"), plansModule()], [at("../app/src/main/assets/appfile/kit.js"), await bundle()],
   [at("../app/src/main/assets/library/catalog.json"), catalogAsset()], ...imageCopies(),
   ...["names", "search"].map((name) => [at(`../app/src/androidTest/assets/library/${name}.json`), readFileSync(at(`test/fixtures/library-${name}.json`), "utf8")]),
   [at("../app/src/main/assets/appfile/prompt.json"), JSON.stringify(promptAsset(), null, 2) + "\n"],

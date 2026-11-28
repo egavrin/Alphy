@@ -1,0 +1,5 @@
+app({{title}}, lang={{lang}}, preset="clean", palette={{palette}})
+need card = card({{cardTitle}}, {{cardText}}, icon="Search")
+data_source = Text({{source}}, variant="source")
+data_wait = Divider({{wait}})
+root = Column([{{top}}])

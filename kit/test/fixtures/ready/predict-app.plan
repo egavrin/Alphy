@@ -1,0 +1,6 @@
+app("Что меняет разгон?", lang="ru", preset="clean", palette="indigo")
+$/t = 0
+need picture = drawing("Что меняет разгон?", 300, 300, [line(20, 204, 280, 204, "ink", 4), rect(40 + $/t, 160, 70, 32, "accent", 6), rect(52 + $/t, 160 - 14 * $/v, 30, 14 * $/v, "wood", 3), circle(54 + $/t, 198, 8, "ink"), circle(96 + $/t, 198, 8, "ink")])
+need v = input("slider", "Масса", 1, min=1, max=4, step=1)
+need guess = question("Как изменится разгон, если добавить массу?", options=["Увеличится", "Уменьшится", "Не изменится"], right="Уменьшится", rightText="Верно: та же сила разгоняет тяжёлую тележку слабее.", wrongText="Проверь в опыте и ответь ещё раз.")
+need go = button("Проверить в опыте", [set($/t, 0), animate($/t, 160, 3000)], icon="Play")

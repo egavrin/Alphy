@@ -1,0 +1,6 @@
+app("Собери 5", lang="ru", preset="clean", palette="green")
+$/checked = false
+need picture = drawing("Собери 5", 300, 300, [each(5, circle(34 + $index * 58, 110, 24, "ink", stroke=true)), each($/v, circle(34 + $index * 58, 110, 18, "accent")), text(150, 220, text($/v) + " / 5", "ink", 28)])
+need v = counter("Камешки", 3, step=1, min=0, max=5)
+need check = button("Проверить", set($/checked, true), icon="Check")
+need result = content(!$/checked ? "Добавь камешки и нажми «Проверить»." : $/v == 5 ? "Верно! Три и два — это пять." : "Пока не пять. Посчитай ещё раз.")

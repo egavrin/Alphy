@@ -1,0 +1,7 @@
+app({{title}}, lang={{lang}}, preset="clean", palette={{palette}})
+$/checked = false
+need picture = drawing({{title}}, 300, 300, [each($/v, circle(34 + $index * 58, 110, 18, "accent")), each({{target}}, circle(34 + $index * 58, 110, 24, "ink", stroke=true)), text(150, 220, text($/v) + " / {{target}}", "ink", 28, visible={{target}} > 0)])
+$/v = {{held}}
+need v = counter({{label}}, {{start}}, step=1, min={{min}}, max={{max}})
+need check = button({{button}}, set($/checked, true), icon="Check")
+need result = content(!$/checked ? {{hint}} : $/v == {{target}} ? {{right}} : {{wrong}})

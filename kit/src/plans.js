@@ -1,0 +1,12 @@
+// Built by kit/build.js from kit/templates. Do not edit: run bun kit/build.js.
+
+/** The ready plan of each template by its word (kit/README.md, section "Ready plans"). */
+export const PLANS = {
+ "cells": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"slider\", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})\nneed card = card({{cardTitle}}, {{cardText}})\n",
+ "chart": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/v = {{mark}}\ndata_view = {{main}}\nneed card = card({{cardTitle}}, {{cardText}})\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n",
+ "compare": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/v = {{mark}}\ndata_view = {{main}}\nneed card = card({{cardTitle}}, {{cardText}})\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n",
+ "items": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/items := [{{items}}]\n$/now := find($/items, $label == $/v)\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"choice\", {{label}}, {{start}}, options={{options}})\nneed card = card({{cardTitle}}, $/now/text)\n",
+ "nodata": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\nneed card = card({{cardTitle}}, {{cardText}}, icon=\"Search\")\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n",
+ "scene": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n{{lines}}\nneed picture = drawing({{title}}, 300, 300, [{{shapes}}])\n$/v = {{held}}\nneed v = input(\"slider\", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})\nneed v = input(\"choice\", {{label}}, {{start}}, options={{options}})\nneed v = input(\"choice\", {{label}}, {{start}}, options={{steps}}, variant=\"stepper\")\nneed t = {{play}}\nneed card = card({{cardTitle}}, {{cardText}})\n",
+ "table": "app({{title}}, lang={{lang}}, preset=\"clean\", palette={{palette}})\n$/v = {{mark}}\ndata_view = {{main}}\nneed card = card({{cardTitle}}, {{cardText}})\ndata_source = Text({{source}}, variant=\"source\")\ndata_wait = Divider({{wait}})\nroot = Column([{{top}}])\n"
+};

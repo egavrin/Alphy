@@ -1,0 +1,7 @@
+app({{title}}, lang={{lang}}, preset="clean", palette={{palette}})
+$/items := [{{items}}]
+$/now := find($/items, $label == $/v)
+need picture = drawing({{title}}, 300, 300, [{{shapes}}])
+$/v = {{held}}
+need v = input("choice", {{label}}, {{start}}, options={{options}})
+need card = card({{cardTitle}}, $/now/text)

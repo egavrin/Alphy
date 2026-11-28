@@ -9,7 +9,7 @@ import { KINDS, PROPERTIES } from "../src/kinds.js";
 import { TONES } from "../src/core.js";
 import { ELEMENTS } from "../src/elements.js";
 import { OBJECTS } from "../src/catalog.js";
-import { SCENE_FORM } from "../src/form-scene.js";
+import * as SCENE_FORM from "../templates/scene.js";
 import { LABEL, LEAST, SEGMENTS, SMALLEST, entryOf, labelLines, layoutOf, lineWidth, segmentsOfEntry, useFault } from "../src/library.js";
 import { parseExpression } from "../src/dsl.js";
 import { COLOR_NAMES, toneColor } from "../src/form-base.js";

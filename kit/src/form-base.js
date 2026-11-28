@@ -1,14 +1,12 @@
-// What each template form uses (docs/superpowers/plans/2026-11-22-one-scene.md, decision 1): the first line, the budget, the drawing size,
-// the faults of a text, of the first line, and of a card with a text, the cut of a long text, and the colors of a shape. Each form has a
-// module of its own (forms.js), and template.js reads, merges, expands, and builds a template file with them.
+// What each line table of a ready plan uses (kit/templates, kit/README.md section "Ready plans"): the budget, the drawing size, the faults of
+// a text and of the first line, the check of a value by the forms of its line (formFault), the cut of a long text, the colors of a shape, and
+// the lines that most templates share. template.js reads, merges, fills, and builds a template file with the line tables.
 
 import { show } from "./dsl.js";
 import { TONES, isColor } from "./core.js";
 import { colorOf } from "./draw.js";
 import { KINDS } from "./kinds.js";
 
-/** The first line of a template file, with the template word as group 1: the explain family, then the data family (form-data.js). */
-export const TEMPLATE_HEAD = /^\s*(scene|items|cells|compare|table|chart|nodata)\s*\(/;
 /**
  * The content budget of each template: texts in characters, lists in items. A text inside the picture (a shape text, a sign) has no fault up to
  * floor(1.25 × cap), because it cannot change the height of the screen. A card text or an item text past its cap is cut after its last whole
@@ -117,29 +115,74 @@ export function cut(text, cap) {
 const textsMapped = (node, map) => (!node || typeof node !== "object" ? node : isText(node) ? map(node)
   : Array.isArray(node) ? node.map((inner) => textsMapped(inner, map)) : Object.fromEntries(Object.entries(node).map(([key, inner]) => [key, textsMapped(inner, map)])));
 /**
- * The tree of a card line of scene and cells, or of an item line, with each text of its card text or item text cut to the cap (cut). Each
- * text of a formula is cut by itself. The same tree when no text changes.
+ * The call with each text of its argument at cut to cap (cut), such as a card text or an item text. Each text of a formula is cut by itself.
+ * The same tree when no text changes.
  */
-export function cutLong(tree, name, word) {
-  const at = name === "card" ? (word === "items" ? -1 : 1) : word === "items" ? 2 : -1, long = tree.k === "call" && tree.name === (name === "card" ? "card" : "item") ? tree.args[at] : undefined;
-  const short = long && textsMapped(long, (node) => ({ ...node, v: cut(node.v, BUDGET.cardText) }));
+export function cutLong(tree, at, cap) {
+  const long = tree.args[at], short = long && textsMapped(long, (node) => ({ ...node, v: cut(node.v, cap) }));
   return !long || show(short) === show(long) ? tree : { ...tree, args: tree.args.map((arg, index) => (index === at ? short : arg)) };
 }
 
-/** The fault of the first line. extra names a named argument of the form beyond lang= and palette=, such as kind= of chart, which the form checks. */
-export function headFault(tree, word, extra) {
-  const [title, ...more] = tree.args ?? [], { lang, palette, [extra]: _own, ...other } = tree.named ?? {};
+/**
+ * The fault of the first line. head is the named argument of a template beyond lang= and palette=, such as {name: "kind", values: ["bar",
+ * "line"]} of chart: its value is one of values.
+ */
+export function headFault(tree, word, head) {
+  const extra = head?.name, [title, ...more] = tree.args ?? [], { lang, palette, [extra]: own, ...other } = tree.named ?? {};
   if (tree.k !== "call" || more.length || Object.keys(other).length) return `the first line is ${word}(TITLE, lang=CODE, palette=NAME${extra ? `, ${extra}=…` : ""}), and palette= is optional`;
   if (!(isText(lang) && /^[a-z]{2}$/.test(lang.v))) return 'lang= is the two-letter code of the language of the request, such as "en"';
   if (palette && !(isText(palette) && PALETTES.includes(palette.v))) return `palette= is one of ${PALETTES.join(", ")}, and ${show(palette)} is not one`;
-  return textFault("the title", title, BUDGET.title);
+  return textFault("the title", title, BUDGET.title)
+    ?? (own && !(isText(own) && head.values.includes(own.v)) ? `${extra}= is ${head.values.map((value) => JSON.stringify(value)).join(" or ")}, and ${show(own)} is not one` : null);
 }
 
-/** The fault of the card line card(TITLE, TEXT) of the template word: the card of scene and of cells. */
-export function textCardFault(tree, word) {
-  if (tree.k !== "call" || tree.name !== "card" || tree.args.length !== 2 || Object.keys(tree.named).length) return `the card of ${word} is card(TITLE, TEXT)`;
-  return textFault("the card title", tree.args[0], BUDGET.cardTitle, true) ?? textFault("the card text", tree.args[1], BUDGET.cardText, true);
+/** The form of a value in the forms of a line entry: a list of argument kinds, a function that checks the value, or null for no call of a form. */
+export const formOf = (entry, tree) => (tree?.k === "call" && Object.hasOwn(entry.forms ?? {}, tree.name) ? entry.forms[tree.name] : null);
+/** Whether a node fits an argument kind before its caps: a number (with is, that number), a whole number, a word (a text in quotes), or a list. */
+const fits = (spec, node) => (!node ? Boolean(spec.optional) : spec.type === "number" ? numberOf(node) !== undefined && (spec.is === undefined || numberOf(node) === spec.is)
+  : spec.type === "whole" ? numberOf(node) !== undefined : spec.type === "word" ? isText(node) : spec.type === "list" ? node.k === "list" : true);
+/**
+ * The fault of a value by the forms of its line entry (kit/README.md, section "Ready plans"): entry.form for a value that is no call of a form,
+ * the fault of a form that is a function, else the first fault of the arguments. The count and the kinds of the arguments come first, then a
+ * whole number out of its range, a list past its counts or with a label past its cap (optionsFault), and a text past its cap (textFault).
+ */
+export function formFault(entry, tree) {
+  const form = formOf(entry, tree), args = tree.args ?? [];
+  if (typeof form === "function") return form(tree);
+  if (!form || Object.keys(tree.named).length || args.length > form.length || form.some((spec, index) => !fits(spec, args[index]))) return entry.form;
+  const given = (type) => form.map((spec, index) => [spec, args[index]]).filter(([spec, node]) => spec.type === type && node);
+  for (const [spec, node] of given("whole")) {
+    const value = numberOf(node);
+    if (!(Number.isInteger(value) && value >= spec.least && value <= spec.most)) return `${spec.what} is a whole number from ${spec.least} to ${spec.most}, and ${show(node)} is not one`;
+  }
+  for (const [spec, { items }] of given("list")) {
+    if (items.length > spec.most) return `the ${spec.what} has ${items.length} ${spec.word}s, and its cap is ${spec.most}. Keep the ones that matter most`;
+    if (items.length < spec.least) return `a ${spec.what} needs at least ${spec.least} ${spec.word}s`;
+    const fault = optionsFault(spec.word, items);
+    if (fault) return fault;
+  }
+  return given("text").map(([spec, node]) => textFault(spec.what, node, spec.cap, spec.formula, spec.inside ? INSIDE : 1)).find(Boolean) ?? null;
 }
+/** The tree of a line with each long text of its form cut to its cap (cutLong), then with the cut of its entry, such as the cut of a label. */
+export function cutOf(entry, tree) {
+  const form = formOf(entry, tree), short = Array.isArray(form) ? form.reduce((one, spec, index) => (spec.long ? cutLong(one, index, spec.cap) : one), tree) : tree;
+  return entry.cut ? entry.cut(short) : short;
+}
+
+// The lines and the arguments that most line tables share.
+
+/** The value of the control, which a line reads as $/v. */
+export const CONTROL_VALUE = { name: "v", what: "the value of the control" };
+/** The control line: the line $/v = VALUE stands for it, it sets $/v, a new one goes after the first line, and it owns the faults of need v. */
+export const CONTROL_LINE = { name: "control", held: true, sets: "v", merge: 1, owner: "v" };
+export const CONTROL_LABEL = { slot: "label", type: "text", what: "the label", cap: BUDGET.control };
+export const CARD_TITLE = { slot: "cardTitle", type: "text", what: "the card title", cap: BUDGET.cardTitle, formula: true };
+/** The card text: the kit cuts a long one after its last whole sentence inside the cap. */
+export const CARD_TEXT = { slot: "cardText", type: "text", what: "the card text", cap: BUDGET.cardText, formula: true, long: true };
+/** The card line card(TITLE, TEXT) of the template word: it holds the card of a frame, and it owns the faults of need card. */
+export const cardLine = (word) => ({ name: "card", holds: "card", owner: "card", form: `the card of ${word} is card(TITLE, TEXT)`, forms: { card: [CARD_TITLE, CARD_TEXT] } });
+/** The narration lines: say for one sentence, and say1 to sayN for the steps of a walk. They draw nothing, so they have no fault. */
+export const NARRATION = { name: "say", narration: true };
 
 /** The values of a color: the color, or each value of a choice (test ? a : b, or if(test, a, b)), as choices in parts.js reads them. map gives each value again. */
 const colorValues = (node, map) => node?.k === "if" ? { ...node, yes: colorValues(node.yes, map), no: colorValues(node.no, map) }

@@ -1,0 +1,8 @@
+app({{title}}, lang={{lang}}, preset="clean", palette={{palette}})
+$/t = {{from}}
+{{lines}}
+need picture = drawing({{title}}, 300, 300, [{{shapes}}])
+$/v = {{held}}
+need v = input("slider", {{label}}, {{start}}, min={{min}}, max={{max}}, step={{step}})
+need guess = question({{question}}, options={{options}}, right={{right}}, rightText={{rightText}}, wrongText={{wrongText}})
+need go = button({{button}}, [set($/t, {{from}}), animate($/t, {{to}}, {{seconds}} * 1000)], icon="Play")

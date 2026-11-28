@@ -18,12 +18,11 @@ Then it runs the app (state, formulas, actions, and the component tree) and chec
 | `src/run.js` | The run-time of a compiled app: `handle` answers each event, and `screen` maps each component to its Alphy node. A timer with rounds, a rest, or no alert draws its bar on a surface and asks for a timer event each second while it runs. A timer with an alert and one phase is Alphy's foreground timer. A Drawing is a canvas with one surface that each reply draws again. A value that an `animate` moves keeps its change in the state field `anim` and asks for a timer event each 50 ms while it moves. `stateOf` copies each field of `app.keep` from the stored state, so a field that a change kept stays after each event. |
 | `src/emit.js` | The emitter: an expanded app file as Alphy's app definition, whose `source` is the run-time and the compiled data of the app (`sourceOf`). `dataOf` reads the compiled data back from a `source`. It gives a fault for each limit of Alphy that the kit's own mapping can pass: state fields, the fields of a need's object, source bytes, and the nodes and depth of the screen. It also keeps the lower limits: a container with no child is a fault of its line, and a plan with no state value keeps one hidden boolean field `d0`, because Alphy keeps 1 to 40 state fields. No line of a plan gets the name `d0`. Each need object has a namer of its own, so the names in it do not depend on the other needs. |
 | `src/change.js` | The next state of a change: `nextState` gives the definition and the state of a changed app from the stored app of the person (section "Changes of an app"), and `BLOCKS` and `MISMATCH` are the texts of its faults. Only the compile step uses it. |
-| `src/form-base.js` | What each template form uses (section "Template files"): `TEMPLATE_HEAD`, `BUDGET`, `COLOR_NAMES`, the drawing size `WIDTH` and `HEIGHT`, `INSIDE`, `SENTENCE_END`, `cut` and `cutLong` (the cut of a long text), `textFault`, `optionFault` (the cap of an option by the number of options), `namedColor` and `toneColor` (a color name with a tone), `headFault` (the first line), `textCardFault` (a card `card(TITLE, TEXT)`), `colored` and `colorFault` (the colors of a shape), and the tree helpers `isText`, `numberOf`, `nodesIn`, and `SHAPES`. |
-| `src/form-scene.js` | `SCENE_FORM`, the form of `scene`: its part names `s1` to `s20`, its control forms, the faults of its control, shape, and card lines, and the owner of the faults of its first line and control alone (`owners`). |
-| `src/form-items.js` | `ITEMS_FORM`, the form of `items`: its part names `i1` to `i6`, the faults of its control, item, and card lines, its expansion (the list of the items, the drawing of the chosen item, the labels as the options, and the text of the chosen item on the card), and its start (the label of the first item). |
-| `src/form-cells.js` | `CELLS_FORM`, the form of `cells`: no part line, the faults of its control and card lines, and its expansion (the rows of cells and their caption). |
-| `src/forms.js` | `FORMS_BY_WORD`, the form of each template word, and the type `TemplateForm`. A new template form is a module of its own and one entry here. |
-| `src/template.js` | The template file of a screen of the voice mode (section "Template files"): `isTemplateFile`, `readTemplate` (the lines in the fixed order and the fault of each line), `mergeTemplate` (the merge of a reply by line name), `expandTemplate` (the app file of a template file), and `buildTemplate` (the compile of a template file with the compile of `compile.js`). It takes the code of each form from `forms.js` and exports `BUDGET` and `TEMPLATE_HEAD` of `form-base.js` again. |
+| `src/form-base.js` | What each line table uses (section "Ready plans"): `BUDGET`, `COLOR_NAMES`, the drawing size `WIDTH` and `HEIGHT`, `INSIDE`, `SENTENCE_END`, `cut` and `cutLong` (the cut of a long text), `textFault`, `optionFault` (the cap of an option by the number of options), `namedColor` and `toneColor` (a color name with a tone), `headFault` (the first line), `formFault` and `cutOf` (the check and the cut of a value by the forms of its entry), the entries and arguments that most line tables share (such as `CONTROL_LINE`, `cardLine`, and `NARRATION`), `colored` and `colorFault` (the colors of a shape), and the tree helpers `isText`, `numberOf`, and `nodesIn`. |
+| `src/form-data.js` | What the line tables of the data family use (section "The data family"): `DATA_BUDGET`, the faults of a row and a mark, the context faults, the fill of a data form (`dataFill`), `tableLine`, and the host check (`checkSource`). |
+| `templates/` | The ready plans and their line tables (section "Ready plans"). `WORD.plan` holds the app file lines of the screen of the template `WORD` with `{{name}}` slots, and `WORD.js` holds its line table (`SCENE`, `ITEMS`, `CELLS`, `COMPARE`, `TABLE`, `CHART`, and `NODATA`). `scene.js` also exports `SHAPES` (the shape lines), `partFault`, `diagramOf`, and `controlStart`. |
+| `src/ready.js` | The registry of the ready plans: `READY` holds the line table and the ready plan of each template by its word, and `register` adds one. It gives `TEMPLATE_HEAD`, `DATA_WORDS`, and `DATA_HEAD` from the templates that the app ships. `build.js` writes `src/plans.js` (`PLANS`, the text of each ready plan) from `templates/`. |
+| `src/template.js` | The engine of the template files of a screen of the voice mode (section "Template files"): `isTemplateFile`, `readTemplate` (the lines in the order of the line table and the fault of each line), `mergeTemplate` (the merge of a reply by line name), `expandTemplate` (the app file: the ready plan with its slots filled), `buildTemplate` (the compile of a template file with the compile of `compile.js`), and `checkData`. It names no template and no line of one: it reads the entry of `src/ready.js`. It exports `BUDGET` of `form-base.js` and `TEMPLATE_HEAD` of `ready.js` again. |
 | `src/compile.js` | The compile `compileAppFile(text, previous?)`: an app file in; the faults and notes of the report, the definition, `hole`, the flags `blockedBySavedData` and `savedDataMismatch`, and `state` out. With `previous`, `state` is the next state of a change (`src/change.js`), else `null`. `hole` is true when the file has a need of kind `hole`, also with faults, so the plan step of the app gives that plan to its loop. A result with a definition also has `frame` (section "The preview step"). A template file also gives `template`, `kept`, `expanded`, and `leftOut` (section "Template files"). The merge `patchAppFile(plan, reply)`: the plan text after a repair reply (section "Repair replies"). The reader `readPlanReply(text)`: `{kind: "outside", word}` for a reply of the one line `outside("word")`, with a word of 1 to 16 small Latin letters or digits, such as `3d`. Each other reply is `{kind: "plan", text}`: its lines with no empty line and no markdown fence line, and a final newline. Prose stays, and the compile reports it. The step `compileStep({text, plan, read, previous, cap})`: the sandbox entry, one step of the host with these three (section "The step of the host"). The step `previewStep({text, plan, previous})`: the second sandbox entry, the frame of the complete lines of a reply so far (section "The preview step"). |
 | `build.js` | The bundle of the modules as one plain script for the sandbox, with the two globals `compileStep` and `previewStep`, the run-time text in it (minified by `Bun.build`), the prompt asset `app/src/main/assets/appfile/prompt.json` (`promptAsset`), and the copies of the plans and the template files for the device tests. |
 | `prompt.js` | The texts of the prompt for the model check and the app: `PROMPT` (the sections of `prompt.md` by heading), `hashOf(names, sections)` (the first 12 hex digits of the SHA-256 of the named sections), `PROMPT_HASH` (the sections "System", "Repair", "Dialogue", and "Change"), and `TEMPLATE_HASH` (the sections "Template", "Template repair", and "Template change"). So each record names the prompt that made it. The section "Template rest" is in neither hash. The task texts are `taskText`, `repairText`, `changeText`, `templateRepairText`, `templateChangeText`, and `templateRestText`. `prompt.json` holds the four sections of the plan prompt as `system`, `repair`, `dialogue`, and `change`, and the section "Template" as `template`. It also holds the task texts `repairTask`, `changeTask`, `templateRepairTask`, `templateChangeTask`, and `templateRestTask`, and `templateHead`, the source of `TEMPLATE_HEAD`. The host puts the plan with no newline at its end in `{{plan}}`, the faults joined by `"\n- "` in `{{faults}}`, and the task text or the request in `{{task}}` or `{{request}}`. A filled task text is then the text of its function in `prompt.js`: `repairText` for `repairTask`, and so on. |
@@ -100,7 +99,7 @@ card = card("Вытеснение воды", "Полый корабль выте
 The lines of a template file (the narration lines are optional):
 
 - The first line names the template: `scene(TITLE, lang=CODE, palette=NAME)`, or `items(…)` or `cells(…)` with the same arguments.
-  `isTemplateFile` tests `TEMPLATE_HEAD` on the first line that is not empty, so it tells a template file from an app file.
+  `isTemplateFile` finds the word of a ready plan of `READY` on the first line that is not empty, so it tells a template file from an app file. `TEMPLATE_HEAD` is the same pattern for the templates that the app ships.
   `lang=` is a code of two small letters. `palette=` is optional: `teal`, `green`, `blue` (the default), `amber`, `orange`, `red`, `pink`, `purple`, `indigo`, `brown`, or `graphite`.
 - The control line `control = …`:
   - `scene`: `slider(LABEL, MIN, MAX, STEP, START)` with numbers, or `choice(LABEL, [OPTION, …], START)` with 2 to 6 options. With no START, the first option is the start.
@@ -140,10 +139,51 @@ The lines of a template file (the narration lines are optional):
 `readTemplate` puts the lines in the fixed order, so a reply with the card before the shapes gives the same app.
 A second line of one name, a line of a name that the template does not have, a line with no name, and a `delete` line are faults.
 
-`expandTemplate` writes the app line `app(TITLE, lang=…, preset="clean", palette=…)`, the drawing `need picture` of 300 × 300 with the parts, the control, and the card.
+`expandTemplate` fills the ready plan of the template (section "Ready plans"). The ready plan of `scene` has the app line `app(TITLE, lang=…, preset="clean", palette=…)`, the drawing `need picture` of 300 × 300 with the parts, the control, and the card.
 The control is `need v = input("slider", …)` or `need v = input("choice", …)`, and the card is `need card = card(…)`.
 The drawing has its final size from the first line. An `items` drawing shows the sign and the label of the chosen item.
 A `cells` drawing shows rows of at most ten cells and the caption "K / N = P%".
+
+### Ready plans
+
+Each template is a ready plan and a line table (`templates/`, `src/ready.js`). The engine `src/template.js` names no template and no line of one.
+
+- The ready plan `templates/WORD.plan` holds the app file lines of the screen of the template. A slot `{{name}}` stands for a value of the template file.
+- `expandTemplate` fills each slot. A plan line with a slot that has no value goes, and so does a line that is empty after the fill.
+  So the plan line of a control form that the file does not use goes, and so does the card line of a file with no card.
+- The line table `templates/WORD.js` is plain data: one entry for each line of the template file, in the fixed order of `readTemplate`.
+  A function of a template gives what a list of arguments cannot state: the layout of a diagram, the rows and the mark of a data form, the cells of `cells`, the play line (FROM and TO differ), and the two cuts of a data label and of a nodata card. The engine holds no function of one template.
+- `build.js` writes `src/plans.js` from the ready plans, as it writes `src/catalog.js`, so the bundle stays one plain script.
+- `test/ready.test.js` adds the task screens `predict` and `collect` of `test/fixtures/ready/` to the registry with `register`. Each one is a ready plan and a line table with no line of engine code. The app does not ship them.
+
+The fields of a line table:
+
+| Field | Meaning |
+| --- | --- |
+| `word`, `family` | The template word, and `"data"` for a form of the data family. |
+| `text` | The lines of the template in a fault, such as "control, i1 to i6 (at most 6 items), and card". |
+| `head` | A named argument of the first line other than `lang=` and `palette=`, with its values, such as `kind=` of `chart`. |
+| `values` | The values that a line can read, such as `$/v`, the value of the control. A value with `line` is readable only beside that line, such as `$/t` beside `play`. |
+| `lines` | The entries of the lines. |
+| `whole` | The whole rule: the file needs `count` lines of the entry `line` with no fault, else the whole fault `fault`. |
+| `owner` | The line that gets the faults of the first line and the control alone (section "Faults by line"). |
+| `voice` | A line and an argument whose text the voice says when the file has no narration line, such as the card text of `nodata`. |
+| `start`, `context`, `fill`, `check` | The functions for what needs more than one line: the start of the held value, the faults that need more than one line, the slots of the whole file, and the host check of a searched form (`checkData`). |
+
+The fields of an entry:
+
+| Field | Meaning |
+| --- | --- |
+| `name`, `count` | The line name, or the names NAME1 to NAMEn of a list, such as `s1` to `s20`. |
+| `forms`, `form` | The forms of the value by their call: a list of arguments, or a function for a form that a list cannot check. An argument has a kind (`text`, `number`, `whole`, `word`, or `list`), its caps, and its slot. `formFault` gives the fault of a value by its forms, and `form` is the fault of a value of no form. |
+| `fault`, `check` | A function that gives the fault of a value in place of `forms`, and a function that gives a second fault after the read check. |
+| `cut`, `draw` | The cut of a long text, and the tree that the kit draws, such as a shape with the kit's color for each color name. |
+| `fill`, `slot`, `absent` | The slots of a list entry, the slot that holds the whole value, and the slots of an absent line. |
+| `part`, `holds` | A part of the picture, and what a line of the entry holds in a frame: `"card"` or `"parts"`. |
+| `held`, `sets`, `merge` | The line `$/NAME = VALUE` stands for the entry, the value that the line sets, and the place of a new line in the merge (1 after the first line, 2 after the control). A line that sets a value reads no value. |
+| `owner` | The needs whose faults belong to the line, such as `v` of the control. |
+| `unread`, `walk` | The forms of a control that changes nothing when no line reads its value, with the fault, and the count of steps of a walk for the narration lines. |
+| `narration` | The narration lines `say` and `say1` to `sayN`. |
 
 ### Budget and colors
 
@@ -236,9 +276,9 @@ label point inside the box for each part, and for each image entry its file insi
 Each fault has the form `NAME: message`. NAME is the name of its line, or the template word for the first line and for a line with no name.
 When the compile of the expansion has faults of the kit, the kit finds the line that owns each one (`ownersOf`):
 
-- A fault of `need v` belongs to `control`, and a fault of `need card` belongs to `card`.
+- A fault of a need belongs to the line whose entry owns that need (`owner`): `need v` to `control`, `need t` to `play`, and `need card` to `card`.
 - Each other fault belongs to each part whose compile with the first line and the control alone has faults. The fault then names the part, not the need.
-- In a `scene`, the faults of the first line and the control alone belong to `control`.
+- In a `scene`, the faults of the first line and the control alone belong to `control` (the `owner` of its line table).
 
 The kit leaves out each owner and compiles once more. These rules give the result:
 
@@ -261,7 +301,8 @@ The kit leaves out each owner and compiles once more. These rules give the resul
 `mergeTemplate(stored, reply)` merges a repair reply, a change reply, or a rest reply into a template file by the name of each line:
 
 - A line of a name that the file has replaces that line in place. A new first line replaces the first line.
-- A new part goes after the last part, a new control goes after the first line, and each other new line goes at the end.
+- A new part goes after the last part, a new control goes after the first line, a new play line goes after the control, and each other new line goes at the end.
+  The entries of the line tables give the place of each name (`part` and `merge`).
 - `delete NAME` removes the line of that name. A line with no name, such as prose or a fence, goes.
 
 ### The template prompt
@@ -279,7 +320,7 @@ Each record of the template check holds `TEMPLATE_HASH` (row `prompt.js`).
 
 ### The data family
 
-The forms `compare`, `table`, `chart`, and `nodata` show data side by side (`src/form-data.js` and the files `src/form-compare.js`, `src/form-table.js`, `src/form-chart.js`, and `src/form-nodata.js`).
+The forms `compare`, `table`, `chart`, and `nodata` show data side by side (`src/form-data.js`, and the ready plans and line tables `compare`, `table`, `chart`, and `nodata` of `templates/`).
 The routing call of the app chooses the family (`docs/tool-integration.md`). The data call has the section "Template data" of `prompt.md` as its instructions, and the repair, change, and rest rules of the template prompt.
 `DATA_HEAD` tells a file of the data family by its first line, and `DATA_HASH` names the prompt of a data record.
 These are the lines of each form:
